@@ -19,17 +19,21 @@ function when(ts: number): string {
  */
 export function ChatList({
   chats,
+  purpose = 'resume',
   activeId,
   onOpen,
   onDelete,
   onClose
 }: {
   chats: ChatSummary[]
+  /** Whether Enter opens the highlighted chat or deletes it. */
+  purpose?: 'resume' | 'delete'
   activeId: string | null
   onOpen(id: string): void
   onDelete(id: string): void
   onClose(): void
 }): React.JSX.Element {
+  const deleting = purpose === 'delete'
   const [filter, setFilter] = useState('')
   const [cursor, setCursor] = useState(0)
   // Two-step delete: a row must be armed before it will actually go.
@@ -66,7 +70,19 @@ export function ChatList({
     } else if (e.key === 'Enter') {
       e.preventDefault()
       const hit = visible[cursor]
-      if (hit) onOpen(hit.id)
+      if (!hit) return
+      if (!deleting) {
+        onOpen(hit.id)
+        return
+      }
+      // In delete mode Enter arms first, then confirms, so a stray keypress
+      // cannot destroy a conversation.
+      if (armed === hit.id) {
+        onDelete(hit.id)
+        setArmed(null)
+      } else {
+        setArmed(hit.id)
+      }
     } else if (e.key === 'Delete' || (e.key === 'Backspace' && e.ctrlKey)) {
       const hit = visible[cursor]
       if (!hit) return
@@ -88,7 +104,9 @@ export function ChatList({
           className="chatlist-filter"
           value={filter}
           onChange={(e) => setFilter(e.target.value)}
-          placeholder={`Resume a chat… (${chats.length})`}
+          placeholder={
+            deleting ? `Delete a chat… (${chats.length})` : `Resume a chat… (${chats.length})`
+          }
           spellCheck={false}
         />
         <button type="button" className="link" onClick={onClose}>
@@ -111,13 +129,24 @@ export function ChatList({
               key={c.id}
               className={`chatrow ${c.id === activeId ? 'is-active' : ''} ${
                 i === cursor ? 'is-cursor' : ''
-              }`}
+              } ${deleting ? 'is-deleting' : ''}`}
             >
               <button
                 type="button"
                 className="chatrow-main"
                 onMouseEnter={() => setCursor(i)}
-                onClick={() => onOpen(c.id)}
+                onClick={() => {
+                  if (!deleting) {
+                    onOpen(c.id)
+                    return
+                  }
+                  if (armed === c.id) {
+                    onDelete(c.id)
+                    setArmed(null)
+                  } else {
+                    setArmed(c.id)
+                  }
+                }}
               >
                 <span className="chatrow-title">{c.title}</span>
                 <span className="chatrow-meta">
@@ -147,7 +176,16 @@ export function ChatList({
 
       <div className="chatlist-foot">
         <kbd>&uarr;</kbd>
-        <kbd>&darr;</kbd> move &middot; <kbd>Enter</kbd> open &middot; <kbd>Del</kbd> delete
+        <kbd>&darr;</kbd> move &middot;{' '}
+        {deleting ? (
+          <>
+            <kbd>Enter</kbd> delete (twice)
+          </>
+        ) : (
+          <>
+            <kbd>Enter</kbd> open &middot; <kbd>Del</kbd> delete
+          </>
+        )}{' '}
         &middot; <kbd>Esc</kbd> back
       </div>
     </div>

@@ -28,6 +28,8 @@ export interface ChatState {
   history(): Array<{ role: string; content: string }>
   /** Adds a local-only note (command output, errors) without calling the model. */
   note(content: string, error?: boolean): void
+  /** Adds a line the model will see as context, shown as a chip. */
+  notice(content: string): void
   stop(): void
   clear(): void
   replace(messages: ChatMessage[]): void
@@ -139,11 +141,14 @@ export function useChat(): ChatState {
     const history = [
       ...messagesRef.current.filter((m) => !m.error && !m.local),
       { ...userMessage, content: trimmed }
-    ].map((m) =>
-      m.summary
-        ? { role: 'system' as const, content: `Earlier in this conversation: ${m.content}` }
-        : { role: m.role, content: m.content }
-    )
+    ].map((m) => {
+      if (m.summary) {
+        return { role: 'system' as const, content: `Earlier in this conversation: ${m.content}` }
+      }
+      // Notices are app facts the model must act on, not chat turns.
+      if (m.notice) return { role: 'system' as const, content: m.content }
+      return { role: m.role, content: m.content }
+    })
 
     const requestId = nextId()
     activeRequest.current = requestId
@@ -171,7 +176,7 @@ export function useChat(): ChatState {
     () =>
       messagesRef.current
         .filter((m) => !m.error && !m.local)
-        .map((m) => ({ role: m.role as string, content: m.content })),
+        .map((m) => ({ role: m.notice ? 'system' : (m.role as string), content: m.content })),
     []
   )
 
@@ -186,6 +191,13 @@ export function useChat(): ChatState {
         createdAt: Date.now(),
         local: true
       }
+    ])
+  }, [])
+
+  const notice = useCallback((content: string) => {
+    setMessages((prev) => [
+      ...prev,
+      { id: nextId(), role: 'system', content, createdAt: Date.now(), notice: true }
     ])
   }, [])
 
@@ -223,5 +235,5 @@ export function useChat(): ChatState {
     [stop]
   )
 
-  return { messages, streaming, stats, send, history, note, stop, clear, replace }
+  return { messages, streaming, stats, send, history, note, notice, stop, clear, replace }
 }

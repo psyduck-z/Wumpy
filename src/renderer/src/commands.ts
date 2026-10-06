@@ -11,9 +11,8 @@ export type CommandAction =
   | { kind: 'info'; message: string }
   | { kind: 'new' }
   | { kind: 'chats' }
-  | { kind: 'load'; query: string }
   | { kind: 'resume' }
-  | { kind: 'delete'; query: string }
+  | { kind: 'delete' }
   | { kind: 'rename'; title: string }
   | { kind: 'tier'; tier: TierId }
   | { kind: 'mode'; mode: Mode | 'toggle' }
@@ -24,7 +23,6 @@ export type CommandAction =
   | { kind: 'compact' }
   | { kind: 'stop' }
   | { kind: 'help' }
-  | { kind: 'settings' }
   | { kind: 'quit' }
   /** Send to the model, but wrapped in a prompt that shapes the answer. */
   | { kind: 'prompt'; text: string; label: string }
@@ -136,22 +134,11 @@ export const COMMANDS: CommandSpec[] = [
     run: () => ({ kind: 'chats' })
   },
   {
-    name: 'load',
-    aliases: ['open'],
-    hint: 'Open a saved chat by name',
-    arg: 'name',
-    run: (arg) =>
-      arg.trim() ? { kind: 'load', query: arg.trim() } : { kind: 'chats' }
-  },
-  {
     name: 'delete',
     aliases: ['rm'],
-    hint: 'Delete a saved chat (or `all`)',
-    arg: 'name',
-    run: (arg) =>
-      arg.trim()
-        ? { kind: 'delete', query: arg.trim() }
-        : { kind: 'error', message: 'Usage: /delete <name>, or /delete all' }
+    // Same picker as /resume: searching by typing a name is what the list is for.
+    hint: 'Delete a saved chat',
+    run: () => ({ kind: 'delete' })
   },
   {
     name: 'rename',
@@ -233,7 +220,6 @@ export const COMMANDS: CommandSpec[] = [
     run: () => ({ kind: 'compact' })
   },
   { name: 'stop', hint: 'Stop generating', run: () => ({ kind: 'stop' }) },
-  { name: 'settings', hint: 'Open the settings file', run: () => ({ kind: 'settings' }) },
   { name: 'help', aliases: ['?'], hint: 'List every command', run: () => ({ kind: 'help' }) },
   { name: 'quit', aliases: ['exit'], hint: 'Quit Wumpy', run: () => ({ kind: 'quit' }) },
 

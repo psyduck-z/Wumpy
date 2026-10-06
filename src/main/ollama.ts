@@ -31,6 +31,8 @@ export interface ChatOptions {
   options: TierOptions
   keepAlive: string
   systemPrompt: string
+  /** Abort the turn after this long. 0 disables the cap. */
+  maxTurnMs: number
 }
 
 /**
@@ -210,6 +212,17 @@ export class OllamaClient {
     const controller = new AbortController()
     this.inflight.set(requestId, controller)
 
+    // A reasoning model on CPU can spend many minutes on scratchpad, so the
+    // turn is capped in wall-clock time as well as in tokens.
+    let hitCap = false
+    const cap =
+      opts.maxTurnMs > 0
+        ? setTimeout(() => {
+            hitCap = true
+            controller.abort()
+          }, opts.maxTurnMs)
+        : null
+
     try {
       const payload: Record<string, unknown> = {
         model,
@@ -287,11 +300,19 @@ export class OllamaClient {
       handlers.onDone(stats)
     } catch (err) {
       if (err instanceof Error && err.name === 'AbortError') {
-        handlers.onDone({})
+        if (hitCap) {
+          handlers.onError(
+            `Stopped after ${Math.round(opts.maxTurnMs / 1000)}s. ` +
+              'Raise `maxTurnMs` in settings, or use a faster tier.'
+          )
+        } else {
+          handlers.onDone({})
+        }
         return
       }
       handlers.onError(describe(err))
     } finally {
+      if (cap) clearTimeout(cap)
       this.inflight.delete(requestId)
     }
   }

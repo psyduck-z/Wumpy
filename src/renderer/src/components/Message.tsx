@@ -36,6 +36,15 @@ export function Message({
     onGrow?.()
   }, [shown, onGrow])
 
+  // An app-generated fact, e.g. "you can now run commands".
+  if (message.notice) {
+    return (
+      <div className="msg msg-notice">
+        <span className="notice-chip">{message.content}</span>
+      </div>
+    )
+  }
+
   // A compaction summary standing in for earlier turns.
   if (message.summary) {
     return (

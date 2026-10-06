@@ -52,6 +52,8 @@ export default function App(): React.JSX.Element {
 
   // Saved chats
   const [showChats, setShowChats] = useState(false)
+  /** What the chat picker is being used for this time round. */
+  const [pickerMode, setPickerMode] = useState<'resume' | 'delete'>('resume')
   const [savedChats, setSavedChats] = useState<ChatSummary[]>([])
   const [chatId, setChatId] = useState<string>(() => nextId())
   const [chatTitle, setChatTitle] = useState<string | null>(null)
@@ -204,11 +206,27 @@ export default function App(): React.JSX.Element {
 
   const setTier = useCallback(
     async (id: TierId) => {
+      const from = TIERS[tier]
+      const to = TIERS[id]
+
       // Picking a tier follows its mode, so the theme always matches the tier.
-      await patch({ tier: id, mode: TIERS[id].mode })
+      await patch({ tier: id, mode: to.mode })
       void window.wumpy.tiers.warm(id).then(setTierStatuses)
+
+      // Tell the model its powers changed. Without this it carries on under the
+      // old assumption and contradicts itself when asked the same thing twice
+      // across a switch.
+      if (chat.messages.length > 0 && from.tools !== to.tools) {
+        chat.notice(
+          to.tools
+            ? `You are now in ${to.label} (Developer mode) and CAN propose commands to run on this machine. ` +
+                'Anything you previously said you could not check, you can now check.'
+            : `You are now in ${to.label} (Quick mode) and can NO LONGER run commands. ` +
+                'Do not claim to check anything on this machine; say it needs Developer mode.'
+        )
+      }
     },
-    [patch]
+    [chat, patch, tier]
   )
 
   const toggleMode = useCallback(async () => {
@@ -341,39 +359,19 @@ export default function App(): React.JSX.Element {
 
         case 'chats':
           await refreshChats()
+          setPickerMode('resume')
           setShowChats(true)
           return
         case 'resume': {
           await refreshChats()
+          setPickerMode('resume')
           setShowChats(true)
           return
         }
-        case 'load': {
-          await refreshChats()
-          const list = await window.wumpy.chats.list()
-          const q = action.query.toLowerCase()
-          const hit = list.find((c) => c.title.toLowerCase().includes(q))
-          if (hit) await openChat(hit.id)
-          else chat.note(`No saved chat matching "${action.query}".`, true)
-          return
-        }
         case 'delete': {
-          if (action.query.toLowerCase() === 'all') {
-            const n = await window.wumpy.chats.delete('*')
-            await refreshChats()
-            chat.note(`Deleted ${n} saved chat${n === 1 ? '' : 's'}.`)
-            return
-          }
-          const list = await window.wumpy.chats.list()
-          const q = action.query.toLowerCase()
-          const hit = list.find((c) => c.title.toLowerCase().includes(q))
-          if (!hit) {
-            chat.note(`No saved chat matching "${action.query}".`, true)
-            return
-          }
-          await window.wumpy.chats.delete(hit.id)
           await refreshChats()
-          chat.note(`Deleted **${hit.title}**.`)
+          setPickerMode('delete')
+          setShowChats(true)
           return
         }
         case 'rename':
@@ -425,9 +423,6 @@ export default function App(): React.JSX.Element {
           return
         case 'help':
           chat.note(helpText())
-          return
-        case 'settings':
-          chat.note('Opening the settings file from the tray menu → Open settings file.')
           return
         case 'quit':
           window.wumpy.panel.hide()
@@ -576,6 +571,7 @@ export default function App(): React.JSX.Element {
         if (e.key.toLowerCase() === 'r') {
           e.preventDefault()
           void refreshChats()
+          setPickerMode('resume')
           setShowChats(true)
           return
         }
@@ -652,6 +648,7 @@ export default function App(): React.JSX.Element {
         onNewChat={newChat}
         onShowChats={() => {
           void refreshChats()
+          setPickerMode('resume')
           setShowChats((v) => !v)
         }}
         onClose={close}
@@ -669,6 +666,7 @@ export default function App(): React.JSX.Element {
       {showChats ? (
         <ChatList
           chats={savedChats}
+          purpose={pickerMode}
           activeId={chatId}
           onOpen={(id) => void openChat(id)}
           onDelete={async (id) => {

@@ -30,6 +30,10 @@ export const DEFAULT_SETTINGS: WumpySettings = {
   keepAlive: '30m',
   warmOnStart: true,
 
+  // Measured: qwen3:4b spent 9m37s reasoning about a single question. At ~5
+  // tok/s on CPU there is no answer worth waiting longer than this for.
+  maxTurnMs: 180_000,
+
   launchAtLogin: false,
 
   // Commands are never run without an explicit click, so this gates whether

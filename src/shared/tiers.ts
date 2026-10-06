@@ -5,29 +5,60 @@ import type { Tier, TierId, Mode } from './types'
  * proposes, and the user clicks. The fence tag is what the renderer looks for.
  */
 export const SHELL_PROMPT = [
-  'You can run commands on the user’s Windows machine by proposing them.',
+  'You can run commands on this Windows machine by proposing them.',
   '',
-  'Propose a command ONLY when the answer depends on the state of this machine:',
-  'installed software, file contents, versions, hardware, running processes.',
-  'For anything you already know, just answer. Never propose a command for general knowledge.',
+  'Propose a command whenever the answer depends on the state of this machine:',
+  'installed software, versions, files, folders, hardware, running processes.',
+  'Checking is always better than guessing. If you do not know, check.',
+  'Never state a fact about this computer that you have not verified with a command.',
   '',
-  'Never guess the state of this machine. If asked whether something is installed,',
-  'or what version it is, propose a command to check instead of answering from memory.',
+  'Do not propose a command for general knowledge you already have.',
   '',
-  'Format: a fenced block tagged wumpy-run holding exactly one command.',
+  'Format: a fenced block tagged wumpy-run. The FIRST line must be a # comment',
+  'saying plainly why you want to run it, so the user can decide. Then the command.',
   '',
   '```wumpy-run',
+  '# Check whether Ollama is installed',
   'Get-Command ollama -ErrorAction SilentlyContinue',
   '```',
   '',
-  'Rules for the command:',
+  'Rules:',
   '- It already runs in PowerShell. Never wrap it in `powershell -Command`.',
   '- Use real paths: $env:USERPROFILE, $HOME, $PWD. Never a placeholder like YourUsername.',
-  '- One command, doing one thing. No extra pipeline stages that were not asked for.',
-  '- Say in one line what it does, before the block.',
+  '- One command doing one thing. Prefer reading over changing.',
+  '- Always include the # reason line. A command without one will be refused.',
   '',
   'Use `wumpy-run-cmd` for cmd.exe and `wumpy-run-bash` for bash.',
   'Use an ordinary ```powershell block when only showing syntax, not asking to run it.'
+].join('\n')
+
+/**
+ * Sent to tiers that cannot act, so they say so instead of pretending.
+ */
+export const NO_SHELL_PROMPT = [
+  'Answer questions using your own knowledge. That is your main job and you are good at it.',
+  '',
+  'You cannot run commands or look at this computer right now.',
+  'If the user asks you to check, install, open or change something on their machine,',
+  'reply with exactly: That needs Developer mode — press Ctrl+D.',
+  'Never guess the answer and never claim you checked.',
+  '',
+  'Everything else is an ordinary question. Answer it.'
+].join('\n')
+
+/**
+ * Wumpy's own commands, for every tier.
+ *
+ * Without this a reasoning model tries to work out how to rename a chat itself
+ * and gets stuck — qwen3:4b spent nine and a half minutes on exactly that. It
+ * cannot; the user types a slash command.
+ */
+export const APP_PROMPT = [
+  'You cannot change Wumpy itself: chats, titles, tier, mode or settings.',
+  'Those are slash commands the user types. If asked to do one, reply with just the command.',
+  'The complete list is /rename, /new, /resume, /compact, /tier, /mode, /dock.',
+  'Never invent a command that is not on that list, and never claim you already did one.',
+  'Example: asked to rename the chat, answer: Use `/rename Speculative Fiction`'
 ].join('\n')
 
 const BASE_PROMPT =
@@ -89,7 +120,7 @@ export const TIERS: Record<TierId, Tier> = {
     alternates: ['qwen3:8b', 'deepseek-r1:7b'],
     thinking: true,
     tools: true,
-    options: { num_ctx: 8192, num_predict: 2048, temperature: 0.6, top_p: 0.95 },
+    options: { num_ctx: 8192, num_predict: 800, temperature: 0.6, top_p: 0.95 },
     systemPrompt: `${BASE_PROMPT} Reason it through privately, then give the conclusion briefly. State any assumption you had to make, in one line.`
   },
 
@@ -103,7 +134,7 @@ export const TIERS: Record<TierId, Tier> = {
     alternates: ['qwen3:8b', 'qwen3:4b'],
     thinking: false,
     tools: true,
-    options: { num_ctx: 8192, num_predict: 4096, temperature: 0.3, top_p: 0.9 },
+    options: { num_ctx: 8192, num_predict: 1500, temperature: 0.3, top_p: 0.9 },
     systemPrompt:
       `${BASE_PROMPT} Be thorough where it matters and nowhere else. ` +
       'Prefer working code over prose about code. Name edge cases and failure modes, briefly.'

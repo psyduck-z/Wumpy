@@ -657,6 +657,21 @@ body {
 .cmd-status.is-ok { color: #22c55e; }
 .cmd-status.is-failed { color: rgb(var(--danger)); }
 
+.cmd-reason {
+  margin: 0;
+  padding: 8px 11px;
+  border-bottom: 1px solid rgb(var(--border));
+  font-size: 12px;
+  line-height: 1.45;
+  color: rgb(var(--text));
+}
+
+/* A block with no stated purpose is worth flagging, not hiding. */
+.cmd-reason.is-missing {
+  color: rgb(var(--danger));
+  font-style: italic;
+}
+
 .cmd-body {
   margin: 0;
   padding: 9px 11px;
@@ -745,6 +760,24 @@ body {
 @keyframes turn-end-in {
   from { opacity: 0; transform: translateY(-3px); }
   to { opacity: 0.45; transform: none; }
+}
+
+/* ----------------------------------------------------------- app notices */
+
+.msg-notice {
+  align-items: center;
+}
+
+.notice-chip {
+  max-width: 92%;
+  padding: 5px 11px;
+  background: rgb(var(--accent-soft));
+  border: 1px solid rgb(var(--accent) / 0.25);
+  border-radius: 10px;
+  color: rgb(var(--accent-text));
+  font-size: 10.5px;
+  line-height: 1.45;
+  text-align: center;
 }
 
 /* ---------------------------------------------------- compaction summary */
@@ -1010,6 +1043,11 @@ body {
 
 .chatrow:hover { background: rgb(var(--surface)); border-color: rgb(var(--border)); }
 .chatrow.is-cursor { background: rgb(var(--accent-soft)); border-color: rgb(var(--accent) / 0.4); }
+.chatrow.is-deleting.is-cursor {
+  background: rgb(var(--danger-soft));
+  border-color: rgb(var(--danger) / 0.45);
+}
+.chatrow.is-deleting .chatrow-del { opacity: 1; }
 .chatrow.is-active .chatrow-title { color: rgb(var(--accent-text)); font-weight: 600; }
 .chatrow.is-cursor .chatrow-del { opacity: 1; }
 

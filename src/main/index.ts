@@ -12,7 +12,7 @@ import type {
   TierStatus,
   WumpySettings
 } from '@shared/types'
-import { TIERS, TIER_ORDER, SHELL_PROMPT } from '@shared/tiers'
+import { TIERS, TIER_ORDER, SHELL_PROMPT, NO_SHELL_PROMPT, APP_PROMPT } from '@shared/tiers'
 import { SettingsStore } from './store'
 import { ChatStore } from './chats'
 import { OllamaClient } from './ollama'
@@ -169,13 +169,21 @@ function registerIpc(): void {
     }
 
     const canAct = tier.tools && settings.get('shellEnabled')
+    // The model is told what it can do in this tier, both ways round: with the
+    // shell rules when it can act, and with an explicit "you cannot, say so"
+    // when it cannot. Without the second half it invents having checked.
+    const systemPrompt = [
+      tier.systemPrompt,
+      APP_PROMPT,
+      canAct ? SHELL_PROMPT : NO_SHELL_PROMPT
+    ].join('\n\n')
+
     await ollama.chat(req.requestId, model, req.messages, {
       thinking: tier.thinking,
       options: tier.options,
       keepAlive: settings.get('keepAlive'),
-      systemPrompt: canAct ? `${tier.systemPrompt}
-
-${SHELL_PROMPT}` : tier.systemPrompt
+      maxTurnMs: settings.get('maxTurnMs'),
+      systemPrompt
     }, {
       onDelta: (delta) => panel.send(IPC.chatDelta, { requestId: req.requestId, ...delta }),
       onDone: (stats) => panel.send(IPC.chatDone, { requestId: req.requestId, ...stats }),

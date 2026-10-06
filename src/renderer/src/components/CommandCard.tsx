@@ -15,16 +15,41 @@ function duration(ms: number): string {
 }
 
 /**
+ * Splits the leading comment lines off a proposed command.
+ *
+ * The model is told to open every block with a `#` line saying why it wants to
+ * run it. That line is the whole point of the approval card: "delete everything
+ * under Downloads" and "check whether Ollama is installed" look similar as
+ * shell syntax but are not remotely the same decision.
+ */
+function splitReason(raw: string): { reason: string | null; command: string } {
+  const lines = raw.split('\n')
+  const reason: string[] = []
+  let i = 0
+  for (; i < lines.length; i++) {
+    const line = lines[i].trim()
+    if (!line) continue
+    const m = /^(?:#+|::|REM)\s*(.*)$/i.exec(line)
+    if (!m) break
+    if (m[1]) reason.push(m[1])
+  }
+  const command = lines.slice(i).join('\n').trim()
+  // A block that was only comments is not a command.
+  if (!command) return { reason: null, command: raw.trim() }
+  return { reason: reason.join(' ') || null, command }
+}
+
+/**
  * A command the model has proposed, with the Run button that is the actual
  * permission gate.
  *
  * Nothing executes until this button is pressed. The model only ever emits
- * text, so it cannot reach the shell on its own — and because the command is
- * shown verbatim before it runs, a command smuggled in through something the
- * model read is still visible here before anything happens.
+ * text, so it cannot reach the shell on its own — and because both the reason
+ * and the command are shown verbatim first, anything smuggled in through
+ * something the model read is still visible before it runs.
  */
 export function CommandCard({
-  command,
+  command: raw,
   shell,
   onRun,
   onResult
@@ -34,6 +59,7 @@ export function CommandCard({
   onRun(command: string, shell: ShellKind): Promise<ShellResult | null>
   onResult(result: ShellResult): void
 }): React.JSX.Element {
+  const { reason, command } = splitReason(raw)
   const [risk, setRisk] = useState<string | null>(null)
   const [state, setState] = useState<'idle' | 'running' | 'done' | 'cancelled'>('idle')
   const [result, setResult] = useState<ShellResult | null>(null)
@@ -94,6 +120,12 @@ export function CommandCard({
           </span>
         )}
       </div>
+
+      {reason ? (
+        <p className="cmd-reason">{reason}</p>
+      ) : (
+        <p className="cmd-reason is-missing">No reason given — read the command carefully.</p>
+      )}
 
       <pre className="cmd-body">{command}</pre>
 

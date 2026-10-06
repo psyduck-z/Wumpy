@@ -263,8 +263,7 @@ or Enter to accept.
 | `/new`, `/clear` | Start a fresh chat (`Ctrl+N`) |
 | `/resume` | Pick up a previous chat (`Ctrl+R`) |
 | `/chats`, `/history` | Browse saved chats |
-| `/load <name>` | Open a saved chat by name |
-| `/delete <name>` | Delete one, or `/delete all` |
+| `/delete` | Delete a saved chat, same picker |
 | `/rename`, `/title <text>` | Retitle this chat |
 | `/tier`, `/level <name>` | flash \| fast \| thinker \| deep, keeping context |
 | `/mode [quick\|dev]` | Toggle Quick / Developer |
@@ -306,9 +305,17 @@ is still shown verbatim before anything happens.
 ┌──────────────────────────────────────┐
 │ POWERSHELL            [Skip]  [Run]  │
 ├──────────────────────────────────────┤
+│ Check whether Ollama is installed    │
+├──────────────────────────────────────┤
 │ Get-Command ollama -ErrorAction …    │
 └──────────────────────────────────────┘
 ```
+
+**Every command states its purpose.** The model must open the block with a `#`
+line saying why it wants to run it, and the card shows that above the command —
+because "delete everything under Downloads" and "check whether Ollama is
+installed" are similar as shell syntax and nothing alike as decisions. A block
+that arrives without a reason is flagged in red rather than quietly accepted.
 
 Afterwards the output is handed back to the model so it can carry on, trimmed
 to 3,000 characters — a directory listing can easily outweigh the whole

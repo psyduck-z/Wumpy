@@ -18,6 +18,11 @@ export interface ChatMessage {
    */
   local?: boolean
   /**
+   * An app-generated fact the model must act on — a capability change, for
+   * instance. Sent as a system message, shown in the transcript as a chip.
+   */
+  notice?: boolean
+  /**
    * A compaction summary standing in for earlier turns. Sent to the model as a
    * system message so it reads as context rather than as something it said.
    */
@@ -161,6 +166,11 @@ export interface WumpySettings {
   keepAlive: string
   /** Preload tier models at startup so the first question is instant. */
   warmOnStart: boolean
+  /**
+   * Hard ceiling on a single turn, in ms. A reasoning model on CPU will
+   * otherwise happily spend ten minutes on scratchpad.
+   */
+  maxTurnMs: number
   launchAtLogin: boolean
   /** Allow tiers that support it to propose shell commands. */
   shellEnabled: boolean
