@@ -17,6 +17,7 @@ import { isTall } from '@shared/types'
 import { TIERS, TIER_ORDER, defaultTierFor } from '@shared/tiers'
 import { useChat, nextId } from './hooks/useChat'
 import { parseCommand, helpText, type CommandAction } from './commands'
+import { matchIntent } from './intents'
 import { Header } from './components/Header'
 import { Message } from './components/Message'
 import { Composer } from './components/Composer'
@@ -241,11 +242,21 @@ export default function App(): React.JSX.Element {
   /* -------------------------------------------------------------- commands */
 
   /** Whether the active tier may propose commands at all. */
-  const canRunCommands = (TIERS[tier].tools && (settings?.shellEnabled ?? true)) === true
+  const canRunCommands = TIERS[tier].tools !== 'none' && (settings?.shellEnabled ?? true)
+
+  /** The user picked one of the model's options: lock the card and reply with it. */
+  const onAnswerQuestion = useCallback(
+    (messageId: string, option: string) => {
+      chat.recordAnswer(messageId, option)
+      chat.send(option, tier)
+    },
+    [chat, tier]
+  )
 
   const runShellCommand = useCallback(
-    (command: string, shellKind: ShellKind) => window.wumpy.shell.run({ command, shell: shellKind }),
-    []
+    (command: string, shellKind: ShellKind) =>
+      window.wumpy.shell.run({ command, shell: shellKind, tier }),
+    [tier]
   )
 
   /**
@@ -456,6 +467,15 @@ export default function App(): React.JSX.Element {
       const action = parseCommand(text)
       if (action) {
         void runCommand(action, text)
+        return
+      }
+
+      // "rename this chat to X" and friends are things Wumpy does itself. Asking
+      // a model costs six seconds to be told a command, or on a reasoning tier
+      // two minutes to be told nothing at all.
+      const intent = matchIntent(text)
+      if (intent) {
+        void runCommand(intent, text)
         return
       }
 
@@ -794,9 +814,11 @@ export default function App(): React.JSX.Element {
                 streaming={streaming && i === messages.length - 1}
                 showReasoning={settings?.showReasoning ?? false}
                 smoothText={settings?.smoothText ?? false}
+                tier={tier}
                 onGrow={pinToBottom}
                 onRunCommand={canRunCommands ? runShellCommand : undefined}
                 onCommandResult={onCommandResult}
+                onAnswer={onAnswerQuestion}
               />
             ))
           )}

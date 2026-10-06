@@ -35,6 +35,50 @@ export const SHELL_PROMPT = [
 /**
  * Sent to tiers that cannot act, so they say so instead of pretending.
  */
+/** Appended for tiers limited to looking things up. */
+export const READ_SHELL_PROMPT = [
+  'You can look things up on this Windows machine by proposing a command.',
+  '',
+  'You may only READ: versions, files, folders, installed software, running processes.',
+  'You cannot install, delete, move or change anything. If the user asks for that,',
+  'say in one line that it needs Developer mode, and that Ctrl+D switches to it.',
+  '',
+  'Propose a command whenever the answer depends on this machine. Checking beats',
+  'guessing, and you must never state a fact about this computer you have not checked.',
+  'Do not propose a command for general knowledge you already have.',
+  '',
+  'Format: a fenced block tagged wumpy-run whose FIRST line is a # comment saying why.',
+  '',
+  '```wumpy-run',
+  '# Check whether Ollama is installed',
+  'Get-Command ollama -ErrorAction SilentlyContinue',
+  '```',
+  '',
+  'It already runs in PowerShell. Use real paths like $env:USERPROFILE.'
+].join(String.fromCharCode(10))
+
+/**
+ * Lets the model put a question back to the user instead of guessing.
+ *
+ * A wrong guess costs a whole slow turn to discover and another to correct,
+ * which on this hardware is a minute of someone's life.
+ */
+export const ASK_PROMPT = [
+  'If a request is genuinely ambiguous and the answers differ materially, ask',
+  'rather than guess. Put the question in a fenced block tagged wumpy-ask: the',
+  'question on the first line, then two to four options, one per line after a dash.',
+  '',
+  '```wumpy-ask',
+  'Which folder did you mean?',
+  '- Downloads',
+  '- Documents',
+  '- The current project',
+  '```',
+  '',
+  'Ask only when you truly cannot proceed. One question, then stop and wait.',
+  'Never ask about something the facts above already tell you.'
+].join(String.fromCharCode(10))
+
 export const NO_SHELL_PROMPT = [
   'Answer questions using your own knowledge. That is your main job and you are good at it.',
   '',
@@ -104,7 +148,7 @@ export const TIERS: Record<TierId, Tier> = {
     model: 'llama3.2:3b',
     alternates: ['llama3.2:1b', 'phi4-mini:3.8b', 'qwen2.5:3b'],
     thinking: false,
-    tools: false,
+    tools: 'none',
     options: { num_ctx: 2048, num_predict: 384, temperature: 0.4, top_p: 0.9 },
     systemPrompt: `${BASE_PROMPT} One or two sentences. Nothing more.`
   },
@@ -112,13 +156,13 @@ export const TIERS: Record<TierId, Tier> = {
   fast: {
     id: 'fast',
     label: 'Fast',
-    blurb: 'Balanced. The everyday default.',
+    blurb: 'Balanced. The everyday default. Can look things up.',
     mode: 'quick',
     speed: 'quick',
     model: 'phi4-mini:3.8b',
     alternates: ['llama3.2:3b', 'qwen2.5:3b'],
     thinking: false,
-    tools: false,
+    tools: 'read',
     options: { num_ctx: 4096, num_predict: 1024, temperature: 0.6, top_p: 0.9 },
     systemPrompt: `${BASE_PROMPT} A short paragraph, or a few bullets if the answer is genuinely a list.`
   },
@@ -132,7 +176,7 @@ export const TIERS: Record<TierId, Tier> = {
     model: 'qwen3:4b',
     alternates: ['qwen3:8b', 'deepseek-r1:7b'],
     thinking: true,
-    tools: true,
+    tools: 'full',
     options: { num_ctx: 8192, num_predict: 800, temperature: 0.6, top_p: 0.95 },
     systemPrompt: `${BASE_PROMPT} Reason it through privately, then give the conclusion briefly. State any assumption you had to make, in one line.`
   },
@@ -146,7 +190,7 @@ export const TIERS: Record<TierId, Tier> = {
     model: 'qwen2.5-coder:14b',
     alternates: ['qwen2.5-coder:7b', 'qwen3:8b'],
     thinking: false,
-    tools: true,
+    tools: 'full',
     options: { num_ctx: 8192, num_predict: 1500, temperature: 0.3, top_p: 0.9 },
     systemPrompt:
       `${BASE_PROMPT} Be thorough where it matters and nowhere else. ` +

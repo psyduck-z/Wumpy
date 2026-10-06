@@ -29,6 +29,8 @@ export interface ChatMessage {
   summary?: boolean
   /** Number of messages this summary replaced, for the transcript chip. */
   summarised?: number
+  /** The option picked for a `wumpy-ask` block in this message. */
+  answered?: string
 }
 
 /* ------------------------------------------------------------------ tiers */
@@ -77,12 +79,14 @@ export interface Tier {
   /** Ask a reasoning-capable model to reason. Never sends `think: false`. */
   thinking: boolean
   /**
-   * May propose shell commands. Developer-mode tiers only: measured on
-   * llama3.2:3b, a 3B model decided wrongly about half the time, both
-   * proposing commands for general knowledge and guessing at machine state
-   * instead of checking.
+   * What the tier may propose.
+   *
+   * 'read' lets Quick-mode tiers look things up — versions, files, whether
+   * something is installed — while anything that changes the machine still
+   * needs a Developer tier. The restriction is enforced in the main process
+   * against an allowlist, not merely requested in the prompt.
    */
-  tools: boolean
+  tools: 'none' | 'read' | 'full'
   options: TierOptions
   systemPrompt: string
 }

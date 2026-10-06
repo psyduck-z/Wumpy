@@ -459,6 +459,50 @@ red and additionally require a **native confirmation dialog** that the page
 cannot draw or dismiss itself. That list is advisory, not a sandbox: it is there
 so you see what you are agreeing to, not to decide for you what is safe.
 
+### What each tier may do
+
+| tier | commands |
+| --- | --- |
+| Flash | none |
+| **Fast** | **read only** — versions, files, what is installed |
+| Thinker, Deep Thinker | anything, with a click |
+
+Read-only is enforced in the main process against an allowlist of reporting
+commands, not requested in the prompt. A blocklist of dangerous commands is
+endless and one miss is unrecoverable, so anything not on the list counts as a
+write and needs a Developer tier. Pipelines are checked segment by segment, and
+any redirection or mutating verb disqualifies the whole line. Covered by 24
+cases.
+
+A command the current tier may not run gets **no Run button at all** — the card
+says "needs Developer mode" instead. That matters because a small model will
+sometimes propose a command it should not, and an inert card is better than a
+button that fails.
+
+### Asking instead of guessing
+
+A model can put a question back rather than guess, and the answer is one click:
+
+```wumpy-ask
+Which folder did you mean?
+- Downloads
+- Documents
+```
+
+A wrong guess costs a whole slow turn to discover and another to correct, which
+on this hardware is a minute of your life.
+
+### Things Wumpy does itself
+
+"rename this chat to X", "start a new chat", "switch to deep" and similar never
+reach a model at all. The answer is always the same slash command, and asking is
+pure cost: measured, "rename this chat to Speculative Fiction" took 6.4s on
+phi4-mini to be told the command, and on qwen3:4b took **129 seconds, produced
+3,620 characters of scratchpad, and then no answer at all**. Matching is
+deliberately narrow — a question, a long sentence, or anything without a
+concrete title falls through to the model. Covered by 21 cases, 10 of which must
+*not* match.
+
 ### Why Developer mode only
 
 Measured on llama3.2:3b, a 3B model decides wrongly about half the time. Asked

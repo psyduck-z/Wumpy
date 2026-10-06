@@ -1,5 +1,5 @@
 import { memo, useEffect, useState } from 'react'
-import type { ChatMessage, ShellKind, ShellResult } from '@shared/types'
+import type { ChatMessage, ShellKind, ShellResult, TierId } from '@shared/types'
 import { Markdown } from './Markdown'
 import { useSmoothText } from '../hooks/useSmoothText'
 
@@ -15,9 +15,11 @@ export const Message = memo(function Message({
   streaming,
   showReasoning,
   smoothText,
+  tier,
   onGrow,
   onRunCommand,
-  onCommandResult
+  onCommandResult,
+  onAnswer
 }: {
   message: ChatMessage
   streaming: boolean
@@ -25,11 +27,15 @@ export const Message = memo(function Message({
   showReasoning: boolean
   /** Reveal character by character rather than token by token. */
   smoothText: boolean
+  /** The active tier, which decides what a proposed command may do. */
+  tier: TierId
   /** Called as revealed text grows, so the transcript can stay pinned. */
   onGrow?: () => void
   /** Supplied only when the active tier may propose commands. */
   onRunCommand?: (command: string, shell: ShellKind) => Promise<ShellResult | null>
   onCommandResult?: (result: ShellResult) => void
+  /** Called when the user picks an option from a question the model asked. */
+  onAnswer?: (messageId: string, option: string) => void
 }): React.JSX.Element {
   const [open, setOpen] = useState(showReasoning)
   const isUser = message.role === 'user'
@@ -66,7 +72,7 @@ export const Message = memo(function Message({
         </button>
         {open && (
           <div className="summary-body">
-            <Markdown text={message.content} />
+            <Markdown text={message.content} tier={tier} />
           </div>
         )}
       </div>
@@ -105,8 +111,11 @@ export const Message = memo(function Message({
         <div className={`msg-body ${animating && !waiting ? 'is-streaming' : ''}`}>
           <Markdown
             text={shown}
+            tier={tier}
             onRunCommand={onRunCommand}
             onCommandResult={onCommandResult}
+            onAnswer={onAnswer ? (option) => onAnswer(message.id, option) : undefined}
+            answered={message.answered ?? null}
           />
           {waiting && !message.thinking && (
             <span className="dots" role="status" aria-label="Thinking">

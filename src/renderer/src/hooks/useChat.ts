@@ -32,6 +32,8 @@ export interface ChatState {
   note(content: string, error?: boolean): void
   /** Adds a line the model will see as context, shown as a chip. */
   notice(content: string): void
+  /** Records which option was chosen for a message's question. */
+  recordAnswer(messageId: string, option: string): void
   stop(): void
   clear(): void
   replace(messages: ChatMessage[]): void
@@ -208,6 +210,10 @@ export function useChat(): ChatState {
     context.current = ctx
   }, [])
 
+  const recordAnswer = useCallback((messageId: string, option: string) => {
+    setMessages((prev) => prev.map((m) => (m.id === messageId ? { ...m, answered: option } : m)))
+  }, [])
+
   const notice = useCallback((content: string) => {
     setMessages((prev) => [
       ...prev,
@@ -249,5 +255,5 @@ export function useChat(): ChatState {
     [stop]
   )
 
-  return { messages, streaming, stats, send, setContext, history, note, notice, stop, clear, replace }
+  return { messages, streaming, stats, send, setContext, history, note, notice, recordAnswer, stop, clear, replace }
 }

@@ -496,6 +496,61 @@ body {
 }
 .picker-row.is-removing .picker-del { opacity: 1; }
 
+/* ------------------------------------------------------ questions back */
+
+.ask {
+  margin: 0 0 9px;
+  padding: 10px 12px;
+  background: rgb(var(--surface));
+  border: 1px solid rgb(var(--accent) / 0.3);
+  border-radius: 10px;
+}
+
+.ask.is-answered { opacity: 0.75; }
+
+.ask-question {
+  margin: 0 0 9px;
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+.ask-options {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.ask-option {
+  padding: 5px 11px;
+  background: rgb(var(--raised));
+  border: 1px solid rgb(var(--border));
+  border-radius: 8px;
+  color: rgb(var(--text));
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.ask-option:hover:not(:disabled) {
+  border-color: rgb(var(--accent) / 0.6);
+  color: rgb(var(--accent-text));
+}
+
+.ask-option:disabled { cursor: default; opacity: 0.5; }
+
+.ask-option.is-chosen {
+  background: rgb(var(--accent-soft));
+  border-color: rgb(var(--accent) / 0.6);
+  color: rgb(var(--accent-text));
+  opacity: 1;
+}
+
+.ask-hint {
+  margin: 8px 0 0;
+  font-size: 10.5px;
+  color: rgb(var(--muted));
+}
+
 /* --------------------------------------------------------- command cards */
 
 .cmd {

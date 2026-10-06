@@ -13,7 +13,15 @@ import type {
   TierStatus,
   WumpySettings
 } from '@shared/types'
-import { TIERS, TIER_ORDER, SHELL_PROMPT, NO_SHELL_PROMPT, APP_PROMPT } from '@shared/tiers'
+import {
+  TIERS,
+  TIER_ORDER,
+  SHELL_PROMPT,
+  READ_SHELL_PROMPT,
+  NO_SHELL_PROMPT,
+  APP_PROMPT,
+  ASK_PROMPT
+} from '@shared/tiers'
 import { SettingsStore } from './store'
 import { ChatStore } from './chats'
 import { OllamaClient } from './ollama'
@@ -21,7 +29,7 @@ import { Panel } from './panel'
 import { createTray, resourcePath } from './tray'
 import { registerHotkeys, unregisterHotkeys } from './hotkey'
 import { LowLevelHook } from './lowlevelhook'
-import { runCommand, assessRisk } from './shell'
+import { runCommand, assessRisk, isReadOnly } from './shell'
 import { PriorityManager } from './priority'
 
 // Only one Wumpy may own the tray icon and the global hotkey.
@@ -171,7 +179,7 @@ function registerIpc(): void {
       return
     }
 
-    const canAct = tier.tools && settings.get('shellEnabled')
+    const scope = settings.get('shellEnabled') ? tier.tools : 'none'
     // The model is told what it can do in this tier, both ways round: with the
     // shell rules when it can act, and with an explicit "you cannot, say so"
     // when it cannot. Without the second half it invents having checked.
@@ -187,7 +195,8 @@ function registerIpc(): void {
     const systemPrompt = [
       tier.systemPrompt,
       APP_PROMPT,
-      canAct ? SHELL_PROMPT : NO_SHELL_PROMPT
+      scope === 'full' ? SHELL_PROMPT : scope === 'read' ? READ_SHELL_PROMPT : NO_SHELL_PROMPT,
+      ASK_PROMPT
     ].join('\n\n')
 
     // Stand aside for the duration of the turn: tokens matter more than UI.
@@ -283,7 +292,11 @@ function registerIpc(): void {
     }
   )
 
-  ipcMain.handle(IPC.shellRisk, (_e, command: string) => assessRisk(command))
+  ipcMain.handle(IPC.shellRisk, (_e, req: { command: string; tier: TierId }) => {
+    const scope = settings.get('shellEnabled') ? (TIERS[req.tier]?.tools ?? 'none') : 'none'
+    const allowed = scope === 'full' || (scope === 'read' && isReadOnly(req.command))
+    return { risk: assessRisk(req.command), allowed, scope }
+  })
 
   /**
    * Runs a command the user approved in the panel.
@@ -295,9 +308,30 @@ function registerIpc(): void {
    */
   ipcMain.handle(
     IPC.shellRun,
-    async (_e, req: { command: string; shell: ShellKind }): Promise<ShellResult | null> => {
+    async (_e, req: { command: string; shell: ShellKind; tier: TierId }): Promise<ShellResult | null> => {
       const command = req.command.trim()
       if (!command) return null
+
+      // The tier's scope is enforced here, not in the renderer and not by
+      // asking the model nicely. A Quick tier may look things up; anything that
+      // changes the machine needs a Developer tier.
+      const scope = settings.get('shellEnabled') ? (TIERS[req.tier]?.tools ?? 'none') : 'none'
+      if (scope === 'none' || (scope === 'read' && !isReadOnly(command))) {
+        return {
+          command,
+          shell: req.shell,
+          cwd: '',
+          stdout: '',
+          stderr:
+            scope === 'read'
+              ? 'This tier may only read. Switch to Developer mode (Ctrl+D) to change anything.'
+              : 'Running commands is not available in this tier.',
+          exitCode: -1,
+          durationMs: 0,
+          timedOut: false,
+          truncated: false
+        }
+      }
 
       if (!settings.get('shellEnabled')) {
         return {

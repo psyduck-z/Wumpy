@@ -31,6 +31,78 @@ const RISKY: Array<{ pattern: RegExp; why: string }> = [
   { pattern: />\s*\/dev\/sd|dd\s+if=/i, why: 'writes directly to a device' }
 ]
 
+/**
+ * Command heads considered read-only: they report, they do not change.
+ *
+ * This is an allowlist, not a blocklist, because a blocklist of dangerous
+ * commands is endless and a miss is unrecoverable. Anything not named here is
+ * treated as a write, which only means it needs the Developer tiers.
+ */
+const READ_ONLY = new Set([
+  // PowerShell: Get-* is reporting by convention, plus a few explicit others.
+  'get-childitem', 'get-command', 'get-content', 'get-date', 'get-computerinfo',
+  'get-process', 'get-service', 'get-psdrive', 'get-location', 'get-host',
+  'get-item', 'get-itemproperty', 'get-member', 'get-module', 'get-volume',
+  'get-ciminstance', 'get-wmiobject', 'get-filehash', 'get-help', 'get-history',
+  'test-path', 'measure-object', 'select-object', 'where-object', 'sort-object',
+  'compare-object', 'format-table', 'format-list', 'resolve-path', 'split-path',
+  'join-path', 'convertfrom-json', 'convertto-json', 'out-string', 'write-output',
+  // Classic shell equivalents.
+  'dir', 'ls', 'cat', 'type', 'echo', 'where', 'whoami', 'hostname', 'date',
+  'systeminfo', 'tasklist', 'ver', 'tree', 'find', 'findstr', 'wc', 'head', 'tail',
+  // Version and status probes for common tools.
+  'node', 'npm', 'npx', 'python', 'python3', 'pip', 'dotnet', 'java', 'go',
+  'rustc', 'cargo', 'ollama', 'git', 'code', 'pwsh', 'powershell'
+])
+
+/** Subcommands that make an otherwise read-only tool a write. */
+const WRITE_SUBCOMMANDS: Record<string, string[]> = {
+  git: ['push', 'commit', 'reset', 'clean', 'rebase', 'merge', 'checkout', 'rm', 'mv', 'apply'],
+  npm: ['install', 'i', 'uninstall', 'publish', 'update', 'link', 'run', 'exec'],
+  pip: ['install', 'uninstall'],
+  ollama: ['rm', 'create', 'push', 'cp'],
+  dotnet: ['publish', 'build', 'add', 'remove', 'new'],
+  cargo: ['install', 'publish'],
+  go: ['install', 'get'],
+  node: [],
+  python: [],
+  python3: []
+}
+
+/** Anything here means the command writes somewhere, whatever its head says. */
+const WRITE_MARKERS =
+  /(^|\s)(>|>>|\||&&|;)\s*(set-|new-|remove-|clear-|stop-|start-|restart-|rename-|move-|copy-|out-file|tee-object)|(^|\s)(set-|new-|remove-|clear-|rename-|move-|copy-|stop-|start-|restart-)[a-z]+|(^|\s)(rm|del|rmdir|rd|mkdir|md|move|copy|xcopy|robocopy|format|diskpart|reg|sc|net|shutdown|taskkill|icacls|takeown|attrib)(\s|$)|>\s*\S/i
+
+/**
+ * Classifies a command as read-only or not.
+ *
+ * Used to let the Quick tiers act without handing them the whole machine: they
+ * may look things up, and anything that changes state needs a Developer tier.
+ */
+export function isReadOnly(command: string): boolean {
+  const trimmed = command.trim()
+  if (!trimmed) return false
+
+  // Redirection, piping into a mutating cmdlet, or any write-shaped verb.
+  if (WRITE_MARKERS.test(trimmed)) return false
+
+  // Every segment of a pipeline has to be read-only on its own.
+  const segments = trimmed.split(/\||;|&&/)
+  for (const segment of segments) {
+    const tokens = segment.trim().split(/\s+/).filter(Boolean)
+    if (tokens.length === 0) continue
+    const head = tokens[0].toLowerCase().replace(/\.exe$/, '')
+    if (!READ_ONLY.has(head)) return false
+
+    const subs = WRITE_SUBCOMMANDS[head]
+    if (subs) {
+      const sub = (tokens[1] ?? '').toLowerCase()
+      if (subs.includes(sub)) return false
+    }
+  }
+  return true
+}
+
 export function assessRisk(command: string): string | null {
   for (const { pattern, why } of RISKY) {
     if (pattern.test(command)) return why

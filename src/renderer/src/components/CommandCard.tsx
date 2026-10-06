@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import type { ShellKind, ShellResult } from '@shared/types'
+import type { ShellKind, ShellResult, TierId } from '@shared/types'
 
 const SHELL_LABEL: Record<ShellKind, string> = {
   powershell: 'PowerShell',
@@ -51,29 +51,35 @@ function splitReason(raw: string): { reason: string | null; command: string } {
 export function CommandCard({
   command: raw,
   shell,
+  tier,
   onRun,
   onResult
 }: {
   command: string
   shell: ShellKind
+  tier: TierId
   onRun(command: string, shell: ShellKind): Promise<ShellResult | null>
   onResult(result: ShellResult): void
 }): React.JSX.Element {
   const { reason, command } = splitReason(raw)
   const [risk, setRisk] = useState<string | null>(null)
+  // Null until the main process has judged it; the Run button waits for this.
+  const [allowed, setAllowed] = useState<boolean | null>(null)
   const [state, setState] = useState<'idle' | 'running' | 'done' | 'cancelled'>('idle')
   const [result, setResult] = useState<ShellResult | null>(null)
   const [showOutput, setShowOutput] = useState(true)
 
   useEffect(() => {
     let live = true
-    void window.wumpy.shell.risk(command).then((r) => {
-      if (live) setRisk(r)
+    void window.wumpy.shell.check({ command, tier }).then((r) => {
+      if (!live) return
+      setRisk(r.risk)
+      setAllowed(r.allowed)
     })
     return () => {
       live = false
     }
-  }, [command])
+  }, [command, tier])
 
   const run = async (): Promise<void> => {
     setState('running')
@@ -97,7 +103,7 @@ export function CommandCard({
         <span className="cmd-shell">{SHELL_LABEL[shell]}</span>
         {risk && <span className="cmd-risk" title={`This command ${risk}.`}>{risk}</span>}
         <span className="spacer" />
-        {state === 'idle' && (
+        {state === 'idle' && allowed === true && (
           <>
             <button type="button" className="cmd-skip" onClick={() => setState('cancelled')}>
               Skip
@@ -106,6 +112,9 @@ export function CommandCard({
               Run
             </button>
           </>
+        )}
+        {state === 'idle' && allowed === false && (
+          <span className="cmd-status">needs Developer mode</span>
         )}
         {state === 'running' && <span className="cmd-status">running…</span>}
         {state === 'cancelled' && <span className="cmd-status">skipped</span>}

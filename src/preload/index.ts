@@ -74,10 +74,20 @@ const api = {
   },
   shell: {
     /** Runs an approved command. Resolves null if the user cancelled. */
-    run: (req: { command: string; shell: ShellKind }): Promise<ShellResult | null> =>
-      ipcRenderer.invoke(IPC.shellRun, req),
-    /** Why a command looks risky, or null. Drives the warning on the card. */
-    risk: (command: string): Promise<string | null> => ipcRenderer.invoke(IPC.shellRisk, command)
+    run: (req: {
+      command: string
+      shell: ShellKind
+      tier: TierId
+    }): Promise<ShellResult | null> => ipcRenderer.invoke(IPC.shellRun, req),
+    /**
+     * Whether this tier may run the command, and why it looks risky if it does.
+     * Drives the card: a command the tier cannot run gets no Run button.
+     */
+    check: (req: {
+      command: string
+      tier: TierId
+    }): Promise<{ risk: string | null; allowed: boolean; scope: 'none' | 'read' | 'full' }> =>
+      ipcRenderer.invoke(IPC.shellRisk, req)
   },
   panel: {
     hide: (): void => ipcRenderer.send(IPC.panelHide),
