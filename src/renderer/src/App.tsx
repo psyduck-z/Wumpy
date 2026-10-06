@@ -341,11 +341,21 @@ export default function App(): React.JSX.Element {
 
   /* ----------------------------------------------------------------- scroll */
 
-  useLayoutEffect(() => {
-    if (stickToBottom.current) {
-      scroller.current?.scrollTo({ top: scroller.current.scrollHeight })
-    }
-  }, [messages])
+  /**
+   * Pins the transcript to the bottom. Called both when messages change and on
+   * every frame the revealed text grows, so the view tracks the smooth reveal
+   * rather than jumping once per token.
+   */
+  const pinToBottom = useCallback(() => {
+    const el = scroller.current
+    if (!el || !stickToBottom.current) return
+    // Instant, not smooth: the content now grows a character at a time, so a
+    // direct set already reads as a smooth glide, while `behavior: 'smooth'`
+    // would fight itself across frames.
+    el.scrollTop = el.scrollHeight
+  }, [])
+
+  useLayoutEffect(pinToBottom, [messages, pinToBottom])
 
   const onScroll = (): void => {
     const el = scroller.current
@@ -431,6 +441,7 @@ export default function App(): React.JSX.Element {
                 message={m}
                 streaming={streaming && i === messages.length - 1}
                 showReasoning={settings?.showReasoning ?? false}
+                onGrow={pinToBottom}
               />
             ))
           )}

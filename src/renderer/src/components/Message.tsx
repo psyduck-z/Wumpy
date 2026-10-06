@@ -1,28 +1,49 @@
 import { useEffect, useState } from 'react'
 import type { ChatMessage } from '@shared/types'
 import { Markdown } from './Markdown'
+import { useSmoothText } from '../hooks/useSmoothText'
 
 export function Message({
   message,
   streaming,
-  showReasoning
+  showReasoning,
+  onGrow
 }: {
   message: ChatMessage
   streaming: boolean
   /** When false the scratchpad is collapsed behind a disclosure. */
   showReasoning: boolean
+  /** Called as revealed text grows, so the transcript can stay pinned. */
+  onGrow?: () => void
 }): React.JSX.Element {
   const [open, setOpen] = useState(showReasoning)
   const isUser = message.role === 'user'
-  const empty = !message.content && !message.error
+
+  // Reveal the answer smoothly rather than in the lumps the tokens arrive in.
+  const [shown, catchingUp] = useSmoothText(message.content, streaming)
+  const animating = streaming || catchingUp
 
   // Follow the global preference when it changes, but let a click override it
   // for this message.
   useEffect(() => setOpen(showReasoning), [showReasoning])
 
+  useEffect(() => {
+    onGrow?.()
+  }, [shown, onGrow])
+
+  if (isUser) {
+    return (
+      <div className="msg msg-user">
+        <div className="msg-body">{message.content}</div>
+      </div>
+    )
+  }
+
+  const waiting = !shown && !message.error
+
   return (
-    <div className={`msg ${isUser ? 'msg-user' : 'msg-assistant'}`}>
-      {!isUser && message.thinking && (
+    <div className="msg msg-assistant">
+      {message.thinking && (
         <div className="thinking">
           <button type="button" onClick={() => setOpen((v) => !v)}>
             <span className={`caret-glyph ${open ? 'is-open' : ''}`}>&#9656;</span>
@@ -33,15 +54,21 @@ export function Message({
         </div>
       )}
 
+      {/* While streaming, `is-streaming` draws the caret as a pseudo-element on
+          the last block so it flows inline after the final character rather than
+          dropping onto a line of its own. */}
       {message.error ? (
         <div className="msg-error">{message.error}</div>
-      ) : isUser ? (
-        <div className="msg-body">{message.content}</div>
       ) : (
-        <div className="msg-body">
-          <Markdown text={message.content} />
-          {streaming && empty && !message.thinking && <span className="dots" aria-label="Thinking" />}
-          {streaming && !empty && <span className="caret" />}
+        <div className={`msg-body ${animating && !waiting ? 'is-streaming' : ''}`}>
+          <Markdown text={shown} />
+          {waiting && !message.thinking && (
+            <span className="dots" role="status" aria-label="Thinking">
+              <i />
+              <i />
+              <i />
+            </span>
+          )}
         </div>
       )}
     </div>

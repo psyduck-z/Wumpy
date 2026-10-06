@@ -154,6 +154,36 @@ per-tier options are free.
 > instead, which lets Ollama parse reasoning into its own field and keeps the
 > answer clean.
 
+## How the streaming feels
+
+Ollama delivers whole tokens about four to eight times a second, so rendering
+each one as it lands makes text arrive in visible lumps. Wumpy buffers incoming
+tokens and releases *characters* on an animation frame instead, draining the
+backlog over a fixed window. That is self-balancing: at a steady arrival rate
+the reveal settles at exactly that rate, with a cushion so it never stutters to
+a halt between tokens.
+
+Tuned against real token timings, measuring gap jitter as a coefficient of
+variation (lower is smoother):
+
+| | jitter | p95 gap | max gap |
+| --- | --- | --- | --- |
+| render each token on arrival | 2.19 | 329 ms | 387 ms |
+| **buffered reveal (shipped)** | **0.38** | **83 ms** | **200 ms** |
+
+The one counter-intuitive constant is the rate floor, which must stay *below*
+the slowest realistic arrival rate. An earlier attempt set it at 28 chars/s
+against ~19 chars/s of actual arrival, so the reveal outran its own buffer and
+stalled 762 times in a single message — measurably worse than no smoothing at
+all. The first character is exempt, appearing the moment it exists, so none of
+the time-to-first-word won by keeping models warm is given back.
+
+The caret is a pseudo-element on the last rendered block, so it rides inline
+after the final character instead of dropping to a line of its own, and it
+breathes on an eased curve rather than a hard on/off blink. Honouring
+`prefers-reduced-motion` turns the whole thing off and renders text as it
+arrives.
+
 ## Commands
 
 Type `/` in the composer for an autocompleting palette. Arrow keys to move, Tab
