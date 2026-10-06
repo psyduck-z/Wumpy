@@ -101,7 +101,25 @@ async function refreshModels(): Promise<void> {
 async function warmTier(id: TierId): Promise<void> {
   const model = resolveTierModel(id)
   if (!model || ollama.isWarm(model)) return
-  await ollama.warm(model, settings.get('keepAlive'))
+
+  // Prime with exactly the preamble this tier sends, so the cache it leaves
+  // behind is the one the user's first message will hit.
+  const tier = TIERS[id]
+  const scope = settings.get('shellEnabled') ? tier.tools : 'none'
+  const systemPrompt = [
+    tier.systemPrompt,
+    APP_PROMPT,
+    scope === 'full' ? SHELL_PROMPT : scope === 'read' ? READ_SHELL_PROMPT : NO_SHELL_PROMPT,
+    scope !== 'none' && settings.get('searchEnabled') ? SEARCH_PROMPT : '',
+    ASK_PROMPT
+  ]
+    .filter(Boolean)
+    .join('\n\n')
+
+  await ollama.warm(model, settings.get('keepAlive'), {
+    systemPrompt,
+    examples: scope === 'none' ? [] : shellExamples(scope)
+  })
   panel.send(IPC.tiersStatus, tierStatuses())
 }
 

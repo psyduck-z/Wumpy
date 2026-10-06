@@ -112,16 +112,46 @@ export class OllamaClient {
    * with an empty prompt makes Ollama resident the model and start the
    * keep-alive clock, so the user's actual question skips the load entirely.
    */
-  async warm(model: string, keepAlive: string): Promise<boolean> {
+  async warm(
+    model: string,
+    keepAlive: string,
+    prime?: { systemPrompt: string; examples: Array<Pick<ChatMessage, 'role' | 'content'>> }
+  ): Promise<boolean> {
     try {
-      const res = await fetch(`${this.host}/api/generate`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ model, keep_alive: keepAlive }),
-        signal: AbortSignal.timeout(180_000)
-      })
-      if (!res.ok) return false
-      await res.text()
+      if (prime) {
+        // Load the weights *and* fill the KV cache with the fixed part of every
+        // request. Prefill measured ~36 tokens/sec on this CPU, so a 600-token
+        // preamble is sixteen seconds the user would otherwise wait for on
+        // their first message. Priming moves that to startup, where nobody is
+        // watching, and the first real question prefills only its own tokens.
+        const res = await fetch(`${this.host}/api/chat`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            model,
+            messages: [
+              { role: 'system', content: prime.systemPrompt },
+              ...prime.examples,
+              { role: 'user', content: 'ready?' }
+            ],
+            stream: false,
+            keep_alive: keepAlive,
+            options: { num_predict: 1 }
+          }),
+          signal: AbortSignal.timeout(300_000)
+        })
+        if (!res.ok) return false
+        await res.text()
+      } else {
+        const res = await fetch(`${this.host}/api/generate`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ model, keep_alive: keepAlive }),
+          signal: AbortSignal.timeout(180_000)
+        })
+        if (!res.ok) return false
+        await res.text()
+      }
       this.warmed.add(model)
       return true
     } catch {

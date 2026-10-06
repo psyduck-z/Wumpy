@@ -344,6 +344,32 @@ well: both changed every turn and neither earned its place.
 The rule this leaves behind: **anything that changes between turns belongs at
 the end of the request, never the beginning.**
 
+## The prompt is latency
+
+Prefill measured ~36 tokens/sec on this CPU, so every 100 tokens of preamble is
+about three seconds the user waits before a single word appears. Capability
+prompts had grown to 920 fixed tokens without anyone noticing, and "list all my
+ollama models" took 33.5 s — of which 25.6 s was reading instructions.
+
+Two fixes:
+
+**Shorter.** The preamble is 596 tokens, down from 920, with the parts that
+measurably changed behaviour kept verbatim and the restatements cut. Re-scored
+afterwards on nine cases: 9/9, up from 8/8 on the previous eight, with
+`list all my ollama models` now correctly proposing `ollama list` rather than
+hunting the filesystem with `Get-ChildItem`.
+
+**Primed.** Warming a tier no longer just loads the weights, it sends the exact
+preamble that tier will use, so the KV cache already holds it. Measured on a
+cold model:
+
+| | first word |
+| --- | --- |
+| cold, unprimed | **23.5 s** |
+| primed at startup | **0.7 s** |
+
+The 22 s does not disappear, it moves to startup where nobody is waiting on it.
+
 ## Staying out of the model's way
 
 Inference here is CPU-bound, so every core Wumpy takes is a core not producing
