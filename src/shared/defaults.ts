@@ -13,11 +13,10 @@ export const DEFAULT_SETTINGS: WumpySettings = {
     'Use markdown for structure and fenced code blocks with a language tag for code.',
     'You run entirely on the user’s machine, so never claim you cannot access local context — ask for it instead.'
   ].join(' '),
-  // Win+C is NOT in this list: Windows reserves it, so RegisterHotKey always
-  // fails for it. It is claimed by the low-level keyboard hook instead (see
-  // src/hook). These are the extra accelerators, and the fallback if the
-  // helper cannot run.
-  hotkeys: ['Alt+Space'],
+  // Empty on purpose: Win+C is claimed by the low-level keyboard hook (see
+  // src/hook), which is the only way to get it since Windows reserves it.
+  // Add Electron accelerators here if you want extra keys alongside it.
+  hotkeys: [],
   hideOnBlur: true,
   thinking: false,
   panelWidth: 440,

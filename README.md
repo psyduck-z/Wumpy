@@ -82,9 +82,10 @@ It runs as a 170 KB helper process (`src/hook`, C#) spawned by the app:
   no other key" pops the Start menu.
 - Exits when its stdin closes, so it can never outlive the app.
 
-If the helper is missing or refuses to start, Wumpy falls back to whatever
-accelerator it *can* register (`Alt+Space` by default) and says so in the tray
-tooltip and the panel header. Verify the helper independently with:
+`Win+C` is the only key bound out of the box. If the helper is missing or
+refuses to start, Wumpy says so in the tray tooltip and the panel header, and
+you can still open the panel by clicking the tray icon — or add an accelerator
+of your own to `hotkeys` in settings. Verify the helper independently with:
 
 ```powershell
 npm run hook:test         # -> hook=ok sizeof(INPUT)=40 sendinput=ok
@@ -136,7 +137,7 @@ and toggle changes apply immediately; hotkey changes apply on restart.
 | `ollamaHost` | `http://127.0.0.1:11434` | Where Ollama is listening |
 | `chatModel` | `llama3.2:3b` | Falls back to an installed model if missing |
 | `systemPrompt` | terse assistant | Prepended to every conversation |
-| `hotkeys` | `["Alt+Space"]` | Extra accelerators; `Win+C` comes from the hook |
+| `hotkeys` | `[]` | Extra accelerators; `Win+C` comes from the hook |
 | `hideOnBlur` | `true` | Collapse as soon as focus moves away |
 | `thinking` | `false` | Show a reasoning model's scratchpad |
 | `panelWidth` | `440` | Panel width in px |
@@ -146,7 +147,7 @@ and toggle changes apply immediately; hotkey changes apply on restart.
 
 | Key | Action |
 | --- | --- |
-| `Win+C` (or `Alt+Space`) | Toggle the panel |
+| `Win+C` | Toggle the panel (also: click the tray icon) |
 | `Enter` / `Shift+Enter` | Send / newline |
 | `Esc` | Stop generating, or close |
 

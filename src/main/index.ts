@@ -31,11 +31,13 @@ function applyHotkeys(): void {
   // The low-level hook is owned separately; preserve what it already claimed.
   hotkeyState.intercepted = intercepted
 
-  if (!hotkeyState.active) {
-    console.warn('[wumpy] no accelerator could be registered:', hotkeyState.failed.join(', '))
-  } else {
+  if (hotkeyState.active) {
     console.log(`[wumpy] accelerator active: ${hotkeyState.active}`)
+  } else if (hotkeyState.failed.length > 0) {
+    console.warn('[wumpy] no accelerator could be registered:', hotkeyState.failed.join(', '))
   }
+  // An empty candidate list is the default and not worth a warning: Win+C comes
+  // from the low-level hook, so extra accelerators are opt-in.
   tray?.refresh()
   panel.send(IPC.hotkeyState, hotkeyState)
 }
