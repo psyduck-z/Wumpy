@@ -274,6 +274,42 @@ changing fixed it outright:
 | "what's the capital of France" | Paris | Paris |
 | | **2/6** | **6/6** |
 
+## Everything selectable is a list
+
+`/resume`, `/delete`, `/tier`, `/model` and `/dock` all open the same picker:
+type to filter, arrows to move, `Enter` to choose, `Esc` to back out. Commands
+that take a name still accept one, but never require it — you should not have to
+remember what things are called when the app can just show you.
+
+## Why it is not faster, measured
+
+Worth recording so nobody re-tries these. Ollama 0.35.1 ships a Vulkan backend,
+and the Radeon 680M does support Vulkan even though ROCm refuses it. It can be
+enabled:
+
+```powershell
+$env:OLLAMA_VULKAN = "1"       # load the Vulkan backend
+$env:OLLAMA_IGPU_ENABLE = "1"  # integrated GPUs are skipped without this
+```
+
+That genuinely works — `ollama ps` reports **100% GPU**. It is also not faster:
+
+| | tok/s (llama3.2:3b) | tok/s (qwen3:4b) |
+| --- | --- | --- |
+| CPU | 7.6 | 6.0 |
+| Vulkan, 100% GPU offload | 7.8 | 5.6 |
+| CPU + flash attention + q8 KV cache | 7.4 | — |
+
+Single-stream inference is bound by memory bandwidth, not compute, and an
+integrated GPU shares the same DDR5 as the CPU. Moving the work to it moves the
+arithmetic but not the bottleneck. `OLLAMA_FLASH_ATTENTION` and a quantised KV
+cache target bandwidth, but at these context sizes there is too little attention
+traffic for them to matter.
+
+So ~7-8 tok/s for a 3B model is the ceiling on this hardware. What is left is
+generating fewer tokens rather than generating them faster, which is what the
+terse prompts, the token budgets and the warm models are all for.
+
 ## Commands
 
 Type `/` in the composer for an autocompleting palette. Arrow keys to move, Tab
@@ -286,9 +322,10 @@ or Enter to accept.
 | `/chats`, `/history` | Browse saved chats |
 | `/delete` | Delete a saved chat, same picker |
 | `/rename`, `/title <text>` | Retitle this chat |
-| `/tier`, `/level <name>` | flash \| fast \| thinker \| deep, keeping context |
+| `/tier`, `/level` | Switch thinking level, keeping context |
+| `/model` | Pick which installed model this tier uses |
 | `/mode [quick\|dev]` | Toggle Quick / Developer |
-| `/dock <position>` | Move the panel |
+| `/dock` | Move the panel, from a list |
 | `/reasoning on\|off` | Show the scratchpad |
 | `/pin`, `/autohide on\|off` | Keep on top, or hide when you click away |
 | `/compact` | Summarise older turns to free context |

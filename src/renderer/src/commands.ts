@@ -14,9 +14,10 @@ export type CommandAction =
   | { kind: 'resume' }
   | { kind: 'delete' }
   | { kind: 'rename'; title: string }
-  | { kind: 'tier'; tier: TierId }
+  | { kind: 'tier'; tier: TierId | null }
+  | { kind: 'model' }
   | { kind: 'mode'; mode: Mode | 'toggle' }
-  | { kind: 'dock'; dock: Dock }
+  | { kind: 'dock'; dock: Dock | null }
   | { kind: 'reasoning'; show: boolean | 'toggle' }
   | { kind: 'pin'; pinned: boolean | 'toggle' }
   | { kind: 'warm' }
@@ -152,10 +153,12 @@ export const COMMANDS: CommandSpec[] = [
   },
   {
     name: 'tier',
-    aliases: ['model', 'smart', 'level', 'think'],
+    aliases: ['smart', 'level', 'think'],
     hint: 'Switch thinking level, keeping the conversation',
     arg: 'name',
     run: (arg) => {
+      // No name given: show the list rather than make the user remember them.
+      if (!arg.trim()) return { kind: 'tier', tier: null }
       const key = arg.trim().toLowerCase().replace(/[\s-]/g, '')
       const tier = TIER_NAMES[key]
       if (!tier) {
@@ -185,6 +188,7 @@ export const COMMANDS: CommandSpec[] = [
     hint: 'Move the panel: left | right | top-right | …',
     arg: 'position',
     run: (arg) => {
+      if (!arg.trim()) return { kind: 'dock', dock: null }
       const a = arg.trim().toLowerCase().replace(/\s+/g, '-')
       const dock = DOCKS.find((d) => d === a)
       if (!dock) {
@@ -206,6 +210,12 @@ export const COMMANDS: CommandSpec[] = [
     hint: 'Keep on top, or let it hide when you click away',
     arg: 'on|off',
     run: (arg) => ({ kind: 'pin', pinned: bool(arg) })
+  },
+  {
+    name: 'model',
+    aliases: ['models'],
+    hint: 'Pick which installed model this tier uses',
+    run: () => ({ kind: 'model' })
   },
   {
     name: 'warm',

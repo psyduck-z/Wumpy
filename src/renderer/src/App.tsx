@@ -9,11 +9,12 @@ import type {
   TierId,
   ShellKind,
   ShellResult,
+  OllamaModel,
   TierStatus,
   WumpySettings
 } from '@shared/types'
 import { isTall } from '@shared/types'
-import { TIERS, defaultTierFor } from '@shared/tiers'
+import { TIERS, TIER_ORDER, defaultTierFor } from '@shared/tiers'
 import { useChat, nextId } from './hooks/useChat'
 import { parseCommand, helpText, type CommandAction } from './commands'
 import { Header } from './components/Header'
@@ -23,7 +24,7 @@ import { StatusBar } from './components/StatusBar'
 import { Ambience } from './components/Ambience'
 import logo from './assets/logo.png'
 import { TierBar } from './components/TierBar'
-import { ChatList } from './components/ChatList'
+import { Picker, type PickerProps } from './components/Picker'
 
 /** Mirrors the main process's accelerator formatting for display. */
 function prettify(accelerator: string): string {
@@ -36,6 +37,7 @@ export default function App(): React.JSX.Element {
 
   const [settings, setSettings] = useState<WumpySettings | null>(null)
   const [tierStatuses, setTierStatuses] = useState<TierStatus[]>([])
+  const [models, setModels] = useState<OllamaModel[]>([])
   const [status, setStatus] = useState<OllamaStatus | null>(null)
   const [hotkey, setHotkey] = useState<HotkeyState>({
     active: null,
@@ -51,9 +53,10 @@ export default function App(): React.JSX.Element {
   const [openCount, setOpenCount] = useState(0)
 
   // Saved chats
-  const [showChats, setShowChats] = useState(false)
-  /** What the chat picker is being used for this time round. */
-  const [pickerMode, setPickerMode] = useState<'resume' | 'delete'>('resume')
+  /** Which picker is open, if any. One list UI serves them all. */
+  const [picker, setPicker] = useState<null | 'resume' | 'delete' | 'tier' | 'model' | 'dock'>(
+    null
+  )
   const [savedChats, setSavedChats] = useState<ChatSummary[]>([])
   const [chatId, setChatId] = useState<string>(() => nextId())
   const [chatTitle, setChatTitle] = useState<string | null>(null)
@@ -160,7 +163,7 @@ export default function App(): React.JSX.Element {
     setTitleLocked(false)
     // A fresh chat is eligible for automatic titling again.
     titledFor.current = null
-    setShowChats(false)
+    setPicker(null)
   }, [chat])
 
   const retitle = useCallback(
@@ -201,7 +204,7 @@ export default function App(): React.JSX.Element {
       setTitleLocked(loaded.titleLocked ?? false)
       // Already named, so do not re-title it on the next turn.
       titledFor.current = loaded.id
-      setShowChats(false)
+      setPicker(null)
       setFocusToken((n) => n + 1)
     },
     [chat]
@@ -362,25 +365,26 @@ export default function App(): React.JSX.Element {
 
         case 'chats':
           await refreshChats()
-          setPickerMode('resume')
-          setShowChats(true)
+          setPicker('resume')
           return
         case 'resume': {
           await refreshChats()
-          setPickerMode('resume')
-          setShowChats(true)
+          setPicker('resume')
           return
         }
         case 'delete': {
           await refreshChats()
-          setPickerMode('delete')
-          setShowChats(true)
+          setPicker('delete')
           return
         }
         case 'rename':
           await retitle(action.title)
           return
         case 'tier': {
+          if (!action.tier) {
+            setPicker('tier')
+            return
+          }
           const kept = chat.history().length
           await setTier(action.tier)
           chat.note(
@@ -394,9 +398,19 @@ export default function App(): React.JSX.Element {
           await patch({ mode: next, tier: defaultTierFor(next) })
           return
         }
-        case 'dock':
-          window.wumpy.panel.setDock(action.dock)
-          setSettings((prev) => (prev ? { ...prev, dock: action.dock } : prev))
+        case 'dock': {
+          if (!action.dock) {
+            setPicker('dock')
+            return
+          }
+          const next = action.dock
+          window.wumpy.panel.setDock(next)
+          setSettings((prev) => (prev ? { ...prev, dock: next } : prev))
+          return
+        }
+        case 'model':
+          setModels(await window.wumpy.ollama.models())
+          setPicker('model')
           return
         case 'reasoning': {
           const show =
@@ -545,7 +559,7 @@ export default function App(): React.JSX.Element {
       if (e.key === 'Escape') {
         e.preventDefault()
         if (streaming) chat.stop()
-        else if (showChats) setShowChats(false)
+        else if (picker) setPicker(null)
         else close()
         return
       }
@@ -574,8 +588,7 @@ export default function App(): React.JSX.Element {
         if (e.key.toLowerCase() === 'r') {
           e.preventDefault()
           void refreshChats()
-          setPickerMode('resume')
-          setShowChats(true)
+          setPicker('resume')
           return
         }
 
@@ -583,7 +596,7 @@ export default function App(): React.JSX.Element {
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [chat, close, newChat, retitle, setTier, showChats, streaming, toggleMode])
+  }, [chat, close, newChat, retitle, setTier, picker, streaming, toggleMode])
 
   /* ----------------------------------------------------------------- scroll */
 
@@ -607,6 +620,106 @@ export default function App(): React.JSX.Element {
     const el = scroller.current
     if (!el) return
     stickToBottom.current = el.scrollHeight - el.scrollTop - el.clientHeight < 48
+  }
+
+  /* --------------------------------------------------------------- pickers */
+
+  const DOCKS: Array<{ id: Dock; title: string; meta: string }> = [
+    { id: 'left', title: 'Left edge', meta: 'Full height bar' },
+    { id: 'right', title: 'Right edge', meta: 'Full height bar' },
+    { id: 'top-left', title: 'Top left', meta: 'Compact card' },
+    { id: 'top-right', title: 'Top right', meta: 'Compact card' },
+    { id: 'bottom-left', title: 'Bottom left', meta: 'Compact card' },
+    { id: 'bottom-right', title: 'Bottom right', meta: 'Compact card' }
+  ]
+
+  /**
+   * Maps the open picker to its list. Every selection command routes through
+   * here, so they all look and behave the same and nothing has to be
+   * remembered by name.
+   */
+  function pickerProps(kind: NonNullable<typeof picker>): PickerProps {
+    const close = (): void => setPicker(null)
+
+    if (kind === 'tier') {
+      const byId = new Map(tierStatuses.map((t) => [t.id, t]))
+      return {
+        heading: 'Tier',
+        placeholder: 'Filter tiers…',
+        onClose: close,
+        onPick: (id) => void setTier(id as TierId),
+        items: TIER_ORDER.map((id, i) => {
+          const t = TIERS[id]
+          const st = byId.get(id)
+          return {
+            id,
+            title: t.label,
+            meta: st?.installed
+              ? `${t.blurb}  ·  ${st.resolvedModel}${st.warm ? '  · warm' : ''}`
+              : `Not installed — ollama pull ${t.model}`,
+            hint: `Ctrl+${i + 1}`,
+            disabled: !st?.installed,
+            active: id === tier
+          }
+        })
+      }
+    }
+
+    if (kind === 'model') {
+      const current = tierStatus?.resolvedModel
+      return {
+        heading: `Model for ${activeTier.label}`,
+        placeholder: 'Filter models…',
+        emptyText: 'No models installed. Pull one with `ollama pull`.',
+        onClose: close,
+        onPick: (name) => {
+          void patch({ tierModels: { ...(settings?.tierModels ?? {}), [tier]: name } })
+          void window.wumpy.tiers.status().then(setTierStatuses)
+          chat.note(`**${activeTier.label}** now uses \`${name}\`.`)
+          close()
+        },
+        items: models.map((m) => ({
+          id: m.name,
+          title: m.name,
+          meta: `${m.parameterSize || m.family}  ·  ${(m.size / 1e9).toFixed(1)} GB`,
+          active: m.name === current
+        }))
+      }
+    }
+
+    if (kind === 'dock') {
+      return {
+        heading: 'Position',
+        placeholder: 'Filter positions…',
+        onClose: close,
+        onPick: (id) => {
+          window.wumpy.panel.setDock(id as Dock)
+          setSettings((prev) => (prev ? { ...prev, dock: id as Dock } : prev))
+          close()
+        },
+        items: DOCKS.map((d) => ({ ...d, active: d.id === dock }))
+      }
+    }
+
+    // resume / delete
+    const removing = kind === 'delete'
+    return {
+      heading: removing ? 'Delete a chat' : 'Resume',
+      placeholder: removing ? 'Filter chats to delete…' : 'Filter chats…',
+      emptyText: 'Nothing saved yet. Chats save themselves as you go.',
+      removeMode: removing,
+      onClose: close,
+      onPick: (id) => void openChat(id),
+      onRemove: (id) => {
+        void window.wumpy.chats.delete(id).then(() => refreshChats())
+      },
+      items: savedChats.map((c) => ({
+        id: c.id,
+        title: c.title,
+        meta: `${TIERS[c.tier]?.label ?? c.tier}  ·  ${c.messageCount} msg  ·  ${when(c.updatedAt)}`,
+        active: c.id === chatId
+      }))
+    }
   }
 
   /* ------------------------------------------------------------------ render */
@@ -651,8 +764,7 @@ export default function App(): React.JSX.Element {
         onNewChat={newChat}
         onShowChats={() => {
           void refreshChats()
-          setPickerMode('resume')
-          setShowChats((v) => !v)
+          setPicker((p) => (p ? null : 'resume'))
         }}
         onClose={close}
         hotkeyLabel={hotkeyLabel}
@@ -666,18 +778,8 @@ export default function App(): React.JSX.Element {
         onPick={(id) => void setTier(id)}
       />
 
-      {showChats ? (
-        <ChatList
-          chats={savedChats}
-          purpose={pickerMode}
-          activeId={chatId}
-          onOpen={(id) => void openChat(id)}
-          onDelete={async (id) => {
-            await window.wumpy.chats.delete(id)
-            await refreshChats()
-          }}
-          onClose={() => setShowChats(false)}
-        />
+      {picker ? (
+        <Picker {...pickerProps(picker)} />
       ) : (
         <div className="scroll" ref={scroller} onScroll={onScroll}>
           {messages.length === 0 ? (
@@ -772,4 +874,14 @@ function Empty({
       )}
     </div>
   )
+}
+
+/** Relative time for picker rows. */
+function when(ts: number): string {
+  const mins = Math.round((Date.now() - ts) / 60000)
+  if (mins < 1) return 'just now'
+  if (mins < 60) return `${mins}m ago`
+  const hours = Math.round(mins / 60)
+  if (hours < 24) return `${hours}h ago`
+  return `${Math.round(hours / 24)}d ago`
 }
