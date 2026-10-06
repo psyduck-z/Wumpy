@@ -36,7 +36,9 @@ export default function App(): React.JSX.Element {
     failed: [],
     intercepted: null
   })
-  const [pinned, setPinned] = useState(false)
+  // "Pinned" is the inverse of hideOnBlur, and persists: the panel is meant to
+  // stay on top of whatever you are working in until you dismiss it.
+  const pinned = !(settings?.hideOnBlur ?? false)
   const [visible, setVisible] = useState(false)
   const [focusToken, setFocusToken] = useState(0)
 
@@ -178,6 +180,61 @@ export default function App(): React.JSX.Element {
     void window.wumpy.tiers.warm(defaultTierFor(next)).then(setTierStatuses)
   }, [mode, patch])
 
+  /* --------------------------------------------------- autosave + compaction */
+
+  /** Rough token estimate; good enough to decide when to compact. */
+  const estimateTokens = useCallback(
+    () => Math.ceil(chat.history().reduce((n, m) => n + m.content.length, 0) / 4),
+    [chat]
+  )
+
+  /**
+   * Replaces all but the most recent turns with a model-written summary, so a
+   * long conversation keeps fitting in the context window.
+   */
+  const compactHistory = useCallback(
+    async (opts: { silent?: boolean } = {}): Promise<boolean> => {
+      const msgs = chat.messages.filter((m) => !m.error && !m.local)
+      // Keep the last few turns verbatim; summarising those loses the thread.
+      const keep = 4
+      if (msgs.length <= keep + 1) {
+        if (!opts.silent) chat.note('Not enough history to compact yet.')
+        return false
+      }
+
+      const older = msgs.slice(0, msgs.length - keep)
+      const recent = msgs.slice(msgs.length - keep)
+      if (!opts.silent) chat.note('Compacting earlier turns…')
+
+      const summary = await window.wumpy.chat.compact({
+        tier,
+        messages: older.map((m) => ({
+          role: m.summary ? 'system' : m.role,
+          content: m.content
+        }))
+      })
+
+      if (!summary) {
+        if (!opts.silent) chat.note('Could not compact this conversation.', true)
+        return false
+      }
+
+      chat.replace([
+        {
+          id: nextId(),
+          role: 'assistant',
+          content: summary,
+          createdAt: Date.now(),
+          summary: true,
+          summarised: older.length
+        },
+        ...recent
+      ])
+      return true
+    },
+    [chat, tier]
+  )
+
   /* --------------------------------------------------------------- commands */
 
   const runCommand = useCallback(
@@ -230,10 +287,15 @@ export default function App(): React.JSX.Element {
         case 'rename':
           await saveChat(action.title)
           return
-        case 'tier':
+        case 'tier': {
+          const kept = chat.history().length
           await setTier(action.tier)
-          chat.note(`Switched to **${TIERS[action.tier].label}**.`)
+          chat.note(
+            `Switched to **${TIERS[action.tier].label}**` +
+              (kept > 0 ? ` — carrying ${kept} message${kept === 1 ? '' : 's'} of context.` : '.')
+          )
           return
+        }
         case 'mode': {
           const next: Mode = action.mode === 'toggle' ? (mode === 'quick' ? 'dev' : 'quick') : action.mode
           await patch({ mode: next, tier: defaultTierFor(next) })
@@ -252,8 +314,12 @@ export default function App(): React.JSX.Element {
         }
         case 'pin': {
           const next = action.pinned === 'toggle' ? !pinned : action.pinned
-          setPinned(next)
-          window.wumpy.panel.setPinned(next)
+          await patch({ hideOnBlur: !next })
+          chat.note(next ? 'Staying on top until dismissed.' : 'Will hide when it loses focus.')
+          return
+        }
+        case 'compact': {
+          await compactHistory()
           return
         }
         case 'warm': {
@@ -291,10 +357,45 @@ export default function App(): React.JSX.Element {
         void runCommand(action, text)
         return
       }
+
+      // Compact before sending when the context is filling up, so the model
+      // never silently loses the start of the conversation.
+      const budget = TIERS[tier].options.num_ctx * 0.65
+      if ((settings?.autoCompact ?? true) && estimateTokens() > budget) {
+        void (async () => {
+          const done = await compactHistory({ silent: true })
+          if (done) chat.note('Compacted earlier turns to make room.')
+          chat.send(text, tier)
+        })()
+        return
+      }
+
       chat.send(text, tier)
     },
-    [chat, runCommand, tier]
+    [chat, compactHistory, estimateTokens, runCommand, settings, tier]
   )
+
+  /**
+   * Persists the conversation whenever it settles. Debounced and keyed on the
+   * message count so a stream of tokens does not write a file per frame.
+   */
+  useEffect(() => {
+    if (!(settings?.autoSave ?? true)) return
+    if (streaming) return
+    const real = chat.messages.filter((m) => !m.local)
+    if (real.length === 0) return
+
+    const timer = setTimeout(() => {
+      void window.wumpy.chats
+        .save({ id: chatId, title: chatTitle ?? undefined, messages: chat.messages, tier })
+        .then((summary) => {
+          if (!summary) return
+          if (!chatTitle) setChatTitle(summary.title)
+          void refreshChats()
+        })
+    }, 600)
+    return () => clearTimeout(timer)
+  }, [chat.messages, chatId, chatTitle, refreshChats, settings, streaming, tier])
 
   /* ------------------------------------------------------------- shortcuts */
 
@@ -366,9 +467,7 @@ export default function App(): React.JSX.Element {
   /* ------------------------------------------------------------------ render */
 
   const togglePin = (): void => {
-    const next = !pinned
-    setPinned(next)
-    window.wumpy.panel.setPinned(next)
+    void patch({ hideOnBlur: pinned })
   }
 
   const liveKey = hotkey.intercepted ?? hotkey.active

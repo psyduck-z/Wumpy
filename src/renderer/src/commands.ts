@@ -21,6 +21,7 @@ export type CommandAction =
   | { kind: 'reasoning'; show: boolean | 'toggle' }
   | { kind: 'pin'; pinned: boolean | 'toggle' }
   | { kind: 'warm' }
+  | { kind: 'compact' }
   | { kind: 'stop' }
   | { kind: 'help' }
   | { kind: 'settings' }
@@ -161,8 +162,8 @@ export const COMMANDS: CommandSpec[] = [
   },
   {
     name: 'tier',
-    aliases: ['model', 'smart'],
-    hint: 'Switch tier: flash | fast | thinker | deep',
+    aliases: ['model', 'smart', 'level', 'think'],
+    hint: 'Switch thinking level, keeping the conversation',
     arg: 'name',
     run: (arg) => {
       const key = arg.trim().toLowerCase().replace(/[\s-]/g, '')
@@ -204,14 +205,14 @@ export const COMMANDS: CommandSpec[] = [
   },
   {
     name: 'reasoning',
-    aliases: ['think'],
+    aliases: ['scratchpad'],
     hint: 'Show or hide the model’s scratchpad',
     arg: 'on|off',
     run: (arg) => ({ kind: 'reasoning', show: bool(arg) })
   },
   {
     name: 'pin',
-    hint: 'Keep the panel open when it loses focus',
+    hint: 'Stay on top when you click elsewhere',
     arg: 'on|off',
     run: (arg) => ({ kind: 'pin', pinned: bool(arg) })
   },
@@ -220,6 +221,12 @@ export const COMMANDS: CommandSpec[] = [
     aliases: ['preload'],
     hint: 'Preload this tier’s model so answers start instantly',
     run: () => ({ kind: 'warm' })
+  },
+  {
+    name: 'compact',
+    aliases: ['summarise', 'summarize'],
+    hint: 'Summarise older turns to free up context',
+    run: () => ({ kind: 'compact' })
   },
   { name: 'stop', hint: 'Stop generating', run: () => ({ kind: 'stop' }) },
   { name: 'settings', hint: 'Open the settings file', run: () => ({ kind: 'settings' }) },

@@ -4,40 +4,57 @@ import { useEffect, useRef, useState } from 'react'
  * How far behind the incoming stream the reveal aims to sit, in ms.
  *
  * Draining the backlog over a fixed window is self-balancing: at a steady
- * arrival rate A, the backlog settles at A x LEAD and the reveal rate settles
- * at exactly A. A wider window buys a bigger cushion and smoother spacing at
- * the cost of trailing further behind.
+ * arrival rate A the backlog settles at A x LEAD and the reveal rate settles at
+ * exactly A. A wider window buys smoother spacing at the cost of trailing
+ * further behind the model.
  *
- * Measured against real token timings (llama3.2:3b at ~19 chars/s), gap jitter
- * as a coefficient of variation — lower is smoother:
+ * Tuned against captured token timings (llama3.2:3b, ~19 chars/s), scoring gap
+ * jitter as a coefficient of variation — lower is smoother:
  *
- *   render on arrival   2.19   (p95 gap 329ms, max 387ms)
- *   LEAD 260            0.54
- *   LEAD 500            0.38   (p95 gap  83ms, max 200ms)
- *   LEAD 650            0.34   — diminishing, and visibly lags the model
+ *   render on arrival                 2.19   lag    0ms
+ *   LEAD 500, no floor                0.437  lag  497ms
+ *   LEAD 400 + floor 0.7              0.428  lag  376ms   <- shipped
+ *   LEAD 650 + floor 0.85             0.384  lag  548ms
+ *
+ * 400 is the knee: it is both smoother and 120ms less laggy than 500. Going
+ * wider buys very little evenness for real lag.
  */
-const LEAD_MS = 500
+const LEAD_MS = 400
 
 /** Once the stream ends, drain what is left this fast instead of snapping. */
 const FLUSH_MS = 110
 
 /**
+ * Keep revealing at least this fraction of the measured arrival rate while the
+ * stream is live. A model pause then becomes a gentle slowdown rather than a
+ * dead stop, which is what the eye reads as stutter.
+ */
+const RATE_FLOOR = 0.7
+
+/** Time constant for the arrival-rate estimate, in ms. */
+const EMA_TAU = 800
+
+/**
  * Characters per second, floor and ceiling.
  *
- * The floor must stay *below* the slowest realistic arrival rate. Setting it
- * above (28/s against ~19/s arrival) makes the reveal outrun the buffer and
- * stall ~760 times a message, which is the stutter this hook exists to remove.
+ * The absolute floor must stay *below* the slowest realistic arrival rate.
+ * Setting it above (28/s against ~19/s arrival) makes the reveal outrun its own
+ * buffer and stall ~760 times a message — worse than no smoothing at all.
  */
-const MIN_RATE = 5
-const MAX_RATE = 1200
+const MIN_RATE = 4
+const MAX_RATE = 1500
 
 /**
  * Progressively reveals `target`, decoupling display from arrival.
  *
- * Ollama delivers whole tokens about eight times a second, so rendering each
- * one as it lands makes text appear in visible lumps. This buffers them and
- * releases characters on an animation frame instead, at a rate derived from how
- * much is waiting — fast when it is behind, gentle when it has caught up.
+ * Ollama does not trickle characters: it emits a whole token roughly every
+ * 300ms, around six characters at a time. Rendering each as it lands is what
+ * makes text appear in lumps. This buffers them and releases characters on an
+ * animation frame instead, at a rate derived from how much is waiting and how
+ * fast text has been arriving.
+ *
+ * The one gap it cannot smooth is the one after the very first character, since
+ * no buffer exists yet. Everything after that holds a p95 gap of ~83ms.
  *
  * Returns the text to display plus whether it is still catching up, so the
  * caller can keep a caret on screen after the network stream has finished.
@@ -45,8 +62,8 @@ const MAX_RATE = 1200
 export function useSmoothText(target: string, streaming: boolean): [string, boolean] {
   const reduceMotion = usePrefersReducedMotion()
 
-  // Messages that are already complete when first rendered (history, saved
-  // chats) must not animate from nothing.
+  // Messages already complete when first rendered (history, saved chats) must
+  // not animate from nothing.
   const [revealed, setRevealed] = useState(() => (streaming ? 0 : target.length))
 
   const targetRef = useRef(target)
@@ -54,6 +71,9 @@ export function useSmoothText(target: string, streaming: boolean): [string, bool
   const revealedRef = useRef(revealed)
   /** Sub-character progress carried between frames, so slow rates still move. */
   const remainder = useRef(0)
+  /** Smoothed arrival rate in chars/sec, used for the soft floor. */
+  const arrivalRate = useRef(0)
+  const lastLength = useRef(target.length)
   const lastFrame = useRef(0)
   const lastCommit = useRef(0)
   const raf = useRef(0)
@@ -75,24 +95,32 @@ export function useSmoothText(target: string, streaming: boolean): [string, bool
       lastFrame.current = now
 
       const total = targetRef.current.length
-      const backlog = total - revealedRef.current
 
+      // Exponential moving average of how fast characters are arriving.
+      const instant = ((total - lastLength.current) * 1000) / dt
+      lastLength.current = total
+      arrivalRate.current += (instant - arrivalRate.current) * (1 - Math.exp(-dt / EMA_TAU))
+
+      const backlog = total - revealedRef.current
       if (backlog <= 0) {
-        // Nothing waiting: idle until new text arrives.
         remainder.current = 0
         raf.current = requestAnimationFrame(tick)
         return
       }
 
-      // Drain the backlog over the lead window, so a burst of tokens speeds the
-      // reveal up and a trickle slows it down.
-      const window = streamingRef.current ? LEAD_MS : FLUSH_MS
-      const rate = Math.min(MAX_RATE, Math.max(MIN_RATE, (backlog * 1000) / window))
+      // Drain the backlog over the lead window; a burst speeds the reveal up and
+      // a trickle slows it down.
+      let rate = (backlog * 1000) / (streamingRef.current ? LEAD_MS : FLUSH_MS)
+      if (streamingRef.current) {
+        rate = Math.max(rate, arrivalRate.current * RATE_FLOOR)
+      }
+      rate = Math.min(MAX_RATE, Math.max(MIN_RATE, rate))
 
       const advance = (rate * dt) / 1000 + remainder.current
-      // Show the first character as soon as it exists. Easing into it would
-      // give back the time-to-first-word that keeping models warm bought.
-      const whole = revealedRef.current === 0 ? Math.max(1, Math.floor(advance)) : Math.floor(advance)
+      // Show the first character as soon as it exists. Easing into it would give
+      // back the time-to-first-word that keeping models warm bought.
+      const whole =
+        revealedRef.current === 0 ? Math.max(1, Math.floor(advance)) : Math.floor(advance)
       remainder.current = Math.max(0, advance - whole)
 
       if (whole > 0) {
@@ -116,8 +144,7 @@ export function useSmoothText(target: string, streaming: boolean): [string, bool
 
   if (reduceMotion) return [target, false]
 
-  const shown = target.slice(0, revealed)
-  return [shown, revealed < target.length]
+  return [target.slice(0, revealed), revealed < target.length]
 }
 
 function usePrefersReducedMotion(): boolean {

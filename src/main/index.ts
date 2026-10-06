@@ -177,6 +177,42 @@ function registerIpc(): void {
     })
   })
 
+  /**
+   * Summarises older turns so a long conversation keeps fitting in the model's
+   * context window. Returns the summary text; the renderer decides what to
+   * replace with it.
+   */
+  ipcMain.handle(
+    IPC.chatCompact,
+    async (_e, req: { tier: TierId; messages: Array<{ role: string; content: string }> }) => {
+      // Summarising is a simple job, so always use the quickest installed model
+      // rather than the active tier. Compacting on a 14B model would take
+      // minutes, and the user is waiting to send their actual message.
+      const model = resolveTierModel('flash') ?? resolveTierModel(req.tier)
+      if (!model || req.messages.length === 0) return null
+
+      const transcript = req.messages
+        .map((m) => `${m.role === 'user' ? 'User' : 'Assistant'}: ${m.content}`)
+        .join('\n\n')
+
+      return ollama.complete(
+        model,
+        [
+          {
+            role: 'system',
+            content:
+              'You compress conversations so they can be carried forward as context. ' +
+              'Write a dense summary in the third person. Preserve decisions, facts, ' +
+              'names, file paths, code identifiers and anything the user asked for. ' +
+              'Drop pleasantries and repetition. No preamble, no headings.'
+          },
+          { role: 'user', content: `Summarise this conversation:\n\n${transcript}` }
+        ],
+        { keepAlive: settings.get('keepAlive'), numPredict: 500 }
+      )
+    }
+  )
+
   ipcMain.on(IPC.chatAbort, (_e, requestId: string) => ollama.abort(requestId))
   ipcMain.on(IPC.panelHide, () => panel.hide())
   ipcMain.on(IPC.panelPin, (_e, pinned: boolean) => panel.setPinned(pinned))

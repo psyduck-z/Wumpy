@@ -166,6 +166,36 @@ export class OllamaClient {
     this.inflight.clear()
   }
 
+  /**
+   * One-shot, non-streaming completion. Used for compaction summaries, which
+   * nobody watches arrive.
+   */
+  async complete(
+    model: string,
+    messages: Array<Pick<ChatMessage, 'role' | 'content'>>,
+    opts: { keepAlive: string; numPredict?: number }
+  ): Promise<string | null> {
+    try {
+      const res = await fetch(`${this.host}/api/chat`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          model,
+          messages,
+          stream: false,
+          keep_alive: opts.keepAlive,
+          options: { num_predict: opts.numPredict ?? 400, temperature: 0.2 }
+        }),
+        signal: AbortSignal.timeout(240_000)
+      })
+      if (!res.ok) return null
+      const body = (await res.json()) as { message?: { content?: string } }
+      return body.message?.content?.trim() ?? null
+    } catch {
+      return null
+    }
+  }
+
   async chat(
     requestId: string,
     model: string,

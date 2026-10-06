@@ -466,6 +466,43 @@ body {
 .codeblock:hover .copy { opacity: 1; }
 .codeblock .copy:hover { background: rgb(255 255 255 / 0.18); }
 
+/* ---------------------------------------------------- compaction summary */
+
+.msg-summary {
+  align-items: stretch;
+}
+
+.summary-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  align-self: center;
+  padding: 3px 10px;
+  background: rgb(var(--raised));
+  border: 1px dashed rgb(var(--border));
+  border-radius: 20px;
+  color: rgb(var(--muted));
+  font: inherit;
+  font-size: 10.5px;
+  cursor: pointer;
+  transition: color 120ms, border-color 120ms;
+}
+
+.summary-chip:hover {
+  color: rgb(var(--text));
+  border-color: rgb(var(--accent) / 0.45);
+}
+
+.summary-body {
+  margin-top: 8px;
+  padding: 9px 11px;
+  background: rgb(var(--surface));
+  border-left: 2px solid rgb(var(--accent) / 0.35);
+  border-radius: 0 9px 9px 0;
+  color: rgb(var(--muted));
+  font-size: 12px;
+}
+
 /* ------------------------------------------------------- reasoning block */
 
 .thinking {

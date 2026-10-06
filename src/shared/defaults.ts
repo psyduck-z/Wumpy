@@ -12,8 +12,13 @@ export const DEFAULT_SETTINGS: WumpySettings = {
   compactWidth: 460,
   compactHeight: 420,
 
-  hideOnBlur: true,
+  // The panel floats above everything and stays put when you click elsewhere.
+  // Toggle it off with the pin button, Esc, or the hotkey.
+  hideOnBlur: false,
   showReasoning: false,
+
+  autoSave: true,
+  autoCompact: true,
 
   // Empty on purpose: Win+C is claimed by the low-level keyboard hook (see
   // src/hook), which is the only way to get it since Windows reserves it.

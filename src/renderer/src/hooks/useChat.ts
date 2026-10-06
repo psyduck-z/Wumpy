@@ -12,6 +12,8 @@ export interface ChatState {
   /** Model load time for the last answer; near zero means it was warm. */
   lastLoadMs: number | null
   send(text: string, tier: TierId, displayText?: string): void
+  /** Messages as the model would see them, for size estimates and compaction. */
+  history(): Array<{ role: string; content: string }>
   /** Adds a local-only note (command output, errors) without calling the model. */
   note(content: string, error?: boolean): void
   stop(): void
@@ -96,11 +98,17 @@ export function useChat(): ChatState {
     // replays updaters under StrictMode, which would fire the request twice.
     // The wrapped text is what the model sees.
     // Command output and failed turns are not conversation: feeding /help back
-    // to the model would waste context and confuse the next answer.
+    // to the model would waste context and confuse the next answer. Compaction
+    // summaries go in as system messages so they read as context rather than as
+    // something the assistant said.
     const history = [
       ...messagesRef.current.filter((m) => !m.error && !m.local),
       { ...userMessage, content: trimmed }
-    ].map(({ role, content }) => ({ role, content }))
+    ].map((m) =>
+      m.summary
+        ? { role: 'system' as const, content: `Earlier in this conversation: ${m.content}` }
+        : { role: m.role, content: m.content }
+    )
 
     const requestId = nextId()
     activeRequest.current = requestId
@@ -112,6 +120,14 @@ export function useChat(): ChatState {
 
     void window.wumpy.chat.send({ requestId, messages: history, tier })
   }, [])
+
+  const history = useCallback(
+    () =>
+      messagesRef.current
+        .filter((m) => !m.error && !m.local)
+        .map((m) => ({ role: m.role as string, content: m.content })),
+    []
+  )
 
   const note = useCallback((content: string, error = false) => {
     setMessages((prev) => [
@@ -150,5 +166,5 @@ export function useChat(): ChatState {
     [stop]
   )
 
-  return { messages, streaming, lastSpeed, lastLoadMs, send, note, stop, clear, replace }
+  return { messages, streaming, lastSpeed, lastLoadMs, send, history, note, stop, clear, replace }
 }

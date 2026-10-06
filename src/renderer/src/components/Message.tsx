@@ -31,6 +31,24 @@ export function Message({
     onGrow?.()
   }, [shown, onGrow])
 
+  // A compaction summary standing in for earlier turns.
+  if (message.summary) {
+    return (
+      <div className="msg msg-summary">
+        <button type="button" className="summary-chip" onClick={() => setOpen((v) => !v)}>
+          <span className={`caret-glyph ${open ? 'is-open' : ''}`}>&#9656;</span>
+          Compacted {message.summarised ?? 0} earlier message
+          {message.summarised === 1 ? '' : 's'}
+        </button>
+        {open && (
+          <div className="summary-body">
+            <Markdown text={message.content} />
+          </div>
+        )}
+      </div>
+    )
+  }
+
   if (isUser) {
     return (
       <div className="msg msg-user">

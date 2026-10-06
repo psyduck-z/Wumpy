@@ -163,26 +163,60 @@ backlog over a fixed window. That is self-balancing: at a steady arrival rate
 the reveal settles at exactly that rate, with a cushion so it never stutters to
 a halt between tokens.
 
-Tuned against real token timings, measuring gap jitter as a coefficient of
+The model is burstier than it looks: measured, llama3.2:3b emits a token only
+every ~316 ms (p50), about six characters at a time. Perfectly even display
+therefore needs enough buffer to ride through those pauses, which is a direct
+trade against how far behind the model the text runs.
+
+Tuned against captured token timings, scoring gap jitter as a coefficient of
 variation (lower is smoother):
 
-| | jitter | p95 gap | max gap |
+| | jitter | p95 gap | lag |
 | --- | --- | --- | --- |
-| render each token on arrival | 2.19 | 329 ms | 387 ms |
-| **buffered reveal (shipped)** | **0.38** | **83 ms** | **200 ms** |
+| render each token on arrival | 2.19 | 329 ms | 0 ms |
+| first attempt (rate floor 28/s) | 1.10 | 217 ms | — |
+| LEAD 500, no floor | 0.437 | 83 ms | 497 ms |
+| **LEAD 400 + rate floor (shipped)** | **0.428** | **83 ms** | **376 ms** |
+| LEAD 650 + floor 0.85 | 0.384 | 67 ms | 548 ms |
 
-The one counter-intuitive constant is the rate floor, which must stay *below*
-the slowest realistic arrival rate. An earlier attempt set it at 28 chars/s
-against ~19 chars/s of actual arrival, so the reveal outran its own buffer and
-stalled 762 times in a single message — measurably worse than no smoothing at
-all. The first character is exempt, appearing the moment it exists, so none of
-the time-to-first-word won by keeping models warm is given back.
+400 ms is the knee: both smoother *and* 120 ms less laggy than 500. Going wider
+buys very little evenness for real lag.
+
+Two findings worth keeping:
+
+- **The rate floor must stay below the slowest realistic arrival rate.** An
+  early attempt set it at 28 chars/s against ~19 chars/s of actual arrival, so
+  the reveal outran its own buffer and stalled 762 times in one message —
+  measurably worse than no smoothing at all.
+- **The one gap that cannot be smoothed is the one after the first character**,
+  because no buffer exists yet. In the captured sample the first token carried a
+  single character at 3 ms and the second did not arrive until 339 ms. Holding
+  the first character back to prebuffer made it worse (650 ms), so it is shown
+  the moment it exists and none of the time-to-first-word won by keeping models
+  warm is given back.
 
 The caret is a pseudo-element on the last rendered block, so it rides inline
 after the final character instead of dropping to a line of its own, and it
 breathes on an eased curve rather than a hard on/off blink. Honouring
 `prefers-reduced-motion` turns the whole thing off and renders text as it
 arrives.
+
+## Chats and context
+
+**Everything auto-saves.** Conversations persist as they happen, titled from
+your first line, one JSON file each under `%APPDATA%\Wumpy\chats`. `/save` is
+still there to retitle, and `/rename` does the same thing.
+
+**Switching thinking level keeps the conversation.** `/level deep`, `/tier
+thinker`, the tier buttons and `Ctrl+1`–`Ctrl+4` all carry the full history to
+the new model and say how many messages came along.
+
+**Long conversations compact themselves.** When the estimated context reaches
+65% of the tier's window, Wumpy summarises everything but the last four turns
+into a single chip you can expand, and carries it forward as a system message.
+`/compact` forces it early. Compaction always runs on the *fastest* installed
+model rather than the active tier — it is a simple job, and summarising on a 14B
+model would take minutes while you wait to send.
 
 ## Commands
 
@@ -197,11 +231,12 @@ or Enter to accept.
 | `/load <name>` | Open a saved chat by name |
 | `/delete <name>` | Delete one, or `/delete all` |
 | `/rename <title>` | Rename the current chat |
-| `/tier <name>` | flash \| fast \| thinker \| deep |
+| `/tier`, `/level <name>` | flash \| fast \| thinker \| deep, keeping context |
 | `/mode [quick\|dev]` | Toggle Quick / Developer |
 | `/dock <position>` | Move the panel |
 | `/reasoning on\|off` | Show the scratchpad |
-| `/pin on\|off` | Stay open when focus moves |
+| `/pin on\|off` | Stay on top when you click elsewhere |
+| `/compact` | Summarise older turns to free context |
 | `/warm` | Preload this tier's model |
 | `/stop`, `/help`, `/quit` | — |
 
@@ -237,7 +272,9 @@ and toggle changes apply immediately; hotkey changes apply on restart.
 | `dock` | `right` | `left`, `right`, or a corner |
 | `tallWidth` | `440` | Width of the tall bar, px |
 | `compactWidth` / `compactHeight` | `460` / `420` | Size of the corner card, px |
-| `hideOnBlur` | `true` | Collapse when focus moves away |
+| `hideOnBlur` | `false` | Collapse when focus moves away |
+| `autoSave` | `true` | Persist every chat as it happens |
+| `autoCompact` | `true` | Summarise older turns when context fills |
 | `showReasoning` | `false` | Expand the scratchpad by default |
 | `hotkeys` | `[]` | Extra accelerators; `Win+C` comes from the hook |
 | `keepAlive` | `30m` | How long Ollama holds a model resident |

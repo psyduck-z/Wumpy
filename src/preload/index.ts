@@ -44,7 +44,12 @@ const api = {
     abort: (requestId: string): void => ipcRenderer.send(IPC.chatAbort, requestId),
     onDelta: (cb: (d: ChatDelta) => void) => on(IPC.chatDelta, cb),
     onDone: (cb: (d: ChatDone) => void) => on(IPC.chatDone, cb),
-    onError: (cb: (d: ChatError) => void) => on(IPC.chatError, cb)
+    onError: (cb: (d: ChatError) => void) => on(IPC.chatError, cb),
+    /** Summarise older turns; resolves to the summary text, or null on failure. */
+    compact: (req: {
+      tier: TierId
+      messages: Array<{ role: string; content: string }>
+    }): Promise<string | null> => ipcRenderer.invoke(IPC.chatCompact, req)
   },
   chats: {
     list: (): Promise<ChatSummary[]> => ipcRenderer.invoke(IPC.chatsList),

@@ -17,6 +17,13 @@ export interface ChatMessage {
    * Shown in the transcript but never sent back as conversation history.
    */
   local?: boolean
+  /**
+   * A compaction summary standing in for earlier turns. Sent to the model as a
+   * system message so it reads as context rather than as something it said.
+   */
+  summary?: boolean
+  /** Number of messages this summary replaced, for the transcript chip. */
+  summarised?: number
 }
 
 /* ------------------------------------------------------------------ tiers */
@@ -106,7 +113,15 @@ export interface WumpySettings {
   /** Size of the compact corner card, in px. */
   compactWidth: number
   compactHeight: number
+  /**
+   * Collapse when focus moves elsewhere. Off by default: the panel is meant to
+   * stay visible over whatever you are working in until you dismiss it.
+   */
   hideOnBlur: boolean
+  /** Persist every chat as it happens, with no explicit save. */
+  autoSave: boolean
+  /** Summarise older turns automatically when the context fills up. */
+  autoCompact: boolean
   /** Show a reasoning model's scratchpad rather than hiding it. */
   showReasoning: boolean
   /**
@@ -196,5 +211,6 @@ export const IPC = {
   chatsSave: 'chats:save',
   chatsLoad: 'chats:load',
   chatsDelete: 'chats:delete',
-  chatsRename: 'chats:rename'
+  chatsRename: 'chats:rename',
+  chatCompact: 'chat:compact'
 } as const
