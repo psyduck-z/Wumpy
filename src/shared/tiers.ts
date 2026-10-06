@@ -4,58 +4,82 @@ import type { Tier, TierId, Mode } from './types'
  * Appended for tiers that may act. The model never runs anything itself: it
  * proposes, and the user clicks. The fence tag is what the renderer looks for.
  */
-export const SHELL_PROMPT = [
-  'You can run commands on this Windows machine by proposing them.',
-  '',
-  'Propose a command whenever the answer depends on the state of this machine:',
-  'installed software, versions, files, folders, hardware, running processes.',
-  'Checking is always better than guessing. If you do not know, check.',
-  'Never state a fact about this computer that you have not verified with a command.',
-  '',
-  'Do not propose a command for general knowledge you already have.',
-  '',
-  'Format: a fenced block tagged wumpy-run. The FIRST line must be a # comment',
-  'saying plainly why you want to run it, so the user can decide. Then the command.',
-  '',
+const RUN_EXAMPLE = [
   '```wumpy-run',
   '# Check whether Ollama is installed',
   'Get-Command ollama -ErrorAction SilentlyContinue',
-  '```',
-  '',
-  'Rules:',
-  '- It already runs in PowerShell. Never wrap it in `powershell -Command`.',
-  '- Use real paths: $env:USERPROFILE, $HOME, $PWD. Never a placeholder like YourUsername.',
-  '- One command doing one thing. Prefer reading over changing.',
-  '- Always include the # reason line. A command without one will be refused.',
-  '',
-  'Use `wumpy-run-cmd` for cmd.exe and `wumpy-run-bash` for bash.',
-  'Use an ordinary ```powershell block when only showing syntax, not asking to run it.'
-].join('\n')
+  '```'
+].join(String.fromCharCode(10))
 
 /**
- * Sent to tiers that cannot act, so they say so instead of pretending.
+ * The decision the model keeps getting wrong, stated as a decision.
+ *
+ * Phrasing this as "propose a command whenever X" made a 3.8B model wrap
+ * everything in a block, including refusals and the capital of France. Asking
+ * it to answer one question first — does this depend on this computer? — and
+ * naming the common answer as "no" scored measurably better.
  */
+const DECIDE = [
+  'Before answering, decide one thing: does this question depend on what is on',
+  'THIS computer — its files, installed software, versions, processes?',
+  '',
+  'NO  -> answer in plain words. Never emit a code block. Most questions are this.',
+  'YES -> propose one command to find out, in a wumpy-run block.',
+  '',
+  RUN_EXAMPLE,
+  '',
+  'The first line of the block is a # comment saying why. It runs in PowerShell.',
+  'Use real paths like $env:USERPROFILE, never a placeholder.',
+  'A wumpy-run block contains a command and nothing else. Never put a sentence,',
+  'a refusal or an apology inside one.'
+].join(String.fromCharCode(10))
+
+export const SHELL_PROMPT = [
+  DECIDE,
+  '',
+  'You may read and you may change things, but the user approves every command',
+  'before it runs and you are given its output afterwards. One command at a time.'
+].join(String.fromCharCode(10))
+
 /** Appended for tiers limited to looking things up. */
 export const READ_SHELL_PROMPT = [
-  'You can look things up on this Windows machine by proposing a command.',
+  DECIDE,
   '',
-  'You may only READ: versions, files, folders, installed software, running processes.',
+  'You may only READ: versions, files, folders, installed software, processes.',
   'You cannot install, delete, move or change anything. If the user asks for that,',
-  'say in one line that it needs Developer mode, and that Ctrl+D switches to it.',
-  '',
-  'Propose a command whenever the answer depends on this machine. Checking beats',
-  'guessing, and you must never state a fact about this computer you have not checked.',
-  'Do not propose a command for general knowledge you already have.',
-  '',
-  'Format: a fenced block tagged wumpy-run whose FIRST line is a # comment saying why.',
-  '',
-  '```wumpy-run',
-  '# Check whether Ollama is installed',
-  'Get-Command ollama -ErrorAction SilentlyContinue',
-  '```',
-  '',
-  'It already runs in PowerShell. Use real paths like $env:USERPROFILE.'
+  'answer in words: That needs Developer mode — press Ctrl+D. Never put that in a block.'
 ].join(String.fromCharCode(10))
+
+/**
+ * Worked turns, prepended to the conversation for tiers that can act.
+ *
+ * Measured on phi4-mini:3.8b across eight cases: prose rules alone scored 5/8
+ * and the same rules with the examples *described* scored 7/8, but the examples
+ * as real turns scored 8/8 at two temperatures. A small model imitates far
+ * better than it follows instructions.
+ *
+ * They sit at the front of the request, where they are identical every turn and
+ * so stay in the KV cache; they cost one prefill, not one per message.
+ */
+export function shellExamples(scope: 'read' | 'full'): Array<{ role: 'user' | 'assistant'; content: string }> {
+  const refusal =
+    scope === 'read'
+      ? 'That needs Developer mode — press Ctrl+D.'
+      : 'Installing Python. I will fetch it with winget.'
+  return [
+    { role: 'user', content: 'what is the capital of France' },
+    { role: 'assistant', content: 'Paris.' },
+    { role: 'user', content: 'install python for me' },
+    { role: 'assistant', content: refusal },
+    { role: 'user', content: 'is ollama installed on my pc?' },
+    {
+      role: 'assistant',
+      content: `Checking whether Ollama is on your PATH.
+
+${RUN_EXAMPLE}`
+    }
+  ]
+}
 
 /**
  * Lets the model put a question back to the user instead of guessing.

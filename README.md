@@ -494,6 +494,28 @@ on scratchpad per question and never reached a conclusion. Depth now comes from
 a bigger non-reasoning model instead — `qwen2.5:7b` answers the bat-and-ball
 question correctly in 12 s with no scratchpad at all, where qwen3:4b took 92 s.
 
+### Teaching a small model when *not* to act
+
+Getting phi4-mini to propose a command only when it should took measuring, not
+rewriting. Eight cases, half of which must produce no command at all:
+
+| prompt shape | score |
+| --- | --- |
+| "propose a command whenever the answer depends on this machine" | 5/8 |
+| the same, restated as a decision to make first | 6/8 |
+| decision, plus the examples described in prose | 7/8 |
+| **decision, plus the examples as real conversation turns** | **8/8** |
+
+The last one is the whole trick: a 3.8B model imitates far better than it
+follows instructions. Three worked turns — a general-knowledge question answered
+plainly, a request it must refuse, and a real command proposal — do what four
+paragraphs of rules could not. They sit at the front of every request where they
+stay in the KV cache, so they cost one prefill rather than one per message.
+
+The prompt itself is now a question rather than a rule: *does this depend on
+what is on THIS computer? No → answer in words, most questions are this.*
+Naming the common answer mattered.
+
 ### Asking instead of guessing
 
 A model can put a question back rather than guess, and the answer is one click:

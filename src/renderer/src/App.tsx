@@ -164,27 +164,45 @@ export default function App(): React.JSX.Element {
     setPicker(null)
   }, [chat])
 
+  /**
+   * Renames the current chat.
+   *
+   * The title changes on screen in the same frame. Persisting it used to be
+   * awaited first, and persisting meant shipping every message over IPC,
+   * rewriting the file and then re-reading every other saved chat to refresh
+   * the picker — all before the one thing the user asked for appeared. None of
+   * that needs to happen first, so none of it does.
+   */
   const retitle = useCallback(
-    async (title?: string) => {
+    (title?: string) => {
+      const next = title?.trim()
+      if (!next) {
+        chat.note('Give it a name: `/rename Something`.', true)
+        return
+      }
       if (chat.messages.length === 0) {
         chat.note('Nothing to retitle yet.', true)
         return
       }
-      const summary = await window.wumpy.chats.save({
-        id: chatId,
-        title,
-        messages: chat.messages,
-        tier,
-        titleLocked: true
-      })
-      if (summary) {
-        setChatTitle(summary.title)
-        setTitleLocked(true)
-        await refreshChats()
-        chat.note(`Retitled to **${summary.title}**.`)
-      } else {
-        chat.note('Could not retitle this chat.', true)
-      }
+
+      setChatTitle(next)
+      setTitleLocked(true)
+
+      void (async () => {
+        // `rename` only rewrites the title field. It returns null when the chat
+        // has not been written yet, which happens inside the autosave debounce.
+        const renamed = await window.wumpy.chats.rename(chatId, next)
+        if (!renamed) {
+          await window.wumpy.chats.save({
+            id: chatId,
+            title: next,
+            messages: chat.messages,
+            tier,
+            titleLocked: true
+          })
+        }
+        void refreshChats()
+      })()
     },
     [chat, chatId, tier, refreshChats]
   )
@@ -251,7 +269,7 @@ export default function App(): React.JSX.Element {
       const asked = chat.messages.find((m) => m.id === messageId)?.localAsk
       if (asked?.kind === 'rename') {
         // Wumpy asked this one itself, so act on it rather than replying.
-        void retitle(option)
+        retitle(option)
         return
       }
       chat.send(option, tier)
@@ -392,7 +410,7 @@ export default function App(): React.JSX.Element {
           return
         }
         case 'rename':
-          await retitle(action.title)
+          retitle(action.title)
           return
         case 'renameChoice':
           // Both readings are plausible; one click settles it, with no model.

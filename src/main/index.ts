@@ -20,7 +20,8 @@ import {
   READ_SHELL_PROMPT,
   NO_SHELL_PROMPT,
   APP_PROMPT,
-  ASK_PROMPT
+  ASK_PROMPT,
+  shellExamples
 } from '@shared/tiers'
 import { SettingsStore } from './store'
 import { ChatStore } from './chats'
@@ -201,7 +202,7 @@ function registerIpc(): void {
 
     // Stand aside for the duration of the turn: tokens matter more than UI.
     priority.yieldToModel()
-    await ollama.chat(req.requestId, model, withContext(req, tier.label), {
+    await ollama.chat(req.requestId, model, withContext(req, tier.label, scope), {
       thinking: tier.thinking,
       options: tier.options,
       keepAlive: settings.get('keepAlive'),
@@ -493,7 +494,8 @@ function titleCase(text: string): string {
  */
 function withContext(
   req: ChatRequest,
-  tierLabel: string
+  tierLabel: string,
+  scope: 'none' | 'read' | 'full'
 ): Array<Pick<ChatMessage, 'role' | 'content'>> {
   const now = new Date()
   // Deliberately no clock time and no message count. Both changed on every
@@ -511,10 +513,15 @@ function withContext(
     `- The user is on Windows. Commands run from ${settings.get('shellCwd') || homedir()}.`
   ].join('\n')
 
-  const messages: Array<Pick<ChatMessage, 'role' | 'content'>> = req.messages.map((m) => ({
-    role: m.role,
-    content: m.content
-  }))
+  // Worked examples go at the very front, where they are byte-identical every
+  // turn and so stay in the KV cache. They cost one prefill, not one per turn.
+  const examples: Array<Pick<ChatMessage, 'role' | 'content'>> =
+    scope === 'none' ? [] : shellExamples(scope)
+
+  const messages: Array<Pick<ChatMessage, 'role' | 'content'>> = [
+    ...examples,
+    ...req.messages.map((m) => ({ role: m.role, content: m.content }))
+  ]
   // Directly behind the latest user turn, so everything before it stays cached.
   messages.splice(Math.max(0, messages.length - 1), 0, { role: 'system', content: facts })
   return messages
