@@ -1,0 +1,518 @@
+@import 'highlight.js/styles/github-dark.css';
+
+:root {
+  --bg: 18 18 24;
+  --surface: 26 26 34;
+  --raised: 36 36 46;
+  --border: 255 255 255 / 0.08;
+  --text: 232 232 240;
+  --muted: 150 150 168;
+  --accent: 129 118 248;
+  --accent-soft: 129 118 248 / 0.16;
+  --danger: 248 113 113;
+  --radius: 14px;
+  --gutter: 12px;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+  margin: 0;
+}
+
+body {
+  /* The window itself is transparent; only the card below paints. */
+  background: transparent;
+  color: rgb(var(--text));
+  font: 14px/1.55 'Segoe UI Variable Text', 'Segoe UI', system-ui, sans-serif;
+  overflow: hidden;
+  -webkit-font-smoothing: antialiased;
+  cursor: default;
+  user-select: none;
+}
+
+/* ---------- panel shell ---------- */
+
+.panel {
+  height: 100%;
+  margin: 0 var(--gutter);
+  display: flex;
+  flex-direction: column;
+  background: rgb(var(--bg) / 0.92);
+  backdrop-filter: blur(28px) saturate(140%);
+  border: 1px solid rgb(var(--border));
+  border-radius: var(--radius);
+  box-shadow:
+    0 18px 48px rgb(0 0 0 / 0.5),
+    0 2px 8px rgb(0 0 0 / 0.3);
+  overflow: hidden;
+
+  /* Slide-in from the right edge; .panel-in is set one frame after show(). */
+  opacity: 0;
+  transform: translateX(18px) scale(0.985);
+  transition:
+    opacity 140ms ease-out,
+    transform 170ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.panel-in {
+  opacity: 1;
+  transform: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .panel {
+    transition: none;
+  }
+}
+
+/* ---------- header ---------- */
+
+.header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 10px 10px 14px;
+  border-bottom: 1px solid rgb(var(--border));
+  /* Lets the user drag the panel by its header without a native title bar. */
+  -webkit-app-region: drag;
+}
+
+.header button,
+.header select {
+  -webkit-app-region: no-drag;
+}
+
+.brand {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  min-width: 0;
+}
+
+.brand strong {
+  font-size: 13px;
+  letter-spacing: 0.2px;
+}
+
+.brand .hint {
+  font-size: 11px;
+  color: rgb(var(--muted));
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  align-self: center;
+  flex: none;
+}
+
+.dot-on {
+  background: #4ade80;
+  box-shadow: 0 0 8px #4ade8099;
+}
+
+.dot-off {
+  background: rgb(var(--danger));
+}
+
+.header-actions {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.header-actions button,
+.model {
+  background: transparent;
+  border: 1px solid transparent;
+  color: rgb(var(--muted));
+  font: inherit;
+  font-size: 11px;
+  padding: 4px 8px;
+  border-radius: 7px;
+  cursor: pointer;
+  transition:
+    background 120ms,
+    color 120ms;
+}
+
+.header-actions button:hover,
+.model:hover {
+  background: rgb(var(--raised));
+  color: rgb(var(--text));
+}
+
+.header-actions button.active {
+  background: rgb(var(--accent-soft));
+  color: rgb(var(--accent));
+}
+
+.model {
+  max-width: 130px;
+  border-color: rgb(var(--border));
+}
+
+.model option {
+  background: rgb(var(--surface));
+  color: rgb(var(--text));
+}
+
+/* ---------- messages ---------- */
+
+.scroll {
+  flex: 1;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  user-select: text;
+}
+
+.scroll::-webkit-scrollbar {
+  width: 8px;
+}
+
+.scroll::-webkit-scrollbar-thumb {
+  background: rgb(255 255 255 / 0.12);
+  border-radius: 4px;
+}
+
+.scroll::-webkit-scrollbar-thumb:hover {
+  background: rgb(255 255 255 / 0.2);
+}
+
+.msg {
+  display: flex;
+  flex-direction: column;
+  max-width: 100%;
+}
+
+.msg-user {
+  align-items: flex-end;
+}
+
+.msg-user .msg-body {
+  background: rgb(var(--accent-soft));
+  border: 1px solid rgb(var(--accent) / 0.25);
+  border-radius: 12px 12px 4px 12px;
+  padding: 8px 11px;
+  max-width: 85%;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.msg-assistant .msg-body {
+  word-break: break-word;
+}
+
+.msg-error {
+  color: rgb(var(--danger));
+  background: rgb(248 113 113 / 0.1);
+  border: 1px solid rgb(248 113 113 / 0.25);
+  border-radius: 10px;
+  padding: 8px 11px;
+  font-size: 13px;
+}
+
+/* Markdown rhythm inside an assistant turn. */
+.msg-assistant p {
+  margin: 0 0 9px;
+}
+
+.msg-assistant > .msg-body > :last-child {
+  margin-bottom: 0;
+}
+
+.msg-assistant ul,
+.msg-assistant ol {
+  margin: 0 0 9px;
+  padding-left: 20px;
+}
+
+.msg-assistant li {
+  margin: 2px 0;
+}
+
+.msg-assistant h1,
+.msg-assistant h2,
+.msg-assistant h3 {
+  font-size: 14px;
+  margin: 14px 0 6px;
+}
+
+.msg-assistant a {
+  color: rgb(var(--accent));
+}
+
+.msg-assistant table {
+  border-collapse: collapse;
+  width: 100%;
+  margin-bottom: 9px;
+  font-size: 13px;
+}
+
+.msg-assistant th,
+.msg-assistant td {
+  border: 1px solid rgb(var(--border));
+  padding: 5px 8px;
+  text-align: left;
+}
+
+.msg-assistant blockquote {
+  margin: 0 0 9px;
+  padding-left: 10px;
+  border-left: 2px solid rgb(var(--accent) / 0.5);
+  color: rgb(var(--muted));
+}
+
+/* Inline code only - fenced blocks are restyled by .codeblock below. */
+.msg-assistant :not(pre) > code {
+  background: rgb(var(--raised));
+  border-radius: 5px;
+  padding: 1px 5px;
+  font-family: 'Cascadia Code', 'Consolas', monospace;
+  font-size: 12.5px;
+}
+
+.codeblock {
+  position: relative;
+  margin: 0 0 9px;
+}
+
+.codeblock pre {
+  margin: 0;
+  background: rgb(var(--surface));
+  border: 1px solid rgb(var(--border));
+  border-radius: 10px;
+  padding: 10px 11px;
+  overflow-x: auto;
+  font-family: 'Cascadia Code', 'Consolas', monospace;
+  font-size: 12.5px;
+  line-height: 1.5;
+}
+
+.codeblock pre code {
+  background: none;
+  padding: 0;
+}
+
+.codeblock .copy {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  opacity: 0;
+  background: rgb(var(--raised));
+  border: 1px solid rgb(var(--border));
+  color: rgb(var(--muted));
+  font: inherit;
+  font-size: 10.5px;
+  padding: 3px 7px;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: opacity 120ms;
+}
+
+.codeblock:hover .copy {
+  opacity: 1;
+}
+
+.codeblock .copy:hover {
+  color: rgb(var(--text));
+}
+
+/* ---------- reasoning disclosure ---------- */
+
+.thinking {
+  margin-bottom: 6px;
+}
+
+.thinking button {
+  background: none;
+  border: none;
+  color: rgb(var(--muted));
+  font: inherit;
+  font-size: 11px;
+  padding: 0;
+  cursor: pointer;
+  text-decoration: underline dotted;
+}
+
+.thinking pre {
+  margin: 6px 0 0;
+  padding: 8px 10px;
+  background: rgb(var(--surface));
+  border-left: 2px solid rgb(var(--accent) / 0.4);
+  border-radius: 0 8px 8px 0;
+  color: rgb(var(--muted));
+  font-size: 12px;
+  white-space: pre-wrap;
+  max-height: 220px;
+  overflow-y: auto;
+}
+
+/* ---------- streaming affordances ---------- */
+
+.caret {
+  display: inline-block;
+  width: 7px;
+  height: 14px;
+  margin-left: 2px;
+  vertical-align: text-bottom;
+  background: rgb(var(--accent));
+  border-radius: 1px;
+  animation: blink 1s steps(2, start) infinite;
+}
+
+@keyframes blink {
+  to {
+    visibility: hidden;
+  }
+}
+
+.dots {
+  display: inline-block;
+  width: 30px;
+  height: 8px;
+  background: radial-gradient(circle 3px at 5px 50%, rgb(var(--muted)) 95%, transparent) 0 0 / 10px
+    100% repeat-x;
+  animation: pulse 1.1s ease-in-out infinite;
+}
+
+@keyframes pulse {
+  0%,
+  100% {
+    opacity: 0.35;
+  }
+  50% {
+    opacity: 1;
+  }
+}
+
+/* ---------- empty state ---------- */
+
+.empty {
+  margin: auto;
+  text-align: center;
+  color: rgb(var(--muted));
+  padding: 0 18px;
+}
+
+.empty-mark {
+  width: 46px;
+  height: 46px;
+  margin: 0 auto 12px;
+  display: grid;
+  place-items: center;
+  border-radius: 13px;
+  background: linear-gradient(135deg, #6366f1, #8b5cf6);
+  color: #fff;
+  font-size: 23px;
+  font-weight: 600;
+}
+
+.empty h1 {
+  margin: 0 0 6px;
+  font-size: 16px;
+  color: rgb(var(--text));
+}
+
+.empty p {
+  margin: 0;
+  font-size: 12.5px;
+}
+
+.empty code,
+.empty kbd {
+  background: rgb(var(--raised));
+  border-radius: 5px;
+  padding: 1px 5px;
+  font-size: 12px;
+  color: rgb(var(--text));
+}
+
+/* ---------- status + composer ---------- */
+
+.status {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 14px 6px;
+  font-size: 10.5px;
+  color: rgb(var(--muted) / 0.75);
+}
+
+.status .spacer {
+  flex: 1;
+}
+
+.composer {
+  display: flex;
+  align-items: flex-end;
+  gap: 8px;
+  padding: 10px 12px 12px;
+  border-top: 1px solid rgb(var(--border));
+}
+
+.composer textarea {
+  flex: 1;
+  resize: none;
+  background: rgb(var(--surface));
+  border: 1px solid rgb(var(--border));
+  border-radius: 10px;
+  color: rgb(var(--text));
+  font: inherit;
+  padding: 9px 11px;
+  max-height: 160px;
+  user-select: text;
+  transition: border-color 120ms;
+}
+
+.composer textarea:focus {
+  outline: none;
+  border-color: rgb(var(--accent) / 0.6);
+}
+
+.composer textarea::placeholder {
+  color: rgb(var(--muted) / 0.7);
+}
+
+.btn-send,
+.btn-stop {
+  border: none;
+  border-radius: 10px;
+  font: inherit;
+  font-size: 13px;
+  padding: 9px 14px;
+  cursor: pointer;
+  transition:
+    opacity 120ms,
+    background 120ms;
+}
+
+.btn-send {
+  background: rgb(var(--accent));
+  color: #fff;
+}
+
+.btn-send:disabled {
+  opacity: 0.35;
+  cursor: default;
+}
+
+.btn-stop {
+  background: rgb(var(--raised));
+  color: rgb(var(--text));
+}

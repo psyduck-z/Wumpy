@@ -1,0 +1,39 @@
+appId: dev.psyduckz.wumpy
+productName: Wumpy
+copyright: Copyright (c) 2026 psyduck-z
+
+directories:
+  output: dist
+  buildResources: resources
+
+files:
+  - out/**/*
+  - package.json
+
+extraResources:
+  - from: resources
+    to: .
+    filter:
+      - icon.png
+      - icon.ico
+      - tray.png
+  # The Win+C interception helper; see src/hook.
+  - from: resources/hook
+    to: hook
+    filter:
+      - WumpyHook.exe
+
+win:
+  target:
+    - target: nsis
+      arch: [x64]
+  icon: resources/icon.ico
+  artifactName: ${productName}-${version}-setup.${ext}
+
+nsis:
+  oneClick: false
+  perMachine: false
+  allowToChangeInstallationDirectory: true
+  createDesktopShortcut: true
+  createStartMenuShortcut: true
+  shortcutName: Wumpy
