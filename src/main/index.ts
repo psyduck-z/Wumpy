@@ -22,6 +22,7 @@ import { createTray, resourcePath } from './tray'
 import { registerHotkeys, unregisterHotkeys } from './hotkey'
 import { LowLevelHook } from './lowlevelhook'
 import { runCommand, assessRisk } from './shell'
+import { PriorityManager } from './priority'
 
 // Only one Wumpy may own the tray icon and the global hotkey.
 if (!app.requestSingleInstanceLock()) {
@@ -40,6 +41,7 @@ let panel: Panel
 let tray: (Tray & { refresh(): void }) | null = null
 let hotkeyState: HotkeyState = { active: null, failed: [], intercepted: null }
 let lowLevelHook: LowLevelHook | null = null
+let priority: PriorityManager
 
 /** Models installed in Ollama, refreshed whenever we look. */
 let installedModels: string[] = []
@@ -180,6 +182,8 @@ function registerIpc(): void {
       canAct ? SHELL_PROMPT : NO_SHELL_PROMPT
     ].join('\n\n')
 
+    // Stand aside for the duration of the turn: tokens matter more than UI.
+    priority.yieldToModel()
     await ollama.chat(req.requestId, model, req.messages, {
       thinking: tier.thinking,
       options: tier.options,
@@ -188,8 +192,14 @@ function registerIpc(): void {
       systemPrompt
     }, {
       onDelta: (delta) => panel.send(IPC.chatDelta, { requestId: req.requestId, ...delta }),
-      onDone: (stats) => panel.send(IPC.chatDone, { requestId: req.requestId, ...stats }),
-      onError: (message) => panel.send(IPC.chatError, { requestId: req.requestId, message })
+      onDone: (stats) => {
+        priority.restore()
+        panel.send(IPC.chatDone, { requestId: req.requestId, ...stats })
+      },
+      onError: (message) => {
+        priority.restore()
+        panel.send(IPC.chatError, { requestId: req.requestId, message })
+      }
     })
   })
 
@@ -350,6 +360,8 @@ void app.whenReady().then(async () => {
   chats = new ChatStore()
   ollama = new OllamaClient(settings.get('ollamaHost'))
   panel = new Panel(settings)
+
+  priority = new PriorityManager(() => panel.browserWindow)
 
   registerIpc()
   panel.create()

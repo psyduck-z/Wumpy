@@ -59,8 +59,12 @@ const MAX_RATE = 1500
  * Returns the text to display plus whether it is still catching up, so the
  * caller can keep a caret on screen after the network stream has finished.
  */
-export function useSmoothText(target: string, streaming: boolean): [string, boolean] {
-  const reduceMotion = usePrefersReducedMotion()
+export function useSmoothText(
+  target: string,
+  streaming: boolean,
+  enabled: boolean
+): [string, boolean] {
+  const reduceMotion = usePrefersReducedMotion() || !enabled
 
   // Messages already complete when first rendered (history, saved chats) must
   // not animate from nothing.
@@ -76,7 +80,6 @@ export function useSmoothText(target: string, streaming: boolean): [string, bool
   const lastLength = useRef(target.length)
   const lastFrame = useRef(0)
   const lastCommit = useRef(0)
-  const raf = useRef(0)
 
   targetRef.current = target
   streamingRef.current = streaming
@@ -89,6 +92,12 @@ export function useSmoothText(target: string, streaming: boolean): [string, bool
 
   useEffect(() => {
     if (reduceMotion) return
+    // Nothing to reveal: do not start a loop at all. Without this guard every
+    // finished message kept a 60fps callback alive for the life of the chat,
+    // which measured 36% of a core with the panel merely open.
+    if (revealedRef.current >= targetRef.current.length) return
+
+    let frame = 0
 
     const tick = (now: number): void => {
       const dt = lastFrame.current ? Math.min(now - lastFrame.current, 100) : 16
@@ -103,8 +112,9 @@ export function useSmoothText(target: string, streaming: boolean): [string, bool
 
       const backlog = total - revealedRef.current
       if (backlog <= 0) {
+        // Caught up. Stop; a new token restarts the effect.
         remainder.current = 0
-        raf.current = requestAnimationFrame(tick)
+        lastFrame.current = 0
         return
       }
 
@@ -135,12 +145,14 @@ export function useSmoothText(target: string, streaming: boolean): [string, bool
         }
       }
 
-      raf.current = requestAnimationFrame(tick)
+      frame = requestAnimationFrame(tick)
     }
 
-    raf.current = requestAnimationFrame(tick)
-    return () => cancelAnimationFrame(raf.current)
-  }, [reduceMotion])
+    frame = requestAnimationFrame(tick)
+    return () => cancelAnimationFrame(frame)
+    // `target` is a dependency on purpose: each arriving token restarts the
+    // loop, and a message that is fully revealed never starts one.
+  }, [target, streaming, reduceMotion])
 
   if (reduceMotion) return [target, false]
 

@@ -173,11 +173,12 @@ export function useChat(): ChatState {
 
   useEffect(() => {
     if (!streaming) return
-    // 100ms is enough for a tenths-of-a-second readout and costs nothing.
+    // 250ms still reads as a live counter at tenth-of-a-second precision, and
+    // is a quarter of the wake-ups during the one period that matters.
     const timer = setInterval(() => {
       if (startedAt.current === null) return
       setStats((s) => ({ ...s, elapsedMs: Date.now() - (startedAt.current ?? Date.now()) }))
-    }, 100)
+    }, 250)
     return () => clearInterval(timer)
   }, [streaming])
 

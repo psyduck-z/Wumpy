@@ -281,34 +281,37 @@ type to filter, arrows to move, `Enter` to choose, `Esc` to back out. Commands
 that take a name still accept one, but never require it — you should not have to
 remember what things are called when the app can just show you.
 
-## Why it is not faster, measured
+## Staying out of the model's way
 
-Worth recording so nobody re-tries these. Ollama 0.35.1 ships a Vulkan backend,
-and the Radeon 680M does support Vulkan even though ROCm refuses it. It can be
-enabled:
+Inference here is CPU-bound, so every core Wumpy takes is a core not producing
+tokens. The app is built to be nearly free.
 
-```powershell
-$env:OLLAMA_VULKAN = "1"       # load the Vulkan backend
-$env:OLLAMA_IGPU_ENABLE = "1"  # integrated GPUs are skipped without this
-```
+Measured as a share of one core, panel open and doing nothing:
 
-That genuinely works — `ollama ps` reports **100% GPU**. It is also not faster:
-
-| | tok/s (llama3.2:3b) | tok/s (qwen3:4b) |
+| | before | after |
 | --- | --- | --- |
-| CPU | 7.6 | 6.0 |
-| Vulkan, 100% GPU offload | 7.8 | 5.6 |
-| CPU + flash attention + q8 KV cache | 7.4 | — |
+| Quick mode | 1.4% | 2.0% |
+| Developer mode | **37.1%** | **2.9%** |
 
-Single-stream inference is bound by memory bandwidth, not compute, and an
-integrated GPU shares the same DDR5 as the CPU. Moving the work to it moves the
-arithmetic but not the bottleneck. `OLLAMA_FLASH_ATTENTION` and a quantised KV
-cache target bandwidth, but at these context sizes there is too little attention
-traffic for them to matter.
+Developer mode had a binary-rain backdrop built from twenty absolutely
+positioned elements, each with a CSS transform and a gradient mask. A masked
+layer has to be re-rasterised every frame it moves, and it cost thirteen times
+the entire rest of the app — burnt in the one mode where the slowest models
+live. There are no animations now.
 
-So ~7-8 tok/s for a 3B model is the ceiling on this hardware. What is left is
-generating fewer tokens rather than generating them faster, which is what the
-terse prompts, the token budgets and the warm models are all for.
+The rest of the budget went the same way:
+
+- **No animation loop while reading.** Each message used to keep an animation
+  frame callback alive for the life of the chat, including finished ones.
+- **Character-by-character reveal is opt-in** (`smoothText`, off). It looks
+  better, but it re-parses markdown many times a second *during generation*,
+  which is the worst possible moment to spend CPU.
+- **Messages are memoised**, so an arriving token re-renders the message it
+  landed in rather than every message in the conversation.
+- **Wumpy drops to below-normal priority while a turn generates**, so the
+  scheduler hands contested time to Ollama, and restores it afterwards.
+- Status polling runs every 30s, not 10s; the elapsed counter ticks at 250ms,
+  not 100ms.
 
 ## Commands
 
@@ -453,6 +456,8 @@ and toggle changes apply immediately; hotkey changes apply on restart.
 | `hotkeys` | `[]` | Extra accelerators; `Win+C` comes from the hook |
 | `keepAlive` | `30m` | How long Ollama holds a model resident |
 | `warmOnStart` | `true` | Preload tier models at startup |
+| `smoothText` | `false` | Reveal character by character (costs CPU while generating) |
+| `maxTurnMs` | `180000` | Hard ceiling on one turn |
 | `shellEnabled` | `true` | Let Dev tiers propose commands |
 | `shellCwd` | `""` | Working directory; empty means home |
 | `tierModels` | `{}` | Per-tier model overrides |

@@ -167,6 +167,14 @@ export interface WumpySettings {
   /** Preload tier models at startup so the first question is instant. */
   warmOnStart: boolean
   /**
+   * Reveal answers character by character instead of token by token.
+   *
+   * Off by default. It looks better, but it runs an animation frame loop and
+   * re-parses markdown far more often, during generation, which is exactly
+   * when the CPU is needed for tokens.
+   */
+  smoothText: boolean
+  /**
    * Hard ceiling on a single turn, in ms. A reasoning model on CPU will
    * otherwise happily spend ten minutes on scratchpad.
    */

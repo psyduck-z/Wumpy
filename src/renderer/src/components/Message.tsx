@@ -1,12 +1,20 @@
-import { useEffect, useState } from 'react'
+import { memo, useEffect, useState } from 'react'
 import type { ChatMessage, ShellKind, ShellResult } from '@shared/types'
 import { Markdown } from './Markdown'
 import { useSmoothText } from '../hooks/useSmoothText'
 
-export function Message({
+/**
+ * Memoised on purpose.
+ *
+ * Every arriving token updates the message array, which re-rendered every
+ * message in the chat. In a long conversation that is a lot of markdown
+ * re-parsing per token, competing with the model for the same cores.
+ */
+export const Message = memo(function Message({
   message,
   streaming,
   showReasoning,
+  smoothText,
   onGrow,
   onRunCommand,
   onCommandResult
@@ -15,6 +23,8 @@ export function Message({
   streaming: boolean
   /** When false the scratchpad is collapsed behind a disclosure. */
   showReasoning: boolean
+  /** Reveal character by character rather than token by token. */
+  smoothText: boolean
   /** Called as revealed text grows, so the transcript can stay pinned. */
   onGrow?: () => void
   /** Supplied only when the active tier may propose commands. */
@@ -25,7 +35,7 @@ export function Message({
   const isUser = message.role === 'user'
 
   // Reveal the answer smoothly rather than in the lumps the tokens arrive in.
-  const [shown, catchingUp] = useSmoothText(message.content, streaming)
+  const [shown, catchingUp] = useSmoothText(message.content, streaming, smoothText)
   const animating = streaming || catchingUp
 
   // Follow the global preference when it changes, but let a click override it
@@ -109,4 +119,4 @@ export function Message({
       )}
     </div>
   )
-}
+})

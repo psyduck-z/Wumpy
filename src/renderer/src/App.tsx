@@ -21,7 +21,6 @@ import { Header } from './components/Header'
 import { Message } from './components/Message'
 import { Composer } from './components/Composer'
 import { StatusBar } from './components/StatusBar'
-import { Ambience } from './components/Ambience'
 import logo from './assets/logo.png'
 import { TierBar } from './components/TierBar'
 import { Picker, type PickerProps } from './components/Picker'
@@ -49,8 +48,6 @@ export default function App(): React.JSX.Element {
   const pinned = !(settings?.hideOnBlur ?? false)
   const [visible, setVisible] = useState(false)
   const [focusToken, setFocusToken] = useState(0)
-  /** Advances every time the panel is summoned, so one-shot effects replay. */
-  const [openCount, setOpenCount] = useState(0)
 
   // Saved chats
   /** Which picker is open, if any. One list UI serves them all. */
@@ -62,9 +59,6 @@ export default function App(): React.JSX.Element {
   const [chatTitle, setChatTitle] = useState<string | null>(null)
   /** Set once the user renames, so automatic titling stops touching it. */
   const [titleLocked, setTitleLocked] = useState(false)
-
-  // Keep the model's view of the app current without threading it through send().
-  chat.setContext({ chatTitle })
 
   const scroller = useRef<HTMLDivElement>(null)
   /** False once the user scrolls up, so streaming does not yank them back down. */
@@ -99,7 +93,8 @@ export default function App(): React.JSX.Element {
       if (!cancelled) setStatus(next)
     }
     void refresh()
-    const timer = setInterval(() => void refresh(), 10_000)
+    // Ollama coming or going is not urgent news; polling it often is pure cost.
+    const timer = setInterval(() => void refresh(), 30_000)
     return () => {
       cancelled = true
       clearInterval(timer)
@@ -108,13 +103,9 @@ export default function App(): React.JSX.Element {
 
   // Trigger the slide-in on mount and on every hotkey press.
   useEffect(() => {
-    const raf = requestAnimationFrame(() => {
-      setVisible(true)
-      setOpenCount((n) => n + 1)
-    })
+    const raf = requestAnimationFrame(() => setVisible(true))
     const off = window.wumpy.panel.onShown(() => {
       setVisible(true)
-      setOpenCount((n) => n + 1)
       setFocusToken((n) => n + 1)
     })
     return () => {
@@ -144,6 +135,12 @@ export default function App(): React.JSX.Element {
     setSettings(next)
     return next
   }, [])
+
+  // Keep the model's view of the app current. In an effect rather than in the
+  // render body, which would write to a ref during render.
+  useEffect(() => {
+    chat.setContext({ chatTitle })
+  }, [chat, chatTitle])
 
   const close = useCallback(() => {
     setVisible(false)
@@ -748,8 +745,6 @@ export default function App(): React.JSX.Element {
       }`}
       data-theme={mode === 'dev' ? 'dark' : 'light'}
     >
-      <Ambience mode={mode} active={visible} openCount={openCount} />
-
       <Header
         mode={mode}
         onToggleMode={() => void toggleMode()}
@@ -798,6 +793,7 @@ export default function App(): React.JSX.Element {
                 message={m}
                 streaming={streaming && i === messages.length - 1}
                 showReasoning={settings?.showReasoning ?? false}
+                smoothText={settings?.smoothText ?? false}
                 onGrow={pinToBottom}
                 onRunCommand={canRunCommands ? runShellCommand : undefined}
                 onCommandResult={onCommandResult}

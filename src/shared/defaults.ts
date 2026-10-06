@@ -30,6 +30,9 @@ export const DEFAULT_SETTINGS: WumpySettings = {
   keepAlive: '30m',
   warmOnStart: true,
 
+  // Costs CPU during generation, which is the worst moment to spend it.
+  smoothText: false,
+
   // Measured: qwen3:4b spent 9m37s reasoning about a single question. At ~5
   // tok/s on CPU there is no answer worth waiting longer than this for.
   maxTurnMs: 180_000,
