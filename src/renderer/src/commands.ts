@@ -13,6 +13,7 @@ export type CommandAction =
   | { kind: 'save'; title?: string }
   | { kind: 'chats' }
   | { kind: 'load'; query: string }
+  | { kind: 'resume'; query: string }
   | { kind: 'delete'; query: string }
   | { kind: 'rename'; title: string }
   | { kind: 'tier'; tier: TierId }
@@ -126,6 +127,13 @@ export const COMMANDS: CommandSpec[] = [
     hint: 'Save this chat',
     arg: 'title',
     run: (arg) => ({ kind: 'save', title: arg.trim() || undefined })
+  },
+  {
+    name: 'resume',
+    aliases: ['r'],
+    hint: 'Pick up a previous chat (Ctrl+R)',
+    arg: 'name',
+    run: (arg) => ({ kind: 'resume', query: arg.trim() })
   },
   {
     name: 'chats',

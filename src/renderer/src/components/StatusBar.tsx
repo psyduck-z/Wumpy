@@ -1,0 +1,127 @@
+import type { ContextUsage } from '@shared/types'
+import type { ChatStats } from '../hooks/useChat'
+
+function compactTokens(n: number): string {
+  if (n < 1000) return String(n)
+  return `${(n / 1000).toFixed(n < 10_000 ? 1 : 0)}k`
+}
+
+/**
+ * How full the context window is. Turns amber past 65%, which is where
+ * auto-compaction kicks in, and red once there is very little room left.
+ */
+function ContextMeter({
+  usage,
+  onCompact
+}: {
+  usage: ContextUsage
+  onCompact(): void
+}): React.JSX.Element {
+  const pct = Math.min(100, (usage.used / usage.limit) * 100)
+  const level = pct >= 90 ? 'is-critical' : pct >= 65 ? 'is-warn' : ''
+
+  return (
+    <button
+      type="button"
+      className={`ctx ${level}`}
+      onClick={onCompact}
+      title={
+        `Context: ${usage.used.toLocaleString()} of ${usage.limit.toLocaleString()} tokens ` +
+        `(${pct.toFixed(0)}%)${usage.estimated ? ', estimated' : ', counted by Ollama'}\n` +
+        'Click to compact older turns.'
+      }
+    >
+      <span className="ctx-track">
+        <span className="ctx-fill" style={{ width: `${Math.max(2, pct)}%` }} />
+      </span>
+      <span className="ctx-label">
+        {pct.toFixed(0)}%
+        {usage.estimated && <span className="ctx-est" title="Estimated from characters">~</span>}
+      </span>
+    </button>
+  )
+}
+
+export function StatusBar({
+  tierLabel,
+  model,
+  streaming,
+  stats,
+  usage,
+  compact,
+  onCompact
+}: {
+  tierLabel: string
+  model: string
+  streaming: boolean
+  stats: ChatStats
+  usage: ContextUsage
+  /** The panel is in its small corner shape, so drop the optional parts. */
+  compact: boolean
+  onCompact(): void
+}): React.JSX.Element {
+  const elapsed = stats.elapsedMs !== null ? (stats.elapsedMs / 1000).toFixed(1) : null
+
+  // While streaming, derive a live rate from what has arrived so far; once the
+  // turn lands, show the rate Ollama reported.
+  const liveRate =
+    streaming && stats.elapsedMs && stats.elapsedMs > 600
+      ? (stats.liveTokens / (stats.elapsedMs / 1000)).toFixed(1)
+      : null
+
+  return (
+    <footer className="status">
+      <span className="status-tier">{tierLabel}</span>
+      {!compact && (
+        <>
+          <span className="status-sep">·</span>
+          <span className="status-model">{model}</span>
+        </>
+      )}
+
+      <span className="spacer" />
+
+      {streaming ? (
+        <span className="status-live">
+          {elapsed && <span className="status-num">{elapsed}s</span>}
+          {stats.liveTokens > 0 && (
+            <>
+              <span className="status-sep">·</span>
+              <span className="status-num">{stats.liveTokens} tok</span>
+            </>
+          )}
+          {liveRate && (
+            <>
+              <span className="status-sep">·</span>
+              <span className="status-num">{liveRate} tok/s</span>
+            </>
+          )}
+        </span>
+      ) : stats.speed === null ? (
+        // Nothing measured yet, so use the space for discoverability.
+        !compact && <span className="status-tip">/ for commands</span>
+      ) : (
+        (
+          <span className="status-live">
+            <span className="status-num">{stats.speed.toFixed(1)} tok/s</span>
+            {!compact && stats.lastCompletionTokens !== null && (
+              <>
+                <span className="status-sep">·</span>
+                <span className="status-num">{compactTokens(stats.lastCompletionTokens)} tok</span>
+              </>
+            )}
+            {/* Only worth showing when the model actually had to load. */}
+            {!compact && stats.loadMs !== null && stats.loadMs > 500 && (
+              <>
+                <span className="status-sep">·</span>
+                <span className="status-num">{(stats.loadMs / 1000).toFixed(1)}s load</span>
+              </>
+            )}
+          </span>
+        )
+      )}
+
+      <ContextMeter usage={usage} onCompact={onCompact} />
+    </footer>
+  )
+}

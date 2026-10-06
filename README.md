@@ -207,11 +207,25 @@ arrives.
 your first line, one JSON file each under `%APPDATA%\Wumpy\chats`. `/save` is
 still there to retitle, and `/rename` does the same thing.
 
+**`/resume` picks up where you left off.** `Ctrl+R` or `/resume` opens a
+keyboard-driven picker: type to filter, arrows to move, `Enter` to open, `Del`
+to remove. `/resume last` jumps straight back into the most recent chat, and
+`/resume <name>` opens the first match.
+
 **Switching thinking level keeps the conversation.** `/level deep`, `/tier
 thinker`, the tier buttons and `Ctrl+1`–`Ctrl+4` all carry the full history to
 the new model and say how many messages came along.
 
-**Long conversations compact themselves.** When the estimated context reaches
+**The status bar shows where you stand.** A context meter tracks how full the
+window is, amber at 65% where auto-compaction begins and red near the limit.
+Click it to compact early. Alongside it: live elapsed time, token count and
+tokens/sec while a turn streams, then the rate, completion size and model load
+time once it lands. The figures come from Ollama's own `prompt_eval_count` and
+`eval_count` rather than being guessed from characters — a `~` next to the
+percentage means it is falling back to a character estimate, which happens
+before the first turn and just after loading a saved chat.
+
+**Long conversations compact themselves.** When the context reaches
 65% of the tier's window, Wumpy summarises everything but the last four turns
 into a single chip you can expand, and carries it forward as a system message.
 `/compact` forces it early. Compaction always runs on the *fastest* installed
@@ -227,6 +241,7 @@ or Enter to accept.
 | --- | --- |
 | `/new`, `/clear` | Start a fresh chat (`Ctrl+N`) |
 | `/save <title>` | Save this chat (`Ctrl+S`) |
+| `/resume [name\|last]` | Pick up a previous chat (`Ctrl+R`) |
 | `/chats`, `/history` | Browse saved chats |
 | `/load <name>` | Open a saved chat by name |
 | `/delete <name>` | Delete one, or `/delete all` |
@@ -290,6 +305,7 @@ and toggle changes apply immediately; hotkey changes apply on restart.
 | `Ctrl+1`–`Ctrl+4` | Jump to Flash / Fast / Thinker / Deep |
 | `Ctrl+D` | Toggle Quick / Developer mode |
 | `Ctrl+N` / `Ctrl+S` | New chat / save chat |
+| `Ctrl+R` | Resume a previous chat |
 | `/` | Command palette |
 | `Enter` / `Shift+Enter` | Send / newline |
 | `Esc` | Stop generating, close the list, or close |

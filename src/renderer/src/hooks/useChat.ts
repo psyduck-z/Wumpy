@@ -4,13 +4,25 @@ import type { ChatMessage, TierId } from '@shared/types'
 let counter = 0
 export const nextId = (): string => `m${Date.now().toString(36)}${(counter++).toString(36)}`
 
+/** Live and last-turn numbers for the status bar. */
+export interface ChatStats {
+  /** Tokens/sec for the most recent completed answer. */
+  speed: number | null
+  /** Model load time for the last answer; near zero means it was warm. */
+  loadMs: number | null
+  /** Counted by Ollama: what the next request will start from. */
+  contextTokens: number | null
+  lastCompletionTokens: number | null
+  /** Tokens seen so far in the turn currently streaming. */
+  liveTokens: number
+  /** Milliseconds since the current turn started, or null when idle. */
+  elapsedMs: number | null
+}
+
 export interface ChatState {
   messages: ChatMessage[]
   streaming: boolean
-  /** Tokens/sec for the most recent completed answer. */
-  lastSpeed: number | null
-  /** Model load time for the last answer; near zero means it was warm. */
-  lastLoadMs: number | null
+  stats: ChatStats
   send(text: string, tier: TierId, displayText?: string): void
   /** Messages as the model would see them, for size estimates and compaction. */
   history(): Array<{ role: string; content: string }>
@@ -24,8 +36,16 @@ export interface ChatState {
 export function useChat(): ChatState {
   const [messages, setMessages] = useState<ChatMessage[]>([])
   const [streaming, setStreaming] = useState(false)
-  const [lastSpeed, setLastSpeed] = useState<number | null>(null)
-  const [lastLoadMs, setLastLoadMs] = useState<number | null>(null)
+  const [stats, setStats] = useState<ChatStats>({
+    speed: null,
+    loadMs: null,
+    contextTokens: null,
+    lastCompletionTokens: null,
+    liveTokens: 0,
+    elapsedMs: null
+  })
+  /** Wall clock for the turn in flight, so elapsed survives re-renders. */
+  const startedAt = useRef<number | null>(null)
 
   /** Request currently streaming; also the key we match incoming deltas against. */
   const activeRequest = useRef<string | null>(null)
@@ -49,12 +69,25 @@ export function useChat(): ChatState {
         content: d.content ? m.content + d.content : m.content,
         thinking: d.thinking ? (m.thinking ?? '') + d.thinking : m.thinking
       }))
+      // Ollama streams one message per token, so counting them is exact.
+      setStats((s) => ({ ...s, liveTokens: s.liveTokens + 1 }))
     })
 
     const offDone = window.wumpy.chat.onDone((d) => {
       if (d.requestId !== activeRequest.current) return
-      setLastSpeed(d.tokensPerSecond ?? null)
-      setLastLoadMs(d.loadMs ?? null)
+      setStats((s) => ({
+        speed: d.tokensPerSecond ?? s.speed,
+        loadMs: d.loadMs ?? null,
+        // What the model read plus what it wrote is where the next turn starts.
+        contextTokens:
+          d.promptTokens !== undefined
+            ? d.promptTokens + (d.completionTokens ?? 0)
+            : s.contextTokens,
+        lastCompletionTokens: d.completionTokens ?? null,
+        liveTokens: 0,
+        elapsedMs: null
+      }))
+      startedAt.current = null
       activeRequest.current = null
       activeMessage.current = null
       setStreaming(false)
@@ -63,8 +96,10 @@ export function useChat(): ChatState {
     const offError = window.wumpy.chat.onError((d) => {
       if (d.requestId !== activeRequest.current) return
       patchActive((m) => ({ ...m, error: d.message }))
+      startedAt.current = null
       activeRequest.current = null
       activeMessage.current = null
+      setStats((s) => ({ ...s, liveTokens: 0, elapsedMs: null }))
       setStreaming(false)
     })
 
@@ -114,12 +149,23 @@ export function useChat(): ChatState {
     activeRequest.current = requestId
     activeMessage.current = assistantMessage.id
 
+    startedAt.current = Date.now()
     setMessages((prev) => [...prev, userMessage, assistantMessage])
     setStreaming(true)
-    setLastSpeed(null)
+    setStats((s) => ({ ...s, speed: null, liveTokens: 0, elapsedMs: 0 }))
 
     void window.wumpy.chat.send({ requestId, messages: history, tier })
   }, [])
+
+  useEffect(() => {
+    if (!streaming) return
+    // 100ms is enough for a tenths-of-a-second readout and costs nothing.
+    const timer = setInterval(() => {
+      if (startedAt.current === null) return
+      setStats((s) => ({ ...s, elapsedMs: Date.now() - (startedAt.current ?? Date.now()) }))
+    }, 100)
+    return () => clearInterval(timer)
+  }, [streaming])
 
   const history = useCallback(
     () =>
@@ -148,23 +194,34 @@ export function useChat(): ChatState {
     window.wumpy.chat.abort(activeRequest.current)
     activeRequest.current = null
     activeMessage.current = null
+    startedAt.current = null
+    setStats((s) => ({ ...s, liveTokens: 0, elapsedMs: null }))
     setStreaming(false)
   }, [])
 
   const clear = useCallback(() => {
     stop()
     setMessages([])
-    setLastSpeed(null)
-    setLastLoadMs(null)
+    setStats({
+      speed: null,
+      loadMs: null,
+      contextTokens: null,
+      lastCompletionTokens: null,
+      liveTokens: 0,
+      elapsedMs: null
+    })
   }, [stop])
 
   const replace = useCallback(
     (next: ChatMessage[]) => {
       stop()
       setMessages(next)
+      // The counted context belonged to the old conversation; fall back to the
+      // estimate until the next turn reports real numbers.
+      setStats((s) => ({ ...s, contextTokens: null }))
     },
     [stop]
   )
 
-  return { messages, streaming, lastSpeed, lastLoadMs, send, history, note, stop, clear, replace }
+  return { messages, streaming, stats, send, history, note, stop, clear, replace }
 }

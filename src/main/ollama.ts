@@ -5,6 +5,7 @@ interface OllamaChatChunk {
   done?: boolean
   eval_count?: number
   eval_duration?: number
+  prompt_eval_count?: number
   total_duration?: number
   load_duration?: number
   error?: string
@@ -14,6 +15,9 @@ export interface StreamStats {
   tokensPerSecond?: number
   totalDurationMs?: number
   loadMs?: number
+  /** Tokens Ollama actually counted, which beats estimating from characters. */
+  promptTokens?: number
+  completionTokens?: number
 }
 
 export interface StreamHandlers {
@@ -300,6 +304,8 @@ function readStats(chunk: OllamaChatChunk): StreamStats {
   }
   if (chunk.total_duration) stats.totalDurationMs = chunk.total_duration / 1e6
   if (chunk.load_duration !== undefined) stats.loadMs = chunk.load_duration / 1e6
+  if (chunk.prompt_eval_count !== undefined) stats.promptTokens = chunk.prompt_eval_count
+  if (chunk.eval_count !== undefined) stats.completionTokens = chunk.eval_count
   return stats
 }
 

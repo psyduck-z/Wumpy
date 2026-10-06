@@ -176,6 +176,23 @@ export interface ChatDone {
   totalDurationMs?: number
   /** Milliseconds spent loading the model; near zero means it was warm. */
   loadMs?: number
+  /**
+   * Counted by Ollama rather than estimated. `promptTokens` is everything the
+   * model read this turn, so prompt + completion is what the next turn starts
+   * from — which is exactly what the context meter needs.
+   */
+  promptTokens?: number
+  completionTokens?: number
+}
+
+/** What the context meter displays. */
+export interface ContextUsage {
+  /** Tokens the next request will start from. */
+  used: number
+  /** The active tier's context window. */
+  limit: number
+  /** True when `used` is a character-based estimate, not a counted value. */
+  estimated: boolean
 }
 
 export interface ChatError {

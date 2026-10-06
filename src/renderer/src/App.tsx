@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import type {
   ChatSummary,
+  ContextUsage,
   Dock,
   HotkeyState,
   Mode,
@@ -16,6 +17,7 @@ import { parseCommand, helpText, type CommandAction } from './commands'
 import { Header } from './components/Header'
 import { Message } from './components/Message'
 import { Composer } from './components/Composer'
+import { StatusBar } from './components/StatusBar'
 import { TierBar } from './components/TierBar'
 import { ChatList } from './components/ChatList'
 
@@ -26,7 +28,7 @@ function prettify(accelerator: string): string {
 
 export default function App(): React.JSX.Element {
   const chat = useChat()
-  const { messages, streaming, lastSpeed, lastLoadMs } = chat
+  const { messages, streaming, stats } = chat
 
   const [settings, setSettings] = useState<WumpySettings | null>(null)
   const [tierStatuses, setTierStatuses] = useState<TierStatus[]>([])
@@ -182,11 +184,28 @@ export default function App(): React.JSX.Element {
 
   /* --------------------------------------------------- autosave + compaction */
 
-  /** Rough token estimate; good enough to decide when to compact. */
+  /** Character-based fallback, used until Ollama reports real counts. */
   const estimateTokens = useCallback(
     () => Math.ceil(chat.history().reduce((n, m) => n + m.content.length, 0) / 4),
     [chat]
   )
+
+  /**
+   * What the context meter shows. Ollama's counts are exact but only arrive
+   * after a turn completes, so the estimate covers the gap — including the
+   * message being typed, which has not been sent yet.
+   */
+  const usage: ContextUsage = (() => {
+    const limit = TIERS[tier].options.num_ctx
+    const counted = stats.contextTokens
+    const estimate = estimateTokens()
+    // After a turn lands, the counted value is authoritative. Before the first
+    // turn, or after loading a saved chat, fall back to characters.
+    if (counted !== null && counted >= estimate * 0.5) {
+      return { used: counted, limit, estimated: false }
+    }
+    return { used: estimate, limit, estimated: true }
+  })()
 
   /**
    * Replaces all but the most recent turns with a model-written summary, so a
@@ -256,6 +275,27 @@ export default function App(): React.JSX.Element {
           await refreshChats()
           setShowChats(true)
           return
+        case 'resume': {
+          await refreshChats()
+          const list = await window.wumpy.chats.list()
+          if (list.length === 0) {
+            chat.note('No saved chats to resume yet.')
+            return
+          }
+          if (!action.query) {
+            setShowChats(true)
+            return
+          }
+          if (action.query.toLowerCase() === 'last') {
+            await openChat(list[0].id)
+            return
+          }
+          const q = action.query.toLowerCase()
+          const hit = list.find((c) => c.title.toLowerCase().includes(q))
+          if (hit) await openChat(hit.id)
+          else chat.note(`No saved chat matching "${action.query}".`, true)
+          return
+        }
         case 'load': {
           await refreshChats()
           const list = await window.wumpy.chats.list()
@@ -361,7 +401,7 @@ export default function App(): React.JSX.Element {
       // Compact before sending when the context is filling up, so the model
       // never silently loses the start of the conversation.
       const budget = TIERS[tier].options.num_ctx * 0.65
-      if ((settings?.autoCompact ?? true) && estimateTokens() > budget) {
+      if ((settings?.autoCompact ?? true) && usage.used > budget) {
         void (async () => {
           const done = await compactHistory({ silent: true })
           if (done) chat.note('Compacted earlier turns to make room.')
@@ -372,7 +412,7 @@ export default function App(): React.JSX.Element {
 
       chat.send(text, tier)
     },
-    [chat, compactHistory, estimateTokens, runCommand, settings, tier]
+    [chat, compactHistory, runCommand, settings, tier, usage.used]
   )
 
   /**
@@ -428,6 +468,12 @@ export default function App(): React.JSX.Element {
         if (e.key.toLowerCase() === 'n') {
           e.preventDefault()
           newChat()
+          return
+        }
+        if (e.key.toLowerCase() === 'r') {
+          e.preventDefault()
+          void refreshChats()
+          setShowChats(true)
           return
         }
         if (e.key.toLowerCase() === 's') {
@@ -547,21 +593,15 @@ export default function App(): React.JSX.Element {
         </div>
       )}
 
-      <footer className="status">
-        <span className="status-tier">{activeTier.label}</span>
-        <span className="status-sep">·</span>
-        <span>{tierStatus?.resolvedModel ?? 'no model'}</span>
-        {streaming ? (
-          <span className="status-live">generating…</span>
-        ) : lastSpeed ? (
-          <span className="status-live">
-            {lastSpeed.toFixed(1)} tok/s
-            {lastLoadMs !== null && lastLoadMs > 500 ? ` · ${(lastLoadMs / 1000).toFixed(1)}s load` : ''}
-          </span>
-        ) : null}
-        <span className="spacer" />
-        <span className="status-tip">/ for commands</span>
-      </footer>
+      <StatusBar
+        tierLabel={activeTier.label}
+        model={tierStatus?.resolvedModel ?? 'no model'}
+        streaming={streaming}
+        stats={stats}
+        usage={usage}
+        compact={compact}
+        onCompact={() => void compactHistory()}
+      />
 
       <Composer
         onSend={onSend}

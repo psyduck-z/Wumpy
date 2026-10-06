@@ -654,12 +654,41 @@ body {
   font-size: 12px;
 }
 
-.chatlist-count {
-  font-size: 10px;
-  color: rgb(var(--muted));
+.chatlist-filter {
+  flex: 1;
+  min-width: 0;
+  background: rgb(var(--surface));
+  border: 1px solid rgb(var(--border));
+  border-radius: 8px;
+  padding: 6px 9px;
+  color: rgb(var(--text));
+  font: inherit;
+  font-size: 12px;
+  user-select: text;
+}
+
+.chatlist-filter:focus {
+  outline: none;
+  border-color: rgb(var(--accent) / 0.65);
+}
+
+.chatlist-filter::placeholder { color: rgb(var(--muted) / 0.8); }
+
+.chatlist-foot {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  padding: 7px 2px 0;
+  font-size: 9.5px;
+  color: rgb(var(--muted) / 0.8);
+}
+
+.chatlist-foot kbd {
   background: rgb(var(--raised));
-  border-radius: 20px;
-  padding: 1px 7px;
+  border-radius: 4px;
+  padding: 0 4px;
+  font-family: var(--mono);
+  font-size: 9px;
 }
 
 .link {
@@ -704,7 +733,9 @@ body {
 }
 
 .chatrow:hover { background: rgb(var(--surface)); border-color: rgb(var(--border)); }
-.chatrow.is-active { border-color: rgb(var(--accent) / 0.5); }
+.chatrow.is-cursor { background: rgb(var(--accent-soft)); border-color: rgb(var(--accent) / 0.4); }
+.chatrow.is-active .chatrow-title { color: rgb(var(--accent-text)); font-weight: 600; }
+.chatrow.is-cursor .chatrow-del { opacity: 1; }
 
 .chatrow-main {
   flex: 1;
@@ -766,11 +797,76 @@ body {
   color: rgb(var(--muted));
 }
 
-.status-tier { font-weight: 600; color: rgb(var(--accent-text)); }
-.status-sep { opacity: 0.4; }
-.status-live { color: rgb(var(--text)); opacity: 0.75; }
+.status-tier { font-weight: 600; color: rgb(var(--accent-text)); white-space: nowrap; }
+.status-sep { opacity: 0.35; }
+.status-model {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 120px;
+}
+.status-live {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  white-space: nowrap;
+}
+/* Tabular figures stop the readout jittering as digits change. */
+.status-num { font-variant-numeric: tabular-nums; opacity: 0.85; }
 .status .spacer { flex: 1; }
-.status-tip { opacity: 0.6; }
+.status-tip { opacity: 0.55; white-space: nowrap; }
+
+/* ---- context meter ---- */
+
+.ctx {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 2px 4px 2px 6px;
+  margin-left: 2px;
+  background: none;
+  border: none;
+  border-radius: 6px;
+  color: inherit;
+  font: inherit;
+  font-size: 10px;
+  cursor: pointer;
+  transition: background 120ms;
+}
+
+.ctx:hover { background: rgb(var(--raised)); }
+
+.ctx-track {
+  position: relative;
+  width: 42px;
+  height: 4px;
+  border-radius: 3px;
+  background: rgb(var(--text) / 0.13);
+  overflow: hidden;
+}
+
+.ctx-fill {
+  position: absolute;
+  inset: 0 auto 0 0;
+  border-radius: 3px;
+  background: rgb(var(--accent));
+  transition: width 320ms cubic-bezier(0.22, 1, 0.36, 1), background 240ms ease;
+}
+
+.ctx.is-warn .ctx-fill { background: #f59e0b; }
+.ctx.is-critical .ctx-fill { background: rgb(var(--danger)); }
+
+.ctx-label {
+  font-variant-numeric: tabular-nums;
+  min-width: 26px;
+  text-align: right;
+}
+
+.ctx.is-warn .ctx-label { color: #f59e0b; }
+.ctx.is-critical .ctx-label { color: rgb(var(--danger)); }
+
+/* Marks the figure as estimated rather than counted. */
+.ctx-est { opacity: 0.5; margin-left: 1px; }
 
 .composer-wrap {
   position: relative;
