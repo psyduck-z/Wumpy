@@ -222,26 +222,27 @@ function registerIpc(): void {
     IPC.chatTitle,
     async (_e, req: { messages: Array<{ role: string; content: string }> }) => {
       const model = resolveTierModel('flash') ?? resolveTierModel('fast')
-      if (!model || req.messages.length === 0) return null
+      const question = req.messages.find((m) => m.role === 'user')?.content.trim()
+      if (!model || !question) return null
 
-      const excerpt = req.messages
-        .slice(0, 4)
-        .map((m) => `${m.role === 'user' ? 'User' : 'Assistant'}: ${m.content.slice(0, 600)}`)
-        .join('\n\n')
-
+      // Title from the question alone, never the answer.
+      //
+      // Feeding the assistant's reply in made the model title the reply: asking
+      // "what is speculative fiction" came back as "Exploring the Realm of
+      // Speculative". Measured on llama3.2:3b, the question alone is both
+      // accurate and about twice as fast.
       const raw = await ollama.complete(
         model,
         [
           {
             role: 'system',
             content:
-              'You write short titles for conversations. Reply with the title only: ' +
-              'three to six words, no quotation marks, no trailing punctuation, ' +
-              'no preamble, no explanation. Use the language the user wrote in.'
+              'Name the topic of the user’s question in 2 to 5 words, as a noun phrase. ' +
+              'Reply with the name only. No quotes, no punctuation at the end, no preamble.'
           },
-          { role: 'user', content: `Title this conversation:\n\n${excerpt}` }
+          { role: 'user', content: `User asked: ${question.slice(0, 500)}` }
         ],
-        { keepAlive: settings.get('keepAlive'), numPredict: 24 }
+        { keepAlive: settings.get('keepAlive'), numPredict: 20 }
       )
 
       return raw ? cleanTitle(raw) : null
@@ -329,16 +330,34 @@ app.on('will-quit', () => {
 
 /**
  * Small models like to wrap titles in quotes, prefix them with "Title:", or add
- * a full stop. Strip all of that rather than showing it in the sidebar.
+ * a full stop. Strip all of that, then title-case the result.
  */
 function cleanTitle(raw: string): string | null {
   let t = raw.split('\n').find((l) => l.trim()) ?? ''
-  t = t.replace(/^\s*(?:title|chat)\s*[:\-]\s*/i, '')
+  t = t.replace(/^\s*(?:title|topic|chat|name)\s*[:\-]\s*/i, '')
   t = t.replace(/^["'“‘`]+|["'”’`]+$/g, '')
   t = t.replace(/[.\s]+$/, '').trim()
   if (!t) return null
+
   // Guard against a model that ignored the word limit entirely.
   const words = t.split(/\s+/)
-  if (words.length > 9) t = `${words.slice(0, 8).join(' ')}…`
-  return t.length > 60 ? `${t.slice(0, 60).trim()}…` : t
+  if (words.length > 8) t = words.slice(0, 7).join(' ')
+
+  return titleCase(t).slice(0, 60).trim()
+}
+
+/** Minor words stay lowercase unless they lead. */
+const MINOR = new Set(['a', 'an', 'the', 'of', 'in', 'on', 'to', 'for', 'and', 'or', 'vs', 'with'])
+
+function titleCase(text: string): string {
+  return text
+    .split(/\s+/)
+    .map((word, i) => {
+      // Leave anything already carrying a capital alone, so CSS, Win+C and
+      // llama3.2 survive intact.
+      if (/[A-Z0-9]/.test(word)) return word
+      if (i > 0 && MINOR.has(word)) return word
+      return word.charAt(0).toUpperCase() + word.slice(1)
+    })
+    .join(' ')
 }

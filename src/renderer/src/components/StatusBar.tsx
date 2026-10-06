@@ -1,6 +1,25 @@
 import type { ContextUsage } from '@shared/types'
 import type { ChatStats } from '../hooks/useChat'
 
+/**
+ * Elapsed and load times, which on a CPU-only machine and a 14B model can run
+ * well past a minute. Seconds alone stopped being readable around "184.3s".
+ */
+function duration(ms: number): string {
+  if (ms < 1000) return `${Math.round(ms)}ms`
+
+  // Round to seconds first, so 59,999ms reads as "1m 0s" rather than "60.0s".
+  const total = Math.round(ms / 1000)
+  if (total < 60) return `${(ms / 1000).toFixed(1)}s`
+
+  const hours = Math.floor(total / 3600)
+  const minutes = Math.floor((total % 3600) / 60)
+  const seconds = total % 60
+
+  if (hours > 0) return `${hours}h ${minutes}m`
+  return `${minutes}m ${seconds}s`
+}
+
 function compactTokens(n: number): string {
   if (n < 1000) return String(n)
   return `${(n / 1000).toFixed(n < 10_000 ? 1 : 0)}k`
@@ -60,7 +79,7 @@ export function StatusBar({
   compact: boolean
   onCompact(): void
 }): React.JSX.Element {
-  const elapsed = stats.elapsedMs !== null ? (stats.elapsedMs / 1000).toFixed(1) : null
+  const elapsed = stats.elapsedMs !== null ? duration(stats.elapsedMs) : null
 
   // While streaming, derive a live rate from what has arrived so far; once the
   // turn lands, show the rate Ollama reported.
@@ -83,7 +102,7 @@ export function StatusBar({
 
       {streaming ? (
         <span className="status-live">
-          {elapsed && <span className="status-num">{elapsed}s</span>}
+          {elapsed && <span className="status-num">{elapsed}</span>}
           {stats.liveTokens > 0 && (
             <>
               <span className="status-sep">·</span>
@@ -114,7 +133,7 @@ export function StatusBar({
             {!compact && stats.loadMs !== null && stats.loadMs > 500 && (
               <>
                 <span className="status-sep">·</span>
-                <span className="status-num">{(stats.loadMs / 1000).toFixed(1)}s load</span>
+                <span className="status-num">{duration(stats.loadMs)} load</span>
               </>
             )}
           </span>

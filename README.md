@@ -207,13 +207,26 @@ arrives.
 each under `%APPDATA%\Wumpy\chats`. There is no save command because there is
 nothing to save.
 
-**Titles are written by the model.** The store seeds a title from your first
-line so the picker is never blank, then a background request upgrades it to a
-short name once the first answer lands — "Simple Marinara Sauce Recipe" rather
-than the first forty characters you typed. It runs on the fastest installed
-model, capped at 24 tokens, and the output is stripped of the quotes, `Title:`
-prefixes and trailing full stops small models like to add. `/rename` overrides
-it and locks the title so automatic naming leaves it alone.
+**Titles are written by the model, from your question alone.** The store seeds
+a title from the first line so the picker is never blank, then a background
+request names the topic once the first answer lands. It runs on the fastest
+installed model, capped at 20 tokens. `/rename` overrides it and locks the
+title so automatic naming leaves it alone.
+
+Titling from the *answer* as well as the question was a mistake worth recording:
+asking "what is speculative fiction" came back as "Exploring the Realm of
+Speculative", because the model titled the reply rather than the question.
+Measured on llama3.2:3b, the question alone is both accurate and about twice as
+fast:
+
+| input to the titler | result for "what is speculative fiction" |
+| --- | --- |
+| question + answer | Exploring the Realm of Speculative |
+| question + answer, few-shot | Science Fiction and Fantasy |
+| **question only** | **Speculative Fiction** |
+
+Title casing is applied in code rather than asked for in the prompt, so `CSS`,
+`Win+C` and `llama3.2` survive intact.
 
 **`/resume` picks up where you left off.** `Ctrl+R` or `/resume` goes straight
 to a keyboard-driven picker — it deliberately takes no argument, because the
