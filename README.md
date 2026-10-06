@@ -443,6 +443,24 @@ The panel is either a **tall bar** on the left or right edge, or a **compact
 card** in any of the four corners — the same UI with the chrome trimmed down.
 Cycle positions with the glyph in the header, `/dock`, or the tray menu.
 
+## A bug worth recording
+
+Proposed commands rendered as inert code blocks with no Run button for a while,
+and nothing failed loudly — the feature was simply dead. The cause was literal
+backspace characters (0x08) inside the regex that detects a `wumpy-run` fence,
+written there by a careless edit:
+
+```
+if (/language-wumpy-run/.test(className))   intended
+if (/<BS>language-wumpy-run<BS>/.test(className)) actual
+```
+
+The parsers all had tests and all passed, because the parsers were fine. What
+had no test was the wiring between them and the renderer. `npm run check:blocks`
+now renders every kind of block the model can emit and asserts which component
+it becomes, including a lookalike tag that must *not* be runnable. It runs as
+part of `npm run typecheck`.
+
 ## Running commands
 
 Developer-mode tiers can propose shell commands. **Nothing ever runs without a

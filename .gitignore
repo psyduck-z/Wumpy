@@ -447,3 +447,6 @@ FodyWeavers.xsd
 
 # Written by `npm run bench`; machine-specific.
 /bench-results.json
+
+# Scratch files from `npm run check:blocks`.
+/.block-check.*

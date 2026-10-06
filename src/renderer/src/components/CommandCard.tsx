@@ -29,7 +29,7 @@ function splitReason(raw: string): { reason: string | null; command: string } {
   for (; i < lines.length; i++) {
     const line = lines[i].trim()
     if (!line) continue
-    const m = /^(?:#+|::|REM)\s*(.*)$/i.exec(line)
+    const m = /^(?:#+|::|REM\b)\s*(.*)$/i.exec(line)
     if (!m) break
     if (m[1]) reason.push(m[1])
   }

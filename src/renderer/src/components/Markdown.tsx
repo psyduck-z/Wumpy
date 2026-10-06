@@ -75,9 +75,11 @@ function readSearch(children: ReactNode): string | null {
 /** Maps a fence tag to the shell it should run in, or null for ordinary code. */
 function runnableShell(className: unknown): ShellKind | null {
   if (typeof className !== 'string') return null
-  if (/language-wumpy-run-cmd/.test(className)) return 'cmd'
-  if (/language-wumpy-run-bash/.test(className)) return 'bash'
-  if (/language-wumpy-run/.test(className)) return 'powershell'
+  // Exact tag match on the class list, so language-wumpy-runner is not runnable.
+  const tags = className.split(/\s+/)
+  if (tags.includes('language-wumpy-run-cmd')) return 'cmd'
+  if (tags.includes('language-wumpy-run-bash')) return 'bash'
+  if (tags.includes('language-wumpy-run')) return 'powershell'
   return null
 }
 
