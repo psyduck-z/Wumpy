@@ -46,6 +46,20 @@ export interface TierOptions {
   top_p?: number
 }
 
+export type ShellKind = 'powershell' | 'cmd' | 'bash'
+
+export interface ShellResult {
+  command: string
+  shell: ShellKind
+  cwd: string
+  stdout: string
+  stderr: string
+  exitCode: number
+  durationMs: number
+  timedOut: boolean
+  truncated: boolean
+}
+
 export interface Tier {
   id: TierId
   label: string
@@ -57,6 +71,13 @@ export interface Tier {
   alternates: string[]
   /** Ask a reasoning-capable model to reason. Never sends `think: false`. */
   thinking: boolean
+  /**
+   * May propose shell commands. Developer-mode tiers only: measured on
+   * llama3.2:3b, a 3B model decided wrongly about half the time, both
+   * proposing commands for general knowledge and guessing at machine state
+   * instead of checking.
+   */
+  tools: boolean
   options: TierOptions
   systemPrompt: string
 }
@@ -141,6 +162,10 @@ export interface WumpySettings {
   /** Preload tier models at startup so the first question is instant. */
   warmOnStart: boolean
   launchAtLogin: boolean
+  /** Allow tiers that support it to propose shell commands. */
+  shellEnabled: boolean
+  /** Working directory for commands. Empty means the user's home directory. */
+  shellCwd: string
   /** Per-tier model overrides, keyed by tier id. */
   tierModels: Partial<Record<TierId, string>>
 }
@@ -234,5 +259,7 @@ export const IPC = {
   chatsDelete: 'chats:delete',
   chatsRename: 'chats:rename',
   chatCompact: 'chat:compact',
-  chatTitle: 'chat:title'
+  chatTitle: 'chat:title',
+  shellRun: 'shell:run',
+  shellRisk: 'shell:risk'
 } as const

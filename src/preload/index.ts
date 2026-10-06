@@ -12,6 +12,8 @@ import type {
   OllamaModel,
   OllamaStatus,
   SavedChat,
+  ShellKind,
+  ShellResult,
   TierId,
   TierStatus,
   WumpySettings
@@ -69,6 +71,13 @@ const api = {
       ipcRenderer.invoke(IPC.chatsRename, id, title),
     /** Pass '*' to clear every saved chat; resolves to the number removed. */
     delete: (id: string): Promise<boolean | number> => ipcRenderer.invoke(IPC.chatsDelete, id)
+  },
+  shell: {
+    /** Runs an approved command. Resolves null if the user cancelled. */
+    run: (req: { command: string; shell: ShellKind }): Promise<ShellResult | null> =>
+      ipcRenderer.invoke(IPC.shellRun, req),
+    /** Why a command looks risky, or null. Drives the warning on the card. */
+    risk: (command: string): Promise<string | null> => ipcRenderer.invoke(IPC.shellRisk, command)
   },
   panel: {
     hide: (): void => ipcRenderer.send(IPC.panelHide),

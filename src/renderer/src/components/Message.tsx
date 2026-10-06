@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import type { ChatMessage } from '@shared/types'
+import type { ChatMessage, ShellKind, ShellResult } from '@shared/types'
 import { Markdown } from './Markdown'
 import { useSmoothText } from '../hooks/useSmoothText'
 
@@ -7,7 +7,9 @@ export function Message({
   message,
   streaming,
   showReasoning,
-  onGrow
+  onGrow,
+  onRunCommand,
+  onCommandResult
 }: {
   message: ChatMessage
   streaming: boolean
@@ -15,6 +17,9 @@ export function Message({
   showReasoning: boolean
   /** Called as revealed text grows, so the transcript can stay pinned. */
   onGrow?: () => void
+  /** Supplied only when the active tier may propose commands. */
+  onRunCommand?: (command: string, shell: ShellKind) => Promise<ShellResult | null>
+  onCommandResult?: (result: ShellResult) => void
 }): React.JSX.Element {
   const [open, setOpen] = useState(showReasoning)
   const isUser = message.role === 'user'
@@ -79,7 +84,11 @@ export function Message({
         <div className="msg-error">{message.error}</div>
       ) : (
         <div className={`msg-body ${animating && !waiting ? 'is-streaming' : ''}`}>
-          <Markdown text={shown} />
+          <Markdown
+            text={shown}
+            onRunCommand={onRunCommand}
+            onCommandResult={onCommandResult}
+          />
           {waiting && !message.thinking && (
             <span className="dots" role="status" aria-label="Thinking">
               <i />

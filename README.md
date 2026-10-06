@@ -109,8 +109,8 @@ the header) repaints the panel and swaps which pair of tiers is on offer.
 | --- | --- | --- | --- | --- |
 | **Flash** | Quick (light) | `llama3.2:3b` | ~instant | one-liners, lookups |
 | **Fast** | Quick (light) | `llama3.2:3b` | fast | the everyday default |
-| **Thinker** | Dev (dark) | `qwen3:4b` | slow | reasons before answering |
-| **Deep Thinker** | Dev (dark) | `qwen2.5-coder:14b` | very slow | real code |
+| **Thinker** | Dev (dark) | `qwen3:4b` | slow | reasons; can run commands |
+| **Deep Thinker** | Dev (dark) | `qwen2.5-coder:14b` | very slow | real code; can run commands |
 
 Jump straight to one with `Ctrl+1`–`Ctrl+4`; picking a tier also switches to its
 mode, so the theme always matches what is answering. A tier whose model is not
@@ -294,6 +294,50 @@ The panel is either a **tall bar** on the left or right edge, or a **compact
 card** in any of the four corners — the same UI with the chrome trimmed down.
 Cycle positions with the glyph in the header, `/dock`, or the tray menu.
 
+## Running commands
+
+Developer-mode tiers can propose shell commands. **Nothing ever runs without a
+click.** The model only emits text: it writes a fenced block tagged `wumpy-run`,
+the panel renders that as a card showing the exact command, and the Run button
+is the permission gate. A command that arrives through something the model read
+is still shown verbatim before anything happens.
+
+```
+┌──────────────────────────────────────┐
+│ POWERSHELL            [Skip]  [Run]  │
+├──────────────────────────────────────┤
+│ Get-Command ollama -ErrorAction …    │
+└──────────────────────────────────────┘
+```
+
+Afterwards the output is handed back to the model so it can carry on, trimmed
+to 3,000 characters — a directory listing can easily outweigh the whole
+conversation on a 8k window.
+
+| | |
+| --- | --- |
+| Shells | PowerShell (default), `wumpy-run-cmd`, `wumpy-run-bash` |
+| Timeout | 120s, then killed |
+| Output cap | 100 KB per stream |
+| Working directory | `shellCwd`, or your home directory |
+| Off switch | `shellEnabled: false` in settings |
+
+Commands matching a risky pattern — recursive deletes, `shutdown`, `diskpart`,
+`reg delete`, piping a download into a shell, `git push --force` — turn the card
+red and additionally require a **native confirmation dialog** that the page
+cannot draw or dismiss itself. That list is advisory, not a sandbox: it is there
+so you see what you are agreeing to, not to decide for you what is safe.
+
+### Why Developer mode only
+
+Measured on llama3.2:3b, a 3B model decides wrongly about half the time. Asked
+"is ollama installed", it answered "No, Ollama is not installed on your PC"
+from memory rather than checking. Asked "what's the capital of France", it
+proposed running `Get-Location`. Tightening the prompt moved it from 3/6 to 4/6
+correct, which is not good enough to hand a shell. Flash and Fast therefore
+never receive the capability, and the system prompt that describes it is only
+attached for tiers that have it.
+
 ## Look and feel
 
 The two modes are visually distinct, because knowing which one is answering
@@ -344,6 +388,8 @@ and toggle changes apply immediately; hotkey changes apply on restart.
 | `hotkeys` | `[]` | Extra accelerators; `Win+C` comes from the hook |
 | `keepAlive` | `30m` | How long Ollama holds a model resident |
 | `warmOnStart` | `true` | Preload tier models at startup |
+| `shellEnabled` | `true` | Let Dev tiers propose commands |
+| `shellCwd` | `""` | Working directory; empty means home |
 | `tierModels` | `{}` | Per-tier model overrides |
 | `launchAtLogin` | `false` | Start with Windows (packaged builds only) |
 

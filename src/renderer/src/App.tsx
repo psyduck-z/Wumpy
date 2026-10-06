@@ -7,6 +7,8 @@ import type {
   Mode,
   OllamaStatus,
   TierId,
+  ShellKind,
+  ShellResult,
   TierStatus,
   WumpySettings
 } from '@shared/types'
@@ -214,6 +216,41 @@ export default function App(): React.JSX.Element {
     await patch({ mode: next, tier: defaultTierFor(next) })
     void window.wumpy.tiers.warm(defaultTierFor(next)).then(setTierStatuses)
   }, [mode, patch])
+
+  /* -------------------------------------------------------------- commands */
+
+  /** Whether the active tier may propose commands at all. */
+  const canRunCommands = (TIERS[tier].tools && (settings?.shellEnabled ?? true)) === true
+
+  const runShellCommand = useCallback(
+    (command: string, shellKind: ShellKind) => window.wumpy.shell.run({ command, shell: shellKind }),
+    []
+  )
+
+  /**
+   * Hands a command's output back to the model so it can carry on.
+   *
+   * Output is trimmed hard before it goes in: a directory listing can easily
+   * outweigh the whole conversation, and on a 2-8k context window that would
+   * push the actual question out of scope.
+   */
+  const onCommandResult = useCallback(
+    (result: ShellResult) => {
+      const body = [result.stdout, result.stderr].filter(Boolean).join('\n').trim()
+      const clipped = body.length > 3000 ? `${body.slice(0, 3000)}\n…truncated…` : body
+
+      const report = [
+        `I ran that command. Exit code ${result.exitCode}${result.timedOut ? ' (timed out)' : ''}.`,
+        '',
+        clipped ? ['```', clipped, '```'].join('\n') : '(no output)'
+      ].join('\n')
+
+      // Sent as a user turn because that is the role the model expects a tool
+      // result to arrive in, but shown as the short line instead of the dump.
+      chat.send(report, tier, `Ran: \`${result.command}\``)
+    },
+    [chat, tier]
+  )
 
   /* --------------------------------------------------- autosave + compaction */
 
@@ -438,6 +475,14 @@ export default function App(): React.JSX.Element {
    * the title and stops this from running.
    */
   const titledFor = useRef<string | null>(null)
+  /**
+   * Mirrors `titleLocked` for the async callback below. The effect's own copy is
+   * captured when the request goes out, but a rename can land during the three
+   * seconds the model takes to answer — and did, silently overwriting it.
+   */
+  const titleLockedRef = useRef(titleLocked)
+  titleLockedRef.current = titleLocked
+
   useEffect(() => {
     if (streaming || titleLocked) return
     if (titledFor.current === chatId) return
@@ -449,13 +494,20 @@ export default function App(): React.JSX.Element {
     // Mark first: this must run at most once per chat even if the effect
     // re-fires while the request is in flight.
     titledFor.current = chatId
+    const forChat = chatId
+
     void window.wumpy.chat
       .title({ messages: real.map((m) => ({ role: m.role as string, content: m.content })) })
       .then((title) => {
         if (!title) return
+        // Re-check on arrival: the user may have renamed, or moved to another
+        // chat entirely, while this was in flight.
+        if (titleLockedRef.current) return
+        if (forChat !== chatId) return
+
         setChatTitle(title)
         void window.wumpy.chats
-          .save({ id: chatId, title, messages: chat.messages, tier })
+          .save({ id: forChat, title, messages: chat.messages, tier })
           .then(() => refreshChats())
       })
   }, [chat.messages, chatId, refreshChats, streaming, tier, titleLocked])
@@ -644,8 +696,18 @@ export default function App(): React.JSX.Element {
                 streaming={streaming && i === messages.length - 1}
                 showReasoning={settings?.showReasoning ?? false}
                 onGrow={pinToBottom}
+                onRunCommand={canRunCommands ? runShellCommand : undefined}
+                onCommandResult={onCommandResult}
               />
             ))
+          )}
+
+          {/* Marks the end of a finished reply, so a long answer has a visible
+              bottom edge rather than just stopping. */}
+          {!streaming && messages.length > 0 && messages[messages.length - 1].role === 'assistant' && (
+            <div className="turn-end" aria-hidden="true">
+              <span>end of reply</span>
+            </div>
           )}
         </div>
       )}

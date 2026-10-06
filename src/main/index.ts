@@ -1,7 +1,9 @@
-import { app, ipcMain, nativeImage, Tray } from 'electron'
+import { app, dialog, ipcMain, nativeImage, Tray } from 'electron'
 import { IPC } from '@shared/types'
 import type {
   ChatMessage,
+  ShellKind,
+  ShellResult,
   ChatRequest,
   ChatSummary,
   Dock,
@@ -10,7 +12,7 @@ import type {
   TierStatus,
   WumpySettings
 } from '@shared/types'
-import { TIERS, TIER_ORDER } from '@shared/tiers'
+import { TIERS, TIER_ORDER, SHELL_PROMPT } from '@shared/tiers'
 import { SettingsStore } from './store'
 import { ChatStore } from './chats'
 import { OllamaClient } from './ollama'
@@ -18,6 +20,7 @@ import { Panel } from './panel'
 import { createTray, resourcePath } from './tray'
 import { registerHotkeys, unregisterHotkeys } from './hotkey'
 import { LowLevelHook } from './lowlevelhook'
+import { runCommand, assessRisk } from './shell'
 
 // Only one Wumpy may own the tray icon and the global hotkey.
 if (!app.requestSingleInstanceLock()) {
@@ -165,11 +168,14 @@ function registerIpc(): void {
       return
     }
 
+    const canAct = tier.tools && settings.get('shellEnabled')
     await ollama.chat(req.requestId, model, req.messages, {
       thinking: tier.thinking,
       options: tier.options,
       keepAlive: settings.get('keepAlive'),
-      systemPrompt: tier.systemPrompt
+      systemPrompt: canAct ? `${tier.systemPrompt}
+
+${SHELL_PROMPT}` : tier.systemPrompt
     }, {
       onDelta: (delta) => panel.send(IPC.chatDelta, { requestId: req.requestId, ...delta }),
       onDone: (stats) => panel.send(IPC.chatDone, { requestId: req.requestId, ...stats }),
@@ -246,6 +252,58 @@ function registerIpc(): void {
       )
 
       return raw ? cleanTitle(raw) : null
+    }
+  )
+
+  ipcMain.handle(IPC.shellRisk, (_e, command: string) => assessRisk(command))
+
+  /**
+   * Runs a command the user approved in the panel.
+   *
+   * The click in the renderer is the permission gate: the model only ever emits
+   * text, and nothing reaches this handler without a person pressing Run. For
+   * commands that match a risky pattern there is a second, native confirmation
+   * that the page cannot draw or dismiss itself.
+   */
+  ipcMain.handle(
+    IPC.shellRun,
+    async (_e, req: { command: string; shell: ShellKind }): Promise<ShellResult | null> => {
+      const command = req.command.trim()
+      if (!command) return null
+
+      if (!settings.get('shellEnabled')) {
+        return {
+          command,
+          shell: req.shell,
+          cwd: '',
+          stdout: '',
+          stderr: 'Running commands is turned off in settings (shellEnabled).',
+          exitCode: -1,
+          durationMs: 0,
+          timedOut: false,
+          truncated: false
+        }
+      }
+
+      const risk = assessRisk(command)
+      if (risk) {
+        const { response } = await dialog.showMessageBox({
+          type: 'warning',
+          buttons: ['Cancel', 'Run anyway'],
+          defaultId: 0,
+          cancelId: 0,
+          noLink: true,
+          title: 'Wumpy wants to run a command',
+          message: `This command ${risk}.`,
+          detail: `${req.shell}
+
+${command}`
+        })
+        if (response !== 1) return null
+      }
+
+      console.log(`[wumpy] running (${req.shell}): ${command}`)
+      return runCommand(command, req.shell, settings.get('shellCwd') || undefined)
     }
   )
 

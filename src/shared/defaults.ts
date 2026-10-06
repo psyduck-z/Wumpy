@@ -31,5 +31,11 @@ export const DEFAULT_SETTINGS: WumpySettings = {
   warmOnStart: true,
 
   launchAtLogin: false,
+
+  // Commands are never run without an explicit click, so this gates whether
+  // the model may even propose them.
+  shellEnabled: true,
+  shellCwd: '',
+
   tierModels: {}
 }

@@ -1,5 +1,35 @@
 import type { Tier, TierId, Mode } from './types'
 
+/**
+ * Appended for tiers that may act. The model never runs anything itself: it
+ * proposes, and the user clicks. The fence tag is what the renderer looks for.
+ */
+export const SHELL_PROMPT = [
+  'You can run commands on the user’s Windows machine by proposing them.',
+  '',
+  'Propose a command ONLY when the answer depends on the state of this machine:',
+  'installed software, file contents, versions, hardware, running processes.',
+  'For anything you already know, just answer. Never propose a command for general knowledge.',
+  '',
+  'Never guess the state of this machine. If asked whether something is installed,',
+  'or what version it is, propose a command to check instead of answering from memory.',
+  '',
+  'Format: a fenced block tagged wumpy-run holding exactly one command.',
+  '',
+  '```wumpy-run',
+  'Get-Command ollama -ErrorAction SilentlyContinue',
+  '```',
+  '',
+  'Rules for the command:',
+  '- It already runs in PowerShell. Never wrap it in `powershell -Command`.',
+  '- Use real paths: $env:USERPROFILE, $HOME, $PWD. Never a placeholder like YourUsername.',
+  '- One command, doing one thing. No extra pipeline stages that were not asked for.',
+  '- Say in one line what it does, before the block.',
+  '',
+  'Use `wumpy-run-cmd` for cmd.exe and `wumpy-run-bash` for bash.',
+  'Use an ordinary ```powershell block when only showing syntax, not asking to run it.'
+].join('\n')
+
 const BASE_PROMPT =
   'You are Wumpy, a local assistant in the Windows system tray. ' +
   'Answer the question directly and stop. ' +
@@ -30,6 +60,7 @@ export const TIERS: Record<TierId, Tier> = {
     model: 'llama3.2:3b',
     alternates: ['llama3.2:1b', 'qwen2.5:3b', 'phi3.5:3.8b'],
     thinking: false,
+    tools: false,
     options: { num_ctx: 2048, num_predict: 384, temperature: 0.4, top_p: 0.9 },
     systemPrompt: `${BASE_PROMPT} One or two sentences. Nothing more.`
   },
@@ -43,6 +74,7 @@ export const TIERS: Record<TierId, Tier> = {
     model: 'llama3.2:3b',
     alternates: ['qwen2.5:3b', 'llama3.1:8b'],
     thinking: false,
+    tools: false,
     options: { num_ctx: 4096, num_predict: 1024, temperature: 0.6, top_p: 0.9 },
     systemPrompt: `${BASE_PROMPT} A short paragraph, or a few bullets if the answer is genuinely a list.`
   },
@@ -50,12 +82,13 @@ export const TIERS: Record<TierId, Tier> = {
   thinker: {
     id: 'thinker',
     label: 'Thinker',
-    blurb: 'Reasons step by step before answering.',
+    blurb: 'Reasons step by step. Can run commands.',
     mode: 'dev',
     speed: 'slow',
     model: 'qwen3:4b',
     alternates: ['qwen3:8b', 'deepseek-r1:7b'],
     thinking: true,
+    tools: true,
     options: { num_ctx: 8192, num_predict: 2048, temperature: 0.6, top_p: 0.95 },
     systemPrompt: `${BASE_PROMPT} Reason it through privately, then give the conclusion briefly. State any assumption you had to make, in one line.`
   },
@@ -63,12 +96,13 @@ export const TIERS: Record<TierId, Tier> = {
   deep: {
     id: 'deep',
     label: 'Deep Thinker',
-    blurb: 'Most capable, slowest. Worth it for real code.',
+    blurb: 'Most capable, slowest. Can run commands.',
     mode: 'dev',
     speed: 'slowest',
     model: 'qwen2.5-coder:14b',
     alternates: ['qwen3:8b', 'qwen3:4b'],
     thinking: false,
+    tools: true,
     options: { num_ctx: 8192, num_predict: 4096, temperature: 0.3, top_p: 0.9 },
     systemPrompt:
       `${BASE_PROMPT} Be thorough where it matters and nowhere else. ` +
