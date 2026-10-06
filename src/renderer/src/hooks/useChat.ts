@@ -1,23 +1,29 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import type { ChatMessage } from '@shared/types'
+import type { ChatMessage, TierId } from '@shared/types'
 
 let counter = 0
-const nextId = (): string => `m${Date.now().toString(36)}${(counter++).toString(36)}`
+export const nextId = (): string => `m${Date.now().toString(36)}${(counter++).toString(36)}`
 
 export interface ChatState {
   messages: ChatMessage[]
   streaming: boolean
-  /** Tokens/sec reported for the most recent completed answer. */
+  /** Tokens/sec for the most recent completed answer. */
   lastSpeed: number | null
-  send(text: string, model?: string): void
+  /** Model load time for the last answer; near zero means it was warm. */
+  lastLoadMs: number | null
+  send(text: string, tier: TierId, displayText?: string): void
+  /** Adds a local-only note (command output, errors) without calling the model. */
+  note(content: string, error?: boolean): void
   stop(): void
   clear(): void
+  replace(messages: ChatMessage[]): void
 }
 
 export function useChat(): ChatState {
   const [messages, setMessages] = useState<ChatMessage[]>([])
   const [streaming, setStreaming] = useState(false)
   const [lastSpeed, setLastSpeed] = useState<number | null>(null)
+  const [lastLoadMs, setLastLoadMs] = useState<number | null>(null)
 
   /** Request currently streaming; also the key we match incoming deltas against. */
   const activeRequest = useRef<string | null>(null)
@@ -46,6 +52,7 @@ export function useChat(): ChatState {
     const offDone = window.wumpy.chat.onDone((d) => {
       if (d.requestId !== activeRequest.current) return
       setLastSpeed(d.tokensPerSecond ?? null)
+      setLastLoadMs(d.loadMs ?? null)
       activeRequest.current = null
       activeMessage.current = null
       setStreaming(false)
@@ -66,43 +73,59 @@ export function useChat(): ChatState {
     }
   }, [patchActive])
 
-  const send = useCallback(
-    (text: string, model?: string) => {
-      const trimmed = text.trim()
-      if (!trimmed || activeRequest.current) return
+  const send = useCallback((text: string, tier: TierId, displayText?: string) => {
+    const trimmed = text.trim()
+    if (!trimmed || activeRequest.current) return
 
-      const userMessage: ChatMessage = {
-        id: nextId(),
-        role: 'user',
-        content: trimmed,
-        createdAt: Date.now()
-      }
-      const assistantMessage: ChatMessage = {
+    const userMessage: ChatMessage = {
+      id: nextId(),
+      role: 'user',
+      // A command such as /plan sends a wrapped prompt but shows what was typed.
+      content: displayText ?? trimmed,
+      createdAt: Date.now()
+    }
+    const assistantMessage: ChatMessage = {
+      id: nextId(),
+      role: 'assistant',
+      content: '',
+      createdAt: Date.now(),
+      tier
+    }
+
+    // History comes from the ref, never from inside a state updater: React
+    // replays updaters under StrictMode, which would fire the request twice.
+    // The wrapped text is what the model sees.
+    // Command output and failed turns are not conversation: feeding /help back
+    // to the model would waste context and confuse the next answer.
+    const history = [
+      ...messagesRef.current.filter((m) => !m.error && !m.local),
+      { ...userMessage, content: trimmed }
+    ].map(({ role, content }) => ({ role, content }))
+
+    const requestId = nextId()
+    activeRequest.current = requestId
+    activeMessage.current = assistantMessage.id
+
+    setMessages((prev) => [...prev, userMessage, assistantMessage])
+    setStreaming(true)
+    setLastSpeed(null)
+
+    void window.wumpy.chat.send({ requestId, messages: history, tier })
+  }, [])
+
+  const note = useCallback((content: string, error = false) => {
+    setMessages((prev) => [
+      ...prev,
+      {
         id: nextId(),
         role: 'assistant',
-        content: '',
+        content: error ? '' : content,
+        error: error ? content : undefined,
         createdAt: Date.now(),
-        model
+        local: true
       }
-
-      // History comes from the ref, never from inside a state updater: React
-      // replays updaters under StrictMode, which would fire the request twice.
-      const history = [...messagesRef.current, userMessage].map(({ role, content }) => ({
-        role,
-        content
-      }))
-      const requestId = nextId()
-      activeRequest.current = requestId
-      activeMessage.current = assistantMessage.id
-
-      setMessages((prev) => [...prev, userMessage, assistantMessage])
-      setStreaming(true)
-      setLastSpeed(null)
-
-      void window.wumpy.chat.send({ requestId, messages: history, model })
-    },
-    []
-  )
+    ])
+  }, [])
 
   const stop = useCallback(() => {
     if (!activeRequest.current) return
@@ -116,7 +139,16 @@ export function useChat(): ChatState {
     stop()
     setMessages([])
     setLastSpeed(null)
+    setLastLoadMs(null)
   }, [stop])
 
-  return { messages, streaming, lastSpeed, send, stop, clear }
+  const replace = useCallback(
+    (next: ChatMessage[]) => {
+      stop()
+      setMessages(next)
+    },
+    [stop]
+  )
+
+  return { messages, streaming, lastSpeed, lastLoadMs, send, note, stop, clear, replace }
 }

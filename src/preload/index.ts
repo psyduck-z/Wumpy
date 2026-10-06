@@ -4,10 +4,16 @@ import type {
   ChatDelta,
   ChatDone,
   ChatError,
+  ChatMessage,
   ChatRequest,
+  ChatSummary,
+  Dock,
   HotkeyState,
   OllamaModel,
   OllamaStatus,
+  SavedChat,
+  TierId,
+  TierStatus,
   WumpySettings
 } from '@shared/types'
 
@@ -28,6 +34,11 @@ const api = {
     status: (): Promise<OllamaStatus> => ipcRenderer.invoke(IPC.ollamaStatus),
     models: (): Promise<OllamaModel[]> => ipcRenderer.invoke(IPC.ollamaModels)
   },
+  tiers: {
+    status: (): Promise<TierStatus[]> => ipcRenderer.invoke(IPC.tiersStatus),
+    warm: (id: TierId): Promise<TierStatus[]> => ipcRenderer.invoke(IPC.tiersWarm, id),
+    onStatus: (cb: (s: TierStatus[]) => void) => on(IPC.tiersStatus, cb)
+  },
   chat: {
     send: (req: ChatRequest): Promise<void> => ipcRenderer.invoke(IPC.chatSend, req),
     abort: (requestId: string): void => ipcRenderer.send(IPC.chatAbort, requestId),
@@ -35,10 +46,26 @@ const api = {
     onDone: (cb: (d: ChatDone) => void) => on(IPC.chatDone, cb),
     onError: (cb: (d: ChatError) => void) => on(IPC.chatError, cb)
   },
+  chats: {
+    list: (): Promise<ChatSummary[]> => ipcRenderer.invoke(IPC.chatsList),
+    load: (id: string): Promise<SavedChat | null> => ipcRenderer.invoke(IPC.chatsLoad, id),
+    save: (chat: {
+      id: string
+      title?: string
+      messages: ChatMessage[]
+      tier: TierId
+    }): Promise<ChatSummary | null> => ipcRenderer.invoke(IPC.chatsSave, chat),
+    rename: (id: string, title: string): Promise<ChatSummary | null> =>
+      ipcRenderer.invoke(IPC.chatsRename, id, title),
+    /** Pass '*' to clear every saved chat; resolves to the number removed. */
+    delete: (id: string): Promise<boolean | number> => ipcRenderer.invoke(IPC.chatsDelete, id)
+  },
   panel: {
     hide: (): void => ipcRenderer.send(IPC.panelHide),
     setPinned: (pinned: boolean): void => ipcRenderer.send(IPC.panelPin, pinned),
-    onShown: (cb: () => void) => on(IPC.panelShown, cb)
+    setDock: (dock: Dock): void => ipcRenderer.send(IPC.panelDock, dock),
+    onShown: (cb: () => void) => on(IPC.panelShown, cb),
+    onDock: (cb: (d: Dock) => void) => on(IPC.panelDock, cb)
   },
   hotkey: {
     get: (): Promise<HotkeyState> => ipcRenderer.invoke(IPC.hotkeyState),

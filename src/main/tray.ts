@@ -2,12 +2,14 @@ import { Tray, Menu, nativeImage, app, shell } from 'electron'
 import { join } from 'node:path'
 import type { Panel } from './panel'
 import type { SettingsStore } from './store'
-import type { HotkeyState } from '@shared/types'
+import type { Dock, HotkeyState, TierStatus } from '@shared/types'
+import { TIERS, TIER_ORDER, defaultTierFor, SPEED_LABEL } from '@shared/tiers'
 
 export interface TrayDeps {
   panel: Panel
   settings: SettingsStore
   getHotkeyState(): HotkeyState
+  getTierStatuses(): TierStatus[]
   onToggleLaunchAtLogin(enabled: boolean): void
 }
 
@@ -18,6 +20,15 @@ export function resourcePath(file: string): string {
     : join(app.getAppPath(), 'resources', file)
 }
 
+const DOCK_LABELS: Array<{ dock: Dock; label: string }> = [
+  { dock: 'left', label: 'Left edge (tall)' },
+  { dock: 'right', label: 'Right edge (tall)' },
+  { dock: 'top-left', label: 'Top left (compact)' },
+  { dock: 'top-right', label: 'Top right (compact)' },
+  { dock: 'bottom-left', label: 'Bottom left (compact)' },
+  { dock: 'bottom-right', label: 'Bottom right (compact)' }
+]
+
 export function createTray(deps: TrayDeps): Tray {
   const icon = nativeImage.createFromPath(resourcePath('tray.png'))
   const tray = new Tray(icon.isEmpty() ? nativeImage.createEmpty() : icon)
@@ -26,8 +37,11 @@ export function createTray(deps: TrayDeps): Tray {
     const { active, intercepted } = deps.getHotkeyState()
     const live = intercepted ?? active
     const settings = deps.settings.all()
+    const statuses = deps.getTierStatuses()
+    const byId = new Map(statuses.map((s) => [s.id, s]))
 
     tray.setToolTip(live ? `Wumpy — ${prettify(live)}` : 'Wumpy — no hotkey registered')
+
     tray.setContextMenu(
       Menu.buildFromTemplate([
         {
@@ -35,16 +49,73 @@ export function createTray(deps: TrayDeps): Tray {
           click: () => deps.panel.show()
         },
         { type: 'separator' },
+
         {
-          label: `Model: ${settings.chatModel}`,
-          enabled: false
+          label: settings.mode === 'quick' ? 'Mode: Quick' : 'Mode: Developer',
+          submenu: [
+            {
+              label: 'Quick  — Flash & Fast',
+              type: 'radio',
+              checked: settings.mode === 'quick',
+              click: () => {
+                deps.settings.patch({ mode: 'quick', tier: defaultTierFor('quick') })
+                render()
+              }
+            },
+            {
+              label: 'Developer  — Thinker & Deep Thinker',
+              type: 'radio',
+              checked: settings.mode === 'dev',
+              click: () => {
+                deps.settings.patch({ mode: 'dev', tier: defaultTierFor('dev') })
+                render()
+              }
+            }
+          ]
         },
         {
-          label: 'Thinking mode',
+          label: `Tier: ${TIERS[settings.tier]?.label ?? settings.tier}`,
+          submenu: TIER_ORDER.map((id) => {
+            const tier = TIERS[id]
+            const status = byId.get(id)
+            const suffix = !status?.installed
+              ? '  (not installed)'
+              : status.warm
+                ? '  • warm'
+                : ''
+            return {
+              label: `${tier.label}  — ${SPEED_LABEL[tier.speed]}${suffix}`,
+              type: 'radio' as const,
+              checked: settings.tier === id,
+              enabled: status?.installed ?? false,
+              click: () => {
+                // Selecting a tier follows its mode, so the theme matches.
+                deps.settings.patch({ tier: id, mode: tier.mode })
+                render()
+              }
+            }
+          })
+        },
+        {
+          label: 'Position',
+          submenu: DOCK_LABELS.map(({ dock, label }) => ({
+            label,
+            type: 'radio' as const,
+            checked: settings.dock === dock,
+            click: () => {
+              deps.panel.setDock(dock)
+              render()
+            }
+          }))
+        },
+        { type: 'separator' },
+
+        {
+          label: 'Show reasoning',
           type: 'checkbox',
-          checked: settings.thinking,
+          checked: settings.showReasoning,
           click: (item) => {
-            deps.settings.patch({ thinking: item.checked })
+            deps.settings.patch({ showReasoning: item.checked })
             render()
           }
         },
@@ -54,6 +125,15 @@ export function createTray(deps: TrayDeps): Tray {
           checked: settings.hideOnBlur,
           click: (item) => {
             deps.settings.patch({ hideOnBlur: item.checked })
+            render()
+          }
+        },
+        {
+          label: 'Preload models at startup',
+          type: 'checkbox',
+          checked: settings.warmOnStart,
+          click: (item) => {
+            deps.settings.patch({ warmOnStart: item.checked })
             render()
           }
         },
@@ -68,11 +148,14 @@ export function createTray(deps: TrayDeps): Tray {
           }
         },
         { type: 'separator' },
+
         {
           label: 'Open settings file',
-          click: () => {
-            void shell.openPath(join(app.getPath('userData'), 'settings.json'))
-          }
+          click: () => void shell.openPath(join(app.getPath('userData'), 'settings.json'))
+        },
+        {
+          label: 'Open saved chats folder',
+          click: () => void shell.openPath(join(app.getPath('userData'), 'chats'))
         },
         { type: 'separator' },
         { label: 'Quit Wumpy', click: () => app.quit() }

@@ -1,4 +1,4 @@
-import type { ChatMessage, OllamaModel, OllamaStatus } from '@shared/types'
+import type { ChatMessage, OllamaModel, OllamaStatus, TierOptions } from '@shared/types'
 
 interface OllamaChatChunk {
   message?: { content?: string; thinking?: string }
@@ -6,24 +6,40 @@ interface OllamaChatChunk {
   eval_count?: number
   eval_duration?: number
   total_duration?: number
+  load_duration?: number
   error?: string
+}
+
+export interface StreamStats {
+  tokensPerSecond?: number
+  totalDurationMs?: number
+  loadMs?: number
 }
 
 export interface StreamHandlers {
   onDelta(delta: { content?: string; thinking?: string }): void
-  onDone(stats: { tokensPerSecond?: number; totalDurationMs?: number }): void
+  onDone(stats: StreamStats): void
   onError(message: string): void
+}
+
+export interface ChatOptions {
+  thinking: boolean
+  options: TierOptions
+  keepAlive: string
+  systemPrompt: string
 }
 
 /**
  * Minimal Ollama client. Everything lives in the main process so the renderer
- * never needs network access and we keep a single place to cancel in-flight work.
+ * never needs network access and there is a single place to cancel in-flight work.
  */
 export class OllamaClient {
   private host: string
   /** Cache of `/api/show` capability lookups, keyed by model name. */
   private capabilities = new Map<string, string[]>()
   private inflight = new Map<string, AbortController>()
+  /** Models we have asked Ollama to keep resident. */
+  private warmed = new Set<string>()
 
   constructor(host: string) {
     this.host = host.replace(/\/+$/, '')
@@ -34,14 +50,13 @@ export class OllamaClient {
     if (next !== this.host) {
       this.host = next
       this.capabilities.clear()
+      this.warmed.clear()
     }
   }
 
   async status(): Promise<OllamaStatus> {
     try {
-      const res = await fetch(`${this.host}/api/version`, {
-        signal: AbortSignal.timeout(2500)
-      })
+      const res = await fetch(`${this.host}/api/version`, { signal: AbortSignal.timeout(2500) })
       if (!res.ok) return { reachable: false, error: `HTTP ${res.status}` }
       const body = (await res.json()) as { version?: string }
       return { reachable: true, version: body.version }
@@ -70,6 +85,51 @@ export class OllamaClient {
     } catch {
       return []
     }
+  }
+
+  /** Models Ollama currently holds in memory, from `/api/ps`. */
+  async resident(): Promise<Set<string>> {
+    try {
+      const res = await fetch(`${this.host}/api/ps`, { signal: AbortSignal.timeout(3000) })
+      if (!res.ok) return new Set()
+      const body = (await res.json()) as { models?: Array<{ name: string }> }
+      return new Set((body.models ?? []).map((m) => m.name))
+    } catch {
+      return new Set()
+    }
+  }
+
+  /**
+   * Loads a model into memory without generating anything.
+   *
+   * This is the difference between a 4.7s and a 0.2s first word: `/api/generate`
+   * with an empty prompt makes Ollama resident the model and start the
+   * keep-alive clock, so the user's actual question skips the load entirely.
+   */
+  async warm(model: string, keepAlive: string): Promise<boolean> {
+    try {
+      const res = await fetch(`${this.host}/api/generate`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ model, keep_alive: keepAlive }),
+        signal: AbortSignal.timeout(180_000)
+      })
+      if (!res.ok) return false
+      await res.text()
+      this.warmed.add(model)
+      return true
+    } catch {
+      return false
+    }
+  }
+
+  isWarm(model: string): boolean {
+    return this.warmed.has(model)
+  }
+
+  /** Records models Ollama already holds, so a restart does not report them cold. */
+  markWarm(models: Iterable<string>): void {
+    for (const m of models) this.warmed.add(m)
   }
 
   /**
@@ -110,14 +170,22 @@ export class OllamaClient {
     requestId: string,
     model: string,
     messages: Array<Pick<ChatMessage, 'role' | 'content'>>,
-    opts: { thinking: boolean },
+    opts: ChatOptions,
     handlers: StreamHandlers
   ): Promise<void> {
     const controller = new AbortController()
     this.inflight.set(requestId, controller)
 
     try {
-      const payload: Record<string, unknown> = { model, messages, stream: true }
+      const payload: Record<string, unknown> = {
+        model,
+        messages: opts.systemPrompt
+          ? [{ role: 'system', content: opts.systemPrompt }, ...messages]
+          : messages,
+        stream: true,
+        options: opts.options,
+        keep_alive: opts.keepAlive
+      }
 
       // Only ever send `think: true`, never `think: false`.
       //
@@ -126,9 +194,6 @@ export class OllamaClient {
       // with a stray `</think>` terminator, for no token saving (47 vs 44
       // tokens). Omitting the field lets Ollama parse reasoning into the
       // separate `message.thinking` field and keeps `content` clean.
-      //
-      // So the setting controls whether reasoning is *shown*, not whether a
-      // reasoning model reasons — that is the model's nature, not a flag.
       if (opts.thinking && (await this.supportsThinking(model))) payload.think = true
 
       const res = await fetch(`${this.host}/api/chat`, {
@@ -141,15 +206,20 @@ export class OllamaClient {
       if (!res.ok || !res.body) {
         const detail = await res.text().catch(() => '')
         handlers.onError(
-          detail ? `Ollama returned ${res.status}: ${truncate(detail, 300)}` : `Ollama returned ${res.status}`
+          detail
+            ? `Ollama returned ${res.status}: ${truncate(detail, 300)}`
+            : `Ollama returned ${res.status}`
         )
         return
       }
 
+      // Generating at all means the model is resident now.
+      this.warmed.add(model)
+
       const reader = res.body.getReader()
       const decoder = new TextDecoder()
       let buffer = ''
-      let stats: { tokensPerSecond?: number; totalDurationMs?: number } = {}
+      let stats: StreamStats = {}
 
       for (;;) {
         const { done, value } = await reader.read()
@@ -193,12 +263,13 @@ export class OllamaClient {
   }
 }
 
-function readStats(chunk: OllamaChatChunk): { tokensPerSecond?: number; totalDurationMs?: number } {
-  const stats: { tokensPerSecond?: number; totalDurationMs?: number } = {}
+function readStats(chunk: OllamaChatChunk): StreamStats {
+  const stats: StreamStats = {}
   if (chunk.eval_count && chunk.eval_duration) {
     stats.tokensPerSecond = chunk.eval_count / (chunk.eval_duration / 1e9)
   }
   if (chunk.total_duration) stats.totalDurationMs = chunk.total_duration / 1e6
+  if (chunk.load_duration !== undefined) stats.loadMs = chunk.load_duration / 1e6
   return stats
 }
 

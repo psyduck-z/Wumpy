@@ -1,7 +1,18 @@
 import { app, ipcMain, nativeImage, Tray } from 'electron'
 import { IPC } from '@shared/types'
-import type { ChatRequest, HotkeyState, WumpySettings } from '@shared/types'
+import type {
+  ChatMessage,
+  ChatRequest,
+  ChatSummary,
+  Dock,
+  HotkeyState,
+  TierId,
+  TierStatus,
+  WumpySettings
+} from '@shared/types'
+import { TIERS, TIER_ORDER } from '@shared/tiers'
 import { SettingsStore } from './store'
+import { ChatStore } from './chats'
 import { OllamaClient } from './ollama'
 import { Panel } from './panel'
 import { createTray, resourcePath } from './tray'
@@ -19,11 +30,65 @@ app.setAppUserModelId('dev.psyduckz.wumpy')
 app.on('window-all-closed', () => {})
 
 let settings: SettingsStore
+let chats: ChatStore
 let ollama: OllamaClient
 let panel: Panel
 let tray: (Tray & { refresh(): void }) | null = null
 let hotkeyState: HotkeyState = { active: null, failed: [], intercepted: null }
 let lowLevelHook: LowLevelHook | null = null
+
+/** Models installed in Ollama, refreshed whenever we look. */
+let installedModels: string[] = []
+
+/* ------------------------------------------------------------------- tiers */
+
+/**
+ * Resolves a tier to a model that is actually installed, preferring the tier's
+ * first choice and then its alternates. Returns null when none are present, so
+ * the UI can say "not installed" instead of failing at send time.
+ */
+function resolveTierModel(id: TierId): string | null {
+  const override = settings.get('tierModels')[id]
+  if (override && installedModels.includes(override)) return override
+
+  const tier = TIERS[id]
+  const candidates = [tier.model, ...tier.alternates]
+  return candidates.find((m) => installedModels.includes(m)) ?? null
+}
+
+function tierStatuses(): TierStatus[] {
+  return TIER_ORDER.map((id) => {
+    const resolvedModel = resolveTierModel(id)
+    return {
+      id,
+      resolvedModel,
+      installed: resolvedModel !== null,
+      warm: resolvedModel ? ollama.isWarm(resolvedModel) : false
+    }
+  })
+}
+
+async function refreshModels(): Promise<void> {
+  installedModels = (await ollama.models()).map((m) => m.name)
+  // Reconcile with what Ollama already holds, so restarting Wumpy does not
+  // report models cold when they are in fact still resident.
+  ollama.markWarm(await ollama.resident())
+  panel.send(IPC.tiersStatus, tierStatuses())
+  tray?.refresh()
+}
+
+/**
+ * Preloads a tier's model so the next question skips the load entirely.
+ * Measured: cold first-word 4.7s, warm 0.19s.
+ */
+async function warmTier(id: TierId): Promise<void> {
+  const model = resolveTierModel(id)
+  if (!model || ollama.isWarm(model)) return
+  await ollama.warm(model, settings.get('keepAlive'))
+  panel.send(IPC.tiersStatus, tierStatuses())
+}
+
+/* ----------------------------------------------------------------- hotkeys */
 
 function applyHotkeys(): void {
   const intercepted = hotkeyState.intercepted
@@ -52,11 +117,13 @@ async function startLowLevelHook(): Promise<void> {
   hotkeyState.intercepted = ok ? 'Super+C' : null
   if (!ok) {
     lowLevelHook = null
-    console.warn('[wumpy] Win+C interception unavailable; using the accelerator fallback')
+    console.warn('[wumpy] Win+C interception unavailable; use the tray icon')
   }
   tray?.refresh()
   panel.send(IPC.hotkeyState, hotkeyState)
 }
+
+/* --------------------------------------------------------------------- IPC */
 
 function registerIpc(): void {
   ipcMain.handle(IPC.settingsGet, () => settings.all())
@@ -65,8 +132,9 @@ function registerIpc(): void {
     const next = settings.patch(patch)
     if (patch.ollamaHost) ollama.setHost(next.ollamaHost)
     if (patch.hotkeys) applyHotkeys()
-    if (patch.panelWidth) panel.applyWidth()
+    if (patch.tallWidth || patch.compactWidth || patch.compactHeight) panel.applyGeometry()
     if (patch.launchAtLogin !== undefined) syncLaunchAtLogin(patch.launchAtLogin)
+    if (patch.tier) void warmTier(patch.tier)
     tray?.refresh()
     return next
   })
@@ -74,14 +142,35 @@ function registerIpc(): void {
   ipcMain.handle(IPC.ollamaStatus, () => ollama.status())
   ipcMain.handle(IPC.ollamaModels, () => ollama.models())
 
-  ipcMain.handle(IPC.chatSend, async (_e, req: ChatRequest) => {
-    const { systemPrompt, chatModel, thinking } = settings.all()
-    const model = req.model ?? chatModel
-    const messages = systemPrompt
-      ? [{ role: 'system' as const, content: systemPrompt }, ...req.messages]
-      : req.messages
+  ipcMain.handle(IPC.tiersStatus, async () => {
+    await refreshModels()
+    return tierStatuses()
+  })
+  ipcMain.handle(IPC.tiersWarm, async (_e, id: TierId) => {
+    await warmTier(id)
+    return tierStatuses()
+  })
 
-    await ollama.chat(req.requestId, model, messages, { thinking }, {
+  ipcMain.handle(IPC.chatSend, async (_e, req: ChatRequest) => {
+    const tier = TIERS[req.tier] ?? TIERS.fast
+    const model = resolveTierModel(req.tier)
+
+    if (!model) {
+      panel.send(IPC.chatError, {
+        requestId: req.requestId,
+        message:
+          `No model installed for ${tier.label}. Install one with ` +
+          `\`ollama pull ${tier.model}\`, then reopen Wumpy.`
+      })
+      return
+    }
+
+    await ollama.chat(req.requestId, model, req.messages, {
+      thinking: tier.thinking,
+      options: tier.options,
+      keepAlive: settings.get('keepAlive'),
+      systemPrompt: tier.systemPrompt
+    }, {
       onDelta: (delta) => panel.send(IPC.chatDelta, { requestId: req.requestId, ...delta }),
       onDone: (stats) => panel.send(IPC.chatDone, { requestId: req.requestId, ...stats }),
       onError: (message) => panel.send(IPC.chatError, { requestId: req.requestId, message })
@@ -91,28 +180,21 @@ function registerIpc(): void {
   ipcMain.on(IPC.chatAbort, (_e, requestId: string) => ollama.abort(requestId))
   ipcMain.on(IPC.panelHide, () => panel.hide())
   ipcMain.on(IPC.panelPin, (_e, pinned: boolean) => panel.setPinned(pinned))
+  ipcMain.on(IPC.panelDock, (_e, dock: Dock) => panel.setDock(dock))
   ipcMain.handle(IPC.hotkeyState, () => hotkeyState)
-}
 
-/**
- * Keeps the configured model honest: a settings file can outlive the model it
- * names (uninstalled, renamed, pulled on another machine), and a stale name
- * would make every message fail with a raw 404 from Ollama.
- */
-async function reconcileModel(): Promise<void> {
-  const installed = await ollama.models()
-  if (installed.length === 0) return
-
-  const configured = settings.get('chatModel')
-  if (installed.some((m) => m.name === configured)) return
-
-  // Prefer a tag that differs only by suffix (e.g. `qwen3:4b` vs `qwen3:latest`).
-  const base = configured.split(':')[0]
-  const fallback = installed.find((m) => m.name.startsWith(`${base}:`)) ?? installed[0]
-
-  console.warn(`[wumpy] model "${configured}" is not installed; using "${fallback.name}"`)
-  settings.patch({ chatModel: fallback.name })
-  tray?.refresh()
+  // ---- saved chats ----
+  ipcMain.handle(IPC.chatsList, (): ChatSummary[] => chats.list())
+  ipcMain.handle(IPC.chatsLoad, (_e, id: string) => chats.load(id))
+  ipcMain.handle(
+    IPC.chatsSave,
+    (_e, chat: { id: string; title?: string; messages: ChatMessage[]; tier: TierId }) =>
+      chats.save(chat)
+  )
+  ipcMain.handle(IPC.chatsRename, (_e, id: string, title: string) => chats.rename(id, title))
+  ipcMain.handle(IPC.chatsDelete, (_e, id: string) =>
+    id === '*' ? chats.deleteAll() : chats.delete(id)
+  )
 }
 
 function syncLaunchAtLogin(enabled: boolean): void {
@@ -121,8 +203,11 @@ function syncLaunchAtLogin(enabled: boolean): void {
   app.setLoginItemSettings({ openAtLogin: enabled, args: ['--hidden'] })
 }
 
-void app.whenReady().then(() => {
+/* ------------------------------------------------------------------ bootup */
+
+void app.whenReady().then(async () => {
   settings = new SettingsStore()
+  chats = new ChatStore()
   ollama = new OllamaClient(settings.get('ollamaHost'))
   panel = new Panel(settings)
 
@@ -136,16 +221,31 @@ void app.whenReady().then(() => {
     panel,
     settings,
     getHotkeyState: () => hotkeyState,
+    getTierStatuses: tierStatuses,
     onToggleLaunchAtLogin: syncLaunchAtLogin
   }) as Tray & { refresh(): void }
 
   applyHotkeys()
   void startLowLevelHook()
   syncLaunchAtLogin(settings.get('launchAtLogin'))
-  void reconcileModel()
+
+  await refreshModels()
 
   // Launched by the login item: stay in the tray instead of popping up.
   if (!process.argv.includes('--hidden')) panel.show()
+
+  if (settings.get('warmOnStart')) {
+    // Warm the selected tier first so the user's first question is instant,
+    // then the other tier in the same mode. The heavy dev models are left for
+    // an explicit switch rather than loading gigabytes nobody asked for.
+    void (async () => {
+      await warmTier(settings.get('tier'))
+      const mode = settings.get('mode')
+      for (const id of TIER_ORDER) {
+        if (TIERS[id].mode === mode) await warmTier(id)
+      }
+    })()
+  }
 })
 
 app.on('second-instance', () => panel?.show())

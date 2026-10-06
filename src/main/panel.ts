@@ -1,16 +1,18 @@
-import { BrowserWindow, screen, shell } from 'electron'
+import { BrowserWindow, screen, shell, app } from 'electron'
 import { join } from 'node:path'
-import { IPC } from '@shared/types'
+import { IPC, isTall, type Dock } from '@shared/types'
 import type { SettingsStore } from './store'
 
 /** Gap between the panel card and the screen edges, in px. */
 const EDGE_MARGIN = 12
 
 /**
- * The overlay window: a frameless, transparent, always-on-top strip pinned to the
- * right edge of whichever display the cursor is on. It is created once at startup
- * and only ever shown/hidden, so the hotkey feels instant instead of booting a
- * renderer on every press.
+ * The overlay window: frameless, transparent and always on top.
+ *
+ * It docks either as a full-height bar on the left or right edge, or as a
+ * compact card in one of the four corners. The window is created once at
+ * startup and only ever shown or hidden, so the hotkey feels instant rather
+ * than booting a renderer on every press.
  */
 export class Panel {
   private window: BrowserWindow | null = null
@@ -20,11 +22,11 @@ export class Panel {
   constructor(private readonly settings: SettingsStore) {}
 
   create(): BrowserWindow {
-    const width = this.settings.get('panelWidth') + EDGE_MARGIN * 2
+    const { width, height } = this.geometryFor(this.settings.get('dock'))
 
     this.window = new BrowserWindow({
       width,
-      height: 800,
+      height,
       show: false,
       frame: false,
       transparent: true,
@@ -61,6 +63,19 @@ export class Panel {
       this.window = null
     })
 
+    // Surface renderer errors in the dev terminal; without this they are only
+    // visible in devtools, which an overlay window rarely has open.
+    if (!app.isPackaged) {
+      this.window.webContents.on('console-message', (_e, level, message, line, source) => {
+        if (level < 2) return // warnings and errors only
+        const where = source ? ` (${source.split('/').pop()}:${line})` : ''
+        console.error(`[renderer] ${message}${where}`)
+      })
+      this.window.webContents.on('render-process-gone', (_e, details) =>
+        console.error('[renderer] process gone:', details.reason)
+      )
+    }
+
     // Never let the overlay navigate; links belong in the real browser.
     this.window.webContents.setWindowOpenHandler(({ url }) => {
       void shell.openExternal(url)
@@ -76,20 +91,43 @@ export class Panel {
     return this.window
   }
 
-  /** Re-anchors the panel to the display the cursor currently sits on. */
-  private reposition(): void {
-    if (!this.window) return
+  /** Window bounds for a dock, on whichever display the cursor is on. */
+  private geometryFor(dock: Dock): { x: number; y: number; width: number; height: number } {
     const cursor = screen.getCursorScreenPoint()
     const { workArea } = screen.getDisplayNearestPoint(cursor)
-    const width = this.settings.get('panelWidth') + EDGE_MARGIN * 2
-    const height = workArea.height - EDGE_MARGIN * 2
+    const s = this.settings.all()
 
-    this.window.setBounds({
-      x: workArea.x + workArea.width - width,
-      y: workArea.y + EDGE_MARGIN,
+    if (isTall(dock)) {
+      const width = s.tallWidth + EDGE_MARGIN * 2
+      const height = workArea.height - EDGE_MARGIN * 2
+      const x =
+        dock === 'right' ? workArea.x + workArea.width - width : workArea.x
+      return { x, y: workArea.y + EDGE_MARGIN, width, height }
+    }
+
+    // Compact card: clamped so it still fits on small displays.
+    const width = Math.min(s.compactWidth, workArea.width - EDGE_MARGIN * 2) + EDGE_MARGIN * 2
+    const height = Math.min(s.compactHeight, workArea.height - EDGE_MARGIN * 2) + EDGE_MARGIN * 2
+    const right = dock === 'top-right' || dock === 'bottom-right'
+    const bottom = dock === 'bottom-left' || dock === 'bottom-right'
+
+    return {
+      x: right ? workArea.x + workArea.width - width : workArea.x,
+      y: bottom ? workArea.y + workArea.height - height : workArea.y,
       width,
       height
-    })
+    }
+  }
+
+  private reposition(): void {
+    if (!this.window) return
+    this.window.setBounds(this.geometryFor(this.settings.get('dock')))
+  }
+
+  setDock(dock: Dock): void {
+    this.settings.patch({ dock })
+    this.reposition()
+    this.window?.webContents.send(IPC.panelDock, dock)
   }
 
   show(): void {
@@ -124,7 +162,8 @@ export class Panel {
     return this.pinned
   }
 
-  applyWidth(): void {
+  /** Re-applies geometry after a size setting changes. */
+  applyGeometry(): void {
     if (this.window?.isVisible()) this.reposition()
   }
 
