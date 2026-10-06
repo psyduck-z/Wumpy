@@ -54,12 +54,16 @@ export const NO_SHELL_PROMPT = [
  * cannot; the user types a slash command.
  */
 export const APP_PROMPT = [
-  'You cannot change Wumpy itself: chats, titles, tier, mode or settings.',
-  'Those are slash commands the user types. If asked to do one, reply with just the command.',
-  'The complete list is /rename, /new, /resume, /compact, /tier, /mode, /dock.',
-  'Never invent a command that is not on that list, and never claim you already did one.',
-  'Example: asked to rename the chat, answer: Use `/rename Speculative Fiction`'
-].join('\n')
+  'Telling the user a fact is different from changing something.',
+  '',
+  'ASKED A QUESTION about the chat, tier, mode or date: answer it from the facts above.',
+  'Never reply to a question with a slash command.',
+  '',
+  'ASKED TO CHANGE the chat title, start a new chat, switch tier or mode: you cannot do',
+  'it yourself, so reply with the command the user should type, and nothing else.',
+  'The only commands that exist are /rename, /new, /resume, /compact, /tier, /mode, /dock.',
+  'Never invent one outside that list, and never claim you already ran one.'
+].join(String.fromCharCode(10))
 
 const BASE_PROMPT =
   'You are Wumpy, a local assistant in the Windows system tray. ' +

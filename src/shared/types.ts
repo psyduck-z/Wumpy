@@ -201,6 +201,14 @@ export interface ChatRequest {
   requestId: string
   messages: Array<Pick<ChatMessage, 'role' | 'content'>>
   tier: TierId
+  /**
+   * Live facts the model has no other way to know. Without these it guesses
+   * at things it could simply be told, like what the current chat is called.
+   */
+  context: {
+    chatTitle: string | null
+    messageCount: number
+  }
 }
 
 export interface ChatDelta {

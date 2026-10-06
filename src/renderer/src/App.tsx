@@ -60,6 +60,9 @@ export default function App(): React.JSX.Element {
   /** Set once the user renames, so automatic titling stops touching it. */
   const [titleLocked, setTitleLocked] = useState(false)
 
+  // Keep the model's view of the app current without threading it through send().
+  chat.setContext({ chatTitle })
+
   const scroller = useRef<HTMLDivElement>(null)
   /** False once the user scrolls up, so streaming does not yank them back down. */
   const stickToBottom = useRef(true)

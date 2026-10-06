@@ -1,4 +1,5 @@
 import { app, dialog, ipcMain, nativeImage, Tray } from 'electron'
+import { homedir } from 'node:os'
 import { IPC } from '@shared/types'
 import type {
   ChatMessage,
@@ -173,6 +174,7 @@ function registerIpc(): void {
     // shell rules when it can act, and with an explicit "you cannot, say so"
     // when it cannot. Without the second half it invents having checked.
     const systemPrompt = [
+      describeContext(req, tier.label),
       tier.systemPrompt,
       APP_PROMPT,
       canAct ? SHELL_PROMPT : NO_SHELL_PROMPT
@@ -426,4 +428,29 @@ function titleCase(text: string): string {
       return word.charAt(0).toUpperCase() + word.slice(1)
     })
     .join(' ')
+}
+
+/**
+ * Live facts, handed to the model every turn.
+ *
+ * A local model has no clock, no idea which chat it is in and no view of the
+ * app around it, so without this it either guesses or refuses. Telling it is
+ * free and removes a whole class of confident wrong answers.
+ */
+function describeContext(req: ChatRequest, tierLabel: string): string {
+  const now = new Date()
+  const lines = [
+    'Facts about right now. If the user asks about any of these, just state the answer.',
+    `- Today is ${now.toLocaleDateString('en-GB', {
+      weekday: 'long',
+      day: 'numeric',
+      month: 'long',
+      year: 'numeric'
+    })}, ${now.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' })}.`,
+    `- The current tier is ${tierLabel}.`,
+    `- This chat is titled ${req.context.chatTitle ? `"${req.context.chatTitle}"` : 'untitled so far'}.`,
+    `- It has ${req.context.messageCount} message${req.context.messageCount === 1 ? '' : 's'} so far.`,
+    `- The user is on Windows. Commands run from ${settings.get('shellCwd') || homedir()}.`
+  ]
+  return lines.join('\n')
 }

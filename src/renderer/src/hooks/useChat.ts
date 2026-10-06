@@ -24,6 +24,8 @@ export interface ChatState {
   streaming: boolean
   stats: ChatStats
   send(text: string, tier: TierId, displayText?: string): void
+  /** Live facts handed to the model each turn; set by the app. */
+  setContext(ctx: { chatTitle: string | null }): void
   /** Messages as the model would see them, for size estimates and compaction. */
   history(): Array<{ role: string; content: string }>
   /** Adds a local-only note (command output, errors) without calling the model. */
@@ -53,6 +55,8 @@ export function useChat(): ChatState {
   const activeRequest = useRef<string | null>(null)
   /** Assistant message being filled by that request. */
   const activeMessage = useRef<string | null>(null)
+  /** Facts about the app that the model cannot see for itself. */
+  const context = useRef<{ chatTitle: string | null }>({ chatTitle: null })
   /** Mirrors `messages` so `send` can read history without a stale closure. */
   const messagesRef = useRef<ChatMessage[]>([])
   messagesRef.current = messages
@@ -159,7 +163,12 @@ export function useChat(): ChatState {
     setStreaming(true)
     setStats((s) => ({ ...s, speed: null, liveTokens: 0, elapsedMs: 0 }))
 
-    void window.wumpy.chat.send({ requestId, messages: history, tier })
+    void window.wumpy.chat.send({
+      requestId,
+      messages: history,
+      tier,
+      context: { chatTitle: context.current.chatTitle, messageCount: history.length }
+    })
   }, [])
 
   useEffect(() => {
@@ -192,6 +201,10 @@ export function useChat(): ChatState {
         local: true
       }
     ])
+  }, [])
+
+  const setContext = useCallback((ctx: { chatTitle: string | null }) => {
+    context.current = ctx
   }, [])
 
   const notice = useCallback((content: string) => {
@@ -235,5 +248,5 @@ export function useChat(): ChatState {
     [stop]
   )
 
-  return { messages, streaming, stats, send, history, note, notice, stop, clear, replace }
+  return { messages, streaming, stats, send, setContext, history, note, notice, stop, clear, replace }
 }

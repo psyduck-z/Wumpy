@@ -253,6 +253,27 @@ into a single chip you can expand, and carries it forward as a system message.
 model rather than the active tier — it is a simple job, and summarising on a 14B
 model would take minutes while you wait to send.
 
+## What the model is told
+
+A local model has no clock, no view of the app around it and no idea which chat
+it is in, so without help it guesses. Every turn now carries a short block of
+live facts — the date, the active tier, the chat's title and length, the OS and
+the working directory — which the model may state directly.
+
+Alongside it, two rules that took measuring to get right. The first draft of the
+app rules made a 3B model answer *questions* with slash commands: asked what day
+it was, it replied `/day`, a command that does not exist. Separating asking from
+changing fixed it outright:
+
+| | before | after |
+| --- | --- | --- |
+| "what is this chat called?" | Use `/rename` Speculative Fiction | Speculative Fiction |
+| "what day is it today?" | Use `/day` | Tuesday |
+| "which tier am i using" | /tier | The current tier is Fast |
+| "rename this chat to Ideas" | /rename Ideas | /rename Ideas |
+| "what's the capital of France" | Paris | Paris |
+| | **2/6** | **6/6** |
+
 ## Commands
 
 Type `/` in the composer for an autocompleting palette. Arrow keys to move, Tab
