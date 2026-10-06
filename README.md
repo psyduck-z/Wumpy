@@ -100,6 +100,41 @@ If you have admin and would rather disable Copilot outright than run a hook,
 Copilot off, add `Super+C` to `hotkeys` in settings and the plain accelerator
 path will work.
 
+## Which model, measured here
+
+Published benchmarks run on hardware nobody here owns, against tasks Wumpy never
+performs. `npm run bench` scores every installed model on this machine, on what
+the panel actually asks of it: logic puzzles with checkable answers, terse
+instruction following, Wumpy's own asking-versus-changing rule, and whether it
+proposes a command to check the machine rather than guessing. Every check is
+machine-graded; nothing is judged by reading it.
+
+Scored 70% correctness, 30% responsiveness, on a Ryzen 7 7735U:
+
+| model | overall | instruction | wumpy rules | shell | tok/s | first word |
+| --- | --- | --- | --- | --- | --- | --- |
+| **phi4-mini:3.8b** | **95** | 3/4 | 4/4 | **5/5** | 9.2 | 1.3 s |
+| llama3.2:3b | 89 | 3/4 | 4/4 | 4/5 | **12.1** | 1.2 s |
+| gemma3:4b | 64 | **4/4** | 4/4 | 3/5 | 9.9 | 8.7 s |
+| qwen3.5:2b | 6* | 0/4 | 1/4 | 0/5 | 8.8 | 48.4 s |
+| qwen3.5:4b | 6* | 0/4 | 1/4 | 0/5 | 5.7 | 76.9 s |
+
+**phi4-mini:3.8b is now the Fast tier.** It is the only model that got every
+shell decision right — proposing a command when the answer depends on the
+machine, and answering directly when it does not. That was the exact weakness
+that kept the CLI out of Quick mode.
+
+Two honest caveats:
+
+- *The qwen3.5 scores are not a quality verdict.* Both are reasoning models and
+  spend their whole token budget on scratchpad before emitting a visible answer;
+  asked directly, qwen3.5:4b does reply "PONG" correctly. What the benchmark
+  does establish is latency, and **48 to 77 seconds to the first word** rules
+  them out of a panel you summon mid-task however clever they are.
+- *gemma3:4b has the best instruction following of the lot* and a 8.7 s first
+  word, because it carries a vision tower that has to be processed. Good model,
+  wrong shape for an overlay.
+
 ## Thinking tiers
 
 Four tiers, split across two modes. The mode switch (`Ctrl+D`, or the badge in
@@ -108,7 +143,7 @@ the header) repaints the panel and swaps which pair of tiers is on offer.
 | Tier | Mode | Model | Speed | For |
 | --- | --- | --- | --- | --- |
 | **Flash** | Quick (light) | `llama3.2:3b` | ~instant | one-liners, lookups |
-| **Fast** | Quick (light) | `llama3.2:3b` | fast | the everyday default |
+| **Fast** | Quick (light) | `phi4-mini:3.8b` | fast | the everyday default |
 | **Thinker** | Dev (dark) | `qwen3:4b` | slow | reasons; can run commands |
 | **Deep Thinker** | Dev (dark) | `qwen2.5-coder:14b` | very slow | real code; can run commands |
 
@@ -280,6 +315,31 @@ changing fixed it outright:
 type to filter, arrows to move, `Enter` to choose, `Esc` to back out. Commands
 that take a name still accept one, but never require it — you should not have to
 remember what things are called when the app can just show you.
+
+## Prompt caching, or: where six seconds a turn went
+
+llama.cpp reuses the KV cache for the longest common *prefix* of a request. Wumpy
+sends live facts — the date, the active tier, the chat's title — and these were
+placed at the front of the system prompt. Changing text at the front invalidates
+the cache for everything behind it, which is the entire prompt and the whole
+conversation.
+
+Measured on llama3.2:3b with a 262-token prompt:
+
+| arrangement | prefill per turn |
+| --- | --- |
+| live facts first (what Wumpy did) | **6,100–8,200 ms** |
+| live facts last | 1,170–1,620 ms |
+| prefix untouched | **165 ms** |
+
+Six to eight seconds, on every single turn, before a word could appear. The
+facts now go in as a system message directly ahead of the latest question, so
+the instructions and the whole conversation stay cached and only that block and
+the new question are read. The clock time and message count were dropped as
+well: both changed every turn and neither earned its place.
+
+The rule this leaves behind: **anything that changes between turns belongs at
+the end of the request, never the beginning.**
 
 ## Staying out of the model's way
 

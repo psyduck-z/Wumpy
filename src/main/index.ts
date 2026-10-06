@@ -175,8 +175,16 @@ function registerIpc(): void {
     // The model is told what it can do in this tier, both ways round: with the
     // shell rules when it can act, and with an explicit "you cannot, say so"
     // when it cannot. Without the second half it invents having checked.
+    // The system prompt must stay byte-identical between turns.
+    //
+    // llama.cpp reuses the KV cache for the longest common prefix of a request.
+    // Live facts (the clock, the chat title) change every turn, so putting them
+    // here invalidated the cache for the whole prompt *and* the conversation
+    // behind it. Measured on llama3.2:3b with a 262-token prompt: 6-8s of
+    // prefill per turn with volatile text first, 1.2-1.6s with it last, and
+    // 165ms when the prefix is untouched. The facts now go in just ahead of the
+    // latest question, so only they and that question are reprocessed.
     const systemPrompt = [
-      describeContext(req, tier.label),
       tier.systemPrompt,
       APP_PROMPT,
       canAct ? SHELL_PROMPT : NO_SHELL_PROMPT
@@ -184,7 +192,7 @@ function registerIpc(): void {
 
     // Stand aside for the duration of the turn: tokens matter more than UI.
     priority.yieldToModel()
-    await ollama.chat(req.requestId, model, req.messages, {
+    await ollama.chat(req.requestId, model, withContext(req, tier.label), {
       thinking: tier.thinking,
       options: tier.options,
       keepAlive: settings.get('keepAlive'),
@@ -449,20 +457,31 @@ function titleCase(text: string): string {
  * app around it, so without this it either guesses or refuses. Telling it is
  * free and removes a whole class of confident wrong answers.
  */
-function describeContext(req: ChatRequest, tierLabel: string): string {
+function withContext(
+  req: ChatRequest,
+  tierLabel: string
+): Array<Pick<ChatMessage, 'role' | 'content'>> {
   const now = new Date()
-  const lines = [
+  // Deliberately no clock time and no message count. Both changed on every
+  // turn and bought nothing, while making this block differ each time.
+  const facts = [
     'Facts about right now. If the user asks about any of these, just state the answer.',
     `- Today is ${now.toLocaleDateString('en-GB', {
       weekday: 'long',
       day: 'numeric',
       month: 'long',
       year: 'numeric'
-    })}, ${now.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' })}.`,
+    })}.`,
     `- The current tier is ${tierLabel}.`,
     `- This chat is titled ${req.context.chatTitle ? `"${req.context.chatTitle}"` : 'untitled so far'}.`,
-    `- It has ${req.context.messageCount} message${req.context.messageCount === 1 ? '' : 's'} so far.`,
     `- The user is on Windows. Commands run from ${settings.get('shellCwd') || homedir()}.`
-  ]
-  return lines.join('\n')
+  ].join('\n')
+
+  const messages: Array<Pick<ChatMessage, 'role' | 'content'>> = req.messages.map((m) => ({
+    role: m.role,
+    content: m.content
+  }))
+  // Directly behind the latest user turn, so everything before it stays cached.
+  messages.splice(Math.max(0, messages.length - 1), 0, { role: 'system', content: facts })
+  return messages
 }

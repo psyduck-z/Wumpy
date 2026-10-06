@@ -444,3 +444,6 @@ FodyWeavers.xsd
 
 # Generated from logo.png by `npm run icons`.
 /src/renderer/src/assets/
+
+# Written by `npm run bench`; machine-specific.
+/bench-results.json

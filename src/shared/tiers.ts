@@ -77,10 +77,19 @@ const BASE_PROMPT =
  * The four thinking tiers.
  *
  * Models are chosen for a CPU-only machine, where the deciding factor is not
- * parameter count but whether the model reasons before speaking. Measured on a
- * Ryzen 7 7735U: llama3.2:3b reaches its first visible word in ~0.2s warm,
- * while qwen3:4b spends 20-70s on scratchpad first. So the quick tiers use a
- * non-reasoning model and the dev tiers buy depth with time.
+ * parameter count but whether the model reasons before speaking. Benchmarked
+ * on a Ryzen 7 7735U with `npm run bench` — overall score out of 100, 70%
+ * correctness and 30% responsiveness:
+ *
+ *   phi4-mini:3.8b   95   9.2 tok/s   first word 1.3s   shell decisions 5/5
+ *   llama3.2:3b      89  12.1 tok/s   first word 1.2s   shell decisions 4/5
+ *   gemma3:4b        64   9.9 tok/s   first word 8.7s
+ *   qwen3.5:4b        6   5.7 tok/s   first word 76.9s
+ *
+ * A reasoning model is unusable for an overlay regardless of how clever it is:
+ * qwen3.5:4b answers correctly but spends over a minute on scratchpad before
+ * the first visible word. So the quick tiers use non-reasoning models and the
+ * dev tiers buy depth with time.
  *
  * `alternates` let a tier resolve to something that is actually installed
  * rather than failing outright.
@@ -93,7 +102,7 @@ export const TIERS: Record<TierId, Tier> = {
     mode: 'quick',
     speed: 'instant',
     model: 'llama3.2:3b',
-    alternates: ['llama3.2:1b', 'qwen2.5:3b', 'phi3.5:3.8b'],
+    alternates: ['llama3.2:1b', 'phi4-mini:3.8b', 'qwen2.5:3b'],
     thinking: false,
     tools: false,
     options: { num_ctx: 2048, num_predict: 384, temperature: 0.4, top_p: 0.9 },
@@ -106,8 +115,8 @@ export const TIERS: Record<TierId, Tier> = {
     blurb: 'Balanced. The everyday default.',
     mode: 'quick',
     speed: 'quick',
-    model: 'llama3.2:3b',
-    alternates: ['qwen2.5:3b', 'llama3.1:8b'],
+    model: 'phi4-mini:3.8b',
+    alternates: ['llama3.2:3b', 'qwen2.5:3b'],
     thinking: false,
     tools: false,
     options: { num_ctx: 4096, num_predict: 1024, temperature: 0.6, top_p: 0.9 },
@@ -121,7 +130,7 @@ export const TIERS: Record<TierId, Tier> = {
     mode: 'dev',
     speed: 'slow',
     model: 'qwen3:4b',
-    alternates: ['qwen3:8b', 'deepseek-r1:7b'],
+    alternates: ['qwen3.5:4b', 'qwen3:8b'],
     thinking: true,
     tools: true,
     options: { num_ctx: 8192, num_predict: 800, temperature: 0.6, top_p: 0.95 },
@@ -135,7 +144,7 @@ export const TIERS: Record<TierId, Tier> = {
     mode: 'dev',
     speed: 'slowest',
     model: 'qwen2.5-coder:14b',
-    alternates: ['qwen3:8b', 'qwen3:4b'],
+    alternates: ['qwen3.5:9b', 'qwen3:8b'],
     thinking: false,
     tools: true,
     options: { num_ctx: 8192, num_predict: 1500, temperature: 0.3, top_p: 0.9 },
