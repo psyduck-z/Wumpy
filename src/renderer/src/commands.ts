@@ -10,7 +10,6 @@ export type CommandAction =
   | { kind: 'error'; message: string }
   | { kind: 'info'; message: string }
   | { kind: 'new' }
-  | { kind: 'save'; title?: string }
   | { kind: 'chats' }
   | { kind: 'load'; query: string }
   | { kind: 'resume'; query: string }
@@ -123,12 +122,6 @@ export const COMMANDS: CommandSpec[] = [
     run: () => ({ kind: 'new' })
   },
   {
-    name: 'save',
-    hint: 'Save this chat',
-    arg: 'title',
-    run: (arg) => ({ kind: 'save', title: arg.trim() || undefined })
-  },
-  {
     name: 'resume',
     aliases: ['r'],
     hint: 'Pick up a previous chat (Ctrl+R)',
@@ -161,7 +154,8 @@ export const COMMANDS: CommandSpec[] = [
   },
   {
     name: 'rename',
-    hint: 'Rename the current chat',
+    aliases: ['title'],
+    hint: 'Retitle this chat (chats save themselves)',
     arg: 'title',
     run: (arg) =>
       arg.trim()
@@ -220,7 +214,8 @@ export const COMMANDS: CommandSpec[] = [
   },
   {
     name: 'pin',
-    hint: 'Stay on top when you click elsewhere',
+    aliases: ['autohide'],
+    hint: 'Keep on top, or let it hide when you click away',
     arg: 'on|off',
     run: (arg) => ({ kind: 'pin', pinned: bool(arg) })
   },

@@ -1,4 +1,5 @@
 import type { Dock, Mode, OllamaStatus } from '@shared/types'
+import logo from '../assets/logo.png'
 
 const DOCK_CYCLE: Dock[] = [
   'right',
@@ -61,7 +62,11 @@ export function Header({
   return (
     <header className="header">
       <div className="brand">
-        <span className={`dot ${online ? 'dot-on' : 'dot-off'}`} />
+        <span className="brand-mark">
+          <img src={logo} alt="" width={18} height={18} />
+          {/* The connection light rides the corner of the mark. */}
+          <span className={`dot ${online ? 'dot-on' : 'dot-off'}`} />
+        </span>
         <strong>{title ?? 'Wumpy'}</strong>
         <span className="hint">{online ? hotkeyLabel : (status?.error ?? 'connecting…')}</span>
       </div>
@@ -116,7 +121,11 @@ export function Header({
           type="button"
           onClick={onTogglePin}
           className={pinned ? 'is-on' : ''}
-          title={pinned ? 'Unpin — closes when it loses focus' : 'Pin — stay open while you work'}
+          title={
+            pinned
+              ? 'Pinned — stays on top. Click to let it hide when you click away.'
+              : 'Auto-hide — closes when it loses focus. Click to keep it on top.'
+          }
         >
           <svg viewBox="0 0 16 16" width="13" height="13" aria-hidden="true">
             <path
@@ -127,6 +136,16 @@ export function Header({
               strokeLinejoin="round"
               strokeLinecap="round"
             />
+            {/* Struck through when unpinned, so the state is visible at a glance. */}
+            {!pinned && (
+              <path
+                d="M3 13L13 3"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="1.5"
+                strokeLinecap="round"
+              />
+            )}
           </svg>
         </button>
 

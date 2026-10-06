@@ -1,118 +1,167 @@
 /**
- * Generates the tray + app icons so the repo carries no opaque binaries.
- * Draws a rounded "W" mark, then writes 16/24/32/48/64/128/256px PNGs and a
- * multi-resolution .ico for electron-builder.
+ * Builds every icon Wumpy needs from the single source artwork, `logo.png`.
+ *
+ * Emits the tray icon, the app icon, a multi-resolution .ico for
+ * electron-builder, and a copy for the renderer to show in the panel. Corners
+ * are rounded with a real alpha mask so the icon sits cleanly on any
+ * background rather than as a hard square.
  *
  * Run with: node scripts/make-icons.mjs
  */
-import { deflateSync } from 'node:zlib'
-import { writeFileSync, mkdirSync } from 'node:fs'
+import { deflateSync, inflateSync } from 'node:zlib'
+import { readFileSync, writeFileSync, mkdirSync, existsSync } from 'node:fs'
 import { join } from 'node:path'
 
-const OUT = 'resources'
+const SOURCE = 'logo.png'
+const ICON_DIR = 'resources'
+const RENDERER_DIR = 'src/renderer/src/assets'
 const SIZES = [16, 24, 32, 48, 64, 128, 256]
 
-const BG = [99, 102, 241] // indigo
-const BG2 = [139, 92, 246] // violet
-const FG = [255, 255, 255]
+/* ----------------------------------------------------------------- decode */
 
-/** Signed distance from p to the segment ab, used to stroke the W. */
-function distToSegment(px, py, ax, ay, bx, by) {
-  const dx = bx - ax
-  const dy = by - ay
-  const len2 = dx * dx + dy * dy
-  const t = len2 === 0 ? 0 : Math.max(0, Math.min(1, ((px - ax) * dx + (py - ay) * dy) / len2))
-  const cx = ax + t * dx
-  const cy = ay + t * dy
-  return Math.hypot(px - cx, py - cy)
+function paeth(a, b, c) {
+  const p = a + b - c
+  const pa = Math.abs(p - a)
+  const pb = Math.abs(p - b)
+  const pc = Math.abs(p - c)
+  return pa <= pb && pa <= pc ? a : pb <= pc ? b : c
 }
 
-function roundedRectDist(px, py, w, h, r) {
-  // Negative inside, positive outside.
-  const qx = Math.abs(px - w / 2) - (w / 2 - r)
-  const qy = Math.abs(py - h / 2) - (h / 2 - r)
-  const outside = Math.hypot(Math.max(qx, 0), Math.max(qy, 0))
-  return outside + Math.min(Math.max(qx, qy), 0) - r
+/** Minimal PNG reader: 8-bit RGB or RGBA, non-interlaced. Returns RGBA. */
+function decodePNG(buf) {
+  if (buf.readUInt32BE(0) !== 0x89504e47) throw new Error('not a PNG')
+
+  const width = buf.readUInt32BE(16)
+  const height = buf.readUInt32BE(20)
+  const depth = buf[24]
+  const colorType = buf[25]
+  const interlace = buf[28]
+
+  if (depth !== 8) throw new Error(`unsupported bit depth ${depth}; expected 8`)
+  if (interlace !== 0) throw new Error('interlaced PNGs are not supported')
+  if (colorType !== 2 && colorType !== 6) {
+    throw new Error(`unsupported colour type ${colorType}; expected RGB or RGBA`)
+  }
+
+  const channels = colorType === 6 ? 4 : 3
+
+  // Concatenate IDAT payloads, which may be split across chunks.
+  const parts = []
+  let off = 8
+  while (off < buf.length) {
+    const len = buf.readUInt32BE(off)
+    const type = buf.toString('ascii', off + 4, off + 8)
+    if (type === 'IDAT') parts.push(buf.subarray(off + 8, off + 8 + len))
+    if (type === 'IEND') break
+    off += 12 + len
+  }
+
+  const raw = inflateSync(Buffer.concat(parts))
+  const stride = width * channels
+  const out = new Uint8Array(width * height * 4)
+  const line = Buffer.alloc(stride)
+  const prev = Buffer.alloc(stride)
+
+  let pos = 0
+  for (let y = 0; y < height; y++) {
+    const filter = raw[pos++]
+    raw.copy(line, 0, pos, pos + stride)
+    pos += stride
+
+    for (let i = 0; i < stride; i++) {
+      const a = i >= channels ? line[i - channels] : 0
+      const b = prev[i]
+      const c = i >= channels ? prev[i - channels] : 0
+      switch (filter) {
+        case 1: line[i] = (line[i] + a) & 0xff; break
+        case 2: line[i] = (line[i] + b) & 0xff; break
+        case 3: line[i] = (line[i] + ((a + b) >> 1)) & 0xff; break
+        case 4: line[i] = (line[i] + paeth(a, b, c)) & 0xff; break
+        default: break // 0 = none
+      }
+    }
+
+    for (let x = 0; x < width; x++) {
+      const s = x * channels
+      const d = (y * width + x) * 4
+      out[d] = line[s]
+      out[d + 1] = line[s + 1]
+      out[d + 2] = line[s + 2]
+      out[d + 3] = channels === 4 ? line[s + 3] : 255
+    }
+    line.copy(prev)
+  }
+
+  return { width, height, data: out }
 }
 
-function renderRGBA(size) {
-  const ss = 4 // supersample factor for antialiasing
-  const px = new Uint8Array(size * size * 4)
-  const radius = size * 0.26
+/* ---------------------------------------------------------------- resample */
 
-  // "W" strokes in a normalised 0..1 box, inset from the tile edges.
-  const inset = 0.28
-  const top = inset
-  const bottom = 1 - inset
-  const pts = [
-    [inset, top],
-    [inset + (1 - 2 * inset) * 0.3, bottom],
-    [0.5, top + (bottom - top) * 0.45],
-    [1 - inset - (1 - 2 * inset) * 0.3, bottom],
-    [1 - inset, top]
-  ]
-  const stroke = size * 0.072
+/** Box-filter downscale. Averaging every source pixel keeps small sizes sharp. */
+function resize(src, size) {
+  const out = new Uint8Array(size * size * 4)
+  const scaleX = src.width / size
+  const scaleY = src.height / size
+
+  for (let y = 0; y < size; y++) {
+    const y0 = Math.floor(y * scaleY)
+    const y1 = Math.max(y0 + 1, Math.floor((y + 1) * scaleY))
+    for (let x = 0; x < size; x++) {
+      const x0 = Math.floor(x * scaleX)
+      const x1 = Math.max(x0 + 1, Math.floor((x + 1) * scaleX))
+
+      let r = 0, g = 0, b = 0, a = 0, n = 0
+      for (let sy = y0; sy < y1; sy++) {
+        for (let sx = x0; sx < x1; sx++) {
+          const i = (sy * src.width + sx) * 4
+          const alpha = src.data[i + 3] / 255
+          // Weight colour by alpha so transparent edges do not darken the result.
+          r += src.data[i] * alpha
+          g += src.data[i + 1] * alpha
+          b += src.data[i + 2] * alpha
+          a += src.data[i + 3]
+          n++
+        }
+      }
+      const aAvg = a / n
+      const w = aAvg / 255 || 1
+      const d = (y * size + x) * 4
+      out[d] = Math.round(r / n / w)
+      out[d + 1] = Math.round(g / n / w)
+      out[d + 2] = Math.round(b / n / w)
+      out[d + 3] = Math.round(aAvg)
+    }
+  }
+  return { width: size, height: size, data: out }
+}
+
+/** Multiplies in a rounded-rectangle alpha mask, antialiased. */
+function roundCorners(img, radiusRatio = 0.22) {
+  const { width: size, data } = img
+  const r = size * radiusRatio
+  const ss = 3 // supersample the mask edge only
 
   for (let y = 0; y < size; y++) {
     for (let x = 0; x < size; x++) {
-      let r = 0
-      let g = 0
-      let b = 0
-      let a = 0
-
+      let covered = 0
       for (let sy = 0; sy < ss; sy++) {
         for (let sx = 0; sx < ss; sx++) {
-          const fx = x + (sx + 0.5) / ss
-          const fy = y + (sy + 0.5) / ss
-
-          const tileD = roundedRectDist(fx, fy, size, size, radius)
-          const tileA = Math.max(0, Math.min(1, 0.5 - tileD))
-          if (tileA <= 0) continue
-
-          // Diagonal gradient across the tile.
-          const t = (fx / size) * 0.5 + (fy / size) * 0.5
-          let cr = BG[0] + (BG2[0] - BG[0]) * t
-          let cg = BG[1] + (BG2[1] - BG[1]) * t
-          let cb = BG[2] + (BG2[2] - BG[2]) * t
-
-          let glyph = Infinity
-          for (let i = 0; i < pts.length - 1; i++) {
-            glyph = Math.min(
-              glyph,
-              distToSegment(
-                fx,
-                fy,
-                pts[i][0] * size,
-                pts[i][1] * size,
-                pts[i + 1][0] * size,
-                pts[i + 1][1] * size
-              )
-            )
-          }
-          const glyphA = Math.max(0, Math.min(1, stroke / 2 - glyph + 0.5))
-          cr = cr + (FG[0] - cr) * glyphA
-          cg = cg + (FG[1] - cg) * glyphA
-          cb = cb + (FG[2] - cb) * glyphA
-
-          r += cr * tileA
-          g += cg * tileA
-          b += cb * tileA
-          a += tileA
+          const px = x + (sx + 0.5) / ss
+          const py = y + (sy + 0.5) / ss
+          const qx = Math.abs(px - size / 2) - (size / 2 - r)
+          const qy = Math.abs(py - size / 2) - (size / 2 - r)
+          const d = Math.hypot(Math.max(qx, 0), Math.max(qy, 0)) + Math.min(Math.max(qx, qy), 0) - r
+          if (d <= 0) covered++
         }
       }
-
-      const n = ss * ss
-      const i = (y * size + x) * 4
-      if (a > 0) {
-        px[i] = Math.round(r / a)
-        px[i + 1] = Math.round(g / a)
-        px[i + 2] = Math.round(b / a)
-        px[i + 3] = Math.round((a / n) * 255)
-      }
+      const i = (y * size + x) * 4 + 3
+      data[i] = Math.round(data[i] * (covered / (ss * ss)))
     }
   }
-  return px
+  return img
 }
+
+/* ----------------------------------------------------------------- encode */
 
 function crc32(buf) {
   let c = ~0
@@ -132,18 +181,24 @@ function chunk(type, data) {
   return Buffer.concat([len, body, crc])
 }
 
-function toPNG(size, rgba) {
+function encodePNG(img) {
+  const { width: size, data } = img
   const ihdr = Buffer.alloc(13)
   ihdr.writeUInt32BE(size, 0)
   ihdr.writeUInt32BE(size, 4)
   ihdr[8] = 8 // bit depth
   ihdr[9] = 6 // RGBA
+
   // Each scanline is prefixed with its filter type (0 = none).
   const raw = Buffer.alloc(size * (size * 4 + 1))
   for (let y = 0; y < size; y++) {
     raw[y * (size * 4 + 1)] = 0
-    Buffer.from(rgba.buffer, y * size * 4, size * 4).copy(raw, y * (size * 4 + 1) + 1)
+    Buffer.from(data.buffer, data.byteOffset + y * size * 4, size * 4).copy(
+      raw,
+      y * (size * 4 + 1) + 1
+    )
   }
+
   return Buffer.concat([
     Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
     chunk('IHDR', ihdr),
@@ -152,8 +207,8 @@ function toPNG(size, rgba) {
   ])
 }
 
-/** ICO wrapping PNG-compressed entries, which Windows has accepted since Vista. */
-function toICO(entries) {
+/** ICO wrapping PNG entries, which Windows has accepted since Vista. */
+function encodeICO(entries) {
   const header = Buffer.alloc(6)
   header.writeUInt16LE(0, 0)
   header.writeUInt16LE(1, 2) // type: icon
@@ -166,11 +221,8 @@ function toICO(entries) {
     const o = i * 16
     dir[o] = size >= 256 ? 0 : size
     dir[o + 1] = size >= 256 ? 0 : size
-    dir[o + 2] = 0 // palette
-    dir[o + 3] = 0
-    dir.writeUInt16LE(1, o + 4) // color planes
-    dir.writeUInt16LE(32, o + 6) // bpp
-    dir.writeUInt32BE(0, o + 8)
+    dir.writeUInt16LE(1, o + 4) // colour planes
+    dir.writeUInt16LE(32, o + 6) // bits per pixel
     dir.writeUInt32LE(png.length, o + 8)
     dir.writeUInt32LE(offset, o + 12)
     offset += png.length
@@ -178,14 +230,32 @@ function toICO(entries) {
   return Buffer.concat([header, dir, ...entries.map((e) => e.png)])
 }
 
-mkdirSync(OUT, { recursive: true })
+/* ------------------------------------------------------------------- main */
 
-const entries = SIZES.map((size) => ({ size, png: toPNG(size, renderRGBA(size)) }))
-for (const { size, png } of entries) {
-  writeFileSync(join(OUT, `icon-${size}.png`), png)
+if (!existsSync(SOURCE)) {
+  console.error(`[icons] ${SOURCE} is missing. It is the source artwork for every icon.`)
+  process.exit(1)
 }
-writeFileSync(join(OUT, 'icon.png'), entries.find((e) => e.size === 256).png)
-writeFileSync(join(OUT, 'tray.png'), entries.find((e) => e.size === 32).png)
-writeFileSync(join(OUT, 'icon.ico'), toICO(entries.filter((e) => e.size <= 256)))
 
-console.log(`wrote ${SIZES.length + 3} icon files to ${OUT}/`)
+const source = decodePNG(readFileSync(SOURCE))
+mkdirSync(ICON_DIR, { recursive: true })
+mkdirSync(RENDERER_DIR, { recursive: true })
+
+const entries = SIZES.map((size) => ({
+  size,
+  png: encodePNG(roundCorners(resize(source, size)))
+}))
+
+for (const { size, png } of entries) writeFileSync(join(ICON_DIR, `icon-${size}.png`), png)
+
+const at = (n) => entries.find((e) => e.size === n).png
+writeFileSync(join(ICON_DIR, 'icon.png'), at(256))
+writeFileSync(join(ICON_DIR, 'tray.png'), at(32))
+writeFileSync(join(ICON_DIR, 'icon.ico'), encodeICO(entries))
+// The renderer shows the mark in the panel; 128 is plenty at any panel size.
+writeFileSync(join(RENDERER_DIR, 'logo.png'), at(128))
+
+console.log(
+  `[icons] ${source.width}x${source.height} ${SOURCE} -> ` +
+    `${SIZES.length} PNGs, icon.ico, tray.png, renderer asset`
+)

@@ -18,6 +18,8 @@ import { Header } from './components/Header'
 import { Message } from './components/Message'
 import { Composer } from './components/Composer'
 import { StatusBar } from './components/StatusBar'
+import { Ambience } from './components/Ambience'
+import logo from './assets/logo.png'
 import { TierBar } from './components/TierBar'
 import { ChatList } from './components/ChatList'
 
@@ -43,6 +45,8 @@ export default function App(): React.JSX.Element {
   const pinned = !(settings?.hideOnBlur ?? false)
   const [visible, setVisible] = useState(false)
   const [focusToken, setFocusToken] = useState(0)
+  /** Advances every time the panel is summoned, so one-shot effects replay. */
+  const [openCount, setOpenCount] = useState(0)
 
   // Saved chats
   const [showChats, setShowChats] = useState(false)
@@ -92,15 +96,33 @@ export default function App(): React.JSX.Element {
 
   // Trigger the slide-in on mount and on every hotkey press.
   useEffect(() => {
-    const raf = requestAnimationFrame(() => setVisible(true))
+    const raf = requestAnimationFrame(() => {
+      setVisible(true)
+      setOpenCount((n) => n + 1)
+    })
     const off = window.wumpy.panel.onShown(() => {
       setVisible(true)
+      setOpenCount((n) => n + 1)
       setFocusToken((n) => n + 1)
     })
     return () => {
       cancelAnimationFrame(raf)
       off()
     }
+  }, [])
+
+  /**
+   * Electron marks a hidden window as hidden to the page, which is the only
+   * signal the renderer gets when the hotkey dismisses the panel. Without
+   * resetting here the open animation would play once per launch instead of
+   * once per summon.
+   */
+  useEffect(() => {
+    const onVisibility = (): void => {
+      if (document.hidden) setVisible(false)
+    }
+    document.addEventListener('visibilitychange', onVisibility)
+    return () => document.removeEventListener('visibilitychange', onVisibility)
   }, [])
 
   /* ---------------------------------------------------------------- actions */
@@ -128,10 +150,10 @@ export default function App(): React.JSX.Element {
     setShowChats(false)
   }, [chat])
 
-  const saveChat = useCallback(
+  const retitle = useCallback(
     async (title?: string) => {
       if (chat.messages.length === 0) {
-        chat.note('Nothing to save yet.', true)
+        chat.note('Nothing to retitle yet.', true)
         return
       }
       const summary = await window.wumpy.chats.save({
@@ -143,9 +165,9 @@ export default function App(): React.JSX.Element {
       if (summary) {
         setChatTitle(summary.title)
         await refreshChats()
-        chat.note(`Saved as **${summary.title}**.`)
+        chat.note(`Retitled to **${summary.title}**.`)
       } else {
-        chat.note('Could not save this chat.', true)
+        chat.note('Could not retitle this chat.', true)
       }
     },
     [chat, chatId, tier, refreshChats]
@@ -268,9 +290,7 @@ export default function App(): React.JSX.Element {
         case 'new':
           newChat()
           return
-        case 'save':
-          await saveChat(action.title)
-          return
+
         case 'chats':
           await refreshChats()
           setShowChats(true)
@@ -325,7 +345,7 @@ export default function App(): React.JSX.Element {
           return
         }
         case 'rename':
-          await saveChat(action.title)
+          await retitle(action.title)
           return
         case 'tier': {
           const kept = chat.history().length
@@ -387,7 +407,7 @@ export default function App(): React.JSX.Element {
           return
       }
     },
-    [chat, mode, newChat, openChat, patch, pinned, refreshChats, saveChat, setTier, settings, tier]
+    [chat, mode, newChat, openChat, patch, pinned, refreshChats, retitle, setTier, settings, tier]
   )
 
   const onSend = useCallback(
@@ -476,15 +496,12 @@ export default function App(): React.JSX.Element {
           setShowChats(true)
           return
         }
-        if (e.key.toLowerCase() === 's') {
-          e.preventDefault()
-          void saveChat()
-        }
+
       }
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [chat, close, newChat, saveChat, setTier, showChats, streaming, toggleMode])
+  }, [chat, close, newChat, retitle, setTier, showChats, streaming, toggleMode])
 
   /* ----------------------------------------------------------------- scroll */
 
@@ -513,7 +530,14 @@ export default function App(): React.JSX.Element {
   /* ------------------------------------------------------------------ render */
 
   const togglePin = (): void => {
-    void patch({ hideOnBlur: pinned })
+    const next = !pinned
+    void patch({ hideOnBlur: !next })
+    // Toggling this has no visible effect until focus moves, so say what changed.
+    chat.note(
+      next
+        ? 'Pinned — staying on top until you dismiss it.'
+        : 'Unpinned — will hide when it loses focus.'
+    )
   }
 
   const liveKey = hotkey.intercepted ?? hotkey.active
@@ -529,6 +553,8 @@ export default function App(): React.JSX.Element {
       }`}
       data-theme={mode === 'dev' ? 'dark' : 'light'}
     >
+      <Ambience mode={mode} active={visible} openCount={openCount} />
+
       <Header
         mode={mode}
         onToggleMode={() => void toggleMode()}
@@ -633,7 +659,7 @@ function Empty({
 }): React.JSX.Element {
   return (
     <div className="empty">
-      <div className="empty-mark">W</div>
+      <img className="empty-mark" src={logo} alt="" width={48} height={48} />
       {!compact && <h1>Wumpy</h1>}
       {!online ? (
         <p>

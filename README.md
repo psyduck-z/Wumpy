@@ -204,8 +204,8 @@ arrives.
 ## Chats and context
 
 **Everything auto-saves.** Conversations persist as they happen, titled from
-your first line, one JSON file each under `%APPDATA%\Wumpy\chats`. `/save` is
-still there to retitle, and `/rename` does the same thing.
+your first line, one JSON file each under `%APPDATA%\Wumpy\chats`. There is no
+save command because there is nothing to save — `/rename` retitles.
 
 **`/resume` picks up where you left off.** `Ctrl+R` or `/resume` opens a
 keyboard-driven picker: type to filter, arrows to move, `Enter` to open, `Del`
@@ -240,17 +240,16 @@ or Enter to accept.
 | Command | What it does |
 | --- | --- |
 | `/new`, `/clear` | Start a fresh chat (`Ctrl+N`) |
-| `/save <title>` | Save this chat (`Ctrl+S`) |
 | `/resume [name\|last]` | Pick up a previous chat (`Ctrl+R`) |
 | `/chats`, `/history` | Browse saved chats |
 | `/load <name>` | Open a saved chat by name |
 | `/delete <name>` | Delete one, or `/delete all` |
-| `/rename <title>` | Rename the current chat |
+| `/rename`, `/title <text>` | Retitle this chat |
 | `/tier`, `/level <name>` | flash \| fast \| thinker \| deep, keeping context |
 | `/mode [quick\|dev]` | Toggle Quick / Developer |
 | `/dock <position>` | Move the panel |
 | `/reasoning on\|off` | Show the scratchpad |
-| `/pin on\|off` | Stay on top when you click elsewhere |
+| `/pin`, `/autohide on\|off` | Keep on top, or hide when you click away |
 | `/compact` | Summarise older turns to free context |
 | `/warm` | Preload this tier's model |
 | `/stop`, `/help`, `/quit` | — |
@@ -273,6 +272,36 @@ Saved chats live as one JSON file each under `%APPDATA%\Wumpy\chats`.
 The panel is either a **tall bar** on the left or right edge, or a **compact
 card** in any of the four corners — the same UI with the chrome trimmed down.
 Cycle positions with the glyph in the header, `/dock`, or the tray menu.
+
+## Look and feel
+
+The two modes are visually distinct, because knowing which one is answering
+matters more than consistency:
+
+- **Quick** is a light grey panel. A single highlight sweeps across it about a
+  second after the panel opens, then never again until the next summon.
+- **Developer** is near-black with segmented strands of binary falling behind
+  the content, each with a bright leading glyph and a tail that fades out behind
+  it. Digits churn every 110 ms.
+
+Both are built to cost nothing. Motion is `transform`-only so the compositor
+handles it on the GPU, the binary churn mutates characters in an array rather
+than animating hundreds of elements, and neither renders at all while the panel
+is hidden. `prefers-reduced-motion` disables both.
+
+The panel is **opaque on purpose**. It originally used a translucent background
+with `backdrop-filter: blur()`, but Electron's transparent window gives the
+filter no backdrop to sample, so the blur silently did nothing while whatever
+was behind stayed sharply readable through the panel. Solid beats a filter that
+does not run.
+
+### Icons
+
+Every icon is generated from one source file, `logo.png`, by `npm run icons`:
+the tray icon, the app icon, a multi-resolution `.ico`, and the mark the panel
+shows. The script decodes the PNG, box-filters it down to each size and applies
+a real rounded-corner alpha mask, so nothing but the source artwork is
+committed. It runs automatically on `npm install`.
 
 ## Settings
 
@@ -304,7 +333,7 @@ and toggle changes apply immediately; hotkey changes apply on restart.
 | `Win+C` | Toggle the panel (also: click the tray icon) |
 | `Ctrl+1`–`Ctrl+4` | Jump to Flash / Fast / Thinker / Deep |
 | `Ctrl+D` | Toggle Quick / Developer mode |
-| `Ctrl+N` / `Ctrl+S` | New chat / save chat |
+| `Ctrl+N` | New chat |
 | `Ctrl+R` | Resume a previous chat |
 | `/` | Command palette |
 | `Enter` / `Shift+Enter` | Send / newline |

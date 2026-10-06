@@ -13,14 +13,14 @@
   --mono: 'Cascadia Code', 'Consolas', ui-monospace, monospace;
 }
 
-/* ---- Quick mode (light) ---- */
+/* ---- Quick mode (light grey) ---- */
 [data-theme='light'] {
-  --bg: 252 252 254;
-  --surface: 255 255 255;
-  --raised: 240 240 246;
-  --border: 18 18 32 / 0.1;
+  --bg: 226 227 233;
+  --surface: 240 241 245;
+  --raised: 213 215 223;
+  --border: 18 18 32 / 0.12;
   --text: 26 26 36;
-  --muted: 104 104 126;
+  --muted: 92 94 112;
   --accent: 91 82 224;
   --accent-soft: 91 82 224 / 0.1;
   --accent-text: 91 82 224;
@@ -71,13 +71,19 @@ body {
 /* ------------------------------------------------------------ panel shell */
 
 .panel {
+  position: relative;
   height: 100%;
   margin: 0 var(--gutter);
   display: flex;
   flex-direction: column;
   color: rgb(var(--text));
-  background: rgb(var(--bg) / 0.94);
-  backdrop-filter: blur(30px) saturate(150%);
+  /*
+   * Opaque on purpose. Electron's transparent window does not give
+   * backdrop-filter a backdrop to sample, so the blur silently did nothing and
+   * the page behind stayed sharply readable through the panel. Solid grey keeps
+   * the panel's own text legible over any window, and costs nothing to composite.
+   */
+  background: rgb(var(--bg));
   border: 1px solid rgb(var(--border));
   border-radius: var(--radius);
   box-shadow: var(--shadow);
@@ -111,6 +117,109 @@ body {
   }
 }
 
+/*
+ * Ambience sits behind everything. Both layers are transform/opacity only, so
+ * the compositor handles them on the GPU and they take no cycles from
+ * inference. Content is lifted above with a stacking context.
+ */
+.panel > *:not(.shine):not(.rain) {
+  position: relative;
+  z-index: 1;
+}
+
+/* ---- Quick mode: one highlight sweep, a beat after opening ---- */
+
+.shine {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+  overflow: hidden;
+}
+
+.shine::after {
+  content: '';
+  position: absolute;
+  inset: -20% -60%;
+  background: linear-gradient(
+    102deg,
+    transparent 42%,
+    rgb(255 255 255 / 0.5) 49%,
+    rgb(255 255 255 / 0.68) 50%,
+    rgb(255 255 255 / 0.5) 51%,
+    transparent 58%
+  );
+  /* Runs once, a second after the panel settles, then stays parked off-screen. */
+  animation: shine-sweep 1.15s cubic-bezier(0.4, 0, 0.2, 1) 1s 1 both;
+}
+
+@keyframes shine-sweep {
+  from {
+    transform: translateX(-85%);
+  }
+  to {
+    transform: translateX(85%);
+  }
+}
+
+/* ---- Developer mode: falling binary strands ---- */
+
+.rain {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+  overflow: hidden;
+  /* Fade top and bottom so strands do not visibly clip at the panel edges. */
+  mask-image: linear-gradient(180deg, transparent, #000 12%, #000 76%, transparent);
+}
+
+.strand {
+  position: absolute;
+  top: 0;
+  white-space: pre;
+  text-align: center;
+  font-family: var(--mono);
+  font-size: 16px;
+  font-weight: 600;
+  line-height: 1.4;
+  letter-spacing: 1px;
+  color: #4ade80;
+  /* Tail fades out behind the head, which leads the fall. */
+  mask-image: linear-gradient(180deg, transparent, rgb(0 0 0 / 0.5) 45%, #000 100%);
+  will-change: transform;
+  animation-name: strand-fall;
+  animation-timing-function: linear;
+  animation-iteration-count: infinite;
+}
+
+.strand-head {
+  color: #eafff1;
+  font-weight: 700;
+  text-shadow:
+    0 0 6px rgb(134 255 180 / 0.9),
+    0 0 14px rgb(74 222 128 / 0.6);
+}
+
+/* `-100%` is the strand's own height, so it starts fully above the panel;
+   `--fall` is the window height, set from the renderer. */
+@keyframes strand-fall {
+  from {
+    transform: translateY(-100%);
+  }
+  to {
+    transform: translateY(var(--fall, 900px));
+  }
+}
+
+/*
+ * The whole field is dialled right down. It should register as texture behind
+ * the answer, never as something competing with it for attention.
+ */
+[data-theme='dark'] .rain {
+  opacity: 0.17;
+}
+
 /* The compact card trims chrome so the transcript still gets room. */
 .is-compact .scroll { padding: 10px 12px; gap: 9px; }
 .is-compact .header { padding: 7px 7px 7px 11px; }
@@ -118,7 +227,7 @@ body {
 .is-compact .status { padding: 0 11px 4px; }
 .is-compact .composer { padding: 7px 9px 9px; }
 .is-compact .empty h1 { display: none; }
-.is-compact .empty-mark { width: 34px; height: 34px; font-size: 17px; margin-bottom: 8px; }
+.is-compact .empty-mark { width: 34px; height: 34px; margin-bottom: 8px; }
 .is-compact .status-tip { display: none; }
 
 /* ----------------------------------------------------------------- header */
@@ -161,17 +270,33 @@ body {
   text-overflow: ellipsis;
 }
 
+.brand-mark {
+  position: relative;
+  display: inline-flex;
+  align-self: center;
+  flex: none;
+}
+
+.brand-mark img {
+  display: block;
+  border-radius: 5px;
+}
+
 .dot {
+  position: absolute;
+  right: -2px;
+  bottom: -2px;
   width: 7px;
   height: 7px;
   border-radius: 50%;
-  align-self: center;
+  /* Ring in the panel colour so the light reads against the mark. */
+  box-shadow: 0 0 0 1.5px rgb(var(--bg));
   flex: none;
 }
 
 .dot-on {
   background: #22c55e;
-  box-shadow: 0 0 7px #22c55e88;
+  box-shadow: 0 0 0 1.5px rgb(var(--bg)), 0 0 6px #22c55e99;
 }
 
 .dot-off {
@@ -611,16 +736,11 @@ body {
 }
 
 .empty-mark {
-  width: 44px;
-  height: 44px;
+  display: block;
+  width: 48px;
+  height: 48px;
   margin: 0 auto 12px;
-  display: grid;
-  place-items: center;
   border-radius: 13px;
-  background: linear-gradient(135deg, #6366f1, #8b5cf6);
-  color: #fff;
-  font-size: 22px;
-  font-weight: 600;
 }
 
 .empty h1 { margin: 0 0 6px; font-size: 16px; color: rgb(var(--text)); }
@@ -901,6 +1021,15 @@ body {
 }
 
 .composer textarea::placeholder { color: rgb(var(--muted) / 0.8); }
+
+.composer textarea::-webkit-scrollbar { width: 7px; }
+.composer textarea::-webkit-scrollbar-track { background: transparent; }
+.composer textarea::-webkit-scrollbar-thumb {
+  background: rgb(var(--text) / 0.16);
+  border-radius: 4px;
+}
+/* Chromium otherwise draws stepper arrows, which read as a stray widget. */
+.composer textarea::-webkit-scrollbar-button { display: none; }
 
 .btn-send,
 .btn-stop {

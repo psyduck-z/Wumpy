@@ -441,3 +441,6 @@ FodyWeavers.xsd
 
 # TypeScript incremental build state.
 *.tsbuildinfo
+
+# Generated from logo.png by `npm run icons`.
+/src/renderer/src/assets/
