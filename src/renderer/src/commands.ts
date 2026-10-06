@@ -12,7 +12,7 @@ export type CommandAction =
   | { kind: 'new' }
   | { kind: 'chats' }
   | { kind: 'load'; query: string }
-  | { kind: 'resume'; query: string }
+  | { kind: 'resume' }
   | { kind: 'delete'; query: string }
   | { kind: 'rename'; title: string }
   | { kind: 'tier'; tier: TierId }
@@ -124,9 +124,10 @@ export const COMMANDS: CommandSpec[] = [
   {
     name: 'resume',
     aliases: ['r'],
+    // No argument on purpose: the picker has its own search box and arrow-key
+    // selection, so Enter should open it rather than wait for a name.
     hint: 'Pick up a previous chat (Ctrl+R)',
-    arg: 'name',
-    run: (arg) => ({ kind: 'resume', query: arg.trim() })
+    run: () => ({ kind: 'resume' })
   },
   {
     name: 'chats',

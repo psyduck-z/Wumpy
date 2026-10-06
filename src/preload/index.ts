@@ -49,7 +49,11 @@ const api = {
     compact: (req: {
       tier: TierId
       messages: Array<{ role: string; content: string }>
-    }): Promise<string | null> => ipcRenderer.invoke(IPC.chatCompact, req)
+    }): Promise<string | null> => ipcRenderer.invoke(IPC.chatCompact, req),
+    /** Names a conversation from its opening exchange. */
+    title: (req: {
+      messages: Array<{ role: string; content: string }>
+    }): Promise<string | null> => ipcRenderer.invoke(IPC.chatTitle, req)
   },
   chats: {
     list: (): Promise<ChatSummary[]> => ipcRenderer.invoke(IPC.chatsList),
@@ -59,6 +63,7 @@ const api = {
       title?: string
       messages: ChatMessage[]
       tier: TierId
+      titleLocked?: boolean
     }): Promise<ChatSummary | null> => ipcRenderer.invoke(IPC.chatsSave, chat),
     rename: (id: string, title: string): Promise<ChatSummary | null> =>
       ipcRenderer.invoke(IPC.chatsRename, id, title),

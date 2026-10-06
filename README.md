@@ -203,14 +203,22 @@ arrives.
 
 ## Chats and context
 
-**Everything auto-saves.** Conversations persist as they happen, titled from
-your first line, one JSON file each under `%APPDATA%\Wumpy\chats`. There is no
-save command because there is nothing to save — `/rename` retitles.
+**Everything auto-saves.** Conversations persist as they happen, one JSON file
+each under `%APPDATA%\Wumpy\chats`. There is no save command because there is
+nothing to save.
 
-**`/resume` picks up where you left off.** `Ctrl+R` or `/resume` opens a
-keyboard-driven picker: type to filter, arrows to move, `Enter` to open, `Del`
-to remove. `/resume last` jumps straight back into the most recent chat, and
-`/resume <name>` opens the first match.
+**Titles are written by the model.** The store seeds a title from your first
+line so the picker is never blank, then a background request upgrades it to a
+short name once the first answer lands — "Simple Marinara Sauce Recipe" rather
+than the first forty characters you typed. It runs on the fastest installed
+model, capped at 24 tokens, and the output is stripped of the quotes, `Title:`
+prefixes and trailing full stops small models like to add. `/rename` overrides
+it and locks the title so automatic naming leaves it alone.
+
+**`/resume` picks up where you left off.** `Ctrl+R` or `/resume` goes straight
+to a keyboard-driven picker — it deliberately takes no argument, because the
+picker already searches: type to filter, arrows to move, `Enter` to open, `Del`
+to remove.
 
 **Switching thinking level keeps the conversation.** `/level deep`, `/tier
 thinker`, the tier buttons and `Ctrl+1`–`Ctrl+4` all carry the full history to
@@ -240,7 +248,7 @@ or Enter to accept.
 | Command | What it does |
 | --- | --- |
 | `/new`, `/clear` | Start a fresh chat (`Ctrl+N`) |
-| `/resume [name\|last]` | Pick up a previous chat (`Ctrl+R`) |
+| `/resume` | Pick up a previous chat (`Ctrl+R`) |
 | `/chats`, `/history` | Browse saved chats |
 | `/load <name>` | Open a saved chat by name |
 | `/delete <name>` | Delete one, or `/delete all` |

@@ -53,6 +53,8 @@ export default function App(): React.JSX.Element {
   const [savedChats, setSavedChats] = useState<ChatSummary[]>([])
   const [chatId, setChatId] = useState<string>(() => nextId())
   const [chatTitle, setChatTitle] = useState<string | null>(null)
+  /** Set once the user renames, so automatic titling stops touching it. */
+  const [titleLocked, setTitleLocked] = useState(false)
 
   const scroller = useRef<HTMLDivElement>(null)
   /** False once the user scrolls up, so streaming does not yank them back down. */
@@ -145,8 +147,12 @@ export default function App(): React.JSX.Element {
 
   const newChat = useCallback(() => {
     chat.clear()
-    setChatId(nextId())
+    const fresh = nextId()
+    setChatId(fresh)
     setChatTitle(null)
+    setTitleLocked(false)
+    // A fresh chat is eligible for automatic titling again.
+    titledFor.current = null
     setShowChats(false)
   }, [chat])
 
@@ -160,10 +166,12 @@ export default function App(): React.JSX.Element {
         id: chatId,
         title,
         messages: chat.messages,
-        tier
+        tier,
+        titleLocked: true
       })
       if (summary) {
         setChatTitle(summary.title)
+        setTitleLocked(true)
         await refreshChats()
         chat.note(`Retitled to **${summary.title}**.`)
       } else {
@@ -183,6 +191,9 @@ export default function App(): React.JSX.Element {
       chat.replace(loaded.messages)
       setChatId(loaded.id)
       setChatTitle(loaded.title)
+      setTitleLocked(loaded.titleLocked ?? false)
+      // Already named, so do not re-title it on the next turn.
+      titledFor.current = loaded.id
       setShowChats(false)
       setFocusToken((n) => n + 1)
     },
@@ -297,23 +308,7 @@ export default function App(): React.JSX.Element {
           return
         case 'resume': {
           await refreshChats()
-          const list = await window.wumpy.chats.list()
-          if (list.length === 0) {
-            chat.note('No saved chats to resume yet.')
-            return
-          }
-          if (!action.query) {
-            setShowChats(true)
-            return
-          }
-          if (action.query.toLowerCase() === 'last') {
-            await openChat(list[0].id)
-            return
-          }
-          const q = action.query.toLowerCase()
-          const hit = list.find((c) => c.title.toLowerCase().includes(q))
-          if (hit) await openChat(hit.id)
-          else chat.note(`No saved chat matching "${action.query}".`, true)
+          setShowChats(true)
           return
         }
         case 'load': {
@@ -436,6 +431,36 @@ export default function App(): React.JSX.Element {
   )
 
   /**
+   * Names the chat from its opening exchange, once, in the background.
+   *
+   * The store seeds a title from the first user line so the sidebar is never
+   * blank, and this upgrades it to something the model wrote. A rename locks
+   * the title and stops this from running.
+   */
+  const titledFor = useRef<string | null>(null)
+  useEffect(() => {
+    if (streaming || titleLocked) return
+    if (titledFor.current === chatId) return
+
+    const real = chat.messages.filter((m) => !m.local && !m.error)
+    const answered = real.some((m) => m.role === 'assistant' && m.content.trim())
+    if (!answered) return
+
+    // Mark first: this must run at most once per chat even if the effect
+    // re-fires while the request is in flight.
+    titledFor.current = chatId
+    void window.wumpy.chat
+      .title({ messages: real.map((m) => ({ role: m.role as string, content: m.content })) })
+      .then((title) => {
+        if (!title) return
+        setChatTitle(title)
+        void window.wumpy.chats
+          .save({ id: chatId, title, messages: chat.messages, tier })
+          .then(() => refreshChats())
+      })
+  }, [chat.messages, chatId, refreshChats, streaming, tier, titleLocked])
+
+  /**
    * Persists the conversation whenever it settles. Debounced and keyed on the
    * message count so a stream of tokens does not write a file per frame.
    */
@@ -447,7 +472,13 @@ export default function App(): React.JSX.Element {
 
     const timer = setTimeout(() => {
       void window.wumpy.chats
-        .save({ id: chatId, title: chatTitle ?? undefined, messages: chat.messages, tier })
+        .save({
+          id: chatId,
+          title: chatTitle ?? undefined,
+          messages: chat.messages,
+          tier,
+          titleLocked
+        })
         .then((summary) => {
           if (!summary) return
           if (!chatTitle) setChatTitle(summary.title)
@@ -455,7 +486,7 @@ export default function App(): React.JSX.Element {
         })
     }, 600)
     return () => clearTimeout(timer)
-  }, [chat.messages, chatId, chatTitle, refreshChats, settings, streaming, tier])
+  }, [chat.messages, chatId, chatTitle, refreshChats, settings, streaming, tier, titleLocked])
 
   /* ------------------------------------------------------------- shortcuts */
 

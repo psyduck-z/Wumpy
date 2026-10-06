@@ -89,6 +89,10 @@ export function isTall(dock: Dock): boolean {
 export interface ChatSummary {
   id: string
   title: string
+  /**
+   * The user renamed this chat, so automatic titling must leave it alone.
+   */
+  titleLocked?: boolean
   createdAt: number
   updatedAt: number
   messageCount: number
@@ -229,5 +233,6 @@ export const IPC = {
   chatsLoad: 'chats:load',
   chatsDelete: 'chats:delete',
   chatsRename: 'chats:rename',
-  chatCompact: 'chat:compact'
+  chatCompact: 'chat:compact',
+  chatTitle: 'chat:title'
 } as const

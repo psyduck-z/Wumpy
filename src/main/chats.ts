@@ -45,7 +45,8 @@ export class ChatStore {
           createdAt: chat.createdAt,
           updatedAt: chat.updatedAt,
           messageCount: chat.messages?.length ?? 0,
-          tier: chat.tier
+          tier: chat.tier,
+          titleLocked: chat.titleLocked
         })
       } catch {
         // Skip unreadable files rather than failing the whole listing.
@@ -68,6 +69,7 @@ export class ChatStore {
     messages: ChatMessage[]
     tier: TierId
     createdAt?: number
+    titleLocked?: boolean
   }): ChatSummary | null {
     const now = Date.now()
     const existing = this.load(chat.id)
@@ -78,6 +80,7 @@ export class ChatStore {
       updatedAt: now,
       messageCount: chat.messages.length,
       tier: chat.tier,
+      titleLocked: chat.titleLocked ?? existing?.titleLocked,
       messages: chat.messages
     }
 
@@ -95,7 +98,8 @@ export class ChatStore {
   rename(id: string, title: string): ChatSummary | null {
     const chat = this.load(id)
     if (!chat) return null
-    return this.save({ ...chat, title })
+    // An explicit rename pins the title against automatic retitling.
+    return this.save({ ...chat, title, titleLocked: true })
   }
 
   delete(id: string): boolean {

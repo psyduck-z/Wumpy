@@ -213,6 +213,41 @@ function registerIpc(): void {
     }
   )
 
+  /**
+   * Names a conversation from its opening exchange. Runs on the quickest
+   * installed model and caps output hard, because this happens in the
+   * background right after an answer lands and must not compete with it.
+   */
+  ipcMain.handle(
+    IPC.chatTitle,
+    async (_e, req: { messages: Array<{ role: string; content: string }> }) => {
+      const model = resolveTierModel('flash') ?? resolveTierModel('fast')
+      if (!model || req.messages.length === 0) return null
+
+      const excerpt = req.messages
+        .slice(0, 4)
+        .map((m) => `${m.role === 'user' ? 'User' : 'Assistant'}: ${m.content.slice(0, 600)}`)
+        .join('\n\n')
+
+      const raw = await ollama.complete(
+        model,
+        [
+          {
+            role: 'system',
+            content:
+              'You write short titles for conversations. Reply with the title only: ' +
+              'three to six words, no quotation marks, no trailing punctuation, ' +
+              'no preamble, no explanation. Use the language the user wrote in.'
+          },
+          { role: 'user', content: `Title this conversation:\n\n${excerpt}` }
+        ],
+        { keepAlive: settings.get('keepAlive'), numPredict: 24 }
+      )
+
+      return raw ? cleanTitle(raw) : null
+    }
+  )
+
   ipcMain.on(IPC.chatAbort, (_e, requestId: string) => ollama.abort(requestId))
   ipcMain.on(IPC.panelHide, () => panel.hide())
   ipcMain.on(IPC.panelPin, (_e, pinned: boolean) => panel.setPinned(pinned))
@@ -291,3 +326,19 @@ app.on('will-quit', () => {
   lowLevelHook?.stop()
   ollama?.abortAll()
 })
+
+/**
+ * Small models like to wrap titles in quotes, prefix them with "Title:", or add
+ * a full stop. Strip all of that rather than showing it in the sidebar.
+ */
+function cleanTitle(raw: string): string | null {
+  let t = raw.split('\n').find((l) => l.trim()) ?? ''
+  t = t.replace(/^\s*(?:title|chat)\s*[:\-]\s*/i, '')
+  t = t.replace(/^["'“‘`]+|["'”’`]+$/g, '')
+  t = t.replace(/[.\s]+$/, '').trim()
+  if (!t) return null
+  // Guard against a model that ignored the word limit entirely.
+  const words = t.split(/\s+/)
+  if (words.length > 9) t = `${words.slice(0, 8).join(' ')}…`
+  return t.length > 60 ? `${t.slice(0, 60).trim()}…` : t
+}
