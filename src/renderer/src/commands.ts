@@ -14,6 +14,7 @@ export type CommandAction =
   | { kind: 'resume' }
   | { kind: 'delete' }
   | { kind: 'rename'; title: string }
+  | { kind: 'renameChoice'; question: string; options: string[] }
   | { kind: 'tier'; tier: TierId | null }
   | { kind: 'model' }
   | { kind: 'mode'; mode: Mode | 'toggle' }

@@ -76,7 +76,14 @@ export const ASK_PROMPT = [
   '```',
   '',
   'Ask only when you truly cannot proceed. One question, then stop and wait.',
-  'Never ask about something the facts above already tell you.'
+  'Never ask about something the facts above already tell you.',
+  '',
+  'Ambiguity about wording is never worth thinking about. Resolve it by rule:',
+  '- Quotation marks around a name are punctuation, not part of the name.',
+  '- Trailing full stops, commas and question marks are not part of a name.',
+  '- Take the user’s words literally and keep their capitalisation.',
+  'Never deliberate over how to interpret formatting. Apply the rule and move on,',
+  'or if it genuinely changes the outcome, ask — but do not reason about it.'
 ].join(String.fromCharCode(10))
 
 export const NO_SHELL_PROMPT = [
@@ -130,10 +137,15 @@ const BASE_PROMPT =
  *   gemma3:4b        64   9.9 tok/s   first word 8.7s
  *   qwen3.5:4b        6   5.7 tok/s   first word 76.9s
  *
- * A reasoning model is unusable for an overlay regardless of how clever it is:
- * qwen3.5:4b answers correctly but spends over a minute on scratchpad before
- * the first visible word. So the quick tiers use non-reasoning models and the
- * dev tiers buy depth with time.
+ * No tier uses a reasoning model, because on this hardware they are not a
+ * smarter option, they are a broken one. Six logic questions, measured:
+ *
+ *   phi4-mini:3.8b (no reasoning)   3/6 correct   74s total      0 chars scratchpad
+ *   qwen3:4b       (reasoning)      2/6 correct  774s total  12,907 chars scratchpad
+ *
+ * Four of qwen3's six answers were empty: it spent two to three minutes on
+ * scratchpad per question and never reached a conclusion. Depth now comes from
+ * a bigger non-reasoning model instead.
  *
  * `alternates` let a tier resolve to something that is actually installed
  * rather than failing outright.
@@ -170,12 +182,12 @@ export const TIERS: Record<TierId, Tier> = {
   thinker: {
     id: 'thinker',
     label: 'Thinker',
-    blurb: 'Reasons step by step. Can run commands.',
+    blurb: 'Bigger model, more depth. Can run commands.',
     mode: 'dev',
     speed: 'slow',
-    model: 'qwen3:4b',
-    alternates: ['qwen3:8b', 'deepseek-r1:7b'],
-    thinking: true,
+    model: 'qwen2.5:7b',
+    alternates: ['llama3.1:8b', 'qwen2.5:3b'],
+    thinking: false,
     tools: 'full',
     options: { num_ctx: 8192, num_predict: 800, temperature: 0.6, top_p: 0.95 },
     systemPrompt: `${BASE_PROMPT} Reason it through privately, then give the conclusion briefly. State any assumption you had to make, in one line.`

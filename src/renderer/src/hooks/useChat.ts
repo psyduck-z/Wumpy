@@ -34,6 +34,8 @@ export interface ChatState {
   notice(content: string): void
   /** Records which option was chosen for a message's question. */
   recordAnswer(messageId: string, option: string): void
+  /** Asks the user something without involving a model. */
+  askLocal(question: string, options: string[], kind: 'rename'): void
   stop(): void
   clear(): void
   replace(messages: ChatMessage[]): void
@@ -210,6 +212,23 @@ export function useChat(): ChatState {
     context.current = ctx
   }, [])
 
+  const askLocal = useCallback(
+    (question: string, options: string[], kind: 'rename') => {
+      setMessages((prev) => [
+        ...prev,
+        {
+          id: nextId(),
+          role: 'assistant',
+          content: '',
+          createdAt: Date.now(),
+          local: true,
+          localAsk: { question, options, kind }
+        }
+      ])
+    },
+    []
+  )
+
   const recordAnswer = useCallback((messageId: string, option: string) => {
     setMessages((prev) => prev.map((m) => (m.id === messageId ? { ...m, answered: option } : m)))
   }, [])
@@ -255,5 +274,5 @@ export function useChat(): ChatState {
     [stop]
   )
 
-  return { messages, streaming, stats, send, setContext, history, note, notice, recordAnswer, stop, clear, replace }
+  return { messages, streaming, stats, send, setContext, history, note, notice, askLocal, recordAnswer, stop, clear, replace }
 }

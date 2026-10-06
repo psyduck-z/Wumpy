@@ -248,9 +248,15 @@ export default function App(): React.JSX.Element {
   const onAnswerQuestion = useCallback(
     (messageId: string, option: string) => {
       chat.recordAnswer(messageId, option)
+      const asked = chat.messages.find((m) => m.id === messageId)?.localAsk
+      if (asked?.kind === 'rename') {
+        // Wumpy asked this one itself, so act on it rather than replying.
+        void retitle(option)
+        return
+      }
       chat.send(option, tier)
     },
-    [chat, tier]
+    [chat, retitle, tier]
   )
 
   const runShellCommand = useCallback(
@@ -387,6 +393,10 @@ export default function App(): React.JSX.Element {
         }
         case 'rename':
           await retitle(action.title)
+          return
+        case 'renameChoice':
+          // Both readings are plausible; one click settles it, with no model.
+          chat.askLocal(action.question, action.options, 'rename')
           return
         case 'tier': {
           if (!action.tier) {

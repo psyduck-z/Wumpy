@@ -31,6 +31,12 @@ export interface ChatMessage {
   summarised?: number
   /** The option picked for a `wumpy-ask` block in this message. */
   answered?: string
+  /**
+   * A question Wumpy itself is asking, with the options to choose from.
+   * Used where the app knows a request is ambiguous and a model would only
+   * guess — or deliberate for minutes without reaching an answer.
+   */
+  localAsk?: { question: string; options: string[]; kind: 'rename' }
 }
 
 /* ------------------------------------------------------------------ tiers */

@@ -1,6 +1,7 @@
 import { memo, useEffect, useState } from 'react'
 import type { ChatMessage, ShellKind, ShellResult, TierId } from '@shared/types'
 import { Markdown } from './Markdown'
+import { AskCard } from './AskCard'
 import { useSmoothText } from '../hooks/useSmoothText'
 
 /**
@@ -51,6 +52,20 @@ export const Message = memo(function Message({
   useEffect(() => {
     onGrow?.()
   }, [shown, onGrow])
+
+  // A question Wumpy is asking directly, with no model involved.
+  if (message.localAsk) {
+    return (
+      <div className="msg msg-assistant">
+        <AskCard
+          question={message.localAsk.question}
+          options={message.localAsk.options}
+          answered={message.answered ?? null}
+          onAnswer={(option) => onAnswer?.(message.id, option)}
+        />
+      </div>
+    )
+  }
 
   // An app-generated fact, e.g. "you can now run commands".
   if (message.notice) {

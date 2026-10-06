@@ -20,13 +20,34 @@ interface Intent {
   build(m: RegExpMatchArray): CommandAction | null
 }
 
-/** Strips quotes and trailing punctuation from a captured title. */
-function cleanTitle(raw: string): string {
-  return raw
-    .trim()
-    .replace(/^["'“‘]+|["'”’]+$/g, '')
-    .replace(/[.!?]+$/, '')
-    .trim()
+// Character classes as strings, so they can be composed into regexes below.
+const QUOTE_OPEN = "[\"'‘“]"
+const QUOTE_CLOSE = "[\"'’”]"
+
+/** Trailing sentence punctuation, which is never part of a name. */
+function trimTail(raw: string): string {
+  return raw.trim().replace(/[.!?]+$/, '').trim()
+}
+
+/**
+ * Works out what the user meant by any quotation marks in a title.
+ *
+ * There is no safe default. `rename this chat to "mathematics"` probably means
+ * the quotes are punctuation, but `rename this chat to "very funny"` probably
+ * means they are sarcasm and belong in the name — and `happy "fantasy"` almost
+ * certainly does. Nothing in the text distinguishes them, so Wumpy asks and
+ * offers both readings. One click is cheaper than being wrong, and far cheaper
+ * than a reasoning model deliberating about it for two minutes.
+ */
+function readTitle(raw: string): { title: string; alternative: string | null } {
+  const trimmed = trimTail(raw)
+  const anyQuote = new RegExp(`${QUOTE_OPEN}|${QUOTE_CLOSE}`, 'g')
+  if (!anyQuote.test(trimmed)) return { title: trimmed, alternative: null }
+
+  const stripped = trimmed.replace(new RegExp(`${QUOTE_OPEN}|${QUOTE_CLOSE}`, 'g'), '').trim()
+  // Only worth asking when the two readings actually differ.
+  if (!stripped || stripped === trimmed) return { title: trimmed, alternative: null }
+  return { title: trimmed, alternative: stripped }
 }
 
 const TIER_WORDS: Record<string, 'flash' | 'fast' | 'thinker' | 'deep'> = {
@@ -45,9 +66,17 @@ const INTENTS: Intent[] = [
     pattern:
       /^(?:please\s+)?(?:can\s+you\s+)?(?:rename|retitle|call|name)\s+(?:this\s+|the\s+|it\s+)?(?:chat|conversation)?\s*(?:to|as)?\s+(.{2,60})$/i,
     build: (m) => {
-      const title = cleanTitle(m[1])
+      const { title, alternative } = readTitle(m[1])
       // "rename this chat" with no name is a request for the picker, not a title.
       if (!title || /^(a\s+)?(better|good|new)\s+(name|title)$/i.test(title)) return null
+      // Ambiguous quoting: let the user say which they meant.
+      if (alternative) {
+        return {
+          kind: 'renameChoice',
+          question: 'Which did you mean?',
+          options: [alternative, title]
+        }
+      }
       return { kind: 'rename', title }
     }
   },

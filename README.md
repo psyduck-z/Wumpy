@@ -147,7 +147,7 @@ the header) repaints the panel and swaps which pair of tiers is on offer.
 | --- | --- | --- | --- | --- |
 | **Flash** | Quick (light) | `llama3.2:3b` | ~instant | one-liners, lookups |
 | **Fast** | Quick (light) | `phi4-mini:3.8b` | fast | the everyday default |
-| **Thinker** | Dev (dark) | `qwen3:4b` | slow | reasons; can run commands |
+| **Thinker** | Dev (dark) | `qwen2.5:7b` | slow | more depth; can run commands |
 | **Deep Thinker** | Dev (dark) | `qwen2.5-coder:14b` | very slow | real code; can run commands |
 
 Jump straight to one with `Ctrl+1`–`Ctrl+4`; picking a tier also switches to its
@@ -479,6 +479,21 @@ says "needs Developer mode" instead. That matters because a small model will
 sometimes propose a command it should not, and an inert card is better than a
 button that fails.
 
+### No reasoning models
+
+None of the tiers use a reasoning model, because on this hardware they are not a
+smarter option, they are a broken one. Six logic questions, same prompts:
+
+| | correct | total time | scratchpad |
+| --- | --- | --- | --- |
+| phi4-mini:3.8b (no reasoning) | 3/6 | **74 s** | 0 chars |
+| qwen3:4b (reasoning) | **2/6** | **774 s** | 12,907 chars |
+
+Four of qwen3's six answers came back **empty**: it spent two to three minutes
+on scratchpad per question and never reached a conclusion. Depth now comes from
+a bigger non-reasoning model instead — `qwen2.5:7b` answers the bat-and-ball
+question correctly in 12 s with no scratchpad at all, where qwen3:4b took 92 s.
+
 ### Asking instead of guessing
 
 A model can put a question back rather than guess, and the answer is one click:
@@ -491,6 +506,18 @@ Which folder did you mean?
 
 A wrong guess costs a whole slow turn to discover and another to correct, which
 on this hardware is a minute of your life.
+
+### Quotation marks are a question, not a guess
+
+`rename this chat to "very funny"` has no safe default. The quotes might be
+punctuation, or they might be the joke. Nothing in the text distinguishes
+`"mathematics"` (probably punctuation) from `"very funny"` or `happy "fantasy"`
+(probably the name). So Wumpy does not guess: it offers both readings and one
+click settles it, instantly and with no model involved.
+
+This replaced the worst behaviour in the app. Asked to rename a chat to
+`'mathematics'`, the reasoning tier spent close to two minutes deliberating over
+whether the quotes belonged in the name, and produced nothing.
 
 ### Things Wumpy does itself
 
