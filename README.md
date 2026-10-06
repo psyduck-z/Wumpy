@@ -516,6 +516,35 @@ The prompt itself is now a question rather than a rule: *does this depend on
 what is on THIS computer? No → answer in words, most questions are this.*
 Naming the common answer mattered.
 
+### Web search
+
+Developer tiers and Fast can search, behind the same click as a command — the
+query leaves the machine, and a model can put anything in one.
+
+```wumpy-search
+# Find the current default for Ollama keep_alive
+ollama keep_alive default
+```
+
+Results come back into the card and are handed to the model to answer from.
+
+**Scraping was tried first and abandoned.** DuckDuckGo's HTML pages parse
+cleanly for a handful of requests and then return HTTP 202 with an anti-bot
+challenge on every call. A feature that breaks the moment it is used is worse
+than one with stated limits, so search now uses documented endpoints only:
+
+| | covers | needs |
+| --- | --- | --- |
+| DuckDuckGo Instant Answer | definitions, people, places, concepts | nothing |
+| Wikipedia search | the same, with broader recall | nothing |
+| Brave Search | general web — docs, forums, versions | a free API key |
+
+Measured keyless: "what is speculative fiction", "mutex", "WH_KEYBOARD_LL" and
+"ryzen 7735u" all return useful results. "ollama keep_alive setting" returns
+none, and says so — that is the honest shape of a keyless search. Put a Brave
+key in `searchApiKey` for general web results; it is the only thing in Wumpy
+that needs an account.
+
 ### Asking instead of guessing
 
 A model can put a question back rather than guess, and the answer is one click:
@@ -616,6 +645,8 @@ and toggle changes apply immediately; hotkey changes apply on restart.
 | `maxTurnMs` | `180000` | Hard ceiling on one turn |
 | `shellEnabled` | `true` | Let Dev tiers propose commands |
 | `shellCwd` | `""` | Working directory; empty means home |
+| `searchEnabled` | `true` | Let tiers propose web searches |
+| `searchApiKey` | `""` | Brave Search key; without it, encyclopedic only |
 | `tierModels` | `{}` | Per-tier model overrides |
 | `launchAtLogin` | `false` | Start with Windows (packaged builds only) |
 

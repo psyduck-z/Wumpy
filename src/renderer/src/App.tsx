@@ -10,6 +10,7 @@ import type {
   ShellKind,
   ShellResult,
   OllamaModel,
+  SearchResult,
   TierStatus,
   WumpySettings
 } from '@shared/types'
@@ -275,6 +276,33 @@ export default function App(): React.JSX.Element {
       chat.send(option, tier)
     },
     [chat, retitle, tier]
+  )
+
+  const canSearch = TIERS[tier].tools !== 'none' && (settings?.searchEnabled ?? true)
+
+  const runSearch = useCallback((query: string) => window.wumpy.search.run(query), [])
+
+  /** Hands search results back so the model can answer from them. */
+  const onSearchResults = useCallback(
+    (query: string, results: SearchResult[], provider: string, error?: string) => {
+      const body = error
+        ? `The search failed: ${error}`
+        : results
+            .map((r, i) => [`${i + 1}. ${r.title}`, `   ${r.url}`, `   ${r.snippet}`].join('\n'))
+            .join('\n')
+      chat.send(
+        [
+          `Results for "${query}" (via ${provider}):`,
+          '',
+          body,
+          '',
+          'Answer the original question from these. Cite the sources you used.'
+        ].join('\n'),
+        tier,
+        `Searched: ${query}`
+      )
+    },
+    [chat, tier]
   )
 
   const runShellCommand = useCallback(
@@ -847,6 +875,8 @@ export default function App(): React.JSX.Element {
                 onRunCommand={canRunCommands ? runShellCommand : undefined}
                 onCommandResult={onCommandResult}
                 onAnswer={onAnswerQuestion}
+                onSearch={canSearch ? runSearch : undefined}
+                onSearchResults={onSearchResults}
               />
             ))
           )}

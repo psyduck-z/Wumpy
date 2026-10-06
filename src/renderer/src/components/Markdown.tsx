@@ -1,10 +1,11 @@
 import { memo, useState, isValidElement, type ReactNode } from 'react'
-import type { ShellKind, ShellResult, TierId } from '@shared/types'
+import type { SearchResult, ShellKind, ShellResult, TierId } from '@shared/types'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import rehypeHighlight from 'rehype-highlight'
 import { CommandCard } from './CommandCard'
 import { AskCard } from './AskCard'
+import { SearchCard } from './SearchCard'
 
 function CodeBlock({ children }: { children: ReactNode }): React.JSX.Element {
   const [copied, setCopied] = useState(false)
@@ -56,6 +57,21 @@ function readAsk(children: ReactNode): { question: string; options: string[] } |
   return { question, options: options.slice(0, 5) }
 }
 
+/** Pulls the query out of a `wumpy-search` block. */
+function readSearch(children: ReactNode): string | null {
+  if (!isValidElement(children)) return null
+  const props = children.props as { className?: unknown; children?: unknown }
+  if (typeof props.className !== 'string') return null
+  if (!props.className.split(/\s+/).includes('language-wumpy-search')) return null
+  const raw =
+    typeof props.children === 'string'
+      ? props.children
+      : Array.isArray(props.children)
+        ? props.children.filter((c) => typeof c === 'string').join('')
+        : ''
+  return raw.trim() || null
+}
+
 /** Maps a fence tag to the shell it should run in, or null for ordinary code. */
 function runnableShell(className: unknown): ShellKind | null {
   if (typeof className !== 'string') return null
@@ -91,6 +107,14 @@ export interface MarkdownProps {
   onRunCommand?: (command: string, shell: ShellKind) => Promise<ShellResult | null>
   /** The tier asking, which decides what it is allowed to run. */
   tier: TierId
+  /** Supplied for assistant turns that may search the web. */
+  onSearch?: (query: string) => Promise<{ results: SearchResult[]; provider: string; error?: string }>
+  onSearchResults?: (
+    query: string,
+    results: SearchResult[],
+    provider: string,
+    error?: string
+  ) => void
   onCommandResult?: (result: ShellResult) => void
 }
 
@@ -108,7 +132,9 @@ export const Markdown = memo(function Markdown({
   onCommandResult,
   onAnswer,
   answered = null,
-  tier
+  tier,
+  onSearch,
+  onSearchResults
 }: MarkdownProps) {
   return (
     <ReactMarkdown
@@ -116,6 +142,17 @@ export const Markdown = memo(function Markdown({
       rehypePlugins={[[rehypeHighlight, { detect: true, ignoreMissing: true }]]}
       components={{
         pre: ({ children }) => {
+          const query = onSearch ? readSearch(children) : null
+          if (query) {
+            return (
+              <SearchCard
+                query={query}
+                onSearch={onSearch!}
+                onResults={onSearchResults ?? (() => {})}
+              />
+            )
+          }
+
           const ask = onAnswer ? readAsk(children) : null
           if (ask) {
             return (

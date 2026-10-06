@@ -496,6 +496,37 @@ body {
 }
 .picker-row.is-removing .picker-del { opacity: 1; }
 
+/* ----------------------------------------------------------- web search */
+
+.search-results {
+  margin: 6px 0 0;
+  padding-left: 18px;
+  font-size: 12px;
+}
+
+.search-results li { margin: 0 0 7px; }
+
+.search-results a {
+  color: rgb(var(--accent-text));
+  text-decoration: none;
+}
+
+.search-results a:hover { text-decoration: underline; }
+
+.search-snippet {
+  display: block;
+  margin-top: 2px;
+  color: rgb(var(--muted));
+  font-size: 11px;
+  line-height: 1.4;
+}
+
+.search-error {
+  margin: 4px 0 0;
+  font-size: 11.5px;
+  color: rgb(var(--danger));
+}
+
 /* ------------------------------------------------------ questions back */
 
 .ask {

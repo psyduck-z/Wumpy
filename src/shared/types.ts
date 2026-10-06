@@ -73,6 +73,12 @@ export interface ShellResult {
   truncated: boolean
 }
 
+export interface SearchResult {
+  title: string
+  url: string
+  snippet: string
+}
+
 export interface Tier {
   id: TierId
   label: string
@@ -192,6 +198,13 @@ export interface WumpySettings {
   launchAtLogin: boolean
   /** Allow tiers that support it to propose shell commands. */
   shellEnabled: boolean
+  /** Allow tiers that support it to propose web searches. */
+  searchEnabled: boolean
+  /**
+   * Brave Search API key. Without one, search covers encyclopedic questions
+   * only, via DuckDuckGo's Instant Answer API and Wikipedia.
+   */
+  searchApiKey: string
   /** Working directory for commands. Empty means the user's home directory. */
   shellCwd: string
   /** Per-tier model overrides, keyed by tier id. */
@@ -297,5 +310,6 @@ export const IPC = {
   chatCompact: 'chat:compact',
   chatTitle: 'chat:title',
   shellRun: 'shell:run',
-  shellRisk: 'shell:risk'
+  shellRisk: 'shell:risk',
+  searchRun: 'search:run'
 } as const

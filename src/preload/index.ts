@@ -12,6 +12,7 @@ import type {
   OllamaModel,
   OllamaStatus,
   SavedChat,
+  SearchResult,
   ShellKind,
   ShellResult,
   TierId,
@@ -88,6 +89,14 @@ const api = {
       tier: TierId
     }): Promise<{ risk: string | null; allowed: boolean; scope: 'none' | 'read' | 'full' }> =>
       ipcRenderer.invoke(IPC.shellRisk, req)
+  },
+  search: {
+    /** Runs an approved web search. */
+    run: (query: string): Promise<{
+      results: SearchResult[]
+      provider: string
+      error?: string
+    }> => ipcRenderer.invoke(IPC.searchRun, query)
   },
   panel: {
     hide: (): void => ipcRenderer.send(IPC.panelHide),

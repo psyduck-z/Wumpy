@@ -21,6 +21,7 @@ import {
   NO_SHELL_PROMPT,
   APP_PROMPT,
   ASK_PROMPT,
+  SEARCH_PROMPT,
   shellExamples
 } from '@shared/tiers'
 import { SettingsStore } from './store'
@@ -32,6 +33,7 @@ import { registerHotkeys, unregisterHotkeys } from './hotkey'
 import { LowLevelHook } from './lowlevelhook'
 import { runCommand, assessRisk, isReadOnly } from './shell'
 import { PriorityManager } from './priority'
+import { webSearch } from './search'
 
 // Only one Wumpy may own the tray icon and the global hotkey.
 if (!app.requestSingleInstanceLock()) {
@@ -197,6 +199,7 @@ function registerIpc(): void {
       tier.systemPrompt,
       APP_PROMPT,
       scope === 'full' ? SHELL_PROMPT : scope === 'read' ? READ_SHELL_PROMPT : NO_SHELL_PROMPT,
+      scope !== 'none' && settings.get('searchEnabled') ? SEARCH_PROMPT : '',
       ASK_PROMPT
     ].join('\n\n')
 
@@ -292,6 +295,19 @@ function registerIpc(): void {
       return raw ? cleanTitle(raw) : null
     }
   )
+
+  /**
+   * Runs a web search the user approved. Like commands, the query leaves this
+   * machine only after a click: a model can put anything in it, including
+   * whatever it has just read.
+   */
+  ipcMain.handle(IPC.searchRun, async (_e, query: string) => {
+    if (!settings.get('searchEnabled')) {
+      return { results: [], provider: 'none', error: 'Search is turned off in settings.' }
+    }
+    console.log(`[wumpy] searching: ${query}`)
+    return webSearch(query, settings.get('searchApiKey') || undefined)
+  })
 
   ipcMain.handle(IPC.shellRisk, (_e, req: { command: string; tier: TierId }) => {
     const scope = settings.get('shellEnabled') ? (TIERS[req.tier]?.tools ?? 'none') : 'none'

@@ -77,9 +77,39 @@ export function shellExamples(scope: 'read' | 'full'): Array<{ role: 'user' | 'a
       content: `Checking whether Ollama is on your PATH.
 
 ${RUN_EXAMPLE}`
+    },
+    { role: 'user', content: 'what is the latest version of Electron' },
+    {
+      role: 'assistant',
+      content: [
+        'Looking that up.',
+        '',
+        '```wumpy-search',
+        '# Find the current Electron release',
+        'latest Electron version',
+        '```'
+      ].join(String.fromCharCode(10))
     }
   ]
 }
+
+/** Appended for tiers that may search the web. */
+export const SEARCH_PROMPT = [
+  'You can search the web. Do it when the answer needs something current, or',
+  'specific to a product, library or version you are unsure about. Do not search',
+  'for things you already know.',
+  '',
+  'Put the search in a fenced block tagged wumpy-search: a # comment saying why,',
+  'then the query on its own line. Keep the query short, as you would type it.',
+  '',
+  '```wumpy-search',
+  '# Find the current default for Ollama keep_alive',
+  'ollama keep_alive default',
+  '```',
+  '',
+  'The user approves the search before it runs and you are given the results.',
+  'Answer from them and name the sources you used.'
+].join(String.fromCharCode(10))
 
 /**
  * Lets the model put a question back to the user instead of guessing.

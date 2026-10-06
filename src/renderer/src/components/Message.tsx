@@ -1,5 +1,5 @@
 import { memo, useEffect, useState } from 'react'
-import type { ChatMessage, ShellKind, ShellResult, TierId } from '@shared/types'
+import type { ChatMessage, SearchResult, ShellKind, ShellResult, TierId } from '@shared/types'
 import { Markdown } from './Markdown'
 import { AskCard } from './AskCard'
 import { useSmoothText } from '../hooks/useSmoothText'
@@ -20,7 +20,9 @@ export const Message = memo(function Message({
   onGrow,
   onRunCommand,
   onCommandResult,
-  onAnswer
+  onAnswer,
+  onSearch,
+  onSearchResults
 }: {
   message: ChatMessage
   streaming: boolean
@@ -37,6 +39,14 @@ export const Message = memo(function Message({
   onCommandResult?: (result: ShellResult) => void
   /** Called when the user picks an option from a question the model asked. */
   onAnswer?: (messageId: string, option: string) => void
+  /** Supplied when the tier may search the web. */
+  onSearch?: (query: string) => Promise<{ results: SearchResult[]; provider: string; error?: string }>
+  onSearchResults?: (
+    query: string,
+    results: SearchResult[],
+    provider: string,
+    error?: string
+  ) => void
 }): React.JSX.Element {
   const [open, setOpen] = useState(showReasoning)
   const isUser = message.role === 'user'
@@ -131,6 +141,8 @@ export const Message = memo(function Message({
             onCommandResult={onCommandResult}
             onAnswer={onAnswer ? (option) => onAnswer(message.id, option) : undefined}
             answered={message.answered ?? null}
+            onSearch={onSearch}
+            onSearchResults={onSearchResults}
           />
           {waiting && !message.thinking && (
             <span className="dots" role="status" aria-label="Thinking">

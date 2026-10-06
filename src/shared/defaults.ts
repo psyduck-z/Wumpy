@@ -44,5 +44,10 @@ export const DEFAULT_SETTINGS: WumpySettings = {
   shellEnabled: true,
   shellCwd: '',
 
+  // Keyless search answers encyclopedic questions. Add a Brave key for general
+  // web results; nothing else in Wumpy needs an account.
+  searchEnabled: true,
+  searchApiKey: '',
+
   tierModels: {}
 }
