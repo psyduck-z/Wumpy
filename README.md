@@ -119,6 +119,9 @@ Scored 70% correctness, 30% responsiveness, on a Ryzen 7 7735U:
 | qwen3.5:2b | 6* | 0/4 | 1/4 | 0/5 | 8.8 | 48.4 s |
 | qwen3.5:4b | 6* | 0/4 | 1/4 | 0/5 | 5.7 | 76.9 s |
 
+Only the four tier models are kept installed; the rest were removed after
+benchmarking. Re-run `npm run bench` after pulling anything new.
+
 **phi4-mini:3.8b is now the Fast tier.** It is the only model that got every
 shell decision right — proposing a command when the answer depends on the
 machine, and answering directly when it does not. That was the exact weakness
