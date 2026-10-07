@@ -281,6 +281,15 @@ fast:
 Title casing is applied in code rather than asked for in the prompt, so `CSS`,
 `Win+C` and `llama3.2` survive intact.
 
+The model's output is also repaired against the question it came from. Asking
+"what are all the ollama ai models i have locally" produced the title
+**OLLA MA AI MODELS** — shouted, with a word split in half. Both are fixed
+deterministically: a title with no lower case at all is the model shouting
+rather than an acronym, and a short fragment that is not a word in the question
+is tried joined to the one after it, since "olla" + "ma" is "ollama", which is.
+A word the model chose that simply is not in the question is left alone, so
+"Quick Pasta Recipe" survives. `npm run check:titles` covers eleven cases.
+
 **`/resume` picks up where you left off.** `Ctrl+R` or `/resume` goes straight
 to a keyboard-driven picker — it deliberately takes no argument, because the
 picker already searches: type to filter, arrows to move, `Enter` to open, `Del`

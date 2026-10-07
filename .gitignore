@@ -450,3 +450,4 @@ FodyWeavers.xsd
 
 # Scratch files from `npm run check:blocks`.
 /.block-check.*
+/.title-check.*

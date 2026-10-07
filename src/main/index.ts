@@ -34,6 +34,7 @@ import { LowLevelHook } from './lowlevelhook'
 import { runCommand, assessRisk, isReadOnly } from './shell'
 import { PriorityManager } from './priority'
 import { webSearch } from './search'
+import { cleanTitle } from './titles'
 
 // Only one Wumpy may own the tray icon and the global hotkey.
 if (!app.requestSingleInstanceLock()) {
@@ -310,7 +311,7 @@ function registerIpc(): void {
         { keepAlive: settings.get('keepAlive'), numPredict: 20 }
       )
 
-      return raw ? cleanTitle(raw) : null
+      return raw ? cleanTitle(raw, question) : null
     }
   )
 
@@ -485,39 +486,6 @@ app.on('will-quit', () => {
   ollama?.abortAll()
 })
 
-/**
- * Small models like to wrap titles in quotes, prefix them with "Title:", or add
- * a full stop. Strip all of that, then title-case the result.
- */
-function cleanTitle(raw: string): string | null {
-  let t = raw.split('\n').find((l) => l.trim()) ?? ''
-  t = t.replace(/^\s*(?:title|topic|chat|name)\s*[:\-]\s*/i, '')
-  t = t.replace(/^["'“‘`]+|["'”’`]+$/g, '')
-  t = t.replace(/[.\s]+$/, '').trim()
-  if (!t) return null
-
-  // Guard against a model that ignored the word limit entirely.
-  const words = t.split(/\s+/)
-  if (words.length > 8) t = words.slice(0, 7).join(' ')
-
-  return titleCase(t).slice(0, 60).trim()
-}
-
-/** Minor words stay lowercase unless they lead. */
-const MINOR = new Set(['a', 'an', 'the', 'of', 'in', 'on', 'to', 'for', 'and', 'or', 'vs', 'with'])
-
-function titleCase(text: string): string {
-  return text
-    .split(/\s+/)
-    .map((word, i) => {
-      // Leave anything already carrying a capital alone, so CSS, Win+C and
-      // llama3.2 survive intact.
-      if (/[A-Z0-9]/.test(word)) return word
-      if (i > 0 && MINOR.has(word)) return word
-      return word.charAt(0).toUpperCase() + word.slice(1)
-    })
-    .join(' ')
-}
 
 /**
  * Live facts, handed to the model every turn.
