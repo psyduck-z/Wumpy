@@ -570,7 +570,11 @@ Firefox is not on it — but Firefox is installed. The model had copied the
 application, and confidently answered "Firefox is not installed."
 
 The prompt now distinguishes the two: `Get-Command` for command-line tools, and
-the uninstall registry for applications. Verified on this machine, the registry
+the uninstall registry for applications. It also says not to trust
+`Get-Command`'s Version column, which is file metadata and reads `0.0.0.0` for
+most tools — asked for a version the model now proposes the tool's own
+`--version`, which reports `ollama version is 0.40.0` where `Get-Command` said
+`0.0.0.0`. Verified on this machine, the registry
 query returns `Mozilla Firefox (x64 en-US) 155.0.1`, and it is read-only so Fast
 can run it. Asked about Firefox and Chrome the model now reaches for the
 registry, and still uses `Get-Command` for Ollama, which is the right call for a
