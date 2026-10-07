@@ -194,14 +194,22 @@ const BASE_PROMPT = [
  * the shell and instruction set, and is slow enough that it should be chosen
  * deliberately rather than landed on.
  *
- * Fast and Thinker therefore share both a model and a num_ctx. The context
- * size is deliberate: Ollama sizes its context per runner, so a tier that
- * asked for a different one would reload the model on every mode switch, which
- * measured 46-65s of prefill against 4-6s when the sizes match.
+ * Every tier shares one num_ctx, for the reason given on NUM_CTX below.
  *
  * `alternates` let a tier resolve to something that is actually installed
  * rather than failing outright.
  */
+/**
+ * One context size for every tier and every background call.
+ *
+ * Ollama sizes a model's context per runner, so two calls to the same model
+ * asking for different sizes tear each other's down. Keeping a single number
+ * makes that impossible rather than merely unlikely: a mismatch measured 46-65s
+ * of prefill on the next question against 4-6s, with nothing on screen to say
+ * why. It costs only KV memory, which on this machine is not the scarce thing.
+ */
+export const NUM_CTX = 8192
+
 export const TIERS: Record<TierId, Tier> = {
   flash: {
     id: 'flash',
@@ -213,7 +221,7 @@ export const TIERS: Record<TierId, Tier> = {
     alternates: ['llama3.2:1b', 'phi4-mini:3.8b', 'qwen2.5:3b'],
     thinking: false,
     tools: 'none',
-    options: { num_ctx: 2048, num_predict: 384, temperature: 0.4, top_p: 0.9 },
+    options: { num_ctx: NUM_CTX, num_predict: 384, temperature: 0.4, top_p: 0.9 },
     systemPrompt: `${BASE_PROMPT} One or two sentences.`
   },
 
@@ -227,8 +235,7 @@ export const TIERS: Record<TierId, Tier> = {
     alternates: ['llama3.2:3b', 'qwen2.5:3b'],
     thinking: false,
     tools: 'read',
-    // num_ctx matches Thinker's on purpose; see the note above.
-    options: { num_ctx: 8192, num_predict: 1024, temperature: 0.6, top_p: 0.9 },
+    options: { num_ctx: NUM_CTX, num_predict: 1024, temperature: 0.6, top_p: 0.9 },
     systemPrompt: `${BASE_PROMPT} A short paragraph, or bullets if it is genuinely a list.`
   },
 
@@ -242,7 +249,7 @@ export const TIERS: Record<TierId, Tier> = {
     alternates: ['qwen2.5:7b', 'llama3.2:3b'],
     thinking: false,
     tools: 'full',
-    options: { num_ctx: 8192, num_predict: 800, temperature: 0.6, top_p: 0.95 },
+    options: { num_ctx: NUM_CTX, num_predict: 800, temperature: 0.6, top_p: 0.95 },
     systemPrompt: `${BASE_PROMPT} Give the conclusion, plus any assumption in one line.`
   },
 
@@ -256,7 +263,7 @@ export const TIERS: Record<TierId, Tier> = {
     alternates: ['qwen2.5-coder:7b', 'qwen3:8b'],
     thinking: false,
     tools: 'full',
-    options: { num_ctx: 8192, num_predict: 1500, temperature: 0.3, top_p: 0.9 },
+    options: { num_ctx: NUM_CTX, num_predict: 1500, temperature: 0.3, top_p: 0.9 },
     systemPrompt:
       `${BASE_PROMPT} Thorough where it matters only. Working code over prose ` +
       'about code. Name edge cases briefly.'

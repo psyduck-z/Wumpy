@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import type {
   ChatSummary,
   ContextUsage,
@@ -284,19 +284,35 @@ export default function App(): React.JSX.Element {
   /** Whether the active tier may propose commands at all. */
   const canRunCommands = TIERS[tier].tools !== 'none' && (settings?.shellEnabled ?? true)
 
+  /**
+   * The latest chat state, for callbacks that must not change identity.
+   *
+   * `chat` is a fresh object every render and `messages` changes on every
+   * token, so a callback listing it as a dependency was rebuilt per token.
+   * Three of those are handed to every Message, which defeated the memo whose
+   * whole job is to stop the transcript re-parsing its markdown each time — so
+   * the panel's cost per token grew with the length of the conversation,
+   * during the one period when the cores are wanted elsewhere.
+   */
+  const chatRef = useRef(chat)
+  chatRef.current = chat
+  const retitleRef = useRef(retitle)
+  retitleRef.current = retitle
+
   /** The user picked one of the model's options: lock the card and reply with it. */
   const onAnswerQuestion = useCallback(
     (messageId: string, option: string) => {
-      chat.recordAnswer(messageId, option)
-      const asked = chat.messages.find((m) => m.id === messageId)?.localAsk
+      const live = chatRef.current
+      live.recordAnswer(messageId, option)
+      const asked = live.messages.find((m) => m.id === messageId)?.localAsk
       if (asked?.kind === 'rename') {
         // Wumpy asked this one itself, so act on it rather than replying.
-        retitle(option)
+        retitleRef.current(option)
         return
       }
-      chat.send(option, tier)
+      live.send(option, tier)
     },
-    [chat, retitle, tier]
+    [tier]
   )
 
   const canSearch = TIERS[tier].tools !== 'none' && (settings?.searchEnabled ?? true)
@@ -311,7 +327,7 @@ export default function App(): React.JSX.Element {
         : results
             .map((r, i) => [`${i + 1}. ${r.title}`, `   ${r.url}`, `   ${r.snippet}`].join('\n'))
             .join('\n')
-      chat.send(
+      chatRef.current.send(
         [
           `Results for "${query}" (via ${provider}):`,
           '',
@@ -323,7 +339,7 @@ export default function App(): React.JSX.Element {
         `Searched: ${query}`
       )
     },
-    [chat, tier]
+    [tier]
   )
 
   /**
@@ -417,7 +433,7 @@ export default function App(): React.JSX.Element {
       // Reads are different: `Get-Command foo` printing nothing is the answer
       // rather than the absence of one, so those always go back to the model.
       if (!result.readOnly && result.exitCode === 0 && !clipped) {
-        chat.notice(`Ran \`${result.command}\` — succeeded, no output.`)
+        chatRef.current.notice(`Ran \`${result.command}\` — succeeded, no output.`)
         return
       }
 
@@ -434,21 +450,28 @@ export default function App(): React.JSX.Element {
 
       // Sent as a user turn because that is the role the model expects a tool
       // result to arrive in, but shown as the short line instead of the dump.
-      const sent = chat.send(report, tier, `Ran: \`${result.command}\``)
+      const sent = chatRef.current.send(report, tier, `Ran: \`${result.command}\``)
       // A turn was already in flight, so the output would otherwise vanish.
       // It still reaches the model, just as a fact rather than a question.
-      if (!sent) chat.notice(`Ran \`${result.command}\`:
-${clipped || '(no output)'}`)
+      if (!sent) {
+        chatRef.current.notice(`Ran \`${result.command}\`:\n${clipped || '(no output)'}`)
+      }
     },
-    [chat, tier]
+    [tier]
   )
 
   /* --------------------------------------------------- autosave + compaction */
 
-  /** Character-based fallback, used until Ollama reports real counts. */
-  const estimateTokens = useCallback(
-    () => Math.ceil(chat.history().reduce((n, m) => n + m.content.length, 0) / 4),
-    [chat]
+  /**
+   * Character-based fallback, used until Ollama reports real counts.
+   *
+   * Memoised because it walks every message, and the panel re-renders on every
+   * token: without this, the cost of counting the conversation was paid once
+   * per token and grew with the conversation, while the model was generating.
+   */
+  const estimateTokens = useMemo(
+    () => Math.ceil(messages.reduce((n, m) => (m.error || m.local ? n : n + m.content.length), 0) / 4),
+    [messages]
   )
 
   /**
@@ -459,7 +482,7 @@ ${clipped || '(no output)'}`)
   const usage: ContextUsage = (() => {
     const limit = TIERS[tier].options.num_ctx
     const counted = stats.contextTokens
-    const estimate = estimateTokens()
+    const estimate = estimateTokens
     // After a turn lands, the counted value is authoritative. Before the first
     // turn, or after loading a saved chat, fall back to characters.
     if (counted !== null && counted >= estimate * 0.5) {

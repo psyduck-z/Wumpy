@@ -233,7 +233,7 @@ export class OllamaClient {
   async complete(
     model: string,
     messages: Array<Pick<ChatMessage, 'role' | 'content'>>,
-    opts: { keepAlive: string; numPredict?: number }
+    opts: { keepAlive: string; numPredict?: number; numCtx: number }
   ): Promise<string | null> {
     try {
       const res = await fetch(`${this.host}/api/chat`, {
@@ -244,7 +244,12 @@ export class OllamaClient {
           messages,
           stream: false,
           keep_alive: opts.keepAlive,
-          options: { num_predict: opts.numPredict ?? 400, temperature: 0.2 }
+          // num_ctx is required, not optional. Ollama sizes a model's context
+          // per runner, so a background call that asks for a different size
+          // tears down the one the chat is using and rebuilds it - and the
+          // user's next message then pays a reload and a full prefill for a
+          // title it never saw being written.
+          options: { num_ctx: opts.numCtx, num_predict: opts.numPredict ?? 400, temperature: 0.2 }
         }),
         signal: AbortSignal.timeout(240_000)
       })
