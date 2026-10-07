@@ -127,13 +127,30 @@ body {
   min-width: 0;
 }
 
-.brand strong {
+.brand strong,
+.brand-title {
   font-size: 13px;
   letter-spacing: 0.1px;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
   max-width: 190px;
+}
+
+.brand-title {
+  padding: 1px 5px;
+  margin-left: -5px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: inherit;
+  font-family: inherit;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.brand-title:hover {
+  background: rgb(var(--text) / 0.08);
 }
 
 .brand .hint {
@@ -350,8 +367,43 @@ body {
   word-break: break-word;
 }
 
+.msg-assistant {
+  position: relative;
+}
+
 .msg-assistant .msg-body {
   word-break: break-word;
+}
+
+/*
+ * Appears on hover, in the gutter above the answer. Always-visible would put a
+ * button over every message in the transcript.
+ */
+.msg-copy {
+  position: absolute;
+  top: -4px;
+  right: 0;
+  z-index: 2;
+  padding: 2px 7px;
+  border: 1px solid rgb(var(--line));
+  border-radius: 6px;
+  background: rgb(var(--surface));
+  color: rgb(var(--muted));
+  font: inherit;
+  font-size: 10.5px;
+  opacity: 0;
+  cursor: pointer;
+  transition: opacity 120ms ease;
+}
+
+.msg-assistant:hover .msg-copy,
+.msg-copy:focus-visible {
+  opacity: 1;
+}
+
+.msg-copy:hover {
+  color: rgb(var(--text));
+  border-color: rgb(var(--accent) / 0.6);
 }
 
 /*

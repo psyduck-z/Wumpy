@@ -18,7 +18,7 @@ import type {
 import { isTall } from '@shared/types'
 import { TIERS, TIER_ORDER, defaultTierFor } from '@shared/tiers'
 import { useChat, nextId, type ChatStats } from './hooks/useChat'
-import { parseCommand, helpText, type CommandAction } from './commands'
+import { allCommands, parseCommand, helpText, SHORTCUT_FOR, type CommandAction } from './commands'
 import { matchIntent } from './intents'
 import { AUTO_RUN_LIMIT, autoRunEligible } from './autorun'
 import { Header } from './components/Header'
@@ -52,10 +52,15 @@ export default function App(): React.JSX.Element {
   const pinned = !(settings?.hideOnBlur ?? false)
   const [visible, setVisible] = useState(false)
   const [focusToken, setFocusToken] = useState(0)
+  /** Text the command menu has dropped into the composer, with a bump token. */
+  const [prefill, setPrefillState] = useState({ text: '', token: 0 })
+  const setPrefill = useCallback((text: string) => {
+    setPrefillState((p) => ({ text, token: p.token + 1 }))
+  }, [])
 
   // Saved chats
   /** Which picker is open, if any. One list UI serves them all. */
-  const [picker, setPicker] = useState<null | 'resume' | 'delete' | 'tier' | 'model' | 'dock'>(
+  const [picker, setPicker] = useState<null | 'command' | 'resume' | 'delete' | 'tier' | 'model' | 'dock'>(
     null
   )
   const [savedChats, setSavedChats] = useState<ChatSummary[]>([])
@@ -832,6 +837,12 @@ ${clipped || '(no output)'}`)
           setPicker('resume')
           return
         }
+        // Ctrl+K opens everything Wumpy can do, searchable.
+        if (e.key.toLowerCase() === 'k') {
+          e.preventDefault()
+          setPicker((p) => (p === 'command' ? null : 'command'))
+          return
+        }
         // Ctrl+Home / Ctrl+End jump to the ends of the transcript.
         if (e.key === 'Home' || e.key === 'End') {
           e.preventDefault()
@@ -891,6 +902,42 @@ ${clipped || '(no output)'}`)
    */
   function pickerProps(kind: NonNullable<typeof picker>): PickerProps {
     const close = (): void => setPicker(null)
+
+    /**
+     * Everything Wumpy can do, in one searchable list.
+     *
+     * Typing `/` already offered this, but only to someone who knew to try it.
+     * A key that opens the list means nothing has to be known in advance -
+     * which is the same reason every other choice goes through this component.
+     */
+    if (kind === 'command') {
+      return {
+        heading: 'Commands',
+        placeholder: 'What do you want to do?',
+        onClose: close,
+        onPick: (name) => {
+          close()
+          const spec = allCommands().find((c) => c.name === name)
+          if (!spec) return
+          // Run it and see. Several commands take an argument but do something
+          // sensible without one - /tier opens the tier list, /pin toggles -
+          // and those should just happen. Only one that actually complains
+          // needs text, and that goes to the composer ready to be filled in.
+          const action = spec.run('')
+          if (action.kind === 'error') {
+            setPrefill(`/${spec.name} `)
+            return
+          }
+          void runCommand(action, `/${spec.name}`)
+        },
+        items: allCommands().map((c) => ({
+          id: c.name,
+          title: `/${c.name}${c.arg ? ` <${c.arg}>` : ''}`,
+          meta: c.hint,
+          hint: SHORTCUT_FOR[c.name]
+        }))
+      }
+    }
 
     if (kind === 'tier') {
       const byId = new Map(tierStatuses.map((t) => [t.id, t]))
@@ -1017,6 +1064,7 @@ ${clipped || '(no output)'}`)
         pinned={pinned}
         onTogglePin={togglePin}
         onNewChat={newChat}
+        onRename={() => setPrefill(`/rename ${chatTitle ?? ''}`)}
         onShowChats={() => {
           void refreshChats()
           setPicker((p) => (p ? null : 'resume'))
@@ -1102,6 +1150,7 @@ ${clipped || '(no output)'}`)
         onStop={chat.stop}
         streaming={streaming}
         focusToken={focusToken}
+        prefill={prefill}
         placeholder={
           mode === 'quick' ? 'Ask Wumpy…' : `Ask ${activeTier.label}… (slower, deeper)`
         }
@@ -1141,7 +1190,7 @@ function Empty({
       ) : (
         <p>
           <strong>{tierLabel}</strong> on <code>{model}</code>. Press <kbd>{hotkeyLabel}</kbd>{' '}
-          anywhere to summon this. Type <code>/</code> for commands.
+          anywhere to summon this, <kbd>Ctrl+K</kbd> for everything it can do.
         </p>
       )}
     </div>

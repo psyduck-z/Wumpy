@@ -145,7 +145,7 @@ export function StatusBar({
         </span>
       ) : stats.speed === null ? (
         // Nothing measured yet, so use the space for discoverability.
-        !compact && <span className="status-tip">/ for commands</span>
+        !compact && <span className="status-tip">Ctrl+K for commands</span>
       ) : (
         (
           <span className="status-live">

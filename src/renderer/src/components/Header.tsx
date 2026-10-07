@@ -39,6 +39,7 @@ export function Header({
   onTogglePin,
   onNewChat,
   onShowChats,
+  onRename,
   onClose,
   hotkeyLabel,
   title
@@ -52,6 +53,8 @@ export function Header({
   onTogglePin(): void
   onNewChat(): void
   onShowChats(): void
+  /** Clicking the title offers to rename it. */
+  onRename(): void
   onClose(): void
   hotkeyLabel: string
   title: string | null
@@ -67,7 +70,15 @@ export function Header({
           {/* The connection light rides the corner of the mark. */}
           <span className={`dot ${online ? 'dot-on' : 'dot-off'}`} />
         </span>
-        <strong>{title ?? 'Wumpy'}</strong>
+        {/* The obvious thing to try on a title is to click it, and it used to
+            do nothing at all. */}
+        {title ? (
+          <button type="button" className="brand-title" onClick={onRename} title="Rename this chat">
+            {title}
+          </button>
+        ) : (
+          <strong>Wumpy</strong>
+        )}
         <span className="hint">{online ? hotkeyLabel : (status?.error ?? 'connecting…')}</span>
       </div>
 

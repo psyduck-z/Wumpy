@@ -262,6 +262,28 @@ export const COMMANDS: CommandSpec[] = [
   )
 ]
 
+/**
+ * Keys that reach a command directly, shown beside it in the menu.
+ *
+ * The menu is for finding things. Showing the key is what stops it being
+ * needed a second time.
+ */
+export const SHORTCUT_FOR: Record<string, string | undefined> = {
+  new: 'Ctrl+N',
+  resume: 'Ctrl+R',
+  mode: 'Ctrl+D',
+  tier: 'Ctrl+1-4',
+  approve: 'Shift+Tab',
+  stop: 'Esc',
+  quit: 'Esc',
+  help: 'Ctrl+K'
+}
+
+/** Every command, for the menu. */
+export function allCommands(): CommandSpec[] {
+  return COMMANDS
+}
+
 /** Every name and alias, for matching. */
 function matches(spec: CommandSpec, name: string): boolean {
   return spec.name === name || (spec.aliases?.includes(name) ?? false)
@@ -323,6 +345,7 @@ export function helpText(): string {
     '',
     '| Key | What it does |',
     '| --- | --- |',
+    '| Ctrl+K | Every command, searchable |',
     '| ↑ / ↓ | Step back through what you have typed before |',
     '| Enter / Shift+Enter | Send / start a new line |',
     '| Ctrl+1–4 | Jump straight to a tier |',

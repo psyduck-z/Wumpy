@@ -56,7 +56,15 @@ export const Message = memo(function Message({
   ) => void
 }): React.JSX.Element {
   const [open, setOpen] = useState(showReasoning)
+  const [copied, setCopied] = useState(false)
   const isUser = message.role === 'user'
+
+  const copy = (): void => {
+    void navigator.clipboard.writeText(message.content).then(() => {
+      setCopied(true)
+      setTimeout(() => setCopied(false), 1400)
+    })
+  }
 
   // Reveal the answer smoothly rather than in the lumps the tokens arrive in.
   const [shown, catchingUp] = useSmoothText(message.content, streaming, smoothText)
@@ -123,6 +131,13 @@ export const Message = memo(function Message({
 
   return (
     <div className="msg msg-assistant">
+      {/* Code blocks could always be copied; the answer around them could not. */}
+      {!animating && !message.error && message.content.trim() && (
+        <button type="button" className="msg-copy" onClick={copy} title="Copy this answer">
+          {copied ? 'Copied' : 'Copy'}
+        </button>
+      )}
+
       {message.thinking && (
         <div className="thinking">
           <button type="button" onClick={() => setOpen((v) => !v)}>

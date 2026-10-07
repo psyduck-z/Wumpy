@@ -8,6 +8,7 @@ export function Composer({
   onStop,
   streaming,
   focusToken,
+  prefill,
   placeholder
 }: {
   onSend(text: string): void
@@ -15,6 +16,11 @@ export function Composer({
   streaming: boolean
   /** Bumped whenever the panel is shown, so the caret lands in the box. */
   focusToken: number
+  /**
+   * Text to drop into the box, with a token so the same text twice still
+   * lands. Used by the command menu for commands that take an argument.
+   */
+  prefill?: { text: string; token: number }
   placeholder: string
 }): React.JSX.Element {
   const [value, setValue] = useState('')
@@ -41,6 +47,18 @@ export function Composer({
 
   useEffect(() => setSelected(0), [value])
   useEffect(() => ref.current?.focus(), [focusToken])
+
+  useEffect(() => {
+    if (!prefill || prefill.token === 0) return
+    setValue(prefill.text)
+    const el = ref.current
+    if (!el) return
+    el.focus()
+    requestAnimationFrame(() => {
+      el.selectionStart = el.selectionEnd = el.value.length
+    })
+    // Only the token: the same command twice must still fill the box.
+  }, [prefill?.token])
 
   // Grow with the content up to a ceiling, then scroll.
   useEffect(() => {
