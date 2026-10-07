@@ -115,6 +115,48 @@ command decisions, so for *running things* Fast is the better tool, and it can
 already read the machine. Reach for Thinker when the thinking is the point, not
 when you want a directory listing.
 
+## Tuning the prompt, and knowing when to stop
+
+`npm run bench` scores a model against what the panel actually asks of it. Two
+things had to be fixed before its numbers meant anything.
+
+It kept its **own copy** of the prompts, which went stale the moment the real
+ones were trimmed — it had been scoring a prompt that had not shipped for
+several commits, and reporting a failure the app did not have. It now imports
+them from `src/shared/tiers.ts`, so it cannot drift again.
+
+It also ran each case **once**, which is not enough to see past sampling noise.
+On one temperature sweep the same model scored 4/6 and 6/6 on identical
+questions; two prompt experiments were called a win and a loss on that basis,
+wrongly. `--repeat N` now averages, and prints `~` for a case that passes
+sometimes.
+
+With honest measurement, most tuning ideas turned out to be worthless:
+
+| change | logic | notes |
+| --- | --- | --- |
+| current prompt | 11/15 | baseline, bare |
+| "work it out in two short lines first" | worse | 4/6 against 5/6 |
+| "these questions often have a trap" | no change | |
+| a worked trap as a few-shot turn | **much worse** | 3/6, and 35% more tokens |
+| temperature 0.0 – 0.6 | no signal | variance exceeded any effect |
+
+What did work was taking prompt *away*. Reasoning degrades as the preamble
+grows — 11/15 bare, 6/15 with the old app rules attached — and those rules had
+become redundant once `matchIntent` started catching "rename this chat" before
+any model saw it. The short replacement answers app questions **11/12 against
+9/12**, leaves reasoning alone, and costs 38 fewer tokens per turn.
+
+Scored on the shipped prompts, three runs each: **39/39**.
+
+| | logic | instruction | wumpy rules | shell |
+| --- | --- | --- | --- | --- |
+| phi4-mini:3.8b | 4/10 | 12/12 | 12/12 | 15/15 |
+
+Everything Wumpy asks of a model is right every time. Reasoning is where a 3.8B
+model is weak, and no amount of prompting moved it — that is a model-size
+limit, and the lever for it is `/tier`, not another instruction.
+
 ## Which model, measured here
 
 Published benchmarks run on hardware nobody here owns, against tasks Wumpy never

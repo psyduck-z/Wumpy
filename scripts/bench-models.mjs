@@ -10,63 +10,68 @@
  *
  * Every check is machine-gradable. Nothing here is judged by reading it.
  *
+ * Each case is run `--repeat` times and reported as a pass rate, because a
+ * single run cannot tell a real improvement from sampling noise. Two prompt
+ * experiments were wrongly called a win and a loss before this existed: on one
+ * sweep the same model scored 4/6 and 6/6 on identical questions.
+ *
  * Usage:
  *   node scripts/bench-models.mjs                  # every installed model
  *   node scripts/bench-models.mjs qwen3.5:4b ...   # just these
  *   node scripts/bench-models.mjs --quick          # skip the slow reasoning set
+ *   node scripts/bench-models.mjs --repeat 3       # average over three runs
  */
-import { writeFileSync } from 'node:fs'
+import { build } from 'esbuild'
+import { rmSync, writeFileSync } from 'node:fs'
+import { join } from 'node:path'
+import { pathToFileURL } from 'node:url'
 
 const HOST = process.env.OLLAMA_HOST ?? 'http://127.0.0.1:11434'
 const args = process.argv.slice(2)
 const quick = args.includes('--quick')
-const only = args.filter((a) => !a.startsWith('--'))
+const repeatAt = args.indexOf('--repeat')
+const repeat = repeatAt === -1 ? 1 : Math.max(1, Number(args[repeatAt + 1]) || 1)
+const only = args.filter((a, i) => !a.startsWith('--') && i !== repeatAt + 1)
 
-/** Wumpy's real system prompt, trimmed to the parts that shape behaviour. */
+/**
+ * The prompts are imported from the app, never copied.
+ *
+ * They were copied once, and went stale the moment the real ones were trimmed:
+ * the benchmark carried on scoring a prompt that had not shipped for several
+ * commits, and reported a failure the app did not have.
+ */
+const promptBundle = join(process.cwd(), '.bench-prompts.mjs')
+await build({
+  entryPoints: ['src/shared/tiers.ts'],
+  bundle: true,
+  platform: 'node',
+  format: 'esm',
+  outfile: promptBundle,
+  logLevel: 'error'
+})
+const tiers = await import(pathToFileURL(promptBundle).href)
+rmSync(promptBundle, { force: true })
+
+/** Live facts, as src/main/index.ts assembles them. */
 const CONTEXT = [
   'Facts about right now. If the user asks about any of these, just state the answer.',
-  '- Today is Tuesday, 6 October 2026.',
+  '- Today is Tuesday, 7 October 2026.',
   '- The current tier is Fast.',
   '- This chat is titled "Speculative Fiction".',
-  '- It has 6 messages so far.',
   '- The user is on Windows.'
 ].join('\n')
 
-const BASE = [
-  'You are Wumpy, a local assistant in the Windows system tray.',
-  'Answer the question directly and stop.',
-  'Never open by restating the question or announcing what you are about to do,',
-  'and never close by offering further help. No filler, no apologies, no hedging.'
-].join('\n')
-
-const APP = [
-  'Telling the user a fact is different from changing something.',
-  '',
-  'ASKED A QUESTION about the chat, tier, mode or date: answer it from the facts above.',
-  'Never reply to a question with a slash command.',
-  '',
-  'ASKED TO CHANGE the chat title, start a new chat, switch tier or mode: you cannot do',
-  'it yourself, so reply with the command the user should type, and nothing else.',
-  'The only commands that exist are /rename, /new, /resume, /compact, /tier, /mode, /dock.',
-  'Never invent one outside that list, and never claim you already ran one.'
-].join('\n')
-
-const SHELL = [
-  'You can run commands on this Windows machine by proposing them.',
-  'Propose a command whenever the answer depends on the state of this machine.',
-  'Checking is always better than guessing. Never state a fact about this computer',
-  'that you have not verified with a command.',
-  'Do not propose a command for general knowledge you already have.',
-  'Format: a fenced block tagged wumpy-run whose FIRST line is a # comment saying why.',
-  '',
-  '```wumpy-run',
-  '# Check whether Ollama is installed',
-  'Get-Command ollama -ErrorAction SilentlyContinue',
-  '```'
-].join('\n')
-
-const SYS_CHAT = `${CONTEXT}\n\n${BASE}\n\n${APP}`
-const SYS_SHELL = `${CONTEXT}\n\n${BASE}\n\n${APP}\n\n${SHELL}`
+const TIER = tiers.TIERS.fast
+const SYS_CHAT = [TIER.systemPrompt, tiers.APP_PROMPT, tiers.NO_SHELL_PROMPT, tiers.ASK_PROMPT].join('\n\n')
+const SYS_SHELL = [
+  TIER.systemPrompt,
+  tiers.APP_PROMPT,
+  tiers.READ_SHELL_PROMPT,
+  tiers.SEARCH_PROMPT,
+  tiers.ASK_PROMPT
+].join('\n\n')
+/** Worked turns the shell-capable tiers prepend. */
+const SHOTS = tiers.shellExamples('read')
 
 const hasCommand = (t) => /```wumpy-run(?:-cmd|-bash)?\s*\n([\s\S]*?)```/.test(t)
 const commandBody = (t) => (t.match(/```wumpy-run(?:-cmd|-bash)?\s*\n([\s\S]*?)```/) ?? [])[1] ?? ''
@@ -203,6 +208,8 @@ async function ask(model, system, prompt, numPredict) {
       model,
       messages: [
         { role: 'system', content: system },
+        ...(system === SYS_SHELL ? SHOTS : []),
+        { role: 'system', content: CONTEXT },
         { role: 'user', content: prompt }
       ],
       stream: true,
@@ -272,20 +279,27 @@ for (const { name, size } of models) {
 
   for (const t of tests) {
     const system = t.shell ? SYS_SHELL : SYS_CHAT
-    let r
-    try {
-      r = await ask(name, system, t.ask, 350)
-    } catch (err) {
-      r = { text: '', first: 0, total: 0, tps: 0 }
+    let passes = 0
+
+    for (let run = 0; run < repeat; run++) {
+      let r
+      try {
+        r = await ask(name, system, t.ask, 350)
+      } catch {
+        r = { text: '', first: 0, total: 0, tps: 0 }
+      }
+      if (t.check(r.text)) passes++
+      times.push(r.total)
+      if (r.tps) firsts.push({ tps: r.tps, first: r.first })
     }
-    const ok = t.check(r.text)
+
     scores[t.group] ??= { pass: 0, total: 0 }
-    scores[t.group].total++
-    if (ok) scores[t.group].pass++
-    else failed.push(`${t.group}: ${t.ask.slice(0, 48)}`)
-    times.push(r.total)
-    if (r.tps) firsts.push({ tps: r.tps, first: r.first })
-    process.stdout.write(ok ? '.' : 'x')
+    scores[t.group].total += repeat
+    scores[t.group].pass += passes
+
+    if (passes < repeat) failed.push(`${t.group}: ${t.ask.slice(0, 44)} (${passes}/${repeat})`)
+    // A case that is sometimes right is worth seeing as such.
+    process.stdout.write(passes === repeat ? '.' : passes === 0 ? 'x' : '~')
   }
 
   const tps = firsts.length ? firsts.reduce((a, b) => a + b.tps, 0) / firsts.length : 0

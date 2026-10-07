@@ -146,10 +146,8 @@ export const NO_SHELL_PROMPT = [
  * cannot; the user types a slash command.
  */
 export const APP_PROMPT = [
-  'Asked ABOUT the chat, tier, mode or date: state the answer from the facts given.',
-  'Asked to CHANGE one: you cannot, so reply with only the command the user types.',
-  'The commands are /rename, /new, /resume, /compact, /tier, /mode, /dock.',
-  'Never invent another, never claim you ran one, never answer a question with one.'
+  'You cannot change Wumpy itself. If asked to rename, clear or switch something,',
+  'reply with only the command: /rename, /new, /resume, /compact, /tier, /mode, /dock.'
 ].join(String.fromCharCode(10))
 
 const BASE_PROMPT = [
