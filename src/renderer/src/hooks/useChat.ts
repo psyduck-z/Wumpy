@@ -24,6 +24,14 @@ export interface ChatStats {
 export interface ChatState {
   messages: ChatMessage[]
   streaming: boolean
+  /**
+   * The message currently being written, by id.
+   *
+   * Not "the last message": a command that runs while the answer is still
+   * streaming appends its result after it, and the turn in flight stops being
+   * last. Anything keyed on position then thinks the answer has finished.
+   */
+  streamingId: string | null
   stats: ChatStats
   /** False when a turn is already in flight and the message was not sent. */
   send(text: string, tier: TierId, displayText?: string): boolean
@@ -47,6 +55,7 @@ export interface ChatState {
 export function useChat(): ChatState {
   const [messages, setMessages] = useState<ChatMessage[]>([])
   const [streaming, setStreaming] = useState(false)
+  const [streamingId, setStreamingId] = useState<string | null>(null)
   const [stats, setStats] = useState<ChatStats>({
     speed: null,
     loadMs: null,
@@ -106,6 +115,7 @@ export function useChat(): ChatState {
       startedAt.current = null
       activeRequest.current = null
       activeMessage.current = null
+      setStreamingId(null)
       setStreaming(false)
     })
 
@@ -116,6 +126,7 @@ export function useChat(): ChatState {
       activeRequest.current = null
       activeMessage.current = null
       setStats((s) => ({ ...s, liveTokens: 0, elapsedMs: null }))
+      setStreamingId(null)
       setStreaming(false)
     })
 
@@ -173,6 +184,7 @@ export function useChat(): ChatState {
 
     startedAt.current = Date.now()
     setMessages((prev) => [...prev, userMessage, assistantMessage])
+    setStreamingId(assistantMessage.id)
     setStreaming(true)
     setStats((s) => ({ ...s, speed: null, liveTokens: 0, elapsedMs: 0 }))
 
@@ -257,6 +269,7 @@ export function useChat(): ChatState {
     activeMessage.current = null
     startedAt.current = null
     setStats((s) => ({ ...s, liveTokens: 0, elapsedMs: null }))
+    setStreamingId(null)
     setStreaming(false)
   }, [])
 
@@ -285,5 +298,5 @@ export function useChat(): ChatState {
     [stop]
   )
 
-  return { messages, streaming, stats, send, setContext, history, note, notice, askLocal, recordAnswer, stop, clear, replace }
+  return { messages, streaming, streamingId, stats, send, setContext, history, note, notice, askLocal, recordAnswer, stop, clear, replace }
 }

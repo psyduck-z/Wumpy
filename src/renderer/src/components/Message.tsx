@@ -38,7 +38,7 @@ export const Message = memo(function Message({
    * messages that were not generated in this session, so reopening a saved chat
    * never re-runs what it contains.
    */
-  canAutoRun?: (command: string) => boolean
+  canAutoRun?: (command: string, messageId: string) => boolean
   /** Called as revealed text grows, so the transcript can stay pinned. */
   onGrow?: () => void
   /** Supplied only when the active tier may propose commands. */
@@ -146,6 +146,7 @@ export const Message = memo(function Message({
             tier={tier}
             complete={!animating}
             canAutoRun={canAutoRun}
+            messageId={message.id}
             onRunCommand={onRunCommand}
             onCommandResult={onCommandResult}
             onAnswer={onAnswer ? (option) => onAnswer(message.id, option) : undefined}

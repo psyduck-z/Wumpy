@@ -91,6 +91,19 @@ function leadIn(markdown: string): string | null {
   return sentence
 }
 
+/**
+ * Whether the text ends inside an unclosed fence.
+ *
+ * Markdown renders an unterminated fence as a code block, so a card exists from
+ * the moment ``` is revealed and its contents grow a character at a time. Every
+ * one of those prefixes is a different string, so de-duplicating commands does
+ * not help; the only safe rule is that a block nobody has finished writing is
+ * not a proposal yet.
+ */
+function endsMidFence(text: string): boolean {
+  return (text.match(/^\s*```/gm) ?? []).length % 2 === 1
+}
+
 /** Maps a fence tag to the shell it should run in, or null for ordinary code. */
 function runnableShell(className: unknown): ShellKind | null {
   if (typeof className !== 'string') return null
@@ -131,7 +144,9 @@ export interface MarkdownProps {
   /** False while the message is still arriving, so half-written commands wait. */
   complete?: boolean
   /** Whether a given command may still run unattended. */
-  canAutoRun?: (command: string) => boolean
+  canAutoRun?: (command: string, messageId: string) => boolean
+  /** Which message this is, so one message can only run one command. */
+  messageId?: string
   /** Supplied for assistant turns that may search the web. */
   onSearch?: (query: string) => Promise<{ results: SearchResult[]; provider: string; error?: string }>
   onSearchResults?: (
@@ -160,9 +175,14 @@ export const Markdown = memo(function Markdown({
   tier,
   complete = true,
   canAutoRun,
+  messageId,
   onSearch,
   onSearchResults
 }: MarkdownProps) {
+  // Belt and braces with the streaming flag: that says whether tokens are still
+  // arriving, this says whether what arrived is a finished block. Either one
+  // being wrong used to be enough to run a fragment.
+  const settled = complete && !endsMidFence(text)
   return (
     <ReactMarkdown
       remarkPlugins={[remarkGfm]}
@@ -174,7 +194,7 @@ export const Markdown = memo(function Markdown({
             return (
               <SearchCard
                 query={query}
-                complete={complete}
+                complete={settled}
                 onSearch={onSearch!}
                 onResults={onSearchResults ?? (() => {})}
               />
@@ -201,8 +221,9 @@ export const Markdown = memo(function Markdown({
                 shell={fence.shell}
                 tier={tier}
                 fallbackReason={leadIn(text)}
-                complete={complete}
+                complete={settled}
                 canAutoRun={canAutoRun}
+                messageId={messageId}
                 onRun={onRunCommand!}
                 onResult={onCommandResult ?? (() => {})}
               />

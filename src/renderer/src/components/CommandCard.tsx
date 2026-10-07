@@ -34,8 +34,12 @@ function splitReason(raw: string): { reason: string | null; command: string } {
     if (m[1]) reason.push(m[1])
   }
   const command = lines.slice(i).join('\n').trim()
-  // A block that was only comments is not a command.
-  if (!command) return { reason: null, command: raw.trim() }
+  // A block that is only comments is not a command, and must not become one.
+  // This said exactly that and then returned the comment text as the command,
+  // so a half-written block ran `#` and `# Create text` as PowerShell. Both
+  // "succeed" — a comment is valid PowerShell — so they looked like real,
+  // silent successes rather than the nonsense they were.
+  if (!command) return { reason: reason.join(' ') || null, command: '' }
   return { reason: reason.join(' ') || null, command }
 }
 
@@ -55,6 +59,7 @@ export function CommandCard({
   fallbackReason = null,
   complete = true,
   canAutoRun,
+  messageId = '',
   onRun,
   onResult
 }: {
@@ -76,7 +81,9 @@ export function CommandCard({
    * rather than decided here: it is what stops an automatic mode from running
    * the same command on a loop.
    */
-  canAutoRun?: (command: string) => boolean
+  canAutoRun?: (command: string, messageId: string) => boolean
+  /** Which message proposed it; one message may run at most one command. */
+  messageId?: string
   onRun(command: string, shell: ShellKind): Promise<ShellResult | null>
   /** `unattended` is false when a person pressed Run, which resets nothing. */
   onResult(result: ShellResult, unattended: boolean): void
@@ -93,6 +100,7 @@ export function CommandCard({
   const [showOutput, setShowOutput] = useState(true)
 
   useEffect(() => {
+    if (!command) return
     let live = true
     void window.wumpy.shell.check({ command, tier }).then((r) => {
       if (!live) return
@@ -109,14 +117,26 @@ export function CommandCard({
   // here; this only decides whether to press the button on the user's behalf.
   // Absent means "not eligible", not "no opinion": a message reopened from a
   // saved chat is handed no predicate, and must never run itself again.
-  const unattended = auto && complete && canAutoRun?.(command) === true
+  // Whether the mode would run this. Asking the app for permission is a claim
+  // that spends the budget, so that happens in the effect below and never
+  // during render, which React may run more than once for a single commit.
+  const [refused, setRefused] = useState(false)
+  const wouldRun = auto && complete && Boolean(command) && Boolean(canAutoRun)
+  const unattended = wouldRun && !refused
+
   const ranOnce = useRef(false)
   useEffect(() => {
-    if (!unattended || allowed !== true) return
+    if (!wouldRun || refused || allowed !== true) return
     if (state !== 'idle' || ranOnce.current) return
+    // Claimed synchronously: whatever else happens, nothing else may take this
+    // slot, and this card may not take another.
+    if (!canAutoRun!(command, messageId)) {
+      setRefused(true)
+      return
+    }
     ranOnce.current = true
     void run(true)
-  }, [unattended, allowed, state])
+  }, [wouldRun, refused, allowed, state])
 
   const run = async (byItself = false): Promise<void> => {
     setState('running')
@@ -143,10 +163,10 @@ export function CommandCard({
         {state === 'idle' && allowed === true && unattended && (
           <span className="cmd-status">running automatically…</span>
         )}
-        {state === 'idle' && allowed === true && !unattended && !complete && (
+        {state === 'idle' && (!complete || !command) && (
           <span className="cmd-status">still writing…</span>
         )}
-        {state === 'idle' && allowed === true && !unattended && complete && (
+        {state === 'idle' && allowed === true && !unattended && complete && command && (
           <>
             <button type="button" className="cmd-skip" onClick={() => setState('cancelled')}>
               Skip
@@ -156,7 +176,7 @@ export function CommandCard({
             </button>
           </>
         )}
-        {state === 'idle' && allowed === false && (
+        {state === 'idle' && allowed === false && complete && command && (
           <span className="cmd-status">needs Developer mode</span>
         )}
         {state === 'running' && <span className="cmd-status">running…</span>}
@@ -179,7 +199,7 @@ export function CommandCard({
         <p className="cmd-reason is-missing">No reason given — read the command carefully.</p>
       )}
 
-      <pre className="cmd-body">{command}</pre>
+      <pre className="cmd-body">{command || raw.trim()}</pre>
 
       {result && (
         <div className="cmd-output">

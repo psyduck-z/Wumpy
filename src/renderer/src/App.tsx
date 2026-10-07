@@ -36,7 +36,7 @@ function prettify(accelerator: string): string {
 
 export default function App(): React.JSX.Element {
   const chat = useChat()
-  const { messages, streaming, stats } = chat
+  const { messages, streaming, streamingId, stats } = chat
 
   const [settings, setSettings] = useState<WumpySettings | null>(null)
   const [tierStatuses, setTierStatuses] = useState<TierStatus[]>([])
@@ -321,20 +321,40 @@ export default function App(): React.JSX.Element {
   const autoAllowed = autoRuns < AUTO_RUN_LIMIT
 
   /**
-   * Commands already run since the user last typed.
+   * The unattended-run budget, kept in refs rather than in state.
    *
-   * A small model handed "exit code 0, no output" will often answer by
-   * proposing the very same command again, and in an automatic mode that is a
-   * loop that runs it as fast as the model can write it. The second time round
-   * the card stops and waits for a click, which both breaks the loop and shows
-   * the user what is going on.
+   * These are read to decide whether to run something, which happens in an
+   * effect the moment a card appears. State updates land on the next render, so
+   * several cards deciding in the same tick all read the same empty list and
+   * all ran — the de-duplication was there and simply never saw itself. A ref
+   * is written the instant a card claims a run, so the next card sees it.
    */
-  const [ranCommands, setRanCommands] = useState<string[]>([])
+  const autoRunsRef = useRef(0)
+  const ranCommandsRef = useRef<string[]>([])
+  /** One unattended run per assistant message, whatever it proposes. */
+  const ranByMessage = useRef(new Set<string>())
 
-  const canAutoRun = useCallback(
-    (command: string) => autoRunEligible({ command, ranCommands, autoRuns }),
-    [ranCommands, autoRuns]
-  )
+  /**
+   * Asks for permission to run unattended and takes it in the same breath.
+   *
+   * Deliberately not a pure predicate: a card that is told yes has, by that
+   * answer, spent the budget. Anything that merely reports eligibility can be
+   * asked twice.
+   */
+  const claimAutoRun = useCallback((command: string, messageId: string): boolean => {
+    if (messageId && ranByMessage.current.has(messageId)) return false
+    const ok = autoRunEligible({
+      command,
+      ranCommands: ranCommandsRef.current,
+      autoRuns: autoRunsRef.current
+    })
+    if (!ok) return false
+    if (messageId) ranByMessage.current.add(messageId)
+    ranCommandsRef.current.push(command.trim())
+    autoRunsRef.current += 1
+    setAutoRuns(autoRunsRef.current)
+    return true
+  }, [])
 
   /**
    * Message ids generated during this session.
@@ -345,10 +365,8 @@ export default function App(): React.JSX.Element {
    */
   const generated = useRef(new Set<string>())
   useEffect(() => {
-    if (!streaming) return
-    const last = messages[messages.length - 1]
-    if (last?.role === 'assistant') generated.current.add(last.id)
-  }, [streaming, messages])
+    if (streamingId) generated.current.add(streamingId)
+  }, [streamingId])
 
   const runShellCommand = useCallback(
     (command: string, shellKind: ShellKind) =>
@@ -367,8 +385,10 @@ export default function App(): React.JSX.Element {
     (result: ShellResult, unattended: boolean) => {
       // Only runs that happened without a click spend the budget; approving one
       // by hand is the person being present, which is what the budget protects.
-      if (unattended) setAutoRuns((n) => n + 1)
-      setRanCommands((prev) => [...prev, result.command.trim()])
+      // An unattended run already spent its budget when it claimed the slot.
+      // A click does not spend budget, but the command still counts as run, so
+      // the model cannot have it repeated automatically afterwards.
+      if (!unattended) ranCommandsRef.current.push(result.command.trim())
       const body = [result.stdout, result.stderr].filter(Boolean).join('\n').trim()
       const clipped = body.length > 3000 ? `${body.slice(0, 3000)}\n…truncated…` : body
 
@@ -573,6 +593,8 @@ ${clipped || '(no output)'}`)
               : action.mode
           await patch({ approvalMode: next })
           setAutoRuns(0)
+          autoRunsRef.current = 0
+          ranCommandsRef.current = []
           chat.note(APPROVAL_NOTE[next])
           return
         }
@@ -607,7 +629,8 @@ ${clipped || '(no output)'}`)
       // the already-ran list start again — whichever path the message takes
       // from here, including the auto-compact one that used to skip the reset.
       setAutoRuns(0)
-      setRanCommands([])
+      autoRunsRef.current = 0
+      ranCommandsRef.current = []
 
       const action = parseCommand(text)
       if (action) {
@@ -966,15 +989,15 @@ ${clipped || '(no output)'}`)
               compact={compact}
             />
           ) : (
-            messages.map((m, i) => (
+            messages.map((m) => (
               <Message
                 key={m.id}
                 message={m}
-                streaming={streaming && i === messages.length - 1}
+                streaming={m.id === streamingId}
                 showReasoning={settings?.showReasoning ?? false}
                 smoothText={settings?.smoothText ?? false}
                 tier={tier}
-                canAutoRun={generated.current.has(m.id) ? canAutoRun : undefined}
+                canAutoRun={generated.current.has(m.id) ? claimAutoRun : undefined}
                 onGrow={pinToBottom}
                 onRunCommand={canRunCommands ? runShellCommand : undefined}
                 onCommandResult={onCommandResult}
