@@ -453,3 +453,5 @@ FodyWeavers.xsd
 /.title-check.*
 /.approval-check.*
 .bench-out.txt
+.bench-logic.txt
+bench-results.json
