@@ -13,11 +13,13 @@ import type {
   OllamaModel,
   OllamaStatus,
   SavedChat,
+  Dictation,
   SearchResult,
   ShellKind,
   ShellResult,
   TierId,
   TierStatus,
+  VoiceStatus,
   WumpySettings
 } from '@shared/types'
 
@@ -112,6 +114,22 @@ const api = {
   hotkey: {
     get: (): Promise<HotkeyState> => ipcRenderer.invoke(IPC.hotkeyState),
     onChange: (cb: (s: HotkeyState) => void) => on(IPC.hotkeyState, cb)
+  },
+  voice: {
+    status: (): Promise<VoiceStatus> => ipcRenderer.invoke(IPC.voiceStatus),
+    /** Loads the model. Slow the first time, so the panel says it is happening. */
+    start: (): Promise<VoiceStatus> => ipcRenderer.invoke(IPC.voiceStart),
+    /**
+     * Transcribes a recorded clip.
+     *
+     * The audio is sent as a plain ArrayBuffer, which the structured clone
+     * algorithm moves across without copying it into a string first - a few
+     * seconds of Opus is small, but base64 would make it bigger and slower for
+     * no reason.
+     */
+    transcribe: (audio: ArrayBuffer, extension: string, commands: string[]): Promise<Dictation> =>
+      ipcRenderer.invoke(IPC.voiceTranscribe, { audio, extension, commands }),
+    onStatus: (cb: (s: VoiceStatus) => void) => on<VoiceStatus>(IPC.voiceStatusChanged, cb)
   }
 }
 

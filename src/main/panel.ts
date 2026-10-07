@@ -49,6 +49,25 @@ export class Panel {
       }
     })
 
+    /**
+     * The microphone, and nothing else.
+     *
+     * Chromium asks the embedder for every permission a page requests, and
+     * Electron's default is to refuse - so without this, dictation fails with a
+     * NotAllowedError that looks exactly like the user saying no. Granting it
+     * wholesale would hand the panel the camera, the clipboard, notifications and
+     * the screen as well, so each request is answered on its own: audio capture
+     * for our own page, nothing for anything else.
+     */
+    this.window.webContents.session.setPermissionRequestHandler((contents, permission, done, details) => {
+      const own = contents === this.window?.webContents
+      if (!own) return done(false)
+      if (permission !== 'media') return done(false)
+      // mediaTypes is absent on some requests; audio-only is the only shape we want.
+      const types = (details as { mediaTypes?: string[] }).mediaTypes
+      done(types === undefined ? true : types.length === 1 && types[0] === 'audio')
+    })
+
     // 'screen-saver' is the only level that reliably floats over fullscreen browsers.
     this.window.setAlwaysOnTop(true, 'screen-saver')
     this.window.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true })

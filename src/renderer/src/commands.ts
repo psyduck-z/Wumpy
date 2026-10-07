@@ -21,6 +21,8 @@ export type CommandAction =
   | { kind: 'dock'; dock: Dock | null }
   | { kind: 'reasoning'; show: boolean | 'toggle' }
   | { kind: 'pin'; pinned: boolean | 'toggle' }
+  | { kind: 'voice'; setting: 'polish' | 'autostop'; on: boolean | 'toggle' }
+  | { kind: 'speech' }
   | { kind: 'approve'; mode: 'manual' | 'auto' | 'all' | 'cycle' }
   | { kind: 'warm' }
   | { kind: 'compact' }
@@ -218,6 +220,26 @@ export const COMMANDS: CommandSpec[] = [
     aliases: ['models'],
     hint: 'Pick which installed model this tier uses',
     run: () => ({ kind: 'model' })
+  },
+  {
+    name: 'speech',
+    aliases: ['voice', 'dictation', 'whisper'],
+    hint: 'Choose how carefully speech is transcribed',
+    run: () => ({ kind: 'speech' })
+  },
+  {
+    name: 'polish',
+    aliases: ['autocorrect'],
+    hint: 'Tidy dictated punctuation with the local model',
+    arg: 'on|off',
+    run: (arg) => ({ kind: 'voice', setting: 'polish', on: bool(arg) })
+  },
+  {
+    name: 'autostop',
+    aliases: ['pushtotalk'],
+    hint: 'Stop dictating by itself when you stop talking',
+    arg: 'on|off',
+    run: (arg) => ({ kind: 'voice', setting: 'autostop', on: bool(arg) })
   },
   {
     name: 'approve',

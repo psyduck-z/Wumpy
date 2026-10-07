@@ -53,5 +53,11 @@ export const DEFAULT_SETTINGS: WumpySettings = {
   searchEnabled: true,
   searchApiKey: '',
 
-  tierModels: {}
+  tierModels: {},
+  // On, but the button only appears once a transcriber is actually found, so
+  // this is the switch for not wanting one rather than for not having one.
+  voiceEnabled: true,
+  voiceModel: 'base.en',
+  voicePolish: true,
+  voiceAutoStop: true
 }

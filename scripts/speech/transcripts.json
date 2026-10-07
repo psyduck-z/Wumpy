@@ -1,0 +1,173 @@
+[
+  {
+    "model": "base.en",
+    "prompt": true,
+    "load_s": 1.5,
+    "per_clip_s": 2.38,
+    "realtime_x": 1.2,
+    "rows": [
+      {
+        "said": "make a python file in my music folder that prints the time",
+        "heard": "Make a Python file in my music folder that prints the time."
+      },
+      {
+        "said": "what is taking up space on my desktop",
+        "heard": "What is taking up space on my desktop?"
+      },
+      {
+        "said": "run it and show me the output",
+        "heard": "run it and show me the output."
+      },
+      {
+        "said": "switch to the deep tier and try again",
+        "heard": "Switch to the deep tier and try again."
+      },
+      {
+        "said": "ask ollama to summarise this for me",
+        "heard": "Ask Ollama to summarize this for me."
+      },
+      {
+        "said": "delete the temp folder but ask me first",
+        "heard": "Delete the temp folder but ask me first."
+      },
+      {
+        "said": "how much memory is node using right now",
+        "heard": "How much memory is node using right now?"
+      },
+      {
+        "said": "there are two hundred and fourteen files in there",
+        "heard": "There are 214 files in there."
+      },
+      {
+        "said": "it is going to need a new virtual environment",
+        "heard": "It is going to need a new virtual environment."
+      },
+      {
+        "said": "open the settings and turn on accept edits",
+        "heard": "Open the settings and turn on accept edits."
+      },
+      {
+        "said": "list every file larger than fifty megabytes",
+        "heard": "List every file larger than 50 MB."
+      },
+      {
+        "said": "stop what you are doing and start a new chat",
+        "heard": "Stop what you are doing and start a new chat."
+      }
+    ]
+  },
+  {
+    "model": "base.en",
+    "prompt": false,
+    "load_s": 1.2,
+    "per_clip_s": 2.04,
+    "realtime_x": 1.4,
+    "rows": [
+      {
+        "said": "make a python file in my music folder that prints the time",
+        "heard": "Make a Python file in my music folder that prints the time."
+      },
+      {
+        "said": "what is taking up space on my desktop",
+        "heard": "What is taking up space on my desktop?"
+      },
+      {
+        "said": "run it and show me the output",
+        "heard": "Run it and show me the output."
+      },
+      {
+        "said": "switch to the deep tier and try again",
+        "heard": "Switch to the deep tear and try again. // //"
+      },
+      {
+        "said": "ask ollama to summarise this for me",
+        "heard": "Ask Olimit to summarize this for me."
+      },
+      {
+        "said": "delete the temp folder but ask me first",
+        "heard": "Delete the temp folder but ask me first."
+      },
+      {
+        "said": "how much memory is node using right now",
+        "heard": "How much memory is node using right now?"
+      },
+      {
+        "said": "there are two hundred and fourteen files in there",
+        "heard": "There are 214 files in there."
+      },
+      {
+        "said": "it is going to need a new virtual environment",
+        "heard": "It is going to need a new virtual environment."
+      },
+      {
+        "said": "open the settings and turn on accept edits",
+        "heard": "Open the settings and turn on Accept edits."
+      },
+      {
+        "said": "list every file larger than fifty megabytes",
+        "heard": "List every file larger than 50 MB."
+      },
+      {
+        "said": "stop what you are doing and start a new chat",
+        "heard": "Stop what you are doing and start a new chat."
+      }
+    ]
+  },
+  {
+    "model": "tiny.en",
+    "prompt": true,
+    "load_s": 0.8,
+    "per_clip_s": 1.17,
+    "realtime_x": 2.4,
+    "rows": [
+      {
+        "said": "make a python file in my music folder that prints the time",
+        "heard": "Make a Python file in my music folder that prints the time."
+      },
+      {
+        "said": "what is taking up space on my desktop",
+        "heard": "What is taking up space on my desktop?"
+      },
+      {
+        "said": "run it and show me the output",
+        "heard": "Run it and show me the output."
+      },
+      {
+        "said": "switch to the deep tier and try again",
+        "heard": "Switch to the deep tier and try again."
+      },
+      {
+        "said": "ask ollama to summarise this for me",
+        "heard": "Ask Ollama to summarize this for me."
+      },
+      {
+        "said": "delete the temp folder but ask me first",
+        "heard": "Delete the temp folder but ask me first."
+      },
+      {
+        "said": "how much memory is node using right now",
+        "heard": "How much memory is Node using right now?"
+      },
+      {
+        "said": "there are two hundred and fourteen files in there",
+        "heard": "There are 214 files in there."
+      },
+      {
+        "said": "it is going to need a new virtual environment",
+        "heard": "It is going to need a new virtual environment."
+      },
+      {
+        "said": "open the settings and turn on accept edits",
+        "heard": "Open the settings and turn on accept edits."
+      },
+      {
+        "said": "list every file larger than fifty megabytes",
+        "heard": "List every file larger than 50 megabytes."
+      },
+      {
+        "said": "stop what you are doing and start a new chat",
+        "heard": "Stop what you are doing and start a new chat."
+      }
+    ]
+  }
+]

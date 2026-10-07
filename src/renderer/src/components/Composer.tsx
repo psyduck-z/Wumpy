@@ -1,7 +1,9 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { completions, type CommandSpec } from '../commands'
+import { allCommands, completions, type CommandSpec } from '../commands'
 import { CommandPalette } from './CommandPalette'
 import { useInputHistory } from '../hooks/useInputHistory'
+import { useDictation } from '../hooks/useDictation'
+import { Mic } from './Mic'
 
 export function Composer({
   onSend,
@@ -42,6 +44,56 @@ export function Composer({
       el.selectionStart = el.selectionEnd = el.value.length
     })
   }
+
+  /**
+   * Drops dictated text in at the caret.
+   *
+   * Appended rather than replacing, so speech and typing mix: half a sentence
+   * typed and the rest spoken ends up as one sentence, and dictating twice adds
+   * to what is there instead of throwing the first attempt away.
+   */
+  const insert = (text: string): void => {
+    const el = ref.current
+    setValue((current) => {
+      const at = el ? el.selectionStart : current.length
+      const before = current.slice(0, at)
+      const after = current.slice(at)
+      const gap = before && !/\s$/.test(before) ? ' ' : ''
+      const next = before + gap + text + after
+      requestAnimationFrame(() => {
+        if (!el) return
+        el.focus()
+        const caret = (before + gap + text).length
+        el.selectionStart = el.selectionEnd = caret
+      })
+      return next
+    })
+  }
+
+  // The command names go along so that "slash also" can become "/also"; they are
+  // read from the real list, so a command added later is dictatable at once.
+  const commandNames = useMemo(() => allCommands().map((c) => c.name), [])
+  const dictation = useDictation(insert, commandNames)
+
+  // Ctrl+M starts and stops it. On the window rather than the box, because the
+  // caret may be in a picker when the thought arrives.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent): void => {
+      if (e.ctrlKey && !e.altKey && !e.shiftKey && e.key.toLowerCase() === 'm') {
+        e.preventDefault()
+        dictation.toggle()
+        return
+      }
+      // Esc abandons a recording rather than closing the panel, but only while
+      // one is running - otherwise Esc keeps meaning what it meant.
+      if (e.key === 'Escape' && dictation.state === 'recording') {
+        e.stopPropagation()
+        dictation.cancel()
+      }
+    }
+    window.addEventListener('keydown', onKey, true)
+    return () => window.removeEventListener('keydown', onKey, true)
+  }, [dictation])
 
   // Only offer the palette while the command name is still being typed; once
   // there is a space the user has moved on to the argument.
@@ -189,6 +241,7 @@ export function Composer({
           }}
           onKeyDown={onKeyDown}
         />
+        <Mic dictation={dictation} />
         {streaming ? (
           <button className="btn-stop" type="button" onClick={onStop} title="Stop (Ctrl+C or Esc)">
             Stop

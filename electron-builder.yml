@@ -17,6 +17,10 @@ extraResources:
       - icon.png
       - icon.ico
       - tray.png
+  # The transcriber, which runs in whatever Python has faster-whisper; see
+  # src/main/speech.ts for how one is found.
+  - from: resources/speech
+    to: speech
   # The Win+C interception helper; see src/hook.
   - from: resources/hook
     to: hook

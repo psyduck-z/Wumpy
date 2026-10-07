@@ -1301,6 +1301,89 @@ body {
 .btn-send:disabled { opacity: 0.3; cursor: default; }
 .btn-stop { background: rgb(var(--raised)); color: rgb(var(--text)); }
 
+/* ------------------------------------------------------------- dictation */
+
+.mic {
+  position: relative;
+  display: grid;
+  place-items: center;
+  height: 36px;
+  min-width: 34px;
+  border: 1px solid rgb(var(--border));
+  border-radius: 10px;
+  background: rgb(var(--surface));
+  color: rgb(var(--muted));
+  cursor: pointer;
+  overflow: hidden;
+}
+
+.mic:hover { color: rgb(var(--text)); }
+
+.mic-off {
+  opacity: 0.35;
+  cursor: default;
+}
+
+.mic-loading,
+.mic-working {
+  color: rgb(var(--accent));
+  border-color: rgb(var(--accent) / 0.4);
+}
+
+/* Listening has to be unmistakable: this is a live microphone. */
+.mic-recording {
+  color: #fff;
+  background: rgb(var(--danger, 220 64 64));
+  border-color: transparent;
+}
+
+/*
+ * The level meter, drawn as a bar behind the glyph that grows with the input.
+ * A microphone Windows has muted looks exactly like a quiet room otherwise.
+ */
+.mic-level {
+  position: absolute;
+  inset: auto 0 0 0;
+  height: 3px;
+  background: #fff;
+  transform-origin: bottom;
+  opacity: 0.9;
+}
+
+.mic-status {
+  position: absolute;
+  left: 12px;
+  bottom: calc(100% + 4px);
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  font-size: 11px;
+  color: rgb(var(--muted));
+  background: rgb(var(--raised));
+  border: 1px solid rgb(var(--border));
+  border-radius: 8px;
+  padding: 3px 8px;
+  max-width: calc(100% - 24px);
+}
+
+.mic-status-note { color: rgb(var(--text)); }
+
+.mic-dismiss {
+  background: none;
+  border: none;
+  color: inherit;
+  font: inherit;
+  padding: 0;
+  text-align: left;
+  cursor: pointer;
+}
+
+.mic-heard {
+  color: rgb(var(--muted));
+  border-bottom: 1px dotted rgb(var(--muted) / 0.6);
+  cursor: help;
+}
+
 /* ------------------------------------------------------- command palette */
 
 .palette {

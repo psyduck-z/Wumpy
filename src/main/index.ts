@@ -39,6 +39,8 @@ import { runCommand, assessRisk, isReadOnly } from './shell'
 import { PriorityManager } from './priority'
 import { webSearch } from './search'
 import { cleanTitle } from './titles'
+import { Speech } from './speech'
+import { POLISH_PROMPT, polishAcceptable, tidyTranscript } from '@shared/dictation'
 
 // Only one Wumpy may own the tray icon and the global hotkey.
 if (!app.requestSingleInstanceLock()) {
@@ -59,6 +61,7 @@ let tray: (Tray & { refresh(): void }) | null = null
 let hotkeyState: HotkeyState = { active: null, failed: [], intercepted: null }
 let lowLevelHook: LowLevelHook | null = null
 let priority: PriorityManager
+let speech: Speech
 
 /** Models installed in Ollama, refreshed whenever we look. */
 let installedModels: string[] = []
@@ -242,12 +245,18 @@ function registerIpc(): void {
   settings.onChange((next) => panel.send(IPC.settingsChanged, next))
 
   ipcMain.handle(IPC.settingsSet, (_e, patch: Partial<WumpySettings>) => {
+    // Read before writing: everything below that wants to know whether a value
+    // actually changed has to compare against the old one.
+    const wasVoiceModel = settings.get('voiceModel')
     const next = settings.patch(patch)
     if (patch.ollamaHost) ollama.setHost(next.ollamaHost)
     if (patch.hotkeys) applyHotkeys()
     if (patch.tallWidth || patch.compactWidth || patch.compactHeight) panel.applyGeometry()
     if (patch.launchAtLogin !== undefined) syncLaunchAtLogin(patch.launchAtLogin)
     if (patch.tier) void warmTier(patch.tier)
+    // The worker holds one model for its lifetime, so a different size means a
+    // different worker - otherwise changing it did nothing until a restart.
+    if (next.voiceModel !== wasVoiceModel) speech.reload()
     tray?.refresh()
     return next
   })
@@ -383,6 +392,77 @@ function registerIpc(): void {
       )
 
       return raw ? cleanTitle(raw, question) : null
+    }
+  )
+
+  /* ------------------------------------------------------------------- voice */
+
+  ipcMain.handle(IPC.voiceStatus, () => speech.status())
+
+  // Starting the transcriber loads a model, so it is done when the panel asks
+  // rather than at launch: someone who never dictates never pays for it.
+  ipcMain.handle(IPC.voiceStart, async () => {
+    await speech.start()
+    const status = speech.status()
+    panel.send(IPC.voiceStatusChanged, status)
+    return status
+  })
+
+  /**
+   * Turns a recorded clip into text for the composer.
+   *
+   * Three stages, and only the first is unavoidable. Whisper transcribes;
+   * `tidyTranscript` applies the table of things an acoustic model cannot know
+   * about this app; and then, optionally, the local model punctuates it. The
+   * result goes into the box, never straight to the model - dictation is typing,
+   * and a mis-heard sentence has to be as easy to correct as a mistyped one.
+   */
+  ipcMain.handle(
+    IPC.voiceTranscribe,
+    async (_e, req: { audio: ArrayBuffer; extension?: string; commands?: string[] }) => {
+        const clip = await speech.transcribe(new Uint8Array(req.audio), req.extension ?? 'webm')
+
+        const heard = clip.text.trim()
+        // The command list comes from the panel, which owns it, so a command added
+        // later is dictatable without this file having to hear about it.
+        const tidied = tidyTranscript(heard, { commands: req.commands ?? [] })
+      if (!tidied) {
+        return { text: '', heard, polished: false, polishRefused: false, confidence: clip.confidence, ms: clip.ms }
+      }
+
+      if (!settings.get('voicePolish')) {
+        return { text: tidied, heard, polished: false, polishRefused: false, confidence: clip.confidence, ms: clip.ms }
+      }
+
+      // The quickest installed model, for the same reason titles use it: the user
+      // is waiting to read this and press Enter.
+      const model = resolveTierModel('flash') ?? resolveTierModel('fast')
+      if (!model) {
+        return { text: tidied, heard, polished: false, polishRefused: false, confidence: clip.confidence, ms: clip.ms }
+      }
+
+      const polished = await ollama.complete(
+        model,
+        [
+          { role: 'system', content: POLISH_PROMPT },
+          { role: 'user', content: tidied }
+        ],
+        { keepAlive: settings.get('keepAlive'), numPredict: 120, numCtx: NUM_CTX }
+      )
+
+      const accepted = polished !== null && polishAcceptable(tidied, polished)
+      if (polished !== null && !accepted) {
+        console.warn(`[wumpy] polish refused: ${JSON.stringify(polished.slice(0, 120))}`)
+      }
+
+      return {
+        text: accepted ? polished!.trim() : tidied,
+        heard,
+        polished: accepted,
+        polishRefused: polished !== null && !accepted,
+        confidence: clip.confidence,
+        ms: clip.ms
+      }
     }
   )
 
@@ -540,6 +620,9 @@ void app.whenReady().then(async () => {
   panel = new Panel(settings)
 
   priority = new PriorityManager(() => panel.browserWindow)
+  // Reads the size each time it starts, so changing it in settings takes
+  // effect on the next utterance without a restart.
+  speech = new Speech(() => settings.get('voiceModel'))
 
   registerIpc()
   panel.create()
@@ -583,6 +666,7 @@ app.on('second-instance', () => panel?.show())
 app.on('will-quit', () => {
   unregisterHotkeys()
   lowLevelHook?.stop()
+  speech?.stop()
   ollama?.abortAll()
 })
 

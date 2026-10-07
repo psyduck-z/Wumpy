@@ -248,6 +248,30 @@ export interface WumpySettings {
   shellCwd: string
   /** Per-tier model overrides, keyed by tier id. */
   tierModels: Partial<Record<TierId, string>>
+  /**
+   * Dictation. Off until a transcriber is actually installed, because turning
+   * it on without one would put a microphone button in the panel that only ever
+   * reports an error.
+   */
+  voiceEnabled: boolean
+  /**
+   * Whisper size. Measured on this machine against twelve synthesised
+   * sentences: tiny.en and base.en both landed at 8.9% word error, small.en at
+   * 6.9% - but small.en ran at 0.5x realtime, so a ten-second sentence took
+   * twenty seconds to transcribe. base.en is the default because tiny.en's
+   * equal score on clean speech says nothing about a real microphone, and it is
+   * still comfortably faster than speech.
+   */
+  voiceModel: string
+  /**
+   * Send the transcript through the local model to punctuate it.
+   *
+   * The vocabulary table in shared/dictation.ts runs either way; this is only
+   * the part that needs judgement, and it costs a second or so.
+   */
+  voicePolish: boolean
+  /** Stop recording by itself once you stop talking. */
+  voiceAutoStop: boolean
 }
 
 /* ------------------------------------------------------------------- ollama */
@@ -353,5 +377,48 @@ export const IPC = {
   chatTitle: 'chat:title',
   shellRun: 'shell:run',
   shellRisk: 'shell:risk',
-  searchRun: 'search:run'
+  searchRun: 'search:run',
+  voiceStatus: 'voice:status',
+  voiceStatusChanged: 'voice:status-changed',
+  voiceStart: 'voice:start',
+  voiceTranscribe: 'voice:transcribe'
 } as const
+
+/* --------------------------------------------------------------------- voice */
+
+/** Whether a local transcriber is available, and if not, what is missing. */
+export type VoiceStatus =
+  | { kind: 'unknown' }
+  | { kind: 'absent'; detail: string }
+  | { kind: 'starting' }
+  | { kind: 'ready'; model: string; loadMs: number }
+  | { kind: 'failed'; detail: string }
+
+/** One clip, as the transcriber returned it. */
+export interface Transcript {
+  text: string
+  ms: number
+  audioSeconds: number
+  /** 0..1, from the model's own per-token log probabilities. */
+  confidence: number
+}
+
+/** A finished dictation, ready for the composer. */
+export interface Dictation {
+  /** What to put in the box. */
+  text: string
+  /**
+   * What was heard before any correction.
+   *
+   * Kept and shown, because a transcript the user cannot check against is a
+   * transcript they have to trust blindly.
+   */
+  heard: string
+  /** True when the polish pass ran and its result passed the guard. */
+  polished: boolean
+  /** True when it ran and was rejected, which is worth saying out loud. */
+  polishRefused: boolean
+  confidence: number
+  /** Transcription time only, excluding polish. */
+  ms: number
+}
