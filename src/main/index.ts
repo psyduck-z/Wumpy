@@ -104,6 +104,31 @@ async function refreshModels(): Promise<void> {
  * Measured: cold first-word 4.7s, warm 0.19s.
  */
 /**
+ * The live facts block, built in exactly one place.
+ *
+ * Deliberately no clock time and no message count. Both changed on every turn
+ * and bought nothing, while making this block differ each time.
+ */
+function factsFor(tierLabel: string, chatTitle: string | null): string {
+  const now = new Date()
+  return [
+    'Facts about right now. If the user asks about any of these, just state the answer.',
+    `- Today is ${now.toLocaleDateString('en-GB', {
+      weekday: 'long',
+      day: 'numeric',
+      month: 'long',
+      year: 'numeric'
+    })}.`,
+    `- The current tier is ${tierLabel}.`,
+    `- This chat is titled ${chatTitle ? `"${chatTitle}"` : 'untitled so far'}.`,
+    `- The user is on Windows. Commands run from ${settings.get('shellCwd') || homedir()}.`
+  ].join('\n')
+}
+
+/** The chat title the panel last sent, so priming can reproduce the real shape. */
+let lastChatTitle: string | null = null
+
+/**
  * The system prompt for a tier, built in exactly one place.
  *
  * It was built twice - once to prime the cache at startup, once per turn - and
@@ -125,18 +150,44 @@ function systemPromptFor(tier: Tier, scope: 'none' | 'read' | 'full'): string {
     .join('\n\n')
 }
 
+/**
+ * What the KV cache was last primed with.
+ *
+ * Keyed on the preamble rather than the model, because two tiers can share a
+ * model and send different rules: Fast and Thinker are both phi4-mini, one
+ * allowed to read and one allowed to act. Skipping the prime because the model
+ * was already resident would leave the cache holding the other tier's prompt,
+ * and the first question after a mode switch would pay full prefill for a
+ * preamble nothing had primed.
+ */
+let primedWith: string | null = null
+
 async function warmTier(id: TierId): Promise<void> {
   const model = resolveTierModel(id)
-  if (!model || ollama.isWarm(model)) return
+  if (!model) return
 
-  // Prime with exactly the preamble this tier sends, so the cache it leaves
+  // Prime with exactly the shape a real turn has, so the cache it leaves
   // behind is the one the user's first message will hit.
+  //
+  // "Exactly" turned out to matter far more than expected. Priming with the
+  // system prompt and the examples, but without the live facts block that sits
+  // behind them, left the first question paying 7.3-8.6s of prefill. Priming
+  // with the facts block in place as well took that to 0.85-0.97s — the same
+  // 780 tokens, measured twice from an unloaded model. For reference, no prime
+  // at all is 30.6-36.2s. A prefix that is nearly right is worth much less than
+  // one that is right.
   const tier = TIERS[id]
   const scope = settings.get('shellEnabled') ? tier.tools : 'none'
   const systemPrompt = systemPromptFor(tier, scope)
+  const facts = factsFor(tier.label, lastChatTitle)
+
+  const key = `${model}|${scope}|${systemPrompt.length}|${facts}|${tier.options.num_ctx}`
+  if (primedWith === key && ollama.isWarm(model)) return
+  primedWith = key
 
   await ollama.warm(model, settings.get('keepAlive'), {
     systemPrompt,
+    facts,
     examples: scope === 'none' ? [] : shellExamples(scope),
     // Must match what the turn itself will ask for, or the primed cache is
     // discarded and the first question pays full prefill.
@@ -547,21 +598,8 @@ function withContext(
   tierLabel: string,
   scope: 'none' | 'read' | 'full'
 ): Array<Pick<ChatMessage, 'role' | 'content'>> {
-  const now = new Date()
-  // Deliberately no clock time and no message count. Both changed on every
-  // turn and bought nothing, while making this block differ each time.
-  const facts = [
-    'Facts about right now. If the user asks about any of these, just state the answer.',
-    `- Today is ${now.toLocaleDateString('en-GB', {
-      weekday: 'long',
-      day: 'numeric',
-      month: 'long',
-      year: 'numeric'
-    })}.`,
-    `- The current tier is ${tierLabel}.`,
-    `- This chat is titled ${req.context.chatTitle ? `"${req.context.chatTitle}"` : 'untitled so far'}.`,
-    `- The user is on Windows. Commands run from ${settings.get('shellCwd') || homedir()}.`
-  ].join('\n')
+  lastChatTitle = req.context.chatTitle
+  const facts = factsFor(tierLabel, req.context.chatTitle)
 
   // Worked examples go at the very front, where they are byte-identical every
   // turn and so stay in the KV cache. They cost one prefill, not one per turn.

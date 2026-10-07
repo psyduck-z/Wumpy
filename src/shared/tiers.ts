@@ -177,8 +177,27 @@ const BASE_PROMPT = [
  *   qwen3:4b       (reasoning)      2/6 correct  774s total  12,907 chars scratchpad
  *
  * Four of qwen3's six answers were empty: it spent two to three minutes on
- * scratchpad per question and never reached a conclusion. Depth now comes from
- * a bigger non-reasoning model instead.
+ * scratchpad per question and never reached a conclusion.
+ *
+ * Nor does a bigger model buy depth here, which is the assumption Thinker was
+ * built on and it does not survive measurement. Every case run twice:
+ *
+ *   model            overall  logic  instruction  wumpy  shell  tok/s  first word
+ *   phi4-mini:3.8b        88   6/10          8/8    6/8  10/10    8.3       1363ms
+ *   qwen2.5:7b            74   6/10          8/8    7/8  10/10    4.3       3300ms
+ *
+ * Identical on reasoning, identical on shell decisions, one case apart on
+ * Wumpy's own rules, and the 7B is a little under half the speed with nearly
+ * three times the wait for a first word. So Thinker is not a bigger model any
+ * more; it is the same model as Fast, allowed to act. Depth, when it is
+ * actually wanted, is Deep Thinker's job - qwen2.5-coder:14b scored 26/26 on
+ * the shell and instruction set, and is slow enough that it should be chosen
+ * deliberately rather than landed on.
+ *
+ * Fast and Thinker therefore share both a model and a num_ctx. The context
+ * size is deliberate: Ollama sizes its context per runner, so a tier that
+ * asked for a different one would reload the model on every mode switch, which
+ * measured 46-65s of prefill against 4-6s when the sizes match.
  *
  * `alternates` let a tier resolve to something that is actually installed
  * rather than failing outright.
@@ -208,18 +227,19 @@ export const TIERS: Record<TierId, Tier> = {
     alternates: ['llama3.2:3b', 'qwen2.5:3b'],
     thinking: false,
     tools: 'read',
-    options: { num_ctx: 4096, num_predict: 1024, temperature: 0.6, top_p: 0.9 },
+    // num_ctx matches Thinker's on purpose; see the note above.
+    options: { num_ctx: 8192, num_predict: 1024, temperature: 0.6, top_p: 0.9 },
     systemPrompt: `${BASE_PROMPT} A short paragraph, or bullets if it is genuinely a list.`
   },
 
   thinker: {
     id: 'thinker',
     label: 'Thinker',
-    blurb: 'Bigger model, more depth. Can run commands.',
+    blurb: 'Quick, and allowed to run commands.',
     mode: 'dev',
-    speed: 'slow',
-    model: 'qwen2.5:7b',
-    alternates: ['llama3.1:8b', 'qwen2.5:3b'],
+    speed: 'quick',
+    model: 'phi4-mini:3.8b',
+    alternates: ['qwen2.5:7b', 'llama3.2:3b'],
     thinking: false,
     tools: 'full',
     options: { num_ctx: 8192, num_predict: 800, temperature: 0.6, top_p: 0.95 },
@@ -229,7 +249,7 @@ export const TIERS: Record<TierId, Tier> = {
   deep: {
     id: 'deep',
     label: 'Deep Thinker',
-    blurb: 'Most capable, slowest. Can run commands.',
+    blurb: 'Most capable, and much slower. Choose it deliberately.',
     mode: 'dev',
     speed: 'slowest',
     model: 'qwen2.5-coder:14b',

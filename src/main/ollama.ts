@@ -119,6 +119,15 @@ export class OllamaClient {
       systemPrompt: string
       examples: Array<Pick<ChatMessage, 'role' | 'content'>>
       /**
+       * The live facts block, in the position a real turn puts it.
+       *
+       * Priming the system prompt and examples but stopping short of this left
+       * the first question paying 7.3-8.6s of prefill; including it took the
+       * same 780 tokens to 0.85-0.97s. Being one block short of the real shape
+       * cost almost as much as not priming the examples at all.
+       */
+      facts?: string
+      /**
        * The same options the real turn will send.
        *
        * These are not a detail. Ollama keeps one context per model, sized by
@@ -145,6 +154,7 @@ export class OllamaClient {
             messages: [
               { role: 'system', content: prime.systemPrompt },
               ...prime.examples,
+              ...(prime.facts ? [{ role: 'system' as const, content: prime.facts }] : []),
               { role: 'user', content: 'ready?' }
             ],
             stream: false,
