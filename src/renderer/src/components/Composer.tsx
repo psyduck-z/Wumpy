@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { completions, type CommandSpec } from '../commands'
 import { CommandPalette } from './CommandPalette'
+import { useInputHistory } from '../hooks/useInputHistory'
 
 export function Composer({
   onSend,
@@ -19,6 +20,17 @@ export function Composer({
   const [value, setValue] = useState('')
   const [selected, setSelected] = useState(0)
   const ref = useRef<HTMLTextAreaElement>(null)
+  const history = useInputHistory()
+
+  /** Puts a recalled line in the box with the caret at the end of it. */
+  const recall = (text: string): void => {
+    setValue(text)
+    requestAnimationFrame(() => {
+      const el = ref.current
+      if (!el) return
+      el.selectionStart = el.selectionEnd = el.value.length
+    })
+  }
 
   // Only offer the palette while the command name is still being typed; once
   // there is a space the user has moved on to the argument.
@@ -40,6 +52,7 @@ export function Composer({
 
   const submit = (): void => {
     if (!value.trim() || streaming) return
+    history.push(value)
     onSend(value)
     setValue('')
   }
@@ -62,7 +75,9 @@ export function Composer({
         setSelected((i) => (i - 1 + palette.length) % palette.length)
         return
       }
-      if (e.key === 'Tab' || (e.key === 'Enter' && !e.shiftKey && palette.length > 0)) {
+      // Shift+Tab is left alone: it cycles approval mode, and `e.key` is 'Tab'
+      // for both, so without this the palette swallowed it.
+      if ((e.key === 'Tab' && !e.shiftKey) || (e.key === 'Enter' && !e.shiftKey)) {
         // Enter accepts the highlighted command rather than sending a partial one.
         const spec = palette[selected]
         if (spec) {
@@ -70,6 +85,7 @@ export function Composer({
           if (spec.arg) {
             accept(spec)
           } else {
+            history.push(`/${spec.name}`)
             onSend(`/${spec.name}`)
             setValue('')
           }
@@ -81,7 +97,40 @@ export function Composer({
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault()
       submit()
+      return
     }
+
+    // History, once the palette has had its say. Only from the edge of the
+    // text, so arrowing around a multi-line draft still moves the caret: Up on
+    // the first line, Down on the last.
+    const el = e.currentTarget
+    if (e.key === 'ArrowUp' && !e.shiftKey && atFirstLine(el)) {
+      const prev = history.older(value)
+      if (prev !== null) {
+        e.preventDefault()
+        recall(prev)
+      }
+      return
+    }
+    if (e.key === 'ArrowDown' && !e.shiftKey && atLastLine(el)) {
+      const next = history.newer()
+      if (next !== null) {
+        e.preventDefault()
+        recall(next)
+      }
+    }
+  }
+
+  /** True when the caret sits on the first line, so Up has nowhere else to go. */
+  function atFirstLine(el: HTMLTextAreaElement): boolean {
+    if (el.selectionStart !== el.selectionEnd) return false
+    return !el.value.slice(0, el.selectionStart).includes('\n')
+  }
+
+  /** True when the caret sits on the last line. */
+  function atLastLine(el: HTMLTextAreaElement): boolean {
+    if (el.selectionStart !== el.selectionEnd) return false
+    return !el.value.slice(el.selectionEnd).includes('\n')
   }
 
   return (
@@ -94,7 +143,12 @@ export function Composer({
           value={value}
           rows={1}
           placeholder={streaming ? 'Wumpy is answering…' : placeholder}
-          onChange={(e) => setValue(e.target.value)}
+          onChange={(e) => {
+            setValue(e.target.value)
+            // Editing a recalled line makes it the draft again, so Down stops
+            // trying to put the old half-written one back.
+            if (history.browsing) history.reset()
+          }}
           onKeyDown={onKeyDown}
         />
         {streaming ? (

@@ -319,6 +319,19 @@ export function helpText(): string {
     '| --- | --- |',
     ...rows,
     '',
-    'Tier shortcuts: `Ctrl+1`–`Ctrl+4`. Toggle Quick/Developer mode: `Ctrl+D`.'
+    '**Keys**',
+    '',
+    '| Key | What it does |',
+    '| --- | --- |',
+    '| ↑ / ↓ | Step back through what you have typed before |',
+    '| Enter / Shift+Enter | Send / start a new line |',
+    '| Ctrl+1–4 | Jump straight to a tier |',
+    '| Ctrl+D | Quick or Developer mode |',
+    '| Ctrl+N | New chat |',
+    '| Ctrl+R | Reopen a saved chat |',
+    '| Shift+Tab | Cycle approval mode |',
+    '| PageUp / PageDown | Move through the transcript |',
+    '| Ctrl+Home / Ctrl+End | Jump to the start, or to the latest |',
+    '| Esc | Stop, go back, or hide |'
   ].join('\n')
 }

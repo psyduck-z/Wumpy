@@ -60,6 +60,11 @@ const api = {
       messages: Array<{ role: string; content: string }>
     }): Promise<string | null> => ipcRenderer.invoke(IPC.chatTitle, req)
   },
+  /** What the user has typed before, oldest first. */
+  history: {
+    get: (): Promise<string[]> => ipcRenderer.invoke(IPC.historyGet),
+    add: (text: string): Promise<string[]> => ipcRenderer.invoke(IPC.historyAdd, text)
+  },
   chats: {
     list: (): Promise<ChatSummary[]> => ipcRenderer.invoke(IPC.chatsList),
     load: (id: string): Promise<SavedChat | null> => ipcRenderer.invoke(IPC.chatsLoad, id),

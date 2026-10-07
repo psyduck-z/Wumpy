@@ -27,6 +27,7 @@ import {
 } from '@shared/tiers'
 import { SettingsStore } from './store'
 import { ChatStore } from './chats'
+import { InputHistory } from './history'
 import { OllamaClient } from './ollama'
 import { Panel } from './panel'
 import { createTray, resourcePath } from './tray'
@@ -49,6 +50,7 @@ app.on('window-all-closed', () => {})
 
 let settings: SettingsStore
 let chats: ChatStore
+let inputHistory: InputHistory
 let ollama: OllamaClient
 let panel: Panel
 let tray: (Tray & { refresh(): void }) | null = null
@@ -443,6 +445,10 @@ ${command}`
   ipcMain.on(IPC.panelDock, (_e, dock: Dock) => panel.setDock(dock))
   ipcMain.handle(IPC.hotkeyState, () => hotkeyState)
 
+  // ---- what the user typed, for the composer's history ----
+  ipcMain.handle(IPC.historyGet, () => inputHistory.all())
+  ipcMain.handle(IPC.historyAdd, (_e, text: string) => inputHistory.add(text))
+
   // ---- saved chats ----
   ipcMain.handle(IPC.chatsList, (): ChatSummary[] => chats.list())
   ipcMain.handle(IPC.chatsLoad, (_e, id: string) => chats.load(id))
@@ -468,6 +474,7 @@ function syncLaunchAtLogin(enabled: boolean): void {
 void app.whenReady().then(async () => {
   settings = new SettingsStore()
   chats = new ChatStore()
+  inputHistory = new InputHistory()
   ollama = new OllamaClient(settings.get('ollamaHost'))
   panel = new Panel(settings)
 

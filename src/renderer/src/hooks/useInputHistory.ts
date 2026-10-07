@@ -1,0 +1,62 @@
+import { useCallback, useEffect, useRef, useState } from 'react'
+import { HistoryWalk } from '../history'
+
+/**
+ * Walks back through what the user has typed before, as a shell or Claude Code
+ * does: Up goes older, Down goes newer, and coming back past the newest entry
+ * restores whatever was half-written before the walk began.
+ *
+ * The walk itself lives in HistoryWalk, which is plain and tested; this is only
+ * the wiring to the main process and the one piece of state React needs to
+ * re-render on.
+ */
+export interface InputHistory {
+  /** Older. Returns the text to show, or null when there is nothing older. */
+  older(current: string): string | null
+  /** Newer, ending at the stashed draft. Null when already at the newest. */
+  newer(): string | null
+  /** True while showing a recalled entry rather than the live draft. */
+  browsing: boolean
+  /** Records a submitted line and leaves the walk. */
+  push(text: string): void
+  /** Abandons the walk without changing the box. */
+  reset(): void
+}
+
+export function useInputHistory(): InputHistory {
+  const walk = useRef(new HistoryWalk())
+  const [browsing, setBrowsing] = useState(false)
+
+  useEffect(() => {
+    void window.wumpy.history.get().then((list) => walk.current.load(list))
+  }, [])
+
+  const older = useCallback((current: string): string | null => {
+    const text = walk.current.older(current)
+    if (text !== null) setBrowsing(walk.current.browsing)
+    return text
+  }, [])
+
+  const newer = useCallback((): string | null => {
+    const text = walk.current.newer()
+    if (text !== null) setBrowsing(walk.current.browsing)
+    return text
+  }, [])
+
+  const reset = useCallback(() => {
+    walk.current.reset()
+    setBrowsing(false)
+  }, [])
+
+  const push = useCallback((text: string) => {
+    // Recorded locally first, so Up reaches the line just sent without waiting
+    // for a round trip to the main process.
+    walk.current.push(text)
+    setBrowsing(false)
+    const entry = text.trim()
+    if (!entry) return
+    void window.wumpy.history.add(entry).then((list) => walk.current.load(list))
+  }, [])
+
+  return { older, newer, browsing, push, reset }
+}

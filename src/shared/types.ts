@@ -340,6 +340,8 @@ export const IPC = {
   panelDock: 'panel:dock',
   panelShown: 'panel:shown',
   hotkeyState: 'hotkey:state',
+  historyGet: 'history:get',
+  historyAdd: 'history:add',
   chatsList: 'chats:list',
   chatsSave: 'chats:save',
   chatsLoad: 'chats:load',

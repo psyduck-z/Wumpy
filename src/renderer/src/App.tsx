@@ -67,6 +67,8 @@ export default function App(): React.JSX.Element {
   const scroller = useRef<HTMLDivElement>(null)
   /** False once the user scrolls up, so streaming does not yank them back down. */
   const stickToBottom = useRef(true)
+  /** Mirrors it for the "jump to latest" button, which needs a re-render. */
+  const [atBottom, setAtBottom] = useState(true)
 
   const mode: Mode = settings?.mode ?? 'quick'
   const tier: TierId = settings?.tier ?? 'fast'
@@ -737,6 +739,60 @@ ${clipped || '(no output)'}`)
     return () => clearTimeout(timer)
   }, [chat.messages, chatId, chatTitle, refreshChats, settings, streaming, tier, titleLocked])
 
+  /* ----------------------------------------------------------------- scroll */
+
+  /**
+   * Pins the transcript to the bottom. Called both when messages change and on
+   * every frame the revealed text grows, so the view tracks the smooth reveal
+   * rather than jumping once per token.
+   */
+  const pinToBottom = useCallback(() => {
+    const el = scroller.current
+    if (!el || !stickToBottom.current) return
+    // Instant, not smooth: the content now grows a character at a time, so a
+    // direct set already reads as a smooth glide, while `behavior: 'smooth'`
+    // would fight itself across frames.
+    el.scrollTop = el.scrollHeight
+  }, [])
+
+  useLayoutEffect(pinToBottom, [messages, pinToBottom])
+
+  const onScroll = (): void => {
+    const el = scroller.current
+    if (!el) return
+    const near = el.scrollHeight - el.scrollTop - el.clientHeight < 48
+    stickToBottom.current = near
+    setAtBottom(near)
+  }
+
+  /** Back to the newest message, and start following it again. */
+  const jumpToBottom = useCallback(() => {
+    const el = scroller.current
+    if (!el) return
+    stickToBottom.current = true
+    setAtBottom(true)
+    el.scrollTop = el.scrollHeight
+  }, [])
+
+  /**
+   * Moves the transcript from the keyboard.
+   *
+   * The composer holds focus almost all the time, so PageUp and the rest went
+   * nowhere: there was no way to read back through a long answer without
+   * reaching for the mouse.
+   */
+  const scrollBy = useCallback((delta: number | 'top' | 'bottom') => {
+    const el = scroller.current
+    if (!el) return
+    if (delta === 'top') el.scrollTop = 0
+    else if (delta === 'bottom') el.scrollTop = el.scrollHeight
+    else el.scrollTop += delta
+    const near = el.scrollHeight - el.scrollTop - el.clientHeight < 48
+    stickToBottom.current = near
+    setAtBottom(near)
+  }, [])
+
+
   /* ------------------------------------------------------------- shortcuts */
 
   useEffect(() => {
@@ -776,30 +832,32 @@ ${clipped || '(no output)'}`)
           setPicker('resume')
           return
         }
+        // Ctrl+Home / Ctrl+End jump to the ends of the transcript.
+        if (e.key === 'Home' || e.key === 'End') {
+          e.preventDefault()
+          scrollBy(e.key === 'Home' ? 'top' : 'bottom')
+          return
+        }
+      }
 
+      // Shift+Tab cycles approval mode, as it does in Claude Code.
+      if (e.key === 'Tab' && e.shiftKey && !e.ctrlKey && !e.altKey) {
+        e.preventDefault()
+        void runCommand({ kind: 'approve', mode: 'cycle' }, '/approve')
+        return
+      }
+
+      // Paging works wherever focus is, because it is almost always the box.
+      if ((e.key === 'PageUp' || e.key === 'PageDown') && !e.ctrlKey && !e.altKey) {
+        const el = scroller.current
+        if (!el) return
+        e.preventDefault()
+        scrollBy((el.clientHeight - 40) * (e.key === 'PageUp' ? -1 : 1))
       }
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [chat, close, newChat, retitle, setTier, picker, streaming, toggleMode])
-
-  /* ----------------------------------------------------------------- scroll */
-
-  /**
-   * Pins the transcript to the bottom. Called both when messages change and on
-   * every frame the revealed text grows, so the view tracks the smooth reveal
-   * rather than jumping once per token.
-   */
-  const pinToBottom = useCallback(() => {
-    const el = scroller.current
-    if (!el || !stickToBottom.current) return
-    // Instant, not smooth: the content now grows a character at a time, so a
-    // direct set already reads as a smooth glide, while `behavior: 'smooth'`
-    // would fight itself across frames.
-    el.scrollTop = el.scrollHeight
-  }, [])
-
-  useLayoutEffect(pinToBottom, [messages, pinToBottom])
+  }, [chat, close, newChat, retitle, runCommand, scrollBy, setTier, picker, streaming, toggleMode])
 
   const warnedRef = useRef(false)
   useEffect(() => {
@@ -814,12 +872,6 @@ ${clipped || '(no output)'}`)
         'or sending a message, starts the count again.'
     )
   }, [autoAllowed, chat])
-
-  const onScroll = (): void => {
-    const el = scroller.current
-    if (!el) return
-    stickToBottom.current = el.scrollHeight - el.scrollTop - el.clientHeight < 48
-  }
 
   /* --------------------------------------------------------------- pickers */
 
@@ -910,7 +962,13 @@ ${clipped || '(no output)'}`)
       onClose: close,
       onPick: (id) => void openChat(id),
       onRemove: (id) => {
-        void window.wumpy.chats.delete(id).then(() => refreshChats())
+        void window.wumpy.chats.delete(id).then(() => {
+          // Deleting the chat that is open only removed the file: the next
+          // autosave wrote it straight back under the same id, so it vanished
+          // from the list and quietly returned on the following message.
+          if (id === chatId) newChat()
+          void refreshChats()
+        })
       },
       items: savedChats.map((c) => ({
         id: c.id,
@@ -1016,6 +1074,15 @@ ${clipped || '(no output)'}`)
             </div>
           )}
         </div>
+      )}
+
+      {/* Scrolling up stops the view following the answer, and there was no way
+          back but to scroll all the way down by hand. */}
+      {!picker && !atBottom && messages.length > 0 && (
+        <button type="button" className="jump-bottom" onClick={jumpToBottom} title="Latest (Ctrl+End)">
+          <span className="caret-glyph is-open" aria-hidden="true">&#9656;</span>
+          Latest
+        </button>
       )}
 
       <StatusBar

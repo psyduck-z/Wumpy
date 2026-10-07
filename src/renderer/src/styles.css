@@ -1308,3 +1308,39 @@ body {
   overflow: hidden;
   text-overflow: ellipsis;
 }
+
+/* --------------------------------------------------- jump back to the end */
+
+/*
+ * Only appears once the view has been scrolled away from the bottom, which is
+ * also the moment the transcript stops following the answer. Sits above the
+ * composer rather than inside the scroller, so it does not move with content.
+ */
+.jump-bottom {
+  position: absolute;
+  left: 50%;
+  bottom: 86px;
+  transform: translateX(-50%);
+  z-index: 3;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 12px;
+  border: 1px solid rgb(var(--line));
+  border-radius: 999px;
+  background: rgb(var(--surface));
+  color: rgb(var(--text));
+  font: inherit;
+  font-size: 12px;
+  box-shadow: 0 4px 14px rgb(0 0 0 / 0.28);
+  cursor: pointer;
+}
+
+.jump-bottom:hover {
+  border-color: rgb(var(--accent) / 0.6);
+}
+
+.jump-bottom .caret-glyph {
+  transform: rotate(90deg);
+  opacity: 0.7;
+}
