@@ -53,7 +53,8 @@ export function CommandCard({
   shell,
   tier,
   fallbackReason = null,
-  autoAllowed = true,
+  complete = true,
+  canAutoRun,
   onRun,
   onResult
 }: {
@@ -63,12 +64,22 @@ export function CommandCard({
   /** Used when the block omits its `# why` line but the prose above explains it. */
   fallbackReason?: string | null
   /**
-   * False once too many commands have run unattended in a row, at which point
-   * even an automatic mode stops and waits for a person.
+   * False while the message is still arriving.
+   *
+   * An unclosed fence renders as a code block, so this card exists from the
+   * moment the opening ``` is revealed, holding however much of the command has
+   * been written so far. Running then would run a truncated command.
    */
-  autoAllowed?: boolean
+  complete?: boolean
+  /**
+   * Whether this particular command may still run unattended, asked of the app
+   * rather than decided here: it is what stops an automatic mode from running
+   * the same command on a loop.
+   */
+  canAutoRun?: (command: string) => boolean
   onRun(command: string, shell: ShellKind): Promise<ShellResult | null>
-  onResult(result: ShellResult): void
+  /** `unattended` is false when a person pressed Run, which resets nothing. */
+  onResult(result: ShellResult, unattended: boolean): void
 }): React.JSX.Element {
   const parsed = splitReason(raw)
   const command = parsed.command
@@ -96,15 +107,18 @@ export function CommandCard({
 
   // The verdict comes from the main process, so the mode cannot be widened
   // here; this only decides whether to press the button on the user's behalf.
+  // Absent means "not eligible", not "no opinion": a message reopened from a
+  // saved chat is handed no predicate, and must never run itself again.
+  const unattended = auto && complete && canAutoRun?.(command) === true
   const ranOnce = useRef(false)
   useEffect(() => {
-    if (!auto || !autoAllowed || allowed !== true) return
+    if (!unattended || allowed !== true) return
     if (state !== 'idle' || ranOnce.current) return
     ranOnce.current = true
-    void run()
-  }, [auto, autoAllowed, allowed, state])
+    void run(true)
+  }, [unattended, allowed, state])
 
-  const run = async (): Promise<void> => {
+  const run = async (byItself = false): Promise<void> => {
     setState('running')
     const res = await onRun(command, shell)
     if (!res) {
@@ -114,7 +128,7 @@ export function CommandCard({
     }
     setResult(res)
     setState('done')
-    onResult(res)
+    onResult(res, byItself)
   }
 
   const failed = result !== null && result.exitCode !== 0
@@ -126,15 +140,18 @@ export function CommandCard({
         <span className="cmd-shell">{SHELL_LABEL[shell]}</span>
         {risk && <span className="cmd-risk" title={`This command ${risk}.`}>{risk}</span>}
         <span className="spacer" />
-        {state === 'idle' && allowed === true && auto && autoAllowed && (
+        {state === 'idle' && allowed === true && unattended && (
           <span className="cmd-status">running automatically…</span>
         )}
-        {state === 'idle' && allowed === true && !(auto && autoAllowed) && (
+        {state === 'idle' && allowed === true && !unattended && !complete && (
+          <span className="cmd-status">still writing…</span>
+        )}
+        {state === 'idle' && allowed === true && !unattended && complete && (
           <>
             <button type="button" className="cmd-skip" onClick={() => setState('cancelled')}>
               Skip
             </button>
-            <button type="button" className="cmd-run" onClick={() => void run()}>
+            <button type="button" className="cmd-run" onClick={() => void run(false)}>
               Run
             </button>
           </>

@@ -120,7 +120,10 @@ async function warmTier(id: TierId): Promise<void> {
 
   await ollama.warm(model, settings.get('keepAlive'), {
     systemPrompt,
-    examples: scope === 'none' ? [] : shellExamples(scope)
+    examples: scope === 'none' ? [] : shellExamples(scope),
+    // Must match what the turn itself will ask for, or the primed cache is
+    // discarded and the first question pays full prefill.
+    options: tier.options
   })
   panel.send(IPC.tiersStatus, tierStatuses())
 }
@@ -164,6 +167,10 @@ async function startLowLevelHook(): Promise<void> {
 
 function registerIpc(): void {
   ipcMain.handle(IPC.settingsGet, () => settings.all())
+
+  // Whoever changed them - the panel, the tray menu - every window hears about
+  // it, so what the status bar shows is what this process will actually do.
+  settings.onChange((next) => panel.send(IPC.settingsChanged, next))
 
   ipcMain.handle(IPC.settingsSet, (_e, patch: Partial<WumpySettings>) => {
     const next = settings.patch(patch)
@@ -386,7 +393,8 @@ function registerIpc(): void {
           exitCode: -1,
           durationMs: 0,
           timedOut: false,
-          truncated: false
+          truncated: false,
+          readOnly: verdict.readOnly
         }
       }
 
@@ -400,7 +408,8 @@ function registerIpc(): void {
           exitCode: -1,
           durationMs: 0,
           timedOut: false,
-          truncated: false
+          truncated: false,
+          readOnly: verdict.readOnly
         }
       }
 

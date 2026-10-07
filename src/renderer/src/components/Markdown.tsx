@@ -128,8 +128,10 @@ export interface MarkdownProps {
   onRunCommand?: (command: string, shell: ShellKind) => Promise<ShellResult | null>
   /** The tier asking, which decides what it is allowed to run. */
   tier: TierId
-  /** False once unattended runs have piled up; cards then wait for a person. */
-  autoAllowed?: boolean
+  /** False while the message is still arriving, so half-written commands wait. */
+  complete?: boolean
+  /** Whether a given command may still run unattended. */
+  canAutoRun?: (command: string) => boolean
   /** Supplied for assistant turns that may search the web. */
   onSearch?: (query: string) => Promise<{ results: SearchResult[]; provider: string; error?: string }>
   onSearchResults?: (
@@ -138,7 +140,7 @@ export interface MarkdownProps {
     provider: string,
     error?: string
   ) => void
-  onCommandResult?: (result: ShellResult) => void
+  onCommandResult?: (result: ShellResult, unattended: boolean) => void
 }
 
 /**
@@ -156,7 +158,8 @@ export const Markdown = memo(function Markdown({
   onAnswer,
   answered = null,
   tier,
-  autoAllowed = true,
+  complete = true,
+  canAutoRun,
   onSearch,
   onSearchResults
 }: MarkdownProps) {
@@ -171,6 +174,7 @@ export const Markdown = memo(function Markdown({
             return (
               <SearchCard
                 query={query}
+                complete={complete}
                 onSearch={onSearch!}
                 onResults={onSearchResults ?? (() => {})}
               />
@@ -197,7 +201,8 @@ export const Markdown = memo(function Markdown({
                 shell={fence.shell}
                 tier={tier}
                 fallbackReason={leadIn(text)}
-                autoAllowed={autoAllowed}
+                complete={complete}
+                canAutoRun={canAutoRun}
                 onRun={onRunCommand!}
                 onResult={onCommandResult ?? (() => {})}
               />

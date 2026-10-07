@@ -25,7 +25,8 @@ export interface ChatState {
   messages: ChatMessage[]
   streaming: boolean
   stats: ChatStats
-  send(text: string, tier: TierId, displayText?: string): void
+  /** False when a turn is already in flight and the message was not sent. */
+  send(text: string, tier: TierId, displayText?: string): boolean
   /** Live facts handed to the model each turn; set by the app. */
   setContext(ctx: { chatTitle: string | null }): void
   /** Messages as the model would see them, for size estimates and compaction. */
@@ -125,9 +126,12 @@ export function useChat(): ChatState {
     }
   }, [patchActive])
 
-  const send = useCallback((text: string, tier: TierId, displayText?: string) => {
+  const send = useCallback((text: string, tier: TierId, displayText?: string): boolean => {
     const trimmed = text.trim()
-    if (!trimmed || activeRequest.current) return
+    // Refused rather than queued: the caller knows what to do with the message
+    // it could not send, and silently dropping a command's output left the
+    // model answering from a conversation that was missing a step.
+    if (!trimmed || activeRequest.current) return false
 
     const userMessage: ChatMessage = {
       id: nextId(),
@@ -178,6 +182,7 @@ export function useChat(): ChatState {
       tier,
       context: { chatTitle: context.current.chatTitle, messageCount: history.length }
     })
+    return true
   }, [])
 
   useEffect(() => {

@@ -184,6 +184,7 @@ export function runCommand(
   const started = Date.now()
   const workingDir = cwd && existsSync(cwd) ? cwd : homedir()
   const { file, args } = launcher(kind, command)
+  const readOnly = isReadOnly(command)
 
   return new Promise((resolve) => {
     let child: ReturnType<typeof spawn>
@@ -205,7 +206,8 @@ export function runCommand(
         exitCode: -1,
         durationMs: Date.now() - started,
         timedOut: false,
-        truncated: false
+        truncated: false,
+        readOnly
       })
       return
     }
@@ -243,7 +245,8 @@ export function runCommand(
         exitCode: timedOut ? -1 : (code ?? -1),
         durationMs: Date.now() - started,
         timedOut,
-        truncated: out.truncated || errOut.truncated
+        truncated: out.truncated || errOut.truncated,
+        readOnly
       })
     })
   })

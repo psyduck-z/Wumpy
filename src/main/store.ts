@@ -11,9 +11,24 @@ import type { WumpySettings } from '@shared/types'
 export class SettingsStore {
   private readonly file = join(app.getPath('userData'), 'settings.json')
   private cache: WumpySettings
+  private readonly listeners = new Set<(s: WumpySettings) => void>()
 
   constructor() {
     this.cache = this.read()
+  }
+
+  /**
+   * Notified on every change, whoever made it.
+   *
+   * The tray menu and the panel both write settings, and before this only the
+   * writer knew. The panel could sit showing "ask every time" while the tray
+   * had switched approval to "run everything" — the status bar said one thing
+   * and the main process did another, which for a permission control is the
+   * worst way to be wrong.
+   */
+  onChange(cb: (settings: WumpySettings) => void): () => void {
+    this.listeners.add(cb)
+    return () => this.listeners.delete(cb)
   }
 
   private read(): WumpySettings {
@@ -42,6 +57,7 @@ export class SettingsStore {
     } catch (err) {
       console.error('[wumpy] could not persist settings:', err)
     }
+    for (const cb of this.listeners) cb(this.all())
     return this.all()
   }
 }

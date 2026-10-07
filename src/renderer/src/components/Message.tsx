@@ -17,7 +17,7 @@ export const Message = memo(function Message({
   showReasoning,
   smoothText,
   tier,
-  autoAllowed,
+  canAutoRun,
   onGrow,
   onRunCommand,
   onCommandResult,
@@ -33,13 +33,17 @@ export const Message = memo(function Message({
   smoothText: boolean
   /** The active tier, which decides what a proposed command may do. */
   tier: TierId
-  /** False once unattended runs have piled up. */
-  autoAllowed?: boolean
+  /**
+   * Whether a command this message proposes may run unattended. Omitted for
+   * messages that were not generated in this session, so reopening a saved chat
+   * never re-runs what it contains.
+   */
+  canAutoRun?: (command: string) => boolean
   /** Called as revealed text grows, so the transcript can stay pinned. */
   onGrow?: () => void
   /** Supplied only when the active tier may propose commands. */
   onRunCommand?: (command: string, shell: ShellKind) => Promise<ShellResult | null>
-  onCommandResult?: (result: ShellResult) => void
+  onCommandResult?: (result: ShellResult, unattended: boolean) => void
   /** Called when the user picks an option from a question the model asked. */
   onAnswer?: (messageId: string, option: string) => void
   /** Supplied when the tier may search the web. */
@@ -140,7 +144,8 @@ export const Message = memo(function Message({
           <Markdown
             text={shown}
             tier={tier}
-            autoAllowed={autoAllowed}
+            complete={!animating}
+            canAutoRun={canAutoRun}
             onRunCommand={onRunCommand}
             onCommandResult={onCommandResult}
             onAnswer={onAnswer ? (option) => onAnswer(message.id, option) : undefined}

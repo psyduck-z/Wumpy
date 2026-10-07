@@ -18,10 +18,13 @@ const PROVIDER_LABEL: Record<string, string> = {
  */
 export function SearchCard({
   query: raw,
+  complete = true,
   onSearch,
   onResults
 }: {
   query: string
+  /** False while the message is still arriving and the query half-written. */
+  complete?: boolean
   onSearch(query: string): Promise<{ results: SearchResult[]; provider: string; error?: string }>
   onResults(query: string, results: SearchResult[], provider: string, error?: string): void
 }): React.JSX.Element {
@@ -59,7 +62,8 @@ export function SearchCard({
           <span className="cmd-status">{PROVIDER_LABEL[provider] ?? provider}</span>
         )}
         <span className="spacer" />
-        {state === 'idle' && (
+        {state === 'idle' && !complete && <span className="cmd-status">still writing…</span>}
+        {state === 'idle' && complete && (
           <>
             <button type="button" className="cmd-skip" onClick={() => setState('skipped')}>
               Skip

@@ -32,7 +32,8 @@ const api = {
   settings: {
     get: (): Promise<WumpySettings> => ipcRenderer.invoke(IPC.settingsGet),
     set: (patch: Partial<WumpySettings>): Promise<WumpySettings> =>
-      ipcRenderer.invoke(IPC.settingsSet, patch)
+      ipcRenderer.invoke(IPC.settingsSet, patch),
+    onChange: (cb: (s: WumpySettings) => void) => on<WumpySettings>(IPC.settingsChanged, cb)
   },
   ollama: {
     status: (): Promise<OllamaStatus> => ipcRenderer.invoke(IPC.ollamaStatus),

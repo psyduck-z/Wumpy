@@ -20,6 +20,7 @@ import { TIERS, TIER_ORDER, defaultTierFor } from '@shared/tiers'
 import { useChat, nextId, type ChatStats } from './hooks/useChat'
 import { parseCommand, helpText, type CommandAction } from './commands'
 import { matchIntent } from './intents'
+import { AUTO_RUN_LIMIT, autoRunEligible } from './autorun'
 import { Header } from './components/Header'
 import { Message } from './components/Message'
 import { Composer } from './components/Composer'
@@ -82,6 +83,9 @@ export default function App(): React.JSX.Element {
   }, [])
 
   useEffect(() => window.wumpy.tiers.onStatus(setTierStatuses), [])
+
+  // The tray menu can change approval mode and the rest from outside the panel.
+  useEffect(() => window.wumpy.settings.onChange(setSettings), [])
   useEffect(
     () =>
       window.wumpy.panel.onDock((d) => setSettings((prev) => (prev ? { ...prev, dock: d } : prev))),
@@ -313,9 +317,38 @@ export default function App(): React.JSX.Element {
    * the model, the model proposes another. After a handful without a person in
    * the loop, cards stop running themselves and wait.
    */
-  const AUTO_RUN_LIMIT = 6
   const [autoRuns, setAutoRuns] = useState(0)
   const autoAllowed = autoRuns < AUTO_RUN_LIMIT
+
+  /**
+   * Commands already run since the user last typed.
+   *
+   * A small model handed "exit code 0, no output" will often answer by
+   * proposing the very same command again, and in an automatic mode that is a
+   * loop that runs it as fast as the model can write it. The second time round
+   * the card stops and waits for a click, which both breaks the loop and shows
+   * the user what is going on.
+   */
+  const [ranCommands, setRanCommands] = useState<string[]>([])
+
+  const canAutoRun = useCallback(
+    (command: string) => autoRunEligible({ command, ranCommands, autoRuns }),
+    [ranCommands, autoRuns]
+  )
+
+  /**
+   * Message ids generated during this session.
+   *
+   * Reopening a saved chat re-mounts every card it contains, and those are
+   * finished messages, so without this an automatic mode would run the whole
+   * transcript again on load.
+   */
+  const generated = useRef(new Set<string>())
+  useEffect(() => {
+    if (!streaming) return
+    const last = messages[messages.length - 1]
+    if (last?.role === 'assistant') generated.current.add(last.id)
+  }, [streaming, messages])
 
   const runShellCommand = useCallback(
     (command: string, shellKind: ShellKind) =>
@@ -331,20 +364,45 @@ export default function App(): React.JSX.Element {
    * push the actual question out of scope.
    */
   const onCommandResult = useCallback(
-    (result: ShellResult) => {
-      setAutoRuns((n) => n + 1)
+    (result: ShellResult, unattended: boolean) => {
+      // Only runs that happened without a click spend the budget; approving one
+      // by hand is the person being present, which is what the budget protects.
+      if (unattended) setAutoRuns((n) => n + 1)
+      setRanCommands((prev) => [...prev, result.command.trim()])
       const body = [result.stdout, result.stderr].filter(Boolean).join('\n').trim()
       const clipped = body.length > 3000 ? `${body.slice(0, 3000)}\n…truncated…` : body
+
+      // A change that succeeded and printed nothing has nothing to interpret.
+      // Deleting a file used to cost two model turns — one to propose it, one to
+      // be told "exit code 0, no output" and answer "Done." — which on this
+      // hardware is most of a minute spent saying what the card already says.
+      // The fact still enters the history as a note, so a later turn knows.
+      //
+      // Reads are different: `Get-Command foo` printing nothing is the answer
+      // rather than the absence of one, so those always go back to the model.
+      if (!result.readOnly && result.exitCode === 0 && !clipped) {
+        chat.notice(`Ran \`${result.command}\` — succeeded, no output.`)
+        return
+      }
 
       const report = [
         `I ran that command. Exit code ${result.exitCode}${result.timedOut ? ' (timed out)' : ''}.`,
         '',
-        clipped ? ['```', clipped, '```'].join('\n') : '(no output)'
+        clipped ? ['```', clipped, '```'].join('\n') : '(no output)',
+        '',
+        // Without this a 3.8B model answers the report by proposing the same
+        // command over again, which in an automatic mode promptly runs it again.
+        'That command is done. Do not propose it again. Answer the original',
+        'question from this output, in words.'
       ].join('\n')
 
       // Sent as a user turn because that is the role the model expects a tool
       // result to arrive in, but shown as the short line instead of the dump.
-      chat.send(report, tier, `Ran: \`${result.command}\``)
+      const sent = chat.send(report, tier, `Ran: \`${result.command}\``)
+      // A turn was already in flight, so the output would otherwise vanish.
+      // It still reaches the model, just as a fact rather than a question.
+      if (!sent) chat.notice(`Ran \`${result.command}\`:
+${clipped || '(no output)'}`)
     },
     [chat, tier]
   )
@@ -545,6 +603,12 @@ export default function App(): React.JSX.Element {
 
   const onSend = useCallback(
     (text: string) => {
+      // Typing is the person rejoining the loop, so the unattended budget and
+      // the already-ran list start again — whichever path the message takes
+      // from here, including the auto-compact one that used to skip the reset.
+      setAutoRuns(0)
+      setRanCommands([])
+
       const action = parseCommand(text)
       if (action) {
         void runCommand(action, text)
@@ -572,7 +636,6 @@ export default function App(): React.JSX.Element {
         return
       }
 
-      setAutoRuns(0)
       chat.send(text, tier)
     },
     [chat, compactHistory, runCommand, settings, tier, usage.used]
@@ -911,6 +974,7 @@ export default function App(): React.JSX.Element {
                 showReasoning={settings?.showReasoning ?? false}
                 smoothText={settings?.smoothText ?? false}
                 tier={tier}
+                canAutoRun={generated.current.has(m.id) ? canAutoRun : undefined}
                 onGrow={pinToBottom}
                 onRunCommand={canRunCommands ? runShellCommand : undefined}
                 onCommandResult={onCommandResult}

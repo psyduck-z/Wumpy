@@ -115,7 +115,20 @@ export class OllamaClient {
   async warm(
     model: string,
     keepAlive: string,
-    prime?: { systemPrompt: string; examples: Array<Pick<ChatMessage, 'role' | 'content'>> }
+    prime?: {
+      systemPrompt: string
+      examples: Array<Pick<ChatMessage, 'role' | 'content'>>
+      /**
+       * The same options the real turn will send.
+       *
+       * These are not a detail. Ollama keeps one context per model, sized by
+       * `num_ctx`, and asking for a different size throws the filled cache away
+       * and builds another. Priming without them primed a context nobody used:
+       * measured on qwen2.5:7b, the first real question then spent 46-65s in
+       * prefill against 4-6s when the sizes match.
+       */
+      options?: TierOptions
+    }
   ): Promise<boolean> {
     try {
       if (prime) {
@@ -136,7 +149,8 @@ export class OllamaClient {
             ],
             stream: false,
             keep_alive: keepAlive,
-            options: { num_predict: 1 }
+            // num_predict: 1 so it fills the cache without writing an answer.
+            options: { ...prime.options, num_predict: 1 }
           }),
           signal: AbortSignal.timeout(300_000)
         })

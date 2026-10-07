@@ -95,6 +95,15 @@ export interface ShellResult {
   durationMs: number
   timedOut: boolean
   truncated: boolean
+  /**
+   * Whether this only read something, as judged by the main process.
+   *
+   * Carried back so the panel can tell a silent success apart from a silent
+   * answer: `Remove-Item` printing nothing is finished, while `Get-Command`
+   * printing nothing means the tool is absent, which the model still has to
+   * read.
+   */
+  readOnly: boolean
 }
 
 export interface SearchResult {
@@ -316,6 +325,7 @@ export interface HotkeyState {
 export const IPC = {
   settingsGet: 'settings:get',
   settingsSet: 'settings:set',
+  settingsChanged: 'settings:changed',
   chatSend: 'chat:send',
   chatAbort: 'chat:abort',
   chatDelta: 'chat:delta',
