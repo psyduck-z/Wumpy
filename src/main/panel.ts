@@ -1,4 +1,5 @@
-import { BrowserWindow, screen, shell, app } from 'electron'
+import { BrowserWindow, screen, app } from 'electron'
+import { openLink } from './browser'
 import { join } from 'node:path'
 import { IPC, isTall, type Dock } from '@shared/types'
 import type { SettingsStore } from './store'
@@ -95,10 +96,26 @@ export class Panel {
       )
     }
 
-    // Never let the overlay navigate; links belong in the real browser.
+    /**
+     * Never let the overlay navigate; links belong in the real browser.
+     *
+     * Through openLink rather than straight to the shell. This used to pass
+     * whatever the link contained, and the links in here come from a model which
+     * is fed web pages - so `[docs](steam://run/570)` or a `file://` UNC path in
+     * an answer was a click away from launching something. openLink refuses
+     * anything that is not http or https.
+     */
     this.window.webContents.setWindowOpenHandler(({ url }) => {
-      void shell.openExternal(url)
+      void openLink(url)
       return { action: 'deny' }
+    })
+
+    // And never navigate the panel itself, whatever a link's target says.
+    this.window.webContents.on('will-navigate', (e, url) => {
+      const page = process.env.ELECTRON_RENDERER_URL
+      if (page && url.startsWith(page)) return
+      e.preventDefault()
+      void openLink(url)
     })
 
     if (process.env.ELECTRON_RENDERER_URL) {

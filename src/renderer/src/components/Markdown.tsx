@@ -1,11 +1,13 @@
 import { memo, useState, isValidElement, type ReactNode } from 'react'
-import type { SearchResult, ShellKind, ShellResult, TierId } from '@shared/types'
+import type { LinkResult, SearchResult, ShellKind, ShellResult, TierId } from '@shared/types'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import rehypeHighlight from 'rehype-highlight'
 import { CommandCard } from './CommandCard'
 import { AskCard } from './AskCard'
 import { SearchCard } from './SearchCard'
+import { LinkCard } from './LinkCard'
+import type { LinkApproval } from '@shared/links'
 
 function CodeBlock({ children }: { children: ReactNode }): React.JSX.Element {
   const [copied, setCopied] = useState(false)
@@ -57,12 +59,18 @@ function readAsk(children: ReactNode): { question: string; options: string[] } |
   return { question, options: options.slice(0, 5) }
 }
 
-/** Pulls the query out of a `wumpy-search` block. */
-function readSearch(children: ReactNode): string | null {
+/**
+ * Pulls the text back out of a rendered fence with a given tag.
+ *
+ * react-markdown has already turned the fence into <pre><code class="language-x">
+ * by the time a custom renderer sees it, so the tag and the source have to be
+ * read back off the element rather than matched in the markdown.
+ */
+function readTagged(children: ReactNode, tag: string): string | null {
   if (!isValidElement(children)) return null
   const props = children.props as { className?: unknown; children?: unknown }
   if (typeof props.className !== 'string') return null
-  if (!props.className.split(/\s+/).includes('language-wumpy-search')) return null
+  if (!props.className.split(/\s+/).includes(tag)) return null
   const raw =
     typeof props.children === 'string'
       ? props.children
@@ -70,6 +78,16 @@ function readSearch(children: ReactNode): string | null {
         ? props.children.filter((c) => typeof c === 'string').join('')
         : ''
   return raw.trim() || null
+}
+
+/** Pulls the body out of a `wumpy-open` block. */
+function readOpen(children: ReactNode): string | null {
+  return readTagged(children, 'language-wumpy-open')
+}
+
+/** Pulls the query out of a `wumpy-search` block. */
+function readSearch(children: ReactNode): string | null {
+  return readTagged(children, 'language-wumpy-search')
 }
 
 /**
@@ -167,6 +185,13 @@ export interface MarkdownProps {
     error?: string
   ) => void
   onCommandResult?: (result: ShellResult, unattended: boolean) => void
+  /** Supplied for assistant turns that may open a page in the browser. */
+  onOpenLink?: (url: string) => Promise<LinkResult>
+  onOpenSearch?: (query: string) => Promise<LinkResult>
+  onOpened?: (result: LinkResult, messageId: string) => void
+  /** How much may happen without a click, and where searches go. */
+  linkMode?: LinkApproval
+  searchEngine?: string
 }
 
 /**
@@ -197,7 +222,12 @@ export const Markdown = memo(function Markdown({
   canAutoRun,
   messageId,
   onSearch,
-  onSearchResults
+  onSearchResults,
+  onOpenLink,
+  onOpenSearch,
+  onOpened,
+  linkMode = 'manual',
+  searchEngine = 'duckduckgo'
 }: MarkdownProps) {
   // The one block still being written, if any. Everything else is final, even
   // mid-answer, so a command can be offered the moment its fence closes rather
@@ -210,6 +240,22 @@ export const Markdown = memo(function Markdown({
       rehypePlugins={[[rehypeHighlight, { detect: false, ignoreMissing: true }]]}
       components={{
         pre: ({ children }) => {
+          const link = onOpenLink ? readOpen(children) : null
+          if (link) {
+            return (
+              <LinkCard
+                request={link}
+                complete={settled(link)}
+                mode={linkMode}
+                engine={searchEngine}
+                onOpen={onOpenLink!}
+                onSearch={onOpenSearch ?? (async () => ({ opened: false, url: '', host: '', error: 'off' }))}
+                onOpened={onOpened ?? (() => {})}
+                messageId={messageId ?? ''}
+              />
+            )
+          }
+
           const query = onSearch ? readSearch(children) : null
           if (query) {
             return (

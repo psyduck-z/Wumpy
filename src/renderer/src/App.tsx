@@ -11,11 +11,13 @@ import type {
   ShellKind,
   ShellResult,
   OllamaModel,
+  LinkResult,
   SearchResult,
   TierStatus,
   WumpySettings
 } from '@shared/types'
 import { isTall } from '@shared/types'
+import { looksLikeUrl, SEARCH_ENGINES, type LinkApproval } from '@shared/links'
 import { TIERS, TIER_ORDER, defaultTierFor } from '@shared/tiers'
 import { useChat, nextId, type ChatStats } from './hooks/useChat'
 import { allCommands, parseCommand, helpText, SHORTCUT_FOR, type CommandAction } from './commands'
@@ -69,7 +71,7 @@ export default function App(): React.JSX.Element {
 
   // Saved chats
   /** Which picker is open, if any. One list UI serves them all. */
-  const [picker, setPicker] = useState<null | 'command' | 'resume' | 'delete' | 'tier' | 'model' | 'dock' | 'speech'>(
+  const [picker, setPicker] = useState<null | 'command' | 'resume' | 'delete' | 'tier' | 'model' | 'dock' | 'speech' | 'engine'>(
     null
   )
   const [savedChats, setSavedChats] = useState<ChatSummary[]>([])
@@ -341,6 +343,38 @@ export default function App(): React.JSX.Element {
     },
     [tier]
   )
+
+  /* ----------------------------------------------------------------- browser */
+
+  const canOpenLinks = TIERS[tier].tools !== 'none' && (settings?.browserEnabled ?? true)
+
+  /**
+   * How much a proposed link may do on its own.
+   *
+   * Mapped from the approval mode the user already set for commands, rather than
+   * being its own switch: "how much happens without me" is one question, and
+   * answering it twice in two places is how the two end up disagreeing. What the
+   * modes mean for a link is decided in shared/links.ts.
+   */
+  const linkMode: LinkApproval = settings?.approvalMode ?? 'manual'
+
+  const openLink = useCallback((url: string) => window.wumpy.links.open(url), [])
+  const openSearch = useCallback((query: string) => window.wumpy.links.search(query), [])
+
+  /**
+   * Records what was opened, in the transcript rather than back to the model.
+   *
+   * A page in the browser is not something the model can read, so there is
+   * nothing to report to it - and telling it "opened example.com" invited it to
+   * narrate what the page said, which it could not possibly know.
+   */
+  const onOpened = useCallback((result: LinkResult) => {
+    chatRef.current.note(
+      result.opened
+        ? `Opened **${result.host}** in your browser.`
+        : `Could not open that: ${result.error ?? 'unknown error'}`
+    )
+  }, [])
 
   /**
    * How many commands have run unattended since the user last typed.
@@ -616,6 +650,31 @@ export default function App(): React.JSX.Element {
           chat.note(`Reasoning ${show ? 'shown' : 'hidden'}.`)
           return
         }
+        /**
+         * The user asking for a page directly.
+         *
+         * No card and no approval: they typed it, which is the approval. A model
+         * proposing the same thing goes through LinkCard, because the difference
+         * between the two is the whole point of the gate.
+         *
+         * Either a link or words - "github.com/psyduck-z" opens, "best pizza"
+         * searches - because having to remember which command takes which is
+         * friction for no safety.
+         */
+        case 'open': {
+          const result = looksLikeUrl(action.what)
+            ? await window.wumpy.links.open(action.what)
+            : await window.wumpy.links.search(action.what)
+          chat.note(
+            result.opened
+              ? `Opened **${result.host}**.`
+              : `Could not open that: ${result.error ?? 'unknown error'}`
+          )
+          return
+        }
+        case 'engine':
+          setPicker('engine')
+          return
         case 'voice': {
           if (action.setting === 'polish') {
             const next = action.on === 'toggle' ? !settings?.voicePolish : action.on
@@ -1182,6 +1241,25 @@ export default function App(): React.JSX.Element {
       }
     }
 
+    if (kind === 'engine') {
+      return {
+        heading: 'Search engine',
+        placeholder: 'Filter…',
+        onClose: close,
+        onPick: (id) => {
+          void patch({ searchEngine: id })
+          chat.note(`Searches will open in **${SEARCH_ENGINES[id as 'duckduckgo'].label}**.`)
+          close()
+        },
+        items: Object.entries(SEARCH_ENGINES).map(([id, e]) => ({
+          id,
+          title: e.label,
+          meta: new URL(e.url).hostname,
+          active: id === (settings?.searchEngine ?? 'duckduckgo')
+        }))
+      }
+    }
+
     if (kind === 'dock') {
       return {
         heading: 'Position',
@@ -1307,6 +1385,11 @@ export default function App(): React.JSX.Element {
                 onAnswer={onAnswerQuestion}
                 onSearch={canSearch ? runSearch : undefined}
                 onSearchResults={onSearchResults}
+                onOpenLink={canOpenLinks ? openLink : undefined}
+                onOpenSearch={openSearch}
+                onOpened={onOpened}
+                linkMode={linkMode}
+                searchEngine={settings?.searchEngine ?? 'duckduckgo'}
               />
             ))
           )}

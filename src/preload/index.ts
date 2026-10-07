@@ -1,5 +1,6 @@
 import { contextBridge, ipcRenderer } from 'electron'
 import { IPC } from '@shared/types'
+import type { LinkCheck } from '@shared/links'
 import type {
   ChatDelta,
   ChatDone,
@@ -14,6 +15,7 @@ import type {
   OllamaStatus,
   SavedChat,
   Dictation,
+  LinkResult,
   SearchResult,
   ShellKind,
   ShellResult,
@@ -114,6 +116,14 @@ const api = {
   hotkey: {
     get: (): Promise<HotkeyState> => ipcRenderer.invoke(IPC.hotkeyState),
     onChange: (cb: (s: HotkeyState) => void) => on(IPC.hotkeyState, cb)
+  },
+  links: {
+    /** Opens a page. The main process checks it again before anything happens. */
+    open: (url: string): Promise<LinkResult> => ipcRenderer.invoke(IPC.linkOpen, url),
+    /** Opens a search for a query, in whichever engine is configured. */
+    search: (query: string): Promise<LinkResult> => ipcRenderer.invoke(IPC.linkSearch, query),
+    /** Describes a link so the card can show where it goes, without opening it. */
+    check: (url: string): Promise<LinkCheck> => ipcRenderer.invoke(IPC.linkCheck, url)
   },
   voice: {
     status: (): Promise<VoiceStatus> => ipcRenderer.invoke(IPC.voiceStatus),

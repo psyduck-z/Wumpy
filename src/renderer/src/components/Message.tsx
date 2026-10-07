@@ -1,5 +1,6 @@
 import { memo, useEffect, useState } from 'react'
-import type { ChatMessage, SearchResult, ShellKind, ShellResult, TierId } from '@shared/types'
+import type { ChatMessage, LinkResult, SearchResult, ShellKind, ShellResult, TierId } from '@shared/types'
+import type { LinkApproval } from '@shared/links'
 import { Markdown } from './Markdown'
 import { AskCard } from './AskCard'
 import { useSmoothText } from '../hooks/useSmoothText'
@@ -23,7 +24,12 @@ export const Message = memo(function Message({
   onCommandResult,
   onAnswer,
   onSearch,
-  onSearchResults
+  onSearchResults,
+  onOpenLink,
+  onOpenSearch,
+  onOpened,
+  linkMode,
+  searchEngine
 }: {
   message: ChatMessage
   streaming: boolean
@@ -47,6 +53,11 @@ export const Message = memo(function Message({
   /** Called when the user picks an option from a question the model asked. */
   onAnswer?: (messageId: string, option: string) => void
   /** Supplied when the tier may search the web. */
+  onOpenLink?: (url: string) => Promise<LinkResult>
+  onOpenSearch?: (query: string) => Promise<LinkResult>
+  onOpened?: (result: LinkResult, messageId: string) => void
+  linkMode?: LinkApproval
+  searchEngine?: string
   onSearch?: (query: string) => Promise<{ results: SearchResult[]; provider: string; error?: string }>
   onSearchResults?: (
     query: string,
@@ -168,6 +179,11 @@ export const Message = memo(function Message({
             answered={message.answered ?? null}
             onSearch={onSearch}
             onSearchResults={onSearchResults}
+            onOpenLink={onOpenLink}
+            onOpenSearch={onOpenSearch}
+            onOpened={onOpened}
+            linkMode={linkMode}
+            searchEngine={searchEngine}
           />
           {waiting && !message.thinking && (
             <span className="dots" role="status" aria-label="Thinking">

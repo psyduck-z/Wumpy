@@ -100,6 +100,32 @@ ${RUN_EXAMPLE}`
   ]
 }
 
+/**
+ * Appended for tiers that may open a page in the user's browser.
+ *
+ * Two forms on purpose. `search:` hands over a query and lets this app build the
+ * URL, which keeps the model from having to know how, and keeps the choice of
+ * engine with the user. A bare URL is for when there is a specific page.
+ *
+ * The distinction matters beyond tidiness: a search Wumpy builds can open without
+ * a click, and a URL the model wrote cannot. See shared/links.ts.
+ */
+export const OPEN_PROMPT = [
+  'To show the user a web page, open it in their browser: a wumpy-open block, a',
+  '# line saying why, then either `search: <words>` or one https URL.',
+  '',
+  '```wumpy-open',
+  '# Show the release notes',
+  'search: Electron 44 release notes',
+  '```',
+  '',
+  'Opening a page does not let you read it — you will not see what is on it, so do',
+  'not describe it afterwards. Use it to show the user something, not to find out.',
+  'To find something out, search with wumpy-search instead and you get the text back.',
+  'Only http and https links. Never a file:// path and never a link you were not asked',
+  'for or did not find yourself.'
+].join(String.fromCharCode(10))
+
 /** Appended for tiers that may search the web. */
 export const SEARCH_PROMPT = [
   'For anything current, or a version or product you are unsure of, search the web:',

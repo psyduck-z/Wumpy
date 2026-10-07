@@ -272,6 +272,10 @@ export interface WumpySettings {
   voicePolish: boolean
   /** Stop recording by itself once you stop talking. */
   voiceAutoStop: boolean
+  /** Let the model propose opening a page in the real browser. */
+  browserEnabled: boolean
+  /** Which engine `/open` and a proposed search use. */
+  searchEngine: string
 }
 
 /* ------------------------------------------------------------------- ollama */
@@ -381,7 +385,10 @@ export const IPC = {
   voiceStatus: 'voice:status',
   voiceStatusChanged: 'voice:status-changed',
   voiceStart: 'voice:start',
-  voiceTranscribe: 'voice:transcribe'
+  voiceTranscribe: 'voice:transcribe',
+  linkOpen: 'link:open',
+  linkCheck: 'link:check',
+  linkSearch: 'link:search'
 } as const
 
 /* --------------------------------------------------------------------- voice */
@@ -421,4 +428,16 @@ export interface Dictation {
   confidence: number
   /** Transcription time only, excluding polish. */
   ms: number
+}
+
+/* -------------------------------------------------------------------- links */
+
+/** What came of trying to open a link. */
+export interface LinkResult {
+  opened: boolean
+  /** The normalised URL, for the note in the transcript. */
+  url: string
+  /** The host as a browser resolves it, punycoded. */
+  host: string
+  error?: string
 }

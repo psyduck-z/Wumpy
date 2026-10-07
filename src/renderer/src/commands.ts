@@ -23,6 +23,8 @@ export type CommandAction =
   | { kind: 'pin'; pinned: boolean | 'toggle' }
   | { kind: 'voice'; setting: 'polish' | 'autostop'; on: boolean | 'toggle' }
   | { kind: 'speech' }
+  | { kind: 'open'; what: string }
+  | { kind: 'engine' }
   | { kind: 'approve'; mode: 'manual' | 'auto' | 'all' | 'cycle' }
   | { kind: 'warm' }
   | { kind: 'compact' }
@@ -220,6 +222,22 @@ export const COMMANDS: CommandSpec[] = [
     aliases: ['models'],
     hint: 'Pick which installed model this tier uses',
     run: () => ({ kind: 'model' })
+  },
+  {
+    name: 'open',
+    aliases: ['browse', 'go', 'google'],
+    hint: 'Open a page, or search the web, in your browser',
+    arg: 'url or words',
+    run: (arg) =>
+      arg.trim()
+        ? { kind: 'open', what: arg.trim() }
+        : { kind: 'error', message: 'Give me a link or something to search for: `/open wikipedia.org`' }
+  },
+  {
+    name: 'engine',
+    aliases: ['searchengine'],
+    hint: 'Choose which search engine the browser opens',
+    run: () => ({ kind: 'engine' })
   },
   {
     name: 'speech',

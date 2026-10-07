@@ -24,6 +24,7 @@ import {
   APP_PROMPT,
   ASK_PROMPT,
   SEARCH_PROMPT,
+  OPEN_PROMPT,
   shellExamples,
   NUM_CTX
 } from '@shared/tiers'
@@ -40,6 +41,8 @@ import { PriorityManager } from './priority'
 import { webSearch } from './search'
 import { cleanTitle } from './titles'
 import { Speech } from './speech'
+import { openLink, openSearch } from './browser'
+import { checkLink, isSearchEngine } from '@shared/links'
 import { POLISH_PROMPT, polishAcceptable, tidyTranscript } from '@shared/dictation'
 
 // Only one Wumpy may own the tray icon and the global hotkey.
@@ -148,6 +151,7 @@ function systemPromptFor(tier: Tier, scope: 'none' | 'read' | 'full'): string {
     APP_PROMPT,
     scope === 'full' ? SHELL_PROMPT : scope === 'read' ? READ_SHELL_PROMPT : NO_SHELL_PROMPT,
     scope !== 'none' && settings.get('searchEnabled') ? SEARCH_PROMPT : '',
+    scope !== 'none' && settings.get('browserEnabled') ? OPEN_PROMPT : '',
     ASK_PROMPT
   ]
     .filter(Boolean)
@@ -394,6 +398,35 @@ function registerIpc(): void {
       return raw ? cleanTitle(raw, question) : null
     }
   )
+
+  /* ------------------------------------------------------------------ browser */
+
+  /**
+   * Opens a page in the real browser.
+   *
+   * Reached three ways, and they are not equivalent: the user typing `/open`,
+   * the user clicking a card the model proposed, and a card opening itself under
+   * accept-all. All three come through here, and here re-checks the link - the
+   * renderer's own check is for telling the user what will happen, not for
+   * deciding, because the renderer is downstream of model output.
+   */
+  ipcMain.handle(IPC.linkOpen, async (_e, raw: string) => {
+    if (!settings.get('browserEnabled')) {
+      return { opened: false, url: '', host: '', error: 'Opening pages is turned off in settings.' }
+    }
+    return openLink(raw)
+  })
+
+  ipcMain.handle(IPC.linkSearch, async (_e, query: string) => {
+    if (!settings.get('browserEnabled')) {
+      return { opened: false, url: '', host: '', error: 'Opening pages is turned off in settings.' }
+    }
+    const engine = settings.get('searchEngine')
+    return openSearch(query, isSearchEngine(engine) ? engine : 'duckduckgo')
+  })
+
+  /** What the panel needs to describe a link before anything is opened. */
+  ipcMain.handle(IPC.linkCheck, (_e, raw: string) => checkLink(raw))
 
   /* ------------------------------------------------------------------- voice */
 
