@@ -1,4 +1,5 @@
 import type { Tier, TierId, Mode } from './types'
+import { WRITE_PROMPT } from './writefile'
 
 /**
  * Appended for tiers that may act. The model never runs anything itself: it
@@ -45,7 +46,9 @@ export const SHELL_PROMPT = [
   DECIDE,
   '',
   'You may read and you may change things, but the user approves every command',
-  'before it runs and you are given its output afterwards. One command at a time.'
+  'before it runs and you are given its output afterwards. One command at a time.',
+  '',
+  WRITE_PROMPT
 ].join(String.fromCharCode(10))
 
 /** Appended for tiers limited to looking things up. */
@@ -233,6 +236,20 @@ const BASE_PROMPT = [
  * makes that impossible rather than merely unlikely: a mismatch measured 46-65s
  * of prefill on the next question against 4-6s, with nothing on screen to say
  * why. It costs only KV memory, which on this machine is not the scarce thing.
+ */
+/**
+ * Ollama's thread count is left alone, deliberately.
+ *
+ * The transcriber taught the opposite lesson - ctranslate2 taking all sixteen
+ * cores measured 2.7x slower than taking eight - so the same lever was tried
+ * here. It is not there. Measured on phi4-mini with the machine under its usual
+ * load, generating 64-68 tokens each, two runs per setting:
+ *
+ *   default  7.02 tok/s        6  6.77 tok/s
+ *         4  6.44 tok/s        8  5.64 tok/s      12  5.50 tok/s
+ *
+ * llama.cpp already picks well. Every explicit num_thread made it worse, so the
+ * app sets none; this note is here so the measurement is not repeated.
  */
 export const NUM_CTX = 8192
 

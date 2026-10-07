@@ -1,0 +1,239 @@
+/**
+ * Writing a file, without a shell anywhere near it.
+ *
+ * This exists because of one observed failure, repeated until the session was
+ * unusable. Asked to create a Python script, a 3.8B model wrote:
+ *
+ *     New-Item -Path "$HOME\Downloads\list_specs.py" -ItemType file -Content {
+ *     import os
+ *     ...
+ *     }
+ *
+ * PowerShell reads `{ ... }` as a script block, so every line of the Python was
+ * parsed as PowerShell. The result was eight parser errors, which the model then
+ * read as mistakes in its own Python and "corrected" - producing a second script
+ * with the same problem, and a conversation that could never converge because
+ * the errors were never in the Python at all.
+ *
+ * Getting a multi-line file into a shell command needs a here-string and exact
+ * escaping, and a small model will not produce one reliably. So it does not have
+ * to: the content goes in a block, Wumpy writes it with the filesystem API, and
+ * there is no quoting layer to get wrong. Nothing here is interpreted - not `$`,
+ * not a backtick, not a brace.
+ */
+
+export interface WriteRequest {
+  /** The `#` lines, shown on the card. */
+  reason: string | null
+  /** The path as written, before resolution. */
+  path: string | null
+  /** Exactly what should end up in the file. */
+  content: string
+}
+
+/** A file this size is a mistake, not a script. */
+export const MAX_BYTES = 256 * 1024
+
+/**
+ * Reads a `wumpy-write` block.
+ *
+ *     # why this file
+ *     path: ~/Downloads/analysis.py
+ *     ---
+ *     <content, verbatim>
+ *
+ * The separator is optional, because a small model will forget it: without one,
+ * the content simply starts after the path line. Everything after the split is
+ * taken exactly as it is - no trimming of interior lines, no unescaping - since
+ * a file's content is the one thing in this app that must survive untouched.
+ */
+export function readWriteRequest(raw: string): WriteRequest {
+  const lines = raw.split('\n')
+
+  const reason: string[] = []
+  let path: string | null = null
+  let start = -1
+
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i]
+    const trimmed = line.trim()
+
+    if (trimmed.startsWith('#') && path === null) {
+      reason.push(trimmed.replace(/^#+\s*/, ''))
+      continue
+    }
+    if (path === null) {
+      const match = /^path:\s*(.+)$/i.exec(trimmed)
+      if (match) {
+        path = match[1].trim().replace(/^["'`]|["'`]$/g, '')
+        continue
+      }
+      // Anything else before a path line is noise the model added.
+      if (trimmed) continue
+      continue
+    }
+    // Past the path. A separator line is consumed; anything else starts the file.
+    if (start === -1) {
+      if (/^-{3,}$/.test(trimmed)) {
+        start = i + 1
+        break
+      }
+      if (trimmed === '') continue
+      start = i
+      break
+    }
+  }
+
+  return {
+    reason: reason.join(' ').trim() || null,
+    path,
+    content: start === -1 ? '' : lines.slice(start).join('\n')
+  }
+}
+
+/* ------------------------------------------------------------ where it may go */
+
+export interface WriteCheck {
+  ok: boolean
+  /** The absolute path this resolves to. Empty when refused. */
+  path: string
+  why: string | null
+}
+
+/**
+ * Folders a file must never be written into, however the path was spelled.
+ *
+ * Startup is the one that matters: a file dropped there runs at every login, so
+ * it is the difference between "wrote a script" and "installed something". The
+ * rest are places nothing a chat window produced belongs.
+ */
+const FORBIDDEN = [
+  /\\appdata\\roaming\\microsoft\\windows\\start menu\\programs\\startup(\\|$)/i,
+  /\\appdata\\roaming\\microsoft\\windows\\start menu(\\|$)/i,
+  /^[a-z]:\\windows(\\|$)/i,
+  /^[a-z]:\\program files( \(x86\))?(\\|$)/i,
+  /^[a-z]:\\programdata\\microsoft\\windows\\start menu(\\|$)/i,
+  /\\\.ssh(\\|$)/i,
+  /\\\.aws(\\|$)/i,
+  /\\appdata\\roaming\\microsoft\\windows\\recent(\\|$)/i
+]
+
+/** Windows's own reserved device names, which are not files and behave oddly. */
+const DEVICES = /^(con|prn|aux|nul|com[1-9]|lpt[1-9])(\.|$)/i
+
+/**
+ * Resolves and vets a destination.
+ *
+ * `resolve` and `normalise` are passed in rather than imported so this stays a
+ * pure function the checks can drive with any home directory on any platform;
+ * the main process hands it node's path module.
+ */
+export function checkWritePath(
+  raw: string,
+  env: {
+    home: string
+    cwd: string
+    resolve(...parts: string[]): string
+    separator: string
+  }
+): WriteCheck {
+  const text = (raw ?? '').trim()
+  if (!text) return { ok: false, path: '', why: 'No path was given.' }
+  if (text.length > 400) return { ok: false, path: '', why: 'That path is too long.' }
+  if (/[\u0000-\u001f]/.test(text)) {
+    return { ok: false, path: '', why: 'That path has control characters in it.' }
+  }
+  // A wildcard is not a destination, and nor is a stream name.
+  if (/[*?]/.test(text)) return { ok: false, path: '', why: 'A path cannot have wildcards in it.' }
+
+  // The spellings a model actually produces for the home directory.
+  let expanded = text
+    .replace(/^~(?=[\\/]|$)/, env.home)
+    .replace(/\$env:USERPROFILE/gi, env.home)
+    .replace(/%USERPROFILE%/gi, env.home)
+    .replace(/\$HOME/g, env.home)
+    .replace(/\$\{HOME\}/g, env.home)
+
+  // A UNC path reaches another machine, which is not what "write a file" means.
+  if (/^\\\\/.test(expanded)) {
+    return { ok: false, path: '', why: 'That is a network path, not a file on this PC.' }
+  }
+
+  const absolute = env.resolve(env.cwd || env.home, expanded)
+
+  const base = absolute.split(/[\\/]/).pop() ?? ''
+  if (DEVICES.test(base)) {
+    return { ok: false, path: '', why: `${base} is a reserved Windows device name.` }
+  }
+  if (!base || base === '.' || base === '..') {
+    return { ok: false, path: '', why: 'That path has no file name on the end.' }
+  }
+
+  /**
+   * Inside the home directory, and nowhere else.
+   *
+   * Checked after resolving, so `~/Downloads/../../Windows/System32/x.dll` is
+   * caught by where it lands rather than by how it is written.
+   */
+  const home = env.resolve(env.home)
+  if (absolute.toLowerCase() === home.toLowerCase()) {
+    // `~/Downloads/..` resolves to the home folder itself, which is a directory
+    // and not somewhere a file can be written.
+    return { ok: false, path: absolute, why: 'That path has no file name on the end.' }
+  }
+  const inside = absolute.toLowerCase().startsWith(home.toLowerCase() + env.separator)
+  if (!inside) {
+    return {
+      ok: false,
+      path: absolute,
+      why: `Outside your home folder. Wumpy writes files under ${home} only.`
+    }
+  }
+
+  for (const pattern of FORBIDDEN) {
+    if (pattern.test(absolute)) {
+      return {
+        ok: false,
+        path: absolute,
+        why: 'That folder makes files run by themselves or holds credentials.'
+      }
+    }
+  }
+
+  return { ok: true, path: absolute, why: null }
+}
+
+/* ------------------------------------------------------------------- prompting */
+
+/**
+ * What the model is told.
+ *
+ * Telling it to be terse was tried and is not here. Measured over four requests:
+ * 628 tokens as it is against 599 with a "say one sentence, then stop, never
+ * repeat the contents" rule - inside the noise - and the prose *after* the block
+ * actually grew, from 59 to 93 characters. The answers were already short. What
+ * was costing minutes was the failure loop, not the prose.
+ *
+ * The `python "<path>"` line is in here because of the other half of the same
+ * failure: having created a script, the model proposed running it as
+ * `$HOME\Downloads\folder_analysis.py` on its own, which PowerShell reads as an
+ * expression and rejects with "Unexpected token".
+ */
+export const WRITE_PROMPT = [
+  'To create or replace a FILE, never use a shell command — use a wumpy-write block.',
+  'A # line saying why, a path: line, then --- and the exact contents.',
+  '',
+  '```wumpy-write',
+  '# Create the folder analysis script',
+  'path: ~/Downloads/folder_analysis.py',
+  '---',
+  'import os',
+  '',
+  'print(sum(os.path.getsize(f) for f in os.listdir(".") if os.path.isfile(f)))',
+  '```',
+  '',
+  'The contents are written exactly as given, so write plain code: no escaping, no',
+  'quoting, no here-string. Never put file contents inside New-Item, Set-Content or',
+  'echo — braces and quotes in a shell will mangle them.',
+  'To run a Python file afterwards, the command is: python "<full path>"'
+].join(String.fromCharCode(10))

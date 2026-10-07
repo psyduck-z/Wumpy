@@ -379,7 +379,9 @@ export const IPC = {
   voiceTranscribe: 'voice:transcribe',
   linkOpen: 'link:open',
   linkCheck: 'link:check',
-  linkSearch: 'link:search'
+  linkSearch: 'link:search',
+  writeFile: 'write:file',
+  writeCheck: 'write:check'
 } as const
 
 /* --------------------------------------------------------------------- voice */
@@ -431,4 +433,25 @@ export interface LinkResult {
   /** The host as a browser resolves it, punycoded. */
   host: string
   error?: string
+}
+
+/* --------------------------------------------------------------- file writes */
+
+/** What came of writing a file the user approved. */
+export interface WriteResult {
+  written: boolean
+  /** The absolute path, resolved. */
+  path: string
+  bytes: number
+  /** True when something was already there. */
+  overwrote: boolean
+  error?: string
+}
+
+/** What the card needs to describe a destination before anything is written. */
+export interface WriteTarget {
+  ok: boolean
+  path: string
+  why: string | null
+  exists: boolean
 }

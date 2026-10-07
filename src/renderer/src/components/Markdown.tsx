@@ -1,5 +1,13 @@
 import { memo, useState, isValidElement, type ReactNode } from 'react'
-import type { LinkResult, SearchResult, ShellKind, ShellResult, TierId } from '@shared/types'
+import type {
+  LinkResult,
+  SearchResult,
+  ShellKind,
+  ShellResult,
+  TierId,
+  WriteResult,
+  WriteTarget
+} from '@shared/types'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import rehypeHighlight from 'rehype-highlight'
@@ -7,6 +15,7 @@ import { CommandCard } from './CommandCard'
 import { AskCard } from './AskCard'
 import { SearchCard } from './SearchCard'
 import { LinkCard } from './LinkCard'
+import { WriteCard } from './WriteCard'
 import type { LinkApproval } from '@shared/links'
 
 function CodeBlock({ children }: { children: ReactNode }): React.JSX.Element {
@@ -78,6 +87,11 @@ function readTagged(children: ReactNode, tag: string): string | null {
         ? props.children.filter((c) => typeof c === 'string').join('')
         : ''
   return raw.trim() || null
+}
+
+/** Pulls the body out of a `wumpy-write` block. */
+function readWrite(children: ReactNode): string | null {
+  return readTagged(children, 'language-wumpy-write')
 }
 
 /** Pulls the body out of a `wumpy-open` block. */
@@ -185,6 +199,12 @@ export interface MarkdownProps {
     error?: string
   ) => void
   onCommandResult?: (result: ShellResult, unattended: boolean) => void
+  /** Supplied for assistant turns that may create files. */
+  onWriteFile?: (path: string, content: string) => Promise<WriteResult>
+  onCheckWrite?: (path: string) => Promise<WriteTarget>
+  onWritten?: (result: WriteResult, messageId: string) => void
+  /** True when accept-all is on, so a file may be written without a click. */
+  autoWrite?: boolean
   /** Supplied for assistant turns that may open a page in the browser. */
   onOpenLink?: (url: string) => Promise<LinkResult>
   onOpenSearch?: (query: string) => Promise<LinkResult>
@@ -223,6 +243,10 @@ export const Markdown = memo(function Markdown({
   messageId,
   onSearch,
   onSearchResults,
+  onWriteFile,
+  onCheckWrite,
+  onWritten,
+  autoWrite = false,
   onOpenLink,
   onOpenSearch,
   onOpened,
@@ -240,6 +264,21 @@ export const Markdown = memo(function Markdown({
       rehypePlugins={[[rehypeHighlight, { detect: false, ignoreMissing: true }]]}
       components={{
         pre: ({ children }) => {
+          const file = onWriteFile ? readWrite(children) : null
+          if (file) {
+            return (
+              <WriteCard
+                request={file}
+                complete={settled(file)}
+                autoWrite={autoWrite}
+                onCheck={onCheckWrite!}
+                onWrite={onWriteFile!}
+                onWritten={onWritten ?? (() => {})}
+                messageId={messageId ?? ''}
+              />
+            )
+          }
+
           const link = onOpenLink ? readOpen(children) : null
           if (link) {
             return (

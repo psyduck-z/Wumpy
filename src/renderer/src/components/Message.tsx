@@ -1,5 +1,14 @@
 import { memo, useEffect, useState } from 'react'
-import type { ChatMessage, LinkResult, SearchResult, ShellKind, ShellResult, TierId } from '@shared/types'
+import type {
+  ChatMessage,
+  LinkResult,
+  SearchResult,
+  ShellKind,
+  ShellResult,
+  TierId,
+  WriteResult,
+  WriteTarget
+} from '@shared/types'
 import type { LinkApproval } from '@shared/links'
 import { Markdown } from './Markdown'
 import { AskCard } from './AskCard'
@@ -28,6 +37,10 @@ export const Message = memo(function Message({
   onOpenLink,
   onOpenSearch,
   onOpened,
+  onWriteFile,
+  onCheckWrite,
+  onWritten,
+  autoWrite,
   linkMode,
   searchEngine
 }: {
@@ -53,6 +66,10 @@ export const Message = memo(function Message({
   /** Called when the user picks an option from a question the model asked. */
   onAnswer?: (messageId: string, option: string) => void
   /** Supplied when the tier may search the web. */
+  onWriteFile?: (path: string, content: string) => Promise<WriteResult>
+  onCheckWrite?: (path: string) => Promise<WriteTarget>
+  onWritten?: (result: WriteResult, messageId: string) => void
+  autoWrite?: boolean
   onOpenLink?: (url: string) => Promise<LinkResult>
   onOpenSearch?: (query: string) => Promise<LinkResult>
   onOpened?: (result: LinkResult, messageId: string) => void
@@ -179,6 +196,10 @@ export const Message = memo(function Message({
             answered={message.answered ?? null}
             onSearch={onSearch}
             onSearchResults={onSearchResults}
+            onWriteFile={onWriteFile}
+            onCheckWrite={onCheckWrite}
+            onWritten={onWritten}
+            autoWrite={autoWrite}
             onOpenLink={onOpenLink}
             onOpenSearch={onOpenSearch}
             onOpened={onOpened}

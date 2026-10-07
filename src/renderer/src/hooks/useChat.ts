@@ -92,6 +92,28 @@ export function useChat(): ChatState {
     setMessages((prev) => prev.map((m) => (m.id === target ? patch(m) : m)))
   }, [])
 
+  /**
+   * Removes a reply that never said anything.
+   *
+   * An assistant message with nothing in it renders the thinking dots, and those
+   * are a promise that something is coming. Cutting a turn off before the first
+   * token left one in the transcript for good: a row of dots between two
+   * questions, still pulsing, with nothing behind it. A model that finished
+   * without producing a word left the same thing.
+   *
+   * Anything that did say something stays, however little: a short answer, a
+   * scratchpad, an error. Deleting those would throw away what was written.
+   */
+  const dropIfEmpty = useCallback((id: string | null) => {
+    if (!id) return
+    setMessages((prev) =>
+      prev.filter(
+        (m) =>
+          m.id !== id || m.content.trim() !== '' || Boolean(m.thinking?.trim()) || Boolean(m.error)
+      )
+    )
+  }, [])
+
   useEffect(() => {
     const offDelta = window.wumpy.chat.onDelta((d) => {
       if (d.requestId !== activeRequest.current) return
@@ -122,6 +144,7 @@ export function useChat(): ChatState {
       }))
       startedAt.current = null
       activeRequest.current = null
+      dropIfEmpty(activeMessage.current)
       activeMessage.current = null
       setStreamingId(null)
       setStreaming(false)
@@ -288,6 +311,8 @@ export function useChat(): ChatState {
     if (!activeRequest.current) return
     window.wumpy.chat.abort(activeRequest.current)
     activeRequest.current = null
+
+    dropIfEmpty(activeMessage.current)
     activeMessage.current = null
     startedAt.current = null
     setStats((s) => ({ ...s, liveTokens: 0, elapsedMs: null }))

@@ -17,6 +17,8 @@ import type {
   Dictation,
   LinkResult,
   SearchResult,
+  WriteResult,
+  WriteTarget,
   ShellKind,
   ShellResult,
   TierId,
@@ -116,6 +118,13 @@ const api = {
   hotkey: {
     get: (): Promise<HotkeyState> => ipcRenderer.invoke(IPC.hotkeyState),
     onChange: (cb: (s: HotkeyState) => void) => on(IPC.hotkeyState, cb)
+  },
+  files: {
+    /** Writes a file the user approved. The main process vets the path again. */
+    write: (path: string, content: string): Promise<WriteResult> =>
+      ipcRenderer.invoke(IPC.writeFile, { path, content }),
+    /** Resolves a destination so the card can show where the file would land. */
+    check: (path: string): Promise<WriteTarget> => ipcRenderer.invoke(IPC.writeCheck, path)
   },
   links: {
     /** Opens a page. The main process checks it again before anything happens. */

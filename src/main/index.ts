@@ -42,6 +42,7 @@ import { webSearch } from './search'
 import { cleanTitle } from './titles'
 import { Speech } from './speech'
 import { openLink, openSearch } from './browser'
+import { inspectWriteTarget, writeProposedFile } from './writefile'
 import { checkLink, isSearchEngine } from '@shared/links'
 import { POLISH_PROMPT, polishAcceptable, tidyTranscript } from '@shared/dictation'
 
@@ -391,6 +392,29 @@ function registerIpc(): void {
 
       return raw ? cleanTitle(raw, question) : null
     }
+  )
+
+  /* -------------------------------------------------------------- file writes */
+
+  /**
+   * Creates a file the user approved.
+   *
+   * Deliberately not a shell command. A multi-line file inside a PowerShell
+   * command needs a here-string and exact escaping, and a small model does not
+   * produce one - it reached for `New-Item -Content { ... }`, whose braces
+   * PowerShell reads as a script block, so the Python inside was parsed as
+   * PowerShell and came back as eight parser errors. Here the content never
+   * meets a parser.
+   */
+  ipcMain.handle(IPC.writeFile, (_e, req: { path: string; content: string }) => {
+    if (!settings.get('shellEnabled')) {
+      return { written: false, path: '', bytes: 0, overwrote: false, error: 'Commands are turned off.' }
+    }
+    return writeProposedFile(req.path, req.content, settings.get('shellCwd') || homedir())
+  })
+
+  ipcMain.handle(IPC.writeCheck, (_e, path: string) =>
+    inspectWriteTarget(path, settings.get('shellCwd') || homedir())
   )
 
   /* ------------------------------------------------------------------ browser */

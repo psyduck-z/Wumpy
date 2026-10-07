@@ -12,6 +12,7 @@ import type {
   ShellResult,
   OllamaModel,
   LinkResult,
+  WriteResult,
   SearchResult,
   TierStatus,
   WumpySettings
@@ -343,6 +344,29 @@ export default function App(): React.JSX.Element {
     },
     [tier]
   )
+
+  /* ------------------------------------------------------------- file writes */
+
+  const writeFile = useCallback(
+    (path: string, content: string) => window.wumpy.files.write(path, content),
+    []
+  )
+  const checkWrite = useCallback((path: string) => window.wumpy.files.check(path), [])
+
+  /**
+   * Notes what was written, without telling the model the contents back.
+   *
+   * It just wrote them. Feeding a file's text back as a result invited it to
+   * review its own output and "correct" it, which is the loop these cards exist
+   * to break.
+   */
+  const onWritten = useCallback((result: WriteResult) => {
+    chatRef.current.note(
+      result.written
+        ? `${result.overwrote ? 'Replaced' : 'Created'} \`${result.path}\` (${result.bytes} bytes).`
+        : `Could not write that file: ${result.error ?? 'unknown error'}`
+    )
+  }, [])
 
   /* ----------------------------------------------------------------- browser */
 
@@ -774,6 +798,18 @@ export default function App(): React.JSX.Element {
           else chat.aside(body)
           return
         }
+        /**
+         * A command is an instruction to Wumpy, not a message for the model, so
+         * it happens now rather than waiting in line. Queuing them meant `/stop`
+         * sat behind the answer it was meant to stop, which is the one moment
+         * someone is most likely to type it.
+         */
+        const command = parseCommand(text)
+        if (command) {
+          void runCommand(command, text)
+          return
+        }
+
         setQueued(text)
         return
       }
@@ -1348,6 +1384,10 @@ export default function App(): React.JSX.Element {
                 onAnswer={onAnswerQuestion}
                 onSearch={canSearch ? runSearch : undefined}
                 onSearchResults={onSearchResults}
+                onWriteFile={canRunCommands ? writeFile : undefined}
+                onCheckWrite={checkWrite}
+                onWritten={onWritten}
+                autoWrite={(settings?.approvalMode ?? 'manual') === 'all'}
                 onOpenLink={canOpenLinks ? openLink : undefined}
                 onOpenSearch={openSearch}
                 onOpened={onOpened}
