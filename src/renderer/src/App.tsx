@@ -19,6 +19,7 @@ import { isTall } from '@shared/types'
 import { TIERS, TIER_ORDER, defaultTierFor } from '@shared/tiers'
 import { useChat, nextId, type ChatStats } from './hooks/useChat'
 import { allCommands, parseCommand, helpText, SHORTCUT_FOR, type CommandAction } from './commands'
+import { newestPending } from './pending'
 import { matchIntent } from './intents'
 import { AUTO_RUN_LIMIT, autoRunEligible } from './autorun'
 import { Header } from './components/Header'
@@ -52,6 +53,14 @@ export default function App(): React.JSX.Element {
   const pinned = !(settings?.hideOnBlur ?? false)
   const [visible, setVisible] = useState(false)
   const [focusToken, setFocusToken] = useState(0)
+  /**
+   * A message typed while a turn was running.
+   *
+   * It used to be dropped: Enter did nothing, the text stayed in the box, and
+   * nothing said why. One is held at a time - a second replaces it, because
+   * what you meant to say next is the last thing you typed.
+   */
+  const [queued, setQueued] = useState<string | null>(null)
   /** Text the command menu has dropped into the composer, with a bump token. */
   const [prefill, setPrefillState] = useState({ text: '', token: 0 })
   const setPrefill = useCallback((text: string) => {
@@ -639,6 +648,22 @@ ${clipped || '(no output)'}`)
       autoRunsRef.current = 0
       ranCommandsRef.current = []
 
+      // Something said while the model is still writing. /also is for when the
+      // answer is going the right way and you have one more fact to add: the
+      // turn carries on, and the note is in front of the model from the next
+      // one. Anything else waits its turn rather than being thrown away.
+      if (streaming) {
+        const aside = /^\/also\b\s*([\s\S]*)$/i.exec(text.trim())
+        if (aside) {
+          const body = aside[1].trim()
+          if (!body) chat.note('Usage: `/also <something to add>` while an answer is running.')
+          else chat.aside(body)
+          return
+        }
+        setQueued(text)
+        return
+      }
+
       const action = parseCommand(text)
       if (action) {
         void runCommand(action, text)
@@ -668,8 +693,24 @@ ${clipped || '(no output)'}`)
 
       chat.send(text, tier)
     },
-    [chat, compactHistory, runCommand, settings, tier, usage.used]
+    [chat, compactHistory, runCommand, settings, streaming, tier, usage.used]
   )
+
+  /**
+   * Sends what was typed during the last answer, once that answer has landed.
+   *
+   * A frame later, so the turn that just finished has settled its state before
+   * the next one starts from it.
+   */
+  const onSendRef = useRef(onSend)
+  onSendRef.current = onSend
+  useEffect(() => {
+    if (streaming || !queued) return
+    const text = queued
+    setQueued(null)
+    const timer = setTimeout(() => onSendRef.current(text), 60)
+    return () => clearTimeout(timer)
+  }, [streaming, queued])
 
   /**
    * Names the chat from its opening exchange, once, in the background.
@@ -770,6 +811,34 @@ ${clipped || '(no output)'}`)
     setAtBottom(near)
   }
 
+  /**
+   * Scrolls to the message before or after the one at the top of the view.
+   *
+   * Reading back through a long answer by paging is fine for prose, but the
+   * thing you are usually looking for is a turn boundary.
+   */
+  const stepMessage = useCallback((delta: -1 | 1) => {
+    const el = scroller.current
+    if (!el) return
+    const tops = Array.from(el.querySelectorAll<HTMLElement>('.msg')).map(
+      (m) => m.offsetTop - el.offsetTop
+    )
+    if (tops.length === 0) return
+    const here = el.scrollTop
+    const next =
+      delta === -1
+        ? [...tops].reverse().find((t) => t < here - 4)
+        : tops.find((t) => t > here + 4)
+    if (next === undefined) {
+      el.scrollTop = delta === -1 ? 0 : el.scrollHeight
+    } else {
+      el.scrollTop = Math.max(0, next - 8)
+    }
+    const near = el.scrollHeight - el.scrollTop - el.clientHeight < 48
+    stickToBottom.current = near
+    setAtBottom(near)
+  }, [])
+
   /** Back to the newest message, and start following it again. */
   const jumpToBottom = useCallback(() => {
     const el = scroller.current
@@ -843,12 +912,48 @@ ${clipped || '(no output)'}`)
           setPicker((p) => (p === 'command' ? null : 'command'))
           return
         }
+        // Ctrl+C stops, the way it does in a terminal - but only when there is
+        // nothing selected, because with a selection it is still copy, and
+        // taking that away to add a shortcut would be a poor trade.
+        if (e.key.toLowerCase() === 'c') {
+          if ((window.getSelection()?.toString() ?? '') !== '') return
+          if (!streaming) return
+          e.preventDefault()
+          chat.stop()
+          return
+        }
+        // Ctrl+Enter approves the command being asked about, so a proposal can
+        // be dealt with without leaving the keyboard.
+        if (e.key === 'Enter') {
+          const pending = newestPending()
+          if (!pending) return
+          e.preventDefault()
+          pending.run()
+          return
+        }
         // Ctrl+Home / Ctrl+End jump to the ends of the transcript.
         if (e.key === 'Home' || e.key === 'End') {
           e.preventDefault()
           scrollBy(e.key === 'Home' ? 'top' : 'bottom')
           return
         }
+      }
+
+      // Ctrl+Shift+Enter skips it instead.
+      if (e.ctrlKey && e.shiftKey && !e.altKey && e.key === 'Enter') {
+        const pending = newestPending()
+        if (!pending) return
+        e.preventDefault()
+        pending.skip()
+        return
+      }
+
+      // Alt+Up / Alt+Down step through the conversation a message at a time,
+      // which is how you read back through a long answer without a mouse.
+      if (e.altKey && !e.ctrlKey && (e.key === 'ArrowUp' || e.key === 'ArrowDown')) {
+        e.preventDefault()
+        stepMessage(e.key === 'ArrowUp' ? -1 : 1)
+        return
       }
 
       // Shift+Tab cycles approval mode, as it does in Claude Code.
@@ -868,7 +973,7 @@ ${clipped || '(no output)'}`)
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [chat, close, newChat, retitle, runCommand, scrollBy, setTier, picker, streaming, toggleMode])
+  }, [chat, close, newChat, retitle, runCommand, scrollBy, stepMessage, setTier, picker, streaming, toggleMode])
 
   const warnedRef = useRef(false)
   useEffect(() => {
@@ -1156,6 +1261,11 @@ ${clipped || '(no output)'}`)
         streaming={streaming}
         focusToken={focusToken}
         prefill={prefill}
+        queued={queued}
+        onUnqueue={() => {
+          setPrefill(queued ?? '')
+          setQueued(null)
+        }}
         placeholder={
           mode === 'quick' ? 'Ask Wumpy…' : `Ask ${activeTier.label}… (slower, deeper)`
         }

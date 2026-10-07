@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
+import { registerPending } from '../pending'
 import type { ShellKind, ShellResult, TierId } from '@shared/types'
 
 const SHELL_LABEL: Record<ShellKind, string> = {
@@ -95,6 +96,15 @@ export function CommandCard({
   // Null until the main process has judged it; the Run button waits for this.
   const [allowed, setAllowed] = useState<boolean | null>(null)
   const [auto, setAuto] = useState(false)
+  /**
+   * Whether the verdict has arrived.
+   *
+   * Without this the card drew Run and Skip for the moment the check was in
+   * flight and then replaced them with "running automatically" - a pair of
+   * buttons flashing up in an automatic mode, asking a question that had
+   * already been answered.
+   */
+  const [judged, setJudged] = useState(false)
   const [state, setState] = useState<'idle' | 'running' | 'done' | 'cancelled'>('idle')
   const [result, setResult] = useState<ShellResult | null>(null)
   const [showOutput, setShowOutput] = useState(true)
@@ -107,6 +117,7 @@ export function CommandCard({
       setRisk(r.risk)
       setAllowed(r.allowed)
       setAuto(r.auto)
+      setJudged(true)
     })
     return () => {
       live = false
@@ -138,6 +149,19 @@ export function CommandCard({
     void run(true)
   }, [wouldRun, refused, allowed, state])
 
+  const waiting = state === 'idle' && judged && allowed === true && complete && Boolean(command) && !unattended
+
+  // Only while it is actually waiting, so Ctrl+Enter always means the card the
+  // user is looking at.
+  useEffect(() => {
+    if (!waiting) return
+    return registerPending(messageId + command, {
+      command,
+      run: () => void run(false),
+      skip: () => setState('cancelled')
+    })
+  }, [waiting, command, messageId])
+
   const run = async (byItself = false): Promise<void> => {
     setState('running')
     const res = await onRun(command, shell)
@@ -166,17 +190,22 @@ export function CommandCard({
         {state === 'idle' && (!complete || !command) && (
           <span className="cmd-status">still writing…</span>
         )}
-        {state === 'idle' && allowed === true && !unattended && complete && command && (
+        {waiting && (
           <>
             <button type="button" className="cmd-skip" onClick={() => setState('cancelled')}>
               Skip
             </button>
-            <button type="button" className="cmd-run" onClick={() => void run(false)}>
+            <button
+              type="button"
+              className="cmd-run"
+              onClick={() => void run(false)}
+              title="Run (Ctrl+Enter)"
+            >
               Run
             </button>
           </>
         )}
-        {state === 'idle' && allowed === false && complete && command && (
+        {state === 'idle' && judged && allowed === false && complete && command && (
           <span className="cmd-status">needs Developer mode</span>
         )}
         {state === 'running' && <span className="cmd-status">running…</span>}

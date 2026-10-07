@@ -22,6 +22,8 @@ export interface ChatMessage {
    * instance. Sent as a system message, shown in the transcript as a chip.
    */
   notice?: boolean
+  /** A notice the user wrote with /also while a turn was still running. */
+  aside?: boolean
   /**
    * A compaction summary standing in for earlier turns. Sent to the model as a
    * system message so it reads as context rather than as something it said.

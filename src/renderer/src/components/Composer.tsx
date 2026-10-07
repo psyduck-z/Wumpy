@@ -7,6 +7,8 @@ export function Composer({
   onSend,
   onStop,
   streaming,
+  queued = null,
+  onUnqueue,
   focusToken,
   prefill,
   placeholder
@@ -14,6 +16,9 @@ export function Composer({
   onSend(text: string): void
   onStop(): void
   streaming: boolean
+  /** Shown as a chip under the box: typed while busy, sent when the turn ends. */
+  queued?: string | null
+  onUnqueue?(): void
   /** Bumped whenever the panel is shown, so the caret lands in the box. */
   focusToken: number
   /**
@@ -69,7 +74,10 @@ export function Composer({
   }, [value])
 
   const submit = (): void => {
-    if (!value.trim() || streaming) return
+    if (!value.trim()) return
+    // Sending while busy used to do nothing at all: the keystroke vanished and
+    // the box kept the text, with no sign that anything had happened. The app
+    // decides what to do with it - queue it, or take it as an aside.
     history.push(value)
     onSend(value)
     setValue('')
@@ -155,12 +163,24 @@ export function Composer({
     <div className="composer-wrap">
       <CommandPalette items={palette} selected={selected} onPick={accept} />
 
+      {queued && (
+        <button
+          type="button"
+          className="queued"
+          onClick={onUnqueue}
+          title="Waiting for the current answer to finish. Click to take it back."
+        >
+          <span className="queued-label">Queued</span>
+          <span className="queued-text">{queued}</span>
+        </button>
+      )}
+
       <div className="composer">
         <textarea
           ref={ref}
           value={value}
           rows={1}
-          placeholder={streaming ? 'Wumpy is answering…' : placeholder}
+          placeholder={streaming ? 'Still answering — Enter queues, /also adds a note' : placeholder}
           onChange={(e) => {
             setValue(e.target.value)
             // Editing a recalled line makes it the draft again, so Down stops
@@ -170,7 +190,7 @@ export function Composer({
           onKeyDown={onKeyDown}
         />
         {streaming ? (
-          <button className="btn-stop" type="button" onClick={onStop} title="Stop (Esc)">
+          <button className="btn-stop" type="button" onClick={onStop} title="Stop (Ctrl+C or Esc)">
             Stop
           </button>
         ) : (

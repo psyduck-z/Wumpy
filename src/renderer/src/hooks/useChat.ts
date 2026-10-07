@@ -43,6 +43,14 @@ export interface ChatState {
   note(content: string, error?: boolean): void
   /** Adds a line the model will see as context, shown as a chip. */
   notice(content: string): void
+  /**
+   * Something the user says while a turn is still running.
+   *
+   * It cannot change the answer being written - that is already in flight -
+   * but it is in front of the model from the next turn on, which is what makes
+   * it worth saying now rather than waiting for the model to finish.
+   */
+  aside(content: string): void
   /** Records which option was chosen for a message's question. */
   recordAnswer(messageId: string, option: string): void
   /** Asks the user something without involving a model. */
@@ -262,6 +270,20 @@ export function useChat(): ChatState {
     ])
   }, [])
 
+  const aside = useCallback((content: string) => {
+    setMessages((prev) => [
+      ...prev,
+      {
+        id: nextId(),
+        role: 'system',
+        content: `The user added, while you were still answering: ${content}`,
+        createdAt: Date.now(),
+        notice: true,
+        aside: true
+      }
+    ])
+  }, [])
+
   const stop = useCallback(() => {
     if (!activeRequest.current) return
     window.wumpy.chat.abort(activeRequest.current)
@@ -298,5 +320,5 @@ export function useChat(): ChatState {
     [stop]
   )
 
-  return { messages, streaming, streamingId, stats, send, setContext, history, note, notice, askLocal, recordAnswer, stop, clear, replace }
+  return { messages, streaming, streamingId, stats, send, setContext, history, note, notice, aside, askLocal, recordAnswer, stop, clear, replace }
 }

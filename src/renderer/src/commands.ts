@@ -245,6 +245,17 @@ export const COMMANDS: CommandSpec[] = [
     hint: 'Summarise older turns to free up context',
     run: () => ({ kind: 'compact' })
   },
+  {
+    name: 'also',
+    hint: 'Add something while an answer is still running',
+    arg: 'text',
+    // Only meaningful mid-answer, and the app intercepts it there. Reaching
+    // here means nothing was running, so it is just a message.
+    run: (arg) =>
+      arg.trim()
+        ? { kind: 'prompt', text: arg.trim(), label: 'also' }
+        : { kind: 'info', message: '`/also <text>` adds a note while an answer is still running.' }
+  },
   { name: 'stop', hint: 'Stop generating', run: () => ({ kind: 'stop' }) },
   { name: 'help', aliases: ['?'], hint: 'List every command', run: () => ({ kind: 'help' }) },
   { name: 'quit', aliases: ['exit'], hint: 'Quit Wumpy', run: () => ({ kind: 'quit' }) },
@@ -269,6 +280,7 @@ export const COMMANDS: CommandSpec[] = [
  * needed a second time.
  */
 export const SHORTCUT_FOR: Record<string, string | undefined> = {
+  also: 'while busy',
   new: 'Ctrl+N',
   resume: 'Ctrl+R',
   mode: 'Ctrl+D',
@@ -352,9 +364,17 @@ export function helpText(): string {
     '| Ctrl+D | Quick or Developer mode |',
     '| Ctrl+N | New chat |',
     '| Ctrl+R | Reopen a saved chat |',
+    '| Ctrl+Enter | Run the command being asked about |',
+    '| Ctrl+Shift+Enter | Skip it |',
+    '| Ctrl+C | Stop the answer (copies instead if text is selected) |',
+    '| Alt+Up / Alt+Down | Step through the conversation a message at a time |',
     '| Shift+Tab | Cycle approval mode |',
     '| PageUp / PageDown | Move through the transcript |',
     '| Ctrl+Home / Ctrl+End | Jump to the start, or to the latest |',
-    '| Esc | Stop, go back, or hide |'
+    '| Esc | Stop, go back, or hide |',
+    '',
+    'Typing while an answer is running queues the message until it finishes.',
+    'Start it with `/also` instead and it is added as a note straight away,',
+    'without interrupting: the answer carries on and the model sees it next turn.'
   ].join('\n')
 }

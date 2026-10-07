@@ -96,7 +96,7 @@ export const Message = memo(function Message({
   if (message.notice) {
     return (
       <div className="msg msg-notice">
-        <span className="notice-chip">{message.content}</span>
+        <span className={`notice-chip ${message.aside ? 'is-aside' : ''}`}>{message.content}</span>
       </div>
     )
   }

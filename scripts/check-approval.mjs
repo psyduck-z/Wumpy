@@ -106,7 +106,16 @@ const MUST_BLOCK = [
   'Remove-Item -Recurse C:/temp',
   'Get-ChildItem; Remove-Item x',
   'echo hi > f.txt',
-  'Get-Content a | Invoke-Expression'
+  'Get-Content a | Invoke-Expression',
+  // A read subcommand handed a flag that writes. Five of the eight flags in
+  // that guard were matching a literal backspace rather than a word boundary,
+  // because a shell heredoc ate the escape, so they could never fire. Nothing
+  // here covered them, which is why it went unnoticed.
+  'git log --force',
+  'git show --delete',
+  'ollama list -f something',
+  'npm list --set x',
+  'pip list -w /tmp'
 ]
 
 /** Reads that must keep working, or the auto mode is useless. */

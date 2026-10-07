@@ -132,7 +132,7 @@ export function isReadOnly(command: string): boolean {
       const first = args.find((a) => !a.startsWith('-')) ?? args[0]
       if (!reads.includes(first)) return false
       // A read subcommand must not then be handed a flag that writes.
-      if (/(^|\s)(--global|--system|-w|--write|--set|--delete|--force|-f)/i.test(segment)) {
+      if (/(^|\s)(--global|--system|-w\b|--write|--set\b|--delete\b|--force\b|-f\b)/i.test(segment)) {
         return false
       }
     }

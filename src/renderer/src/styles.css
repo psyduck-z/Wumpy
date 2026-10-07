@@ -1396,3 +1396,54 @@ body {
   transform: rotate(90deg);
   opacity: 0.7;
 }
+
+/* -------------------------------------------------- queued while answering */
+
+/*
+ * A message typed before the last answer finished. Shown rather than silently
+ * held, because a message you think you sent and a message you know is waiting
+ * are very different things.
+ */
+.queued {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  width: 100%;
+  margin: 0 0 6px;
+  padding: 5px 10px;
+  border: 1px dashed rgb(var(--line));
+  border-radius: 8px;
+  background: transparent;
+  color: rgb(var(--muted));
+  font: inherit;
+  font-size: 12px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.queued:hover {
+  border-color: rgb(var(--accent) / 0.6);
+  color: rgb(var(--text));
+}
+
+.queued-label {
+  flex: none;
+  font-size: 10px;
+  letter-spacing: 0.4px;
+  text-transform: uppercase;
+  opacity: 0.75;
+}
+
+.queued-text {
+  flex: 1;
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* An aside the user added mid-answer, distinct from an app notice. */
+.msg-notice .notice-chip.is-aside {
+  border-style: dashed;
+  font-style: italic;
+}

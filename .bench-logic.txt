@@ -1,0 +1,8 @@
+Benchmarking 2 model(s) on 18 checks each.
+
+phi4-mini:3.8b
+x.x.........x.....  30/36  8.3 tok/s  first word 1363ms
+  missed: logic: A bat and a ball cost $1.10 together. The ba (0/2) | logic: I have 3 apples. I eat one, then buy a bag c (0/2) | wumpy: start a new chat (0/2)
+
+qwen2.5:7b
+..xx..
