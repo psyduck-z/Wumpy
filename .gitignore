@@ -452,3 +452,4 @@ FodyWeavers.xsd
 /.block-check.*
 /.title-check.*
 /.approval-check.*
+.bench-out.txt
