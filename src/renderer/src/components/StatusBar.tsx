@@ -1,4 +1,4 @@
-import type { ContextUsage } from '@shared/types'
+import type { ApprovalMode, ContextUsage } from '@shared/types'
 import type { ChatStats } from '../hooks/useChat'
 
 /**
@@ -61,6 +61,18 @@ function ContextMeter({
   )
 }
 
+const APPROVAL: Record<ApprovalMode, { label: string; title: string }> = {
+  manual: { label: 'manual', title: 'Every command waits for you. Click to change.' },
+  auto: {
+    label: 'auto',
+    title: 'Read-only commands run themselves; anything that changes something asks. Click to change.'
+  },
+  all: {
+    label: 'accept all',
+    title: 'Commands run without asking; destructive ones still raise a dialog. Click to change.'
+  }
+}
+
 export function StatusBar({
   tierLabel,
   model,
@@ -68,6 +80,8 @@ export function StatusBar({
   stats,
   usage,
   compact,
+  approvalMode,
+  onCycleApproval,
   onCompact
 }: {
   tierLabel: string
@@ -77,6 +91,8 @@ export function StatusBar({
   usage: ContextUsage
   /** The panel is in its small corner shape, so drop the optional parts. */
   compact: boolean
+  approvalMode: ApprovalMode
+  onCycleApproval(): void
   onCompact(): void
 }): React.JSX.Element {
   const elapsed = stats.elapsedMs !== null ? duration(stats.elapsedMs) : null
@@ -99,6 +115,17 @@ export function StatusBar({
       )}
 
       <span className="spacer" />
+
+      {/* Never leave the user guessing what will run without them. */}
+      <button
+        type="button"
+        className={`approval is-${approvalMode}`}
+        onClick={onCycleApproval}
+        title={APPROVAL[approvalMode].title}
+      >
+        {APPROVAL[approvalMode].label}
+      </button>
+
 
       {streaming ? (
         <span className="status-live">

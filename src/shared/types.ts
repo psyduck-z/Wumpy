@@ -61,6 +61,30 @@ export interface TierOptions {
 
 export type ShellKind = 'powershell' | 'cmd' | 'bash'
 
+/**
+ * How much the model may do without being asked.
+ *
+ * - `manual`: every command waits for a click. The default.
+ * - `auto`: commands that only read run themselves; anything that writes asks.
+ * - `all`: everything runs. Commands matching a destructive pattern still raise
+ *   a native dialog unless `confirmRisky` is turned off, because the model
+ *   wrote them and a wrong path is not recoverable.
+ */
+export type ApprovalMode = 'manual' | 'auto' | 'all'
+
+/** What the main process decided about one proposed command. */
+export interface CommandVerdict {
+  /** Why it looks destructive, or null. */
+  risk: string | null
+  /** Whether this tier may run it at all. */
+  allowed: boolean
+  scope: 'none' | 'read' | 'full'
+  /** True when it should run without waiting for a click. */
+  auto: boolean
+  /** True when it only reads. */
+  readOnly: boolean
+}
+
 export interface ShellResult {
   command: string
   shell: ShellKind
@@ -198,6 +222,10 @@ export interface WumpySettings {
   launchAtLogin: boolean
   /** Allow tiers that support it to propose shell commands. */
   shellEnabled: boolean
+  /** How much runs without being asked. */
+  approvalMode: ApprovalMode
+  /** Keep the native dialog for destructive commands even in `all`. */
+  confirmRisky: boolean
   /** Allow tiers that support it to propose web searches. */
   searchEnabled: boolean
   /**

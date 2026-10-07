@@ -55,21 +55,45 @@ const READ_ONLY = new Set([
   'rustc', 'cargo', 'ollama', 'git', 'code', 'pwsh', 'powershell'
 ])
 
-/** Subcommands that make an otherwise read-only tool a write. */
-const WRITE_SUBCOMMANDS: Record<string, string[]> = {
-  git: ['push', 'commit', 'reset', 'clean', 'rebase', 'merge', 'checkout', 'rm', 'mv', 'apply'],
-  npm: ['install', 'i', 'uninstall', 'publish', 'update', 'link', 'run', 'exec'],
-  pip: ['install', 'uninstall'],
-  ollama: ['rm', 'create', 'push', 'cp'],
-  dotnet: ['publish', 'build', 'add', 'remove', 'new'],
-  cargo: ['install', 'publish'],
-  go: ['install', 'get'],
+/**
+ * Tools whose safety depends entirely on their arguments.
+ *
+ * These are listed as the reads they are allowed to do, not the writes they are
+ * forbidden — the same reasoning as the top-level allowlist, applied a level
+ * deeper. Blocklisting write subcommands was tried first and leaked badly:
+ * `node -e "<anything>"` is arbitrary code, `python -m http.server` starts a
+ * server, `find . -delete` deletes, and `git config --global` rewrites settings,
+ * all of which passed a "head is on the list, subcommand is not a known write"
+ * test.
+ */
+const READ_SUBCOMMANDS: Record<string, string[]> = {
+  git: ['status', 'log', 'diff', 'show', 'rev-parse', 'describe', 'blame', 'ls-files', 'shortlog'],
+  npm: ['list', 'ls', 'view', 'outdated', 'ping', 'root', 'prefix', 'why'],
+  pip: ['list', 'show', 'freeze'],
+  ollama: ['list', 'ps', 'show'],
+  go: ['version', 'env', 'list'],
+  cargo: ['tree', 'metadata'],
+  dotnet: ['--list-sdks', '--list-runtimes', '--info'],
+  // Interpreters and editors get nothing but their version and help flags:
+  // every one of them can run arbitrary code given an argument.
   node: [],
+  npx: [],
   python: [],
-  python3: []
+  python3: [],
+  java: [],
+  rustc: [],
+  pwsh: [],
+  powershell: [],
+  code: []
 }
 
-/** Anything here means the command writes somewhere, whatever its head says. */
+/** Always safe on any of the tools above. */
+const VERSION_FLAGS = new Set(['--version', '-v', '-V', 'version', '--help', '-h', '-?', '/?'])
+
+/** Flags that make an otherwise harmless search tool act. */
+const DANGEROUS_FIND_FLAGS = /(^|\s)-(exec|execdir|delete|ok|okdir|fls|fprint|fprintf)(\s|$)/i
+
+/** Anything here means the command writes somewhere, whatever its head says. *//** Anything here means the command writes somewhere, whatever its head says. */
 const WRITE_MARKERS =
   /(^|\s)(>|>>|\||&&|;)\s*(set-|new-|remove-|clear-|stop-|start-|restart-|rename-|move-|copy-|out-file|tee-object)|(^|\s)(set-|new-|remove-|clear-|rename-|move-|copy-|stop-|start-|restart-)[a-z]+|(^|\s)(rm|del|rmdir|rd|mkdir|md|move|copy|xcopy|robocopy|format|diskpart|reg|sc|net|shutdown|taskkill|icacls|takeown|attrib)(\s|$)|>\s*\S/i
 
@@ -94,10 +118,23 @@ export function isReadOnly(command: string): boolean {
     const head = tokens[0].toLowerCase().replace(/\.exe$/, '')
     if (!READ_ONLY.has(head)) return false
 
-    const subs = WRITE_SUBCOMMANDS[head]
-    if (subs) {
-      const sub = (tokens[1] ?? '').toLowerCase()
-      if (subs.includes(sub)) return false
+    // `find` searches harmlessly until told to act on what it finds.
+    if (head === 'find' && DANGEROUS_FIND_FLAGS.test(segment)) return false
+
+    const reads = READ_SUBCOMMANDS[head]
+    if (reads) {
+      const args = tokens.slice(1).map((t) => t.toLowerCase())
+      // Nothing but version or help flags is always fine.
+      const onlyFlags = args.length === 0 || args.every((a) => VERSION_FLAGS.has(a))
+      if (onlyFlags) continue
+
+      // Otherwise the first argument must be one of this tool's read commands.
+      const first = args.find((a) => !a.startsWith('-')) ?? args[0]
+      if (!reads.includes(first)) return false
+      // A read subcommand must not then be handed a flag that writes.
+      if (/(^|\s)(--global|--system|-w|--write|--set|--delete|--force|-f)/i.test(segment)) {
+        return false
+      }
     }
   }
   return true

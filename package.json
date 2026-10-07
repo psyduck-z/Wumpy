@@ -10,7 +10,7 @@
     "dev": "electron-vite dev",
     "start": "electron-vite preview",
     "build": "electron-vite build",
-    "typecheck": "tsc --noEmit -p tsconfig.node.json && tsc --noEmit -p tsconfig.web.json && node scripts/check-blocks.mjs && node scripts/check-titles.mjs",
+    "typecheck": "tsc --noEmit -p tsconfig.node.json && tsc --noEmit -p tsconfig.web.json && node scripts/check-blocks.mjs && node scripts/check-titles.mjs && node scripts/check-approval.mjs",
     "package": "npm run hook:build && electron-vite build && electron-builder --win",
     "hotkey:claim": "powershell -ExecutionPolicy Bypass -File scripts/claim-win-c.ps1",
     "hotkey:restore": "powershell -ExecutionPolicy Bypass -File scripts/restore-copilot.ps1",
@@ -20,7 +20,8 @@
     "postinstall": "node scripts/make-icons.mjs",
     "bench": "node scripts/bench-models.mjs",
     "check:blocks": "node scripts/check-blocks.mjs",
-    "check:titles": "node scripts/check-titles.mjs"
+    "check:titles": "node scripts/check-titles.mjs",
+    "check:approval": "node scripts/check-approval.mjs"
   },
   "dependencies": {
     "electron-updater": "^6.6.2"

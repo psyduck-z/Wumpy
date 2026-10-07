@@ -485,6 +485,56 @@ now renders every kind of block the model can emit and asserts which component
 it becomes, including a lookalike tag that must *not* be runnable. It runs as
 part of `npm run typecheck`.
 
+## Approval modes
+
+How much runs without being asked. Click the badge in the status bar, use
+`/approve manual|auto|all`, or set it from the tray.
+
+| mode | reads | writes | destructive |
+| --- | --- | --- | --- |
+| **manual** (default) | asks | asks | asks |
+| **auto** | **runs** | asks | asks |
+| **accept all** | runs | runs | **asks** |
+
+Destructive commands keep their dialog even in "accept all", because the model
+wrote them and a wrong path does not come back. Turn that off in the tray
+(`confirmRisky`) if you want it gone — but it is off by your choice, not by
+default.
+
+Automatic modes stop themselves after six commands run without you. An automatic
+mode plus a model that reads its own output is a loop, and the cap breaks it:
+approving one by hand, or sending a message, starts the count again.
+
+### What decides that a command "only reads"
+
+`isReadOnly()` in `src/main/shell.ts`, and it is an **allowlist** — a command
+whose head is not on the list counts as a write. Pipelines are checked segment
+by segment, and any redirection or mutating verb disqualifies the whole line.
+The decision is made in the main process and sent to the renderer, so the UI
+obeys it rather than computing it.
+
+The first version of this leaked, and the leaks are worth recording because they
+are the obvious ones:
+
+| allowed by the old check | why it is not a read |
+| --- | --- |
+| `node -e "<anything>"` | arbitrary code |
+| `npx create-react-app x` | runs whatever it downloads |
+| `python3 -m http.server` | starts a server |
+| `find . -delete` | deletes |
+| `git config --global …` | rewrites settings |
+| `npm config set …` | rewrites settings |
+
+All six passed a test of the form "head is on the list and the subcommand is not
+a known write". The fix was to invert it one level deeper: multi-purpose tools
+are now listed by the reads they *are* allowed — `git status`, `npm list`,
+`ollama ps` — and interpreters get nothing but `--version` and `--help`, because
+every one of them runs arbitrary code when given an argument.
+
+`npm run check:approval` asserts all of it: 53 checks covering every mode
+against reads, writes and destructive commands, 20 bypass attempts that must
+need a click, and 18 ordinary reads that must not.
+
 ## Running commands
 
 Developer-mode tiers can propose shell commands. **Nothing ever runs without a
@@ -731,6 +781,8 @@ and toggle changes apply immediately; hotkey changes apply on restart.
 | `maxTurnMs` | `180000` | Hard ceiling on one turn |
 | `shellEnabled` | `true` | Let Dev tiers propose commands |
 | `shellCwd` | `""` | Working directory; empty means home |
+| `approvalMode` | `manual` | `manual`, `auto` or `all` |
+| `confirmRisky` | `true` | Keep the dialog for destructive commands |
 | `searchEnabled` | `true` | Let tiers propose web searches |
 | `searchApiKey` | `""` | Brave Search key; without it, encyclopedic only |
 | `tierModels` | `{}` | Per-tier model overrides |

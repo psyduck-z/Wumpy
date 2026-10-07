@@ -111,6 +111,54 @@ export function createTray(deps: TrayDeps): Tray {
         { type: 'separator' },
 
         {
+          label: `Approval: ${
+            settings.approvalMode === 'manual'
+              ? 'ask every time'
+              : settings.approvalMode === 'auto'
+                ? 'run read-only'
+                : 'run everything'
+          }`,
+          submenu: [
+            {
+              label: 'Ask every time',
+              type: 'radio',
+              checked: settings.approvalMode === 'manual',
+              click: () => {
+                deps.settings.patch({ approvalMode: 'manual' })
+                render()
+              }
+            },
+            {
+              label: 'Run read-only commands, ask for the rest',
+              type: 'radio',
+              checked: settings.approvalMode === 'auto',
+              click: () => {
+                deps.settings.patch({ approvalMode: 'auto' })
+                render()
+              }
+            },
+            {
+              label: 'Run everything',
+              type: 'radio',
+              checked: settings.approvalMode === 'all',
+              click: () => {
+                deps.settings.patch({ approvalMode: 'all' })
+                render()
+              }
+            },
+            { type: 'separator' },
+            {
+              label: 'Still confirm destructive commands',
+              type: 'checkbox',
+              checked: settings.confirmRisky,
+              click: (item) => {
+                deps.settings.patch({ confirmRisky: item.checked })
+                render()
+              }
+            }
+          ]
+        },
+        {
           label: 'Show reasoning',
           type: 'checkbox',
           checked: settings.showReasoning,

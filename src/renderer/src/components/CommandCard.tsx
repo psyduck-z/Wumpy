@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import type { ShellKind, ShellResult, TierId } from '@shared/types'
 
 const SHELL_LABEL: Record<ShellKind, string> = {
@@ -53,6 +53,7 @@ export function CommandCard({
   shell,
   tier,
   fallbackReason = null,
+  autoAllowed = true,
   onRun,
   onResult
 }: {
@@ -61,6 +62,11 @@ export function CommandCard({
   tier: TierId
   /** Used when the block omits its `# why` line but the prose above explains it. */
   fallbackReason?: string | null
+  /**
+   * False once too many commands have run unattended in a row, at which point
+   * even an automatic mode stops and waits for a person.
+   */
+  autoAllowed?: boolean
   onRun(command: string, shell: ShellKind): Promise<ShellResult | null>
   onResult(result: ShellResult): void
 }): React.JSX.Element {
@@ -70,6 +76,7 @@ export function CommandCard({
   const [risk, setRisk] = useState<string | null>(null)
   // Null until the main process has judged it; the Run button waits for this.
   const [allowed, setAllowed] = useState<boolean | null>(null)
+  const [auto, setAuto] = useState(false)
   const [state, setState] = useState<'idle' | 'running' | 'done' | 'cancelled'>('idle')
   const [result, setResult] = useState<ShellResult | null>(null)
   const [showOutput, setShowOutput] = useState(true)
@@ -80,11 +87,22 @@ export function CommandCard({
       if (!live) return
       setRisk(r.risk)
       setAllowed(r.allowed)
+      setAuto(r.auto)
     })
     return () => {
       live = false
     }
   }, [command, tier])
+
+  // The verdict comes from the main process, so the mode cannot be widened
+  // here; this only decides whether to press the button on the user's behalf.
+  const ranOnce = useRef(false)
+  useEffect(() => {
+    if (!auto || !autoAllowed || allowed !== true) return
+    if (state !== 'idle' || ranOnce.current) return
+    ranOnce.current = true
+    void run()
+  }, [auto, autoAllowed, allowed, state])
 
   const run = async (): Promise<void> => {
     setState('running')
@@ -108,7 +126,10 @@ export function CommandCard({
         <span className="cmd-shell">{SHELL_LABEL[shell]}</span>
         {risk && <span className="cmd-risk" title={`This command ${risk}.`}>{risk}</span>}
         <span className="spacer" />
-        {state === 'idle' && allowed === true && (
+        {state === 'idle' && allowed === true && auto && autoAllowed && (
+          <span className="cmd-status">running automatically…</span>
+        )}
+        {state === 'idle' && allowed === true && !(auto && autoAllowed) && (
           <>
             <button type="button" className="cmd-skip" onClick={() => setState('cancelled')}>
               Skip

@@ -17,6 +17,7 @@ export const Message = memo(function Message({
   showReasoning,
   smoothText,
   tier,
+  autoAllowed,
   onGrow,
   onRunCommand,
   onCommandResult,
@@ -32,6 +33,8 @@ export const Message = memo(function Message({
   smoothText: boolean
   /** The active tier, which decides what a proposed command may do. */
   tier: TierId
+  /** False once unattended runs have piled up. */
+  autoAllowed?: boolean
   /** Called as revealed text grows, so the transcript can stay pinned. */
   onGrow?: () => void
   /** Supplied only when the active tier may propose commands. */
@@ -137,6 +140,7 @@ export const Message = memo(function Message({
           <Markdown
             text={shown}
             tier={tier}
+            autoAllowed={autoAllowed}
             onRunCommand={onRunCommand}
             onCommandResult={onCommandResult}
             onAnswer={onAnswer ? (option) => onAnswer(message.id, option) : undefined}

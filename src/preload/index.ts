@@ -7,6 +7,7 @@ import type {
   ChatMessage,
   ChatRequest,
   ChatSummary,
+  CommandVerdict,
   Dock,
   HotkeyState,
   OllamaModel,
@@ -84,10 +85,7 @@ const api = {
      * Whether this tier may run the command, and why it looks risky if it does.
      * Drives the card: a command the tier cannot run gets no Run button.
      */
-    check: (req: {
-      command: string
-      tier: TierId
-    }): Promise<{ risk: string | null; allowed: boolean; scope: 'none' | 'read' | 'full' }> =>
+    check: (req: { command: string; tier: TierId }): Promise<CommandVerdict> =>
       ipcRenderer.invoke(IPC.shellRisk, req)
   },
   search: {

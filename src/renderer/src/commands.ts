@@ -21,6 +21,7 @@ export type CommandAction =
   | { kind: 'dock'; dock: Dock | null }
   | { kind: 'reasoning'; show: boolean | 'toggle' }
   | { kind: 'pin'; pinned: boolean | 'toggle' }
+  | { kind: 'approve'; mode: 'manual' | 'auto' | 'all' | 'cycle' }
   | { kind: 'warm' }
   | { kind: 'compact' }
   | { kind: 'stop' }
@@ -217,6 +218,20 @@ export const COMMANDS: CommandSpec[] = [
     aliases: ['models'],
     hint: 'Pick which installed model this tier uses',
     run: () => ({ kind: 'model' })
+  },
+  {
+    name: 'approve',
+    aliases: ['auto', 'permissions'],
+    hint: 'manual | auto | all — how much runs without asking',
+    arg: 'mode',
+    run: (arg) => {
+      const a = arg.trim().toLowerCase()
+      if (!a) return { kind: 'approve', mode: 'cycle' }
+      if (['manual', 'ask', 'off'].includes(a)) return { kind: 'approve', mode: 'manual' }
+      if (['auto', 'safe', 'read'].includes(a)) return { kind: 'approve', mode: 'auto' }
+      if (['all', 'everything', 'yolo'].includes(a)) return { kind: 'approve', mode: 'all' }
+      return { kind: 'error', message: 'Usage: /approve manual | auto | all' }
+    }
   },
   {
     name: 'warm',

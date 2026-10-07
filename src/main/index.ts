@@ -3,6 +3,7 @@ import { homedir } from 'node:os'
 import { IPC } from '@shared/types'
 import type {
   ChatMessage,
+  CommandVerdict,
   ShellKind,
   ShellResult,
   ChatRequest,
@@ -328,11 +329,30 @@ function registerIpc(): void {
     return webSearch(query, settings.get('searchApiKey') || undefined)
   })
 
-  ipcMain.handle(IPC.shellRisk, (_e, req: { command: string; tier: TierId }) => {
-    const scope = settings.get('shellEnabled') ? (TIERS[req.tier]?.tools ?? 'none') : 'none'
-    const allowed = scope === 'full' || (scope === 'read' && isReadOnly(req.command))
-    return { risk: assessRisk(req.command), allowed, scope }
-  })
+  /**
+   * The single place that decides what happens to a proposed command.
+   *
+   * The renderer asks and obeys; it never works this out for itself, so a bug
+   * or a tampered page cannot widen what is permitted.
+   */
+  function judge(command: string, tier: TierId): CommandVerdict {
+    const scope = settings.get('shellEnabled') ? (TIERS[tier]?.tools ?? 'none') : 'none'
+    const readOnly = isReadOnly(command)
+    const allowed = scope === 'full' || (scope === 'read' && readOnly)
+    const risk = assessRisk(command)
+    const mode = settings.get('approvalMode')
+
+    // Risky commands never run unprompted while confirmRisky stands, whatever
+    // the mode: the model wrote them, and a wrong path does not come back.
+    const risky = risk !== null && settings.get('confirmRisky')
+    const auto = allowed && !risky && (mode === 'all' || (mode === 'auto' && readOnly))
+
+    return { risk, allowed, scope, auto, readOnly }
+  }
+
+  ipcMain.handle(IPC.shellRisk, (_e, req: { command: string; tier: TierId }) =>
+    judge(req.command, req.tier)
+  )
 
   /**
    * Runs a command the user approved in the panel.
@@ -351,8 +371,9 @@ function registerIpc(): void {
       // The tier's scope is enforced here, not in the renderer and not by
       // asking the model nicely. A Quick tier may look things up; anything that
       // changes the machine needs a Developer tier.
-      const scope = settings.get('shellEnabled') ? (TIERS[req.tier]?.tools ?? 'none') : 'none'
-      if (scope === 'none' || (scope === 'read' && !isReadOnly(command))) {
+      const verdict = judge(command, req.tier)
+      if (!verdict.allowed) {
+        const scope = verdict.scope
         return {
           command,
           shell: req.shell,
@@ -383,7 +404,9 @@ function registerIpc(): void {
         }
       }
 
-      const risk = assessRisk(command)
+      // A risky command still raises the dialog even when the mode would have
+      // run it, unless the user has explicitly turned that off.
+      const risk = settings.get('confirmRisky') ? verdict.risk : null
       if (risk) {
         const { response } = await dialog.showMessageBox({
           type: 'warning',

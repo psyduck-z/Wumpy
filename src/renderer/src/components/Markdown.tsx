@@ -128,6 +128,8 @@ export interface MarkdownProps {
   onRunCommand?: (command: string, shell: ShellKind) => Promise<ShellResult | null>
   /** The tier asking, which decides what it is allowed to run. */
   tier: TierId
+  /** False once unattended runs have piled up; cards then wait for a person. */
+  autoAllowed?: boolean
   /** Supplied for assistant turns that may search the web. */
   onSearch?: (query: string) => Promise<{ results: SearchResult[]; provider: string; error?: string }>
   onSearchResults?: (
@@ -154,6 +156,7 @@ export const Markdown = memo(function Markdown({
   onAnswer,
   answered = null,
   tier,
+  autoAllowed = true,
   onSearch,
   onSearchResults
 }: MarkdownProps) {
@@ -194,6 +197,7 @@ export const Markdown = memo(function Markdown({
                 shell={fence.shell}
                 tier={tier}
                 fallbackReason={leadIn(text)}
+                autoAllowed={autoAllowed}
                 onRun={onRunCommand!}
                 onResult={onCommandResult ?? (() => {})}
               />

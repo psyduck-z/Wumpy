@@ -7,6 +7,7 @@ import type {
   Mode,
   OllamaStatus,
   TierId,
+  ApprovalMode,
   ShellKind,
   ShellResult,
   OllamaModel,
@@ -305,6 +306,17 @@ export default function App(): React.JSX.Element {
     [chat, tier]
   )
 
+  /**
+   * How many commands have run unattended since the user last typed.
+   *
+   * Automatic modes can otherwise loop: a command runs, its output goes back to
+   * the model, the model proposes another. After a handful without a person in
+   * the loop, cards stop running themselves and wait.
+   */
+  const AUTO_RUN_LIMIT = 6
+  const [autoRuns, setAutoRuns] = useState(0)
+  const autoAllowed = autoRuns < AUTO_RUN_LIMIT
+
   const runShellCommand = useCallback(
     (command: string, shellKind: ShellKind) =>
       window.wumpy.shell.run({ command, shell: shellKind, tier }),
@@ -320,6 +332,7 @@ export default function App(): React.JSX.Element {
    */
   const onCommandResult = useCallback(
     (result: ShellResult) => {
+      setAutoRuns((n) => n + 1)
       const body = [result.stdout, result.stderr].filter(Boolean).join('\n').trim()
       const clipped = body.length > 3000 ? `${body.slice(0, 3000)}\n…truncated…` : body
 
@@ -493,6 +506,18 @@ export default function App(): React.JSX.Element {
           await compactHistory()
           return
         }
+        case 'approve': {
+          const order: ApprovalMode[] = ['manual', 'auto', 'all']
+          const current = settings?.approvalMode ?? 'manual'
+          const next =
+            action.mode === 'cycle'
+              ? order[(order.indexOf(current) + 1) % order.length]
+              : action.mode
+          await patch({ approvalMode: next })
+          setAutoRuns(0)
+          chat.note(APPROVAL_NOTE[next])
+          return
+        }
         case 'warm': {
           chat.note(`Preloading **${TIERS[tier].label}**…`)
           setTierStatuses(await window.wumpy.tiers.warm(tier))
@@ -547,6 +572,7 @@ export default function App(): React.JSX.Element {
         return
       }
 
+      setAutoRuns(0)
       chat.send(text, tier)
     },
     [chat, compactHistory, runCommand, settings, tier, usage.used]
@@ -688,6 +714,20 @@ export default function App(): React.JSX.Element {
   }, [])
 
   useLayoutEffect(pinToBottom, [messages, pinToBottom])
+
+  const warnedRef = useRef(false)
+  useEffect(() => {
+    if (autoAllowed) {
+      warnedRef.current = false
+      return
+    }
+    if (warnedRef.current) return
+    warnedRef.current = true
+    chat.note(
+      `${AUTO_RUN_LIMIT} commands have run without you. Approving the next one by hand, ` +
+        'or sending a message, starts the count again.'
+    )
+  }, [autoAllowed, chat])
 
   const onScroll = (): void => {
     const el = scroller.current
@@ -898,6 +938,8 @@ export default function App(): React.JSX.Element {
         stats={stats}
         usage={usage}
         compact={compact}
+        approvalMode={settings?.approvalMode ?? 'manual'}
+        onCycleApproval={() => void runCommand({ kind: 'approve', mode: 'cycle' }, '/approve')}
         onCompact={() => void compactHistory()}
       />
 
@@ -950,6 +992,13 @@ function Empty({
       )}
     </div>
   )
+}
+
+/** What each approval mode means, said plainly when it changes. */
+const APPROVAL_NOTE: Record<ApprovalMode, string> = {
+  manual: '**Manual** — every command waits for you.',
+  auto: '**Auto** — commands that only read run themselves; anything that changes something still asks.',
+  all: '**Accept all** — commands run without asking. Destructive ones still raise a system dialog.'
 }
 
 /** Relative time for picker rows. */
