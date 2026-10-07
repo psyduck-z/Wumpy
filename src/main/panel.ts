@@ -161,7 +161,27 @@ export class Panel {
     this.window.hide()
   }
 
+  /**
+   * Shows or hides, once per press.
+   *
+   * The guard is for repeats, not for the user. Holding a hotkey down makes
+   * Windows deliver the keystroke over and over, and the helper process now
+   * reports one TOGGLE per press - but RegisterHotKey, which is what any extra
+   * accelerator in the settings goes through, repeats the same way and has no
+   * such filter. Without this, holding one of those flashed the panel open and
+   * shut at the keyboard's repeat rate.
+   *
+   * It has to stay short enough that deliberately tapping twice - open, then
+   * immediately shut again - still lands. 120ms is several times a repeat
+   * interval and well under a double tap.
+   */
+  private lastToggle = 0
+
   toggle(): void {
+    const now = Date.now()
+    if (now - this.lastToggle < 120) return
+    this.lastToggle = now
+
     if (this.window?.isVisible() && this.window.isFocused()) {
       this.hide()
     } else {

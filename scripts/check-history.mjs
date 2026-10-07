@@ -9,7 +9,7 @@
  * Run with: npm run check:history
  */
 import { build } from 'esbuild'
-import { rmSync } from 'node:fs'
+import { readFileSync, rmSync } from 'node:fs'
 import { join } from 'node:path'
 import { pathToFileURL } from 'node:url'
 
@@ -84,6 +84,34 @@ check('whitespace is not recorded', blank.all(), ['a'])
 
 rmSync(out, { force: true })
 
-const total = 20
+/* -------------------------------------------- the box is wired to both arrows */
+
+/**
+ * The walk above supports both directions, but a direction nothing presses is a
+ * direction that does not exist. These read the composer, because the walk
+ * passing its own tests says nothing about whether a key reaches it.
+ */
+const composer = readFileSync('src/renderer/src/components/Composer.tsx', 'utf8')
+const handler = composer.slice(composer.indexOf('const onKeyDown'), composer.indexOf('atFirstLine(el: '))
+
+check('Up is bound to the older entry', /ArrowUp'[\s\S]*?history\.older/.test(handler), true)
+check('Down is bound to the newer one', /ArrowDown'[\s\S]*?history\.newer/.test(handler), true)
+
+// Both must give the caret back when there is nowhere to go, or the arrows stop
+// moving around a draft that happens to sit at the edge of the box.
+const older = handler.slice(handler.indexOf("e.key === 'ArrowUp' && !e.shiftKey"))
+const newer = handler.slice(handler.indexOf("e.key === 'ArrowDown' && !e.shiftKey"))
+check('Up only takes over when it has something', /!== null/.test(older.slice(0, 220)), true)
+check('Down only takes over when it has something', /!== null/.test(newer.slice(0, 220)), true)
+
+// The palette owns the arrows while a command name is being completed, so it
+// must not be the thing answering them the rest of the time.
+check(
+  'the palette only claims the arrows when it has items',
+  /if \(palette\.length > 0\) \{/.test(composer),
+  true
+)
+
+const total = 25
 console.log(`\n${total - failed}/${total} input-history checks correct`)
 process.exit(failed === 0 ? 0 : 1)
