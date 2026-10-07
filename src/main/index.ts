@@ -10,6 +10,7 @@ import type {
   ChatSummary,
   Dock,
   HotkeyState,
+  Tier,
   TierId,
   TierStatus,
   WumpySettings
@@ -102,15 +103,18 @@ async function refreshModels(): Promise<void> {
  * Preloads a tier's model so the next question skips the load entirely.
  * Measured: cold first-word 4.7s, warm 0.19s.
  */
-async function warmTier(id: TierId): Promise<void> {
-  const model = resolveTierModel(id)
-  if (!model || ollama.isWarm(model)) return
-
-  // Prime with exactly the preamble this tier sends, so the cache it leaves
-  // behind is the one the user's first message will hit.
-  const tier = TIERS[id]
-  const scope = settings.get('shellEnabled') ? tier.tools : 'none'
-  const systemPrompt = [
+/**
+ * The system prompt for a tier, built in exactly one place.
+ *
+ * It was built twice - once to prime the cache at startup, once per turn - and
+ * the two copies had already drifted: only one filtered out the empty string
+ * left behind when web search is off. With search off they differed by a blank
+ * line, which is enough for llama.cpp to find no common prefix and re-process
+ * the whole preamble on every single turn. Nothing would look wrong; it would
+ * just be slow for a reason nobody could see.
+ */
+function systemPromptFor(tier: Tier, scope: 'none' | 'read' | 'full'): string {
+  return [
     tier.systemPrompt,
     APP_PROMPT,
     scope === 'full' ? SHELL_PROMPT : scope === 'read' ? READ_SHELL_PROMPT : NO_SHELL_PROMPT,
@@ -119,6 +123,17 @@ async function warmTier(id: TierId): Promise<void> {
   ]
     .filter(Boolean)
     .join('\n\n')
+}
+
+async function warmTier(id: TierId): Promise<void> {
+  const model = resolveTierModel(id)
+  if (!model || ollama.isWarm(model)) return
+
+  // Prime with exactly the preamble this tier sends, so the cache it leaves
+  // behind is the one the user's first message will hit.
+  const tier = TIERS[id]
+  const scope = settings.get('shellEnabled') ? tier.tools : 'none'
+  const systemPrompt = systemPromptFor(tier, scope)
 
   await ollama.warm(model, settings.get('keepAlive'), {
     systemPrompt,
@@ -224,13 +239,7 @@ function registerIpc(): void {
     // prefill per turn with volatile text first, 1.2-1.6s with it last, and
     // 165ms when the prefix is untouched. The facts now go in just ahead of the
     // latest question, so only they and that question are reprocessed.
-    const systemPrompt = [
-      tier.systemPrompt,
-      APP_PROMPT,
-      scope === 'full' ? SHELL_PROMPT : scope === 'read' ? READ_SHELL_PROMPT : NO_SHELL_PROMPT,
-      scope !== 'none' && settings.get('searchEnabled') ? SEARCH_PROMPT : '',
-      ASK_PROMPT
-    ].join('\n\n')
+    const systemPrompt = systemPromptFor(tier, scope)
 
     // Stand aside for the duration of the turn: tokens matter more than UI.
     priority.yieldToModel()

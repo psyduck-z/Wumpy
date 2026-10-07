@@ -65,10 +65,10 @@ writeFileSync(
     "import { renderToStaticMarkup } from 'react-dom/server'",
     "import { Markdown } from './src/renderer/src/components/Markdown'",
     "globalThis.window = { wumpy: { shell: { check: async () => ({ risk: null, allowed: true, scope: 'full' }) } } }",
-    'export function render(text) {',
+    'export function render(text, complete = true) {',
     '  return renderToStaticMarkup(',
     '    React.createElement(Markdown, {',
-    "      text, tier: 'thinker',",
+    "      text, tier: 'thinker', complete,",
     '      onRunCommand: async () => null, onCommandResult: () => {},',
     '      onAnswer: () => {},',
     "      onSearch: async () => ({ results: [], provider: 'none' }), onSearchResults: () => {}",
@@ -133,14 +133,13 @@ function proposed(html) {
  * Showing the command as it arrives is fine; treating it as a proposal is not.
  * A card that is not ready says so, and only a card that is ready can run.
  *
- * Rendered with `complete` left at its default of true — that is, as though
- * streaming had already finished — so this tests the unclosed-fence guard on
- * its own rather than the streaming flag that is supposed to back it up.
+ * Rendered mid-stream (`complete: false`), which is when it matters: the guard
+ * being tested is the unclosed fence, not the streaming flag behind it.
  */
 let fragments = 0
 let cards = 0
 for (let n = 1; n <= FULL.length; n++) {
-  const html = render(FULL.slice(0, n))
+  const html = render(FULL.slice(0, n), false)
   const body = proposed(html)
   if (body === null) continue
   cards++
@@ -164,8 +163,19 @@ console.log(
 )
 console.log(`${finalReady ? 'ok  ' : 'FAIL'} the finished block is ready to run`)
 
+/**
+ * The other half: a command whose fence has closed is ready even though the
+ * model is still writing. Waiting for the whole answer costs however long it
+ * spends on the sentence after the block, which on this hardware is seconds.
+ */
+const CLOSED_THEN_PROSE = `${FULL}\n\nThat will write the three lines into`
+const midStream = render(CLOSED_THEN_PROSE, false)
+const readyEarly = !midStream.includes('still writing') && proposed(midStream) === WHOLE_COMMAND
+if (!readyEarly) failed++
+console.log(`${readyEarly ? 'ok  ' : 'FAIL'} a closed block is ready while the answer continues`)
+
 rmSync(out, { force: true })
 
-const total = CASES.length + 2
+const total = CASES.length + 3
 console.log(`\n${total - failed}/${total} block checks correct`)
 process.exit(failed === 0 ? 0 : 1)

@@ -92,16 +92,27 @@ function leadIn(markdown: string): string | null {
 }
 
 /**
- * Whether the text ends inside an unclosed fence.
+ * The contents of a fence that has been opened and not yet closed, or null.
  *
  * Markdown renders an unterminated fence as a code block, so a card exists from
  * the moment ``` is revealed and its contents grow a character at a time. Every
  * one of those prefixes is a different string, so de-duplicating commands does
- * not help; the only safe rule is that a block nobody has finished writing is
- * not a proposal yet.
+ * not help; a block nobody has finished writing is not a proposal yet.
+ *
+ * Only the last fence can be open, so this names the one block that is still
+ * being written — and by elimination says every other block is final, even
+ * while the model carries on typing after it. That matters on this hardware:
+ * waiting for the whole answer before offering Run costs however long the model
+ * spends on the sentence that follows the command.
  */
-function endsMidFence(text: string): boolean {
-  return (text.match(/^\s*```/gm) ?? []).length % 2 === 1
+function openFenceBody(text: string): string | null {
+  const lines = text.split('\n')
+  let opensAt = -1
+  for (let i = 0; i < lines.length; i++) {
+    if (/^\s*```/.test(lines[i])) opensAt = opensAt === -1 ? i : -1
+  }
+  if (opensAt === -1) return null
+  return lines.slice(opensAt + 1).join('\n').trim()
 }
 
 /** Maps a fence tag to the shell it should run in, or null for ordinary code. */
@@ -179,10 +190,11 @@ export const Markdown = memo(function Markdown({
   onSearch,
   onSearchResults
 }: MarkdownProps) {
-  // Belt and braces with the streaming flag: that says whether tokens are still
-  // arriving, this says whether what arrived is a finished block. Either one
-  // being wrong used to be enough to run a fragment.
-  const settled = complete && !endsMidFence(text)
+  // The one block still being written, if any. Everything else is final, even
+  // mid-answer, so a command can be offered the moment its fence closes rather
+  // than when the model finally stops talking about it.
+  const pending = openFenceBody(text)
+  const settled = (code: string): boolean => complete || pending === null || code !== pending
   return (
     <ReactMarkdown
       remarkPlugins={[remarkGfm]}
@@ -194,7 +206,7 @@ export const Markdown = memo(function Markdown({
             return (
               <SearchCard
                 query={query}
-                complete={settled}
+                complete={settled(query)}
                 onSearch={onSearch!}
                 onResults={onSearchResults ?? (() => {})}
               />
@@ -221,7 +233,7 @@ export const Markdown = memo(function Markdown({
                 shell={fence.shell}
                 tier={tier}
                 fallbackReason={leadIn(text)}
-                complete={settled}
+                complete={settled(fence.code)}
                 canAutoRun={canAutoRun}
                 messageId={messageId}
                 onRun={onRunCommand!}

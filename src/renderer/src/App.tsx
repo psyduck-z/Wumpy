@@ -1115,8 +1115,13 @@ ${clipped || '(no output)'}`)
           )}
 
           {/* Marks the end of a finished reply, so a long answer has a visible
-              bottom edge rather than just stopping. */}
-          {!streaming && messages.length > 0 && messages[messages.length - 1].role === 'assistant' && (
+              bottom edge rather than just stopping.
+
+              Not only after an assistant message: a command that succeeds
+              silently now ends the turn with a note instead of a reply, and
+              that left the transcript simply stopping, with no line and no
+              runtime. Anything but a user message is the end of a turn. */}
+          {!streaming && messages.length > 0 && messages[messages.length - 1].role !== 'user' && (
             <div className="turn-end" aria-hidden="true">
               <span>{endOfReplyLabel(stats)}</span>
             </div>

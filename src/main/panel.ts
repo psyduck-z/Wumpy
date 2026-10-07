@@ -136,7 +136,22 @@ export class Panel {
     win.setAlwaysOnTop(true, 'screen-saver')
     win.show()
     win.moveTop()
+
+    // Taking the keyboard needs more than show() on Windows.
+    //
+    // The foreground belongs to whatever the user was in, and Windows will not
+    // hand it to a process that is not already there - which Wumpy never is,
+    // since the hotkey arrives in a background hook. On top of that the panel
+    // is a tool window, kept out of Alt+Tab, and those are not activated by
+    // being shown. So the window appeared, looked focused, and the next
+    // keystroke went to the editor underneath.
+    //
+    // app.focus({ steal: true }) is the part that actually claims it;
+    // webContents.focus() then puts the caret inside the page rather than on
+    // the window frame.
+    app.focus({ steal: true })
     win.focus()
+    win.webContents.focus()
     win.webContents.send(IPC.panelShown)
   }
 
