@@ -28,6 +28,8 @@ const DECIDE = [
   '',
   'Runs in PowerShell. Prefer a tool’s own command (ollama list, node -v, git',
   'status) over hunting the filesystem. Real paths only, never a placeholder.',
+  'Only use subcommands you are certain exist. If unsure, run the tool’s --help',
+  'rather than guessing a name. Always include the # line, every time.',
   'A block holds a command and nothing else — never a sentence or a refusal.'
 ].join(String.fromCharCode(10))
 

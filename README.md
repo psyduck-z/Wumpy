@@ -100,6 +100,21 @@ If you have admin and would rather disable Copilot outright than run a hook,
 Copilot off, add `Super+C` to `hotkeys` in settings and the plain accelerator
 path will work.
 
+## Does the slower tier earn it?
+
+Benchmarked on the same thirteen cases:
+
+| | correct | tok/s | first word |
+| --- | --- | --- | --- |
+| **phi4-mini:3.8b** (Fast) | 12/13 | **9.0** | **1.5 s** |
+| qwen2.5:7b (Thinker) | **13/13** | 2.9 | 7.2 s |
+
+Thinker is genuinely more careful — perfect instruction following where Fast
+drops one — and it is three times slower to produce a word. Both score 5/5 on
+command decisions, so for *running things* Fast is the better tool, and it can
+already read the machine. Reach for Thinker when the thinking is the point, not
+when you want a directory listing.
+
 ## Which model, measured here
 
 Published benchmarks run on hardware nobody here owns, against tasks Wumpy never

@@ -17,6 +17,8 @@ export interface ChatStats {
   liveTokens: number
   /** Milliseconds since the current turn started, or null when idle. */
   elapsedMs: number | null
+  /** Wall-clock duration of the last completed turn. */
+  lastTurnMs: number | null
 }
 
 export interface ChatState {
@@ -50,7 +52,8 @@ export function useChat(): ChatState {
     contextTokens: null,
     lastCompletionTokens: null,
     liveTokens: 0,
-    elapsedMs: null
+    elapsedMs: null,
+    lastTurnMs: null
   })
   /** Wall clock for the turn in flight, so elapsed survives re-renders. */
   const startedAt = useRef<number | null>(null)
@@ -95,7 +98,9 @@ export function useChat(): ChatState {
             : s.contextTokens,
         lastCompletionTokens: d.completionTokens ?? null,
         liveTokens: 0,
-        elapsedMs: null
+        elapsedMs: null,
+        // Wall clock, not the model's own timings: this is what the user waited.
+        lastTurnMs: startedAt.current ? Date.now() - startedAt.current : s.lastTurnMs
       }))
       startedAt.current = null
       activeRequest.current = null
@@ -259,7 +264,8 @@ export function useChat(): ChatState {
       contextTokens: null,
       lastCompletionTokens: null,
       liveTokens: 0,
-      elapsedMs: null
+      elapsedMs: null,
+      lastTurnMs: null
     })
   }, [stop])
 

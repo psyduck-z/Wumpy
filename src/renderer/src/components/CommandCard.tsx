@@ -52,16 +52,21 @@ export function CommandCard({
   command: raw,
   shell,
   tier,
+  fallbackReason = null,
   onRun,
   onResult
 }: {
   command: string
   shell: ShellKind
   tier: TierId
+  /** Used when the block omits its `# why` line but the prose above explains it. */
+  fallbackReason?: string | null
   onRun(command: string, shell: ShellKind): Promise<ShellResult | null>
   onResult(result: ShellResult): void
 }): React.JSX.Element {
-  const { reason, command } = splitReason(raw)
+  const parsed = splitReason(raw)
+  const command = parsed.command
+  const reason = parsed.reason ?? fallbackReason
   const [risk, setRisk] = useState<string | null>(null)
   // Null until the main process has judged it; the Run button waits for this.
   const [allowed, setAllowed] = useState<boolean | null>(null)

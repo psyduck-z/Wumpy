@@ -16,7 +16,7 @@ import type {
 } from '@shared/types'
 import { isTall } from '@shared/types'
 import { TIERS, TIER_ORDER, defaultTierFor } from '@shared/tiers'
-import { useChat, nextId } from './hooks/useChat'
+import { useChat, nextId, type ChatStats } from './hooks/useChat'
 import { parseCommand, helpText, type CommandAction } from './commands'
 import { matchIntent } from './intents'
 import { Header } from './components/Header'
@@ -885,7 +885,7 @@ export default function App(): React.JSX.Element {
               bottom edge rather than just stopping. */}
           {!streaming && messages.length > 0 && messages[messages.length - 1].role === 'assistant' && (
             <div className="turn-end" aria-hidden="true">
-              <span>end of reply</span>
+              <span>{endOfReplyLabel(stats)}</span>
             </div>
           )}
         </div>
@@ -960,4 +960,20 @@ function when(ts: number): string {
   const hours = Math.round(mins / 60)
   if (hours < 24) return `${hours}h ago`
   return `${Math.round(hours / 24)}d ago`
+}
+
+/** Summary under a finished answer: how long it took and how fast it ran. */
+function endOfReplyLabel(stats: ChatStats): string {
+  const parts: string[] = []
+  if (stats.lastTurnMs !== null) {
+    const ms = stats.lastTurnMs
+    if (ms < 60_000) parts.push(`${(ms / 1000).toFixed(1)}s`)
+    else {
+      const total = Math.round(ms / 1000)
+      parts.push(`${Math.floor(total / 60)}m ${total % 60}s`)
+    }
+  }
+  if (stats.speed !== null) parts.push(`${stats.speed.toFixed(1)} tok/s`)
+  if (stats.lastCompletionTokens !== null) parts.push(`${stats.lastCompletionTokens} tok`)
+  return parts.length ? parts.join(' · ') : 'end of reply'
 }

@@ -72,6 +72,25 @@ function readSearch(children: ReactNode): string | null {
   return raw.trim() || null
 }
 
+/**
+ * The last sentence of prose before the first fence.
+ *
+ * Models reliably say what they are about to do and then sometimes omit the
+ * `# why` line inside the block. Rather than show "No reason given" in red when
+ * the reason is sitting right above it, the card falls back to this.
+ */
+function leadIn(markdown: string): string | null {
+  const before = markdown.split('```')[0].trim()
+  if (!before) return null
+  const sentence = before
+    .split(/\n{2,}/)
+    .pop()
+    ?.replace(/\s+/g, ' ')
+    .trim()
+  if (!sentence || sentence.length > 160) return null
+  return sentence
+}
+
 /** Maps a fence tag to the shell it should run in, or null for ordinary code. */
 function runnableShell(className: unknown): ShellKind | null {
   if (typeof className !== 'string') return null
@@ -174,6 +193,7 @@ export const Markdown = memo(function Markdown({
                 command={fence.code}
                 shell={fence.shell}
                 tier={tier}
+                fallbackReason={leadIn(text)}
                 onRun={onRunCommand!}
                 onResult={onCommandResult ?? (() => {})}
               />
