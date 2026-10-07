@@ -4,6 +4,7 @@ import { join } from 'node:path'
 import { app } from 'electron'
 import { resourcePath } from './tray'
 import type { VoiceStatus, Transcript } from '@shared/types'
+import { WHISPER_MODEL } from '@shared/dictation'
 
 /**
  * Drives the local transcriber.
@@ -36,7 +37,10 @@ export class Speech {
     { resolve(t: Transcript): void; reject(err: Error): void; timer: NodeJS.Timeout }
   >()
 
-  constructor(private readonly model: () => string) {}
+  /**
+   * No constructor argument: the model is fixed. See WHISPER_MODEL for the
+   * measurements that settled it.
+   */
 
   status(): VoiceStatus {
     return this.state
@@ -106,7 +110,7 @@ export class Speech {
         windowsHide: true,
         env: {
           ...process.env,
-          WUMPY_WHISPER_MODEL: this.model(),
+          WUMPY_WHISPER_MODEL: process.env.WUMPY_WHISPER_MODEL ?? WHISPER_MODEL,
           WUMPY_WHISPER_MODELS: this.modelsDir(),
           HF_HUB_DISABLE_SYMLINKS_WARNING: '1'
         }
@@ -233,14 +237,6 @@ export class Speech {
         /* the next run will clear it */
       }
     }
-  }
-
-  /** Drops the worker, so the next utterance picks up a changed model size. */
-  reload(): void {
-    this.stop()
-    this.state = { kind: 'unknown' }
-    this.restarts = 0
-    this.stopping = false
   }
 
   stop(): void {

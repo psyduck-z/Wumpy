@@ -21,8 +21,7 @@ export type CommandAction =
   | { kind: 'dock'; dock: Dock | null }
   | { kind: 'reasoning'; show: boolean | 'toggle' }
   | { kind: 'pin'; pinned: boolean | 'toggle' }
-  | { kind: 'voice'; setting: 'polish' | 'autostop'; on: boolean | 'toggle' }
-  | { kind: 'speech' }
+  | { kind: 'voice'; setting: 'on' | 'polish' | 'autostop'; on: boolean | 'toggle' }
   | { kind: 'open'; what: string }
   | { kind: 'engine' }
   | { kind: 'approve'; mode: 'manual' | 'auto' | 'all' | 'cycle' }
@@ -240,10 +239,11 @@ export const COMMANDS: CommandSpec[] = [
     run: () => ({ kind: 'engine' })
   },
   {
-    name: 'speech',
-    aliases: ['voice', 'dictation', 'whisper'],
-    hint: 'Choose how carefully speech is transcribed',
-    run: () => ({ kind: 'speech' })
+    name: 'voice',
+    aliases: ['dictate', 'dictation', 'mic'],
+    hint: 'Talk instead of typing — hold the spacebar',
+    arg: 'on|off',
+    run: (arg) => ({ kind: 'voice', setting: 'on', on: bool(arg) })
   },
   {
     name: 'polish',

@@ -249,18 +249,12 @@ function registerIpc(): void {
   settings.onChange((next) => panel.send(IPC.settingsChanged, next))
 
   ipcMain.handle(IPC.settingsSet, (_e, patch: Partial<WumpySettings>) => {
-    // Read before writing: everything below that wants to know whether a value
-    // actually changed has to compare against the old one.
-    const wasVoiceModel = settings.get('voiceModel')
     const next = settings.patch(patch)
     if (patch.ollamaHost) ollama.setHost(next.ollamaHost)
     if (patch.hotkeys) applyHotkeys()
     if (patch.tallWidth || patch.compactWidth || patch.compactHeight) panel.applyGeometry()
     if (patch.launchAtLogin !== undefined) syncLaunchAtLogin(patch.launchAtLogin)
     if (patch.tier) void warmTier(patch.tier)
-    // The worker holds one model for its lifetime, so a different size means a
-    // different worker - otherwise changing it did nothing until a restart.
-    if (next.voiceModel !== wasVoiceModel) speech.reload()
     tray?.refresh()
     return next
   })
@@ -653,9 +647,7 @@ void app.whenReady().then(async () => {
   panel = new Panel(settings)
 
   priority = new PriorityManager(() => panel.browserWindow)
-  // Reads the size each time it starts, so changing it in settings takes
-  // effect on the next utterance without a restart.
-  speech = new Speech(() => settings.get('voiceModel'))
+  speech = new Speech()
 
   registerIpc()
   panel.create()

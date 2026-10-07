@@ -3,6 +3,7 @@ import { allCommands, completions, type CommandSpec } from '../commands'
 import { CommandPalette } from './CommandPalette'
 import { useInputHistory } from '../hooks/useInputHistory'
 import { useDictation } from '../hooks/useDictation'
+import { HOLD_MS, HoldToTalk, isPlainSpace, type HoldAction } from '../holdtotalk'
 import { Mic } from './Mic'
 
 export function Composer({
@@ -95,6 +96,74 @@ export function Composer({
     return () => window.removeEventListener('keydown', onKey, true)
   }, [dictation])
 
+  /* ----------------------------------------------- hold the spacebar to talk */
+
+  /**
+   * The machine lives in a ref and the clock lives here.
+   *
+   * The decisions are all in HoldToTalk, which knows nothing about React and is
+   * tested on its own; this is the timer, the key events and putting the text
+   * back. The timer is scheduled a frame past the delay because setTimeout is
+   * allowed to fire a touch early, and a tick that arrives early is a tick that
+   * decides the key was not held long enough.
+   */
+  const hold = useRef(new HoldToTalk())
+  const holdTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+  const stopTimer = (): void => {
+    if (holdTimer.current === null) return
+    clearTimeout(holdTimer.current)
+    holdTimer.current = null
+  }
+
+  const applyHold = (action: HoldAction, e?: React.KeyboardEvent<HTMLTextAreaElement>): void => {
+    if (action.swallow) e?.preventDefault()
+
+    if (action.kind === 'arm') {
+      stopTimer()
+      holdTimer.current = setTimeout(() => {
+        holdTimer.current = null
+        applyHold(hold.current.tick(performance.now()))
+      }, HOLD_MS + 16)
+      return
+    }
+
+    if (action.kind === 'listen') {
+      // Take the spaces back out. Everything the auto-repeat typed while the
+      // delay ran goes with them, because this is the text as it was before the
+      // key went down at all.
+      const { value: text, caret } = action.restore
+      setValue(text)
+      requestAnimationFrame(() => {
+        const el = ref.current
+        if (!el) return
+        el.selectionStart = el.selectionEnd = caret
+      })
+      dictation.beginHold()
+      return
+    }
+
+    if (action.kind === 'send') {
+      stopTimer()
+      dictation.finish()
+      return
+    }
+
+    if (action.kind === 'cancel') {
+      stopTimer()
+      dictation.cancel()
+    }
+  }
+
+  // A press whose release lands somewhere else would otherwise leave the machine
+  // armed, and the next space would read as the end of a hold nobody is doing.
+  const abandonHold = (): void => {
+    stopTimer()
+    applyHold(hold.current.abort())
+  }
+
+  useEffect(() => stopTimer, [])
+
   // Only offer the palette while the command name is still being typed; once
   // there is a space the user has moved on to the argument.
   const palette = useMemo(() => {
@@ -142,6 +211,20 @@ export function Composer({
   }
 
   const onKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>): void => {
+    /**
+     * The spacebar, before anything else looks at it.
+     *
+     * Only when voice input has been turned on with /voice: otherwise the most
+     * pressed key on the keyboard behaves exactly as it always did, which is the
+     * point of the switch. A space pressed and released is still a space even
+     * when it is on - nothing happens until half a second of holding.
+     */
+    if (dictation.enabled && isPlainSpace(e)) {
+      const el = e.currentTarget
+      applyHold(hold.current.down(performance.now(), { value: el.value, caret: el.selectionStart }), e)
+      if (hold.current.state !== 'idle') return
+    }
+
     if (palette.length > 0) {
       if (e.key === 'ArrowDown') {
         e.preventDefault()
@@ -240,6 +323,15 @@ export function Composer({
             if (history.browsing) history.reset()
           }}
           onKeyDown={onKeyDown}
+          onKeyUp={(e) => {
+            // Only the key, not the modifiers. Whether it was a plain space
+            // decided whether to start; by the time it comes up, Shift may have
+            // been let go first, and a release that failed to match would leave
+            // the machine listening with nothing to end it.
+            if (!dictation.enabled || e.key !== ' ') return
+            applyHold(hold.current.up(), e)
+          }}
+          onBlur={abandonHold}
         />
         <Mic dictation={dictation} />
         {streaming ? (

@@ -255,15 +255,6 @@ export interface WumpySettings {
    */
   voiceEnabled: boolean
   /**
-   * Whisper size. Measured on this machine against twelve synthesised
-   * sentences: tiny.en and base.en both landed at 8.9% word error, small.en at
-   * 6.9% - but small.en ran at 0.5x realtime, so a ten-second sentence took
-   * twenty seconds to transcribe. base.en is the default because tiny.en's
-   * equal score on clean speech says nothing about a real microphone, and it is
-   * still comfortably faster than speech.
-   */
-  voiceModel: string
-  /**
    * Send the transcript through the local model to punctuate it.
    *
    * The vocabulary table in shared/dictation.ts runs either way; this is only

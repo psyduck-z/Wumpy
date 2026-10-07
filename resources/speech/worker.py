@@ -37,7 +37,9 @@ def send(obj):
 
 
 def main():
-    size = os.environ.get("WUMPY_WHISPER_MODEL", "base.en")
+    # Fixed, not configurable. src/shared/dictation.ts holds the measurements
+    # that settled on this size; the variable is for overriding it by hand.
+    size = os.environ.get("WUMPY_WHISPER_MODEL") or "base.en"
     root = os.environ.get("WUMPY_WHISPER_MODELS") or None
 
     try:

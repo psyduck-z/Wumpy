@@ -22,12 +22,12 @@ export function Mic({ dictation }: { dictation: Dictation }): React.JSX.Element 
 
   const label =
     state === 'recording'
-      ? 'Listening - Ctrl+M or stop talking to finish, Esc to discard'
+      ? 'Listening - let go of the spacebar to finish, Esc to discard'
       : state === 'working'
         ? 'Transcribing'
         : state === 'loading'
           ? 'Loading the speech model'
-          : 'Dictate (Ctrl+M)'
+          : 'Talk - hold the spacebar, or Ctrl+M'
 
   return (
     <>
@@ -48,7 +48,7 @@ export function Mic({ dictation }: { dictation: Dictation }): React.JSX.Element 
 
       {(state === 'recording' || state === 'working' || state === 'loading' || detail) && (
         <div className={`mic-status${detail && state !== 'recording' ? ' mic-status-note' : ''}`}>
-          {state === 'recording' && <>Listening…</>}
+          {state === 'recording' && <>Listening… let go to send</>}
           {state === 'working' && <>Transcribing…</>}
           {state === 'loading' && <>Loading the speech model…</>}
           {state !== 'recording' && state !== 'working' && state !== 'loading' && detail && (

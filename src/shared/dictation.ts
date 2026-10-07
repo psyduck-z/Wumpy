@@ -19,6 +19,32 @@
  * those away rather than typing "Thank you." into the box.
  */
 
+/**
+ * The Whisper size, fixed rather than chosen.
+ *
+ * There is no setting for this because the measurements left nothing to decide.
+ * Twelve sentences, scored with en-US spelling and spoken numbers treated as
+ * correct, run both clean and again through pink noise and a 130-5800Hz band to
+ * sound like a laptop microphone in a room:
+ *
+ *            clean          noisy          speed (8 threads)
+ *   tiny.en  0 errors       1 error        5.1x realtime
+ *   base.en  0 errors       0 errors       2.7x realtime
+ *   small.en 0 errors       0 errors       0.8x realtime
+ *
+ * base.en is as accurate as the largest of them on everything measured, while
+ * small.en takes longer than the sentence did to say and tiny.en starts guessing
+ * once there is any noise. The accuracy that was available for free went into the
+ * vocabulary prompt, the silence trimming and the beam width instead.
+ *
+ * Twelve sentences in one synthesised voice cannot speak for every accent, and the
+ * published figures do put small.en ahead on harder audio - so WUMPY_WHISPER_MODEL
+ * still overrides this. It is an environment variable rather than a setting
+ * because choosing between them is not a choice this app should be asking anyone
+ * to make.
+ */
+export const WHISPER_MODEL = 'base.en'
+
 /** A spoken form and what it should have been, with the reason it is here. */
 interface Fix {
   from: RegExp

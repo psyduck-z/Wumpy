@@ -54,10 +54,10 @@ export const DEFAULT_SETTINGS: WumpySettings = {
   searchApiKey: '',
 
   tierModels: {},
-  // On, but the button only appears once a transcriber is actually found, so
-  // this is the switch for not wanting one rather than for not having one.
-  voiceEnabled: true,
-  voiceModel: 'base.en',
+  // Off until asked for with /voice. It is not only a microphone button: with it
+  // on, holding the spacebar means something, and the most-pressed key on the
+  // keyboard does not change behaviour because an app was installed.
+  voiceEnabled: false,
   voicePolish: true,
   voiceAutoStop: true,
 

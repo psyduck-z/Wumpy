@@ -16,6 +16,8 @@ export type DictationState =
 
 export interface Dictation {
   state: DictationState
+  /** True when the user has turned voice input on with /voice. */
+  enabled: boolean
   /** 0..1 input level, for the meter. */
   level: number
   /** Why it is unavailable, or what went wrong. */
@@ -26,6 +28,15 @@ export interface Dictation {
   polished: boolean
   /** Starts listening, or stops if it already is. */
   toggle(): void
+  /**
+   * Starts listening for as long as a key is held.
+   *
+   * No silence timeout: the release is the signal, so trailing off mid-thought
+   * does not cut the sentence short the way it would for the button.
+   */
+  beginHold(): void
+  /** Stops listening and transcribes what was said. */
+  finish(): void
   /** Throws away the recording in progress without transcribing it. */
   cancel(): void
   /** Clears the last error or transcript note. */
@@ -46,9 +57,20 @@ export function useDictation(onText: (text: string) => void, commands: string[])
   const [detail, setDetail] = useState<string | null>(null)
   const [heard, setHeard] = useState<string | null>(null)
   const [polished, setPolished] = useState(false)
+  const [on, setOn] = useState(false)
 
   const live = useRef<Recording | null>(null)
   const cancelled = useRef(false)
+  /**
+   * Whether the user still wants this recording.
+   *
+   * Starting is not instantaneous: the first time, the model has to load, and
+   * getUserMedia takes a moment after that. Nothing exists to stop during either
+   * await - so letting go of the spacebar in that window used to do nothing, and
+   * the recording then began on its own, unattended, with no silence timeout to
+   * end it. This is checked after every await instead.
+   */
+  const wanted = useRef(false)
   // Through refs, so starting a recording does not depend on a callback identity
   // that changes every time the conversation does.
   const textRef = useRef(onText)
@@ -90,6 +112,7 @@ export function useDictation(onText: (text: string) => void, commands: string[])
     const read = (s: { voiceEnabled: boolean; voiceAutoStop: boolean }): void => {
       enabled.current = s.voiceEnabled
       autoStop.current = s.voiceAutoStop
+      setOn(s.voiceEnabled)
       // Turning it off hides the button rather than disabling it, which is why
       // this leaves no detail behind: there is nothing wrong to explain.
       if (!s.voiceEnabled) {
@@ -111,7 +134,11 @@ export function useDictation(onText: (text: string) => void, commands: string[])
     }
   }, [apply])
 
-  const start = useCallback(async () => {
+  const start = useCallback(async (held: boolean) => {
+    // One at a time. The guards on `state` cannot catch a second call during the
+    // awaits below, because state is still 'idle' until the recorder exists.
+    if (wanted.current) return
+    wanted.current = true
     cancelled.current = false
     setHeard(null)
     setPolished(false)
@@ -120,7 +147,12 @@ export function useDictation(onText: (text: string) => void, commands: string[])
     // Loading base.en takes a second or two the first time, and recording before
     // it is ready would mean talking into a process that is not listening yet.
     const status = await window.wumpy.voice.start()
+    if (!wanted.current) {
+      setState('idle')
+      return
+    }
     if (status.kind !== 'ready') {
+      wanted.current = false
       apply(status)
       return
     }
@@ -130,11 +162,13 @@ export function useDictation(onText: (text: string) => void, commands: string[])
       setState('recording')
       recording = await record({
         onLevel: setLevel,
-        // Null means push-to-talk: Ctrl+M again to finish.
-        silenceMs: autoStop.current ? 1400 : null
+        // Held: the release ends it, so no silence timeout at all. Otherwise
+        // null means push-to-talk with Ctrl+M at both ends.
+        silenceMs: held ? null : autoStop.current ? 1400 : null
       })
     } catch (err) {
       // Almost always the microphone being refused, by Windows or by the user.
+      wanted.current = false
       setState('error')
       setDetail(
         err instanceof Error && /denied|not allowed|NotAllowed/i.test(err.message)
@@ -147,7 +181,12 @@ export function useDictation(onText: (text: string) => void, commands: string[])
     }
 
     live.current = recording
+    // Let go while the microphone was opening: end it now rather than recording
+    // into an empty room until the sixty-second ceiling.
+    if (!wanted.current) recording.stop()
+
     const clip = await recording.done
+    wanted.current = false
     live.current = null
     setLevel(0)
 
@@ -192,12 +231,22 @@ export function useDictation(onText: (text: string) => void, commands: string[])
       return
     }
     if (state === 'working' || state === 'loading') return
-    void start()
+    void start(false)
   }, [state, start])
 
+  const beginHold = useCallback(() => {
+    void start(true)
+  }, [start])
+
+  const finish = useCallback(() => {
+    wanted.current = false
+    live.current?.stop()
+  }, [])
+
   const cancel = useCallback(() => {
-    if (state !== 'recording') return
+    if (!wanted.current && state !== 'recording') return
     cancelled.current = true
+    wanted.current = false
     live.current?.stop()
   }, [state])
 
@@ -205,6 +254,7 @@ export function useDictation(onText: (text: string) => void, commands: string[])
   useEffect(() => {
     return () => {
       cancelled.current = true
+      wanted.current = false
       live.current?.stop()
     }
   }, [])
@@ -214,5 +264,5 @@ export function useDictation(onText: (text: string) => void, commands: string[])
     setHeard(null)
   }, [])
 
-  return { state, level, detail, heard, polished, toggle, cancel, dismiss }
+  return { state, enabled: on, level, detail, heard, polished, toggle, beginHold, finish, cancel, dismiss }
 }

@@ -71,7 +71,7 @@ export default function App(): React.JSX.Element {
 
   // Saved chats
   /** Which picker is open, if any. One list UI serves them all. */
-  const [picker, setPicker] = useState<null | 'command' | 'resume' | 'delete' | 'tier' | 'model' | 'dock' | 'speech' | 'engine'>(
+  const [picker, setPicker] = useState<null | 'command' | 'resume' | 'delete' | 'tier' | 'model' | 'dock' | 'engine'>(
     null
   )
   const [savedChats, setSavedChats] = useState<ChatSummary[]>([])
@@ -640,9 +640,6 @@ export default function App(): React.JSX.Element {
           setModels(await window.wumpy.ollama.models())
           setPicker('model')
           return
-        case 'speech':
-          setPicker('speech')
-          return
         case 'reasoning': {
           const show =
             action.show === 'toggle' ? !(settings?.showReasoning ?? false) : action.show
@@ -676,6 +673,17 @@ export default function App(): React.JSX.Element {
           setPicker('engine')
           return
         case 'voice': {
+          if (action.setting === 'on') {
+            const next = action.on === 'toggle' ? !settings?.voiceEnabled : action.on
+            await patch({ voiceEnabled: next })
+            chat.note(
+              next
+                ? 'Voice input on. **Hold the spacebar** for half a second and talk — let go to ' +
+                    'send it to the box. Ctrl+M does the same without holding.'
+                : 'Voice input off. The spacebar is just a spacebar again.'
+            )
+            return
+          }
           if (action.setting === 'polish') {
             const next = action.on === 'toggle' ? !settings?.voicePolish : action.on
             await patch({ voicePolish: next })
@@ -1193,51 +1201,6 @@ export default function App(): React.JSX.Element {
           meta: `${m.parameterSize || m.family}  ·  ${(m.size / 1e9).toFixed(1)} GB`,
           active: m.name === current
         }))
-      }
-    }
-
-    /**
-     * Whisper sizes, with the measurements rather than the names.
-     *
-     * "base.en" means nothing to anyone; "about as fast as you speak" does. The
-     * numbers are from twelve synthesised sentences on this machine, so they are
-     * a guide to the ranking rather than a promise about a particular microphone.
-     */
-    if (kind === 'speech') {
-      const SIZES = [
-        {
-          id: 'tiny.en',
-          title: 'Quick',
-          meta: 'tiny.en  ·  about 2x faster than speech  ·  75 MB'
-        },
-        {
-          id: 'base.en',
-          title: 'Balanced',
-          meta: 'base.en  ·  keeps up with speech  ·  150 MB'
-        },
-        {
-          id: 'small.en',
-          title: 'Careful',
-          meta: 'small.en  ·  slower than speech, best on accents  ·  480 MB'
-        }
-      ]
-      return {
-        heading: 'Transcription',
-        placeholder: 'Filter…',
-        onClose: close,
-        onPick: (id) => {
-          void patch({ voiceModel: id })
-          const picked = SIZES.find((s) => s.id === id)
-          chat.note(
-            `Dictation will use \`${id}\`.` +
-              (id === 'small.en'
-                ? ' It downloads on first use and takes longer than the sentence did to say.'
-                : ' It downloads on first use.')
-          )
-          void picked
-          close()
-        },
-        items: SIZES.map((s) => ({ ...s, active: s.id === settings?.voiceModel }))
       }
     }
 
