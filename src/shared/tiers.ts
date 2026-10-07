@@ -30,6 +30,11 @@ const DECIDE = [
   'status) over hunting the filesystem. Real paths only, never a placeholder.',
   'Only use subcommands you are certain exist. If unsure, run the tool’s --help',
   'rather than guessing a name. Always include the # line, every time.',
+  'Get-Command only finds things on PATH. To check whether an APPLICATION is',
+  'installed, search the uninstall registry instead:',
+  'Get-ItemProperty HKLM:\\Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\*,',
+  'HKLM:\\Software\\WOW6432Node\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\* |',
+  "Where-Object DisplayName -like '*name*' | Select-Object DisplayName, DisplayVersion",
   'A block holds a command and nothing else — never a sentence or a refusal.'
 ].join(String.fromCharCode(10))
 

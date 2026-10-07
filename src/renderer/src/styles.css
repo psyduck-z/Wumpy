@@ -675,7 +675,16 @@ body {
   user-select: text;
 }
 
-[data-theme='light'] .cmd-body { color: #e6edf3; }
+/*
+ * Commands get the same dark slab as fenced code in both themes. The light
+ * theme previously set light text on the light `--code-bg`, which made the
+ * command invisible — the one thing on the card the user must be able to read
+ * before approving it.
+ */
+[data-theme='light'] .cmd-body {
+  background: #15181e;
+  color: #e6edf3;
+}
 
 .cmd-output {
   border-top: 1px solid rgb(var(--border));

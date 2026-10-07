@@ -562,6 +562,20 @@ on scratchpad per question and never reached a conclusion. Depth now comes from
 a bigger non-reasoning model instead — `qwen2.5:7b` answers the bat-and-ball
 question correctly in 12 s with no scratchpad at all, where qwen3:4b took 92 s.
 
+### "Is X installed" is two different questions
+
+`Get-Command firefox` reports nothing, because `Get-Command` searches PATH and
+Firefox is not on it — but Firefox is installed. The model had copied the
+`Get-Command ollama` example from its own instructions and applied it to an
+application, and confidently answered "Firefox is not installed."
+
+The prompt now distinguishes the two: `Get-Command` for command-line tools, and
+the uninstall registry for applications. Verified on this machine, the registry
+query returns `Mozilla Firefox (x64 en-US) 155.0.1`, and it is read-only so Fast
+can run it. Asked about Firefox and Chrome the model now reaches for the
+registry, and still uses `Get-Command` for Ollama, which is the right call for a
+CLI tool.
+
 ### Teaching a small model when *not* to act
 
 Getting phi4-mini to propose a command only when it should took measuring, not
