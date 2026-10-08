@@ -427,6 +427,7 @@ export const IPC = {
   voiceStatusChanged: 'voice:status-changed',
   voiceStart: 'voice:start',
   voiceTranscribe: 'voice:transcribe',
+  voiceTidy: 'voice:tidy',
   linkOpen: 'link:open',
   linkCheck: 'link:check',
   linkSearch: 'link:search',

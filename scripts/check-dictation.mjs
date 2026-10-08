@@ -58,11 +58,19 @@ const tidy = (text) => tidyTranscript(text, { commands: COMMANDS })
 check('the app name', tidy('open wimpy and ask it'), 'Open Wumpy and ask it')
 check('the app name, other spelling', tidy('is whimpy running'), 'Is Wumpy running')
 check('Ollama split in two', tidy('ask a llama to do it'), 'Ask Ollama to do it')
-check('Ollama as base.en heard it', tidy('ask Olimit to summarize this'), 'Ask Ollama to summarize this')
+check(
+  'Ollama as base.en heard it',
+  tidy('ask Olimit to summarize this'),
+  'Ask Ollama to summarize this'
+)
 check('Ollama, the other one', tidy('Ask Olima to summarize'), 'Ask Ollama to summarize')
 check('a model name', tidy('use fee four mini for this'), 'Use phi4-mini for this')
 check('another model name', tidy('switch to quen two five'), 'Switch to qwen2.5')
-check('tier next to a tier name', tidy('switch to the deep tear and try again'), 'Switch to the deep tier and try again')
+check(
+  'tier next to a tier name',
+  tidy('switch to the deep tear and try again'),
+  'Switch to the deep tier and try again'
+)
 check('tier before a noun', tidy('open the tear list'), 'Open the tier list')
 
 /**
@@ -70,7 +78,11 @@ check('tier before a noun', tidy('open the tear list'), 'Open the tier list')
  * are the sentences a broad rule would have ruined.
  */
 check('a tear is still a tear', tidy('there is a tear in the file'), 'There is a tear in the file')
-check('and so is crying', tidy('that nearly brought a tear to my eye'), 'That nearly brought a tear to my eye')
+check(
+  'and so is crying',
+  tidy('that nearly brought a tear to my eye'),
+  'That nearly brought a tear to my eye'
+)
 check('a llama is still a llama', tidy('draw a llama wearing a hat'), 'Draw a llama wearing a hat')
 
 /* ---------------------------------------------------------------- file names */
@@ -85,7 +97,11 @@ check('a real pie is untouched', tidy('find a recipe for apple pie'), 'Find a re
 
 check('a spoken slash command', tidy('slash also call it hello'), '/also call it hello')
 check('slash misheard as flash', tidy('flash tier'), '/tier')
-check('the bare word at the start', tidy('also it should print the date'), '/also it should print the date')
+check(
+  'the bare word at the start',
+  tidy('also it should print the date'),
+  '/also it should print the date'
+)
 
 /**
  * Only names nobody says by accident get the bare-word treatment. "stop that
@@ -93,7 +109,11 @@ check('the bare word at the start', tidy('also it should print the date'), '/als
  * the user did not ask for - the one failure in this file that would actually
  * do something.
  */
-check('a command name that is also a word', tidy('stop that and come back'), 'Stop that and come back')
+check(
+  'a command name that is also a word',
+  tidy('stop that and come back'),
+  'Stop that and come back'
+)
 check('and another', tidy('new file in my music folder'), 'New file in my music folder')
 
 /* ---------------------------------------------- what Whisper does to silence */
@@ -124,7 +144,11 @@ for (const run of recorded) {
     const after = tidy(heard)
     // Capitalisation and the trailing full stop are Whisper's own; the layer is
     // allowed to leave them be but not to alter the words.
-    const words = (t) => t.toLowerCase().replace(/[^a-z0-9/.\- ]/g, '').trim()
+    const words = (t) =>
+      t
+        .toLowerCase()
+        .replace(/[^a-z0-9/.\- ]/g, '')
+        .trim()
     if (words(after) !== words(heard)) {
       changed++
       // A change is only a fault if it moved away from what was said.
@@ -177,27 +201,67 @@ for (const { said, heard } of noPrompt.rows) {
   if (after < before) closer.push({ heard, fixed: tidy(heard), before, after })
 }
 check('the table repairs what the prompt would have', closer.length >= 2, true)
-for (const r of closer) console.log(`       ${r.heard}\n    -> ${r.fixed}   (${r.before} wrong -> ${r.after})`)
+for (const r of closer)
+  console.log(`       ${r.heard}\n    -> ${r.fixed}   (${r.before} wrong -> ${r.after})`)
 
 /* -------------------------------------------------------------- polish guard */
 
 const raw = 'make a python file in my music folder that prints the time'
 
-check('punctuation is accepted', polishAcceptable(raw, 'Make a Python file in my music folder that prints the time.'), true)
+check(
+  'punctuation is accepted',
+  polishAcceptable(raw, 'Make a Python file in my music folder that prints the time.'),
+  true
+)
 check('an unchanged line is accepted', polishAcceptable(raw, raw), true)
-check('numbers may collapse', polishAcceptable('there are two hundred and fourteen files', 'There are 214 files.'), true)
+check(
+  'numbers may collapse',
+  polishAcceptable('there are two hundred and fourteen files', 'There are 214 files.'),
+  true
+)
 
 // Everything a model does instead of punctuating.
-check('an answer is refused', polishAcceptable(raw, 'Sure! Here is a Python file that prints the time.'), false)
-check('a preamble is refused', polishAcceptable(raw, "Here's the corrected transcript: make a python file"), false)
+check(
+  'an answer is refused',
+  polishAcceptable(raw, 'Sure! Here is a Python file that prints the time.'),
+  false
+)
+check(
+  'a preamble is refused',
+  polishAcceptable(raw, "Here's the corrected transcript: make a python file"),
+  false
+)
 check('a code block is refused', polishAcceptable(raw, '```python\nprint(1)\n```'), false)
-check('a quoted restatement is refused', polishAcceptable(raw, '"Make a Python file in my music folder that prints the time."'), false)
+check(
+  'a quoted restatement is refused',
+  polishAcceptable(raw, '"Make a Python file in my music folder that prints the time."'),
+  false
+)
 check('an empty reply is refused', polishAcceptable(raw, '   '), false)
-check('a commentary is refused', polishAcceptable(raw, 'It looks like you want to create a file.'), false)
-check('extra lines are refused', polishAcceptable(raw, 'Make a Python file.\nIt should print the time.'), false)
-check('a rewrite is refused', polishAcceptable(raw, 'Generate a script that outputs the current timestamp.'), false)
+check(
+  'a commentary is refused',
+  polishAcceptable(raw, 'It looks like you want to create a file.'),
+  false
+)
+check(
+  'extra lines are refused',
+  polishAcceptable(raw, 'Make a Python file.\nIt should print the time.'),
+  false
+)
+check(
+  'a rewrite is refused',
+  polishAcceptable(raw, 'Generate a script that outputs the current timestamp.'),
+  false
+)
 check('a truncation is refused', polishAcceptable(raw, 'Make a Python file.'), false)
-check('an expansion is refused', polishAcceptable(raw, 'Make a Python file in my music folder that prints the current time of day for me please now'), false)
+check(
+  'an expansion is refused',
+  polishAcceptable(
+    raw,
+    'Make a Python file in my music folder that prints the current time of day for me please now'
+  ),
+  false
+)
 
 /**
  * The prompt and the guard have to agree: anything the model is told to do must
@@ -232,13 +296,30 @@ check('Wumpy and Ollama are in that vocabulary', /Wumpy, Ollama/.test(worker), t
 check('int8, because this app only has the CPU', /compute_type="int8"/.test(worker), true)
 
 const main = readFileSync('src/main/index.ts', 'utf8')
-const handler = main.slice(main.indexOf('IPC.voiceTranscribe'), main.indexOf('IPC.searchRun'))
+/**
+ * From the shared pipeline to the next unrelated handler.
+ *
+ * It used to start at IPC.voiceTranscribe, because everything after Whisper
+ * lived inline in that one handler. It does not any more: dictation is
+ * transcribed in pieces while the user speaks, so the cleanup has to be
+ * reachable for text as well as for a clip, and it moved into
+ * finishTranscript. The guarantees below are about that pipeline wherever it
+ * lives, so the window follows it.
+ */
+const handler = main.slice(
+  main.indexOf('async function finishTranscript'),
+  main.indexOf('IPC.searchRun')
+)
 
 check('the table runs on every transcript', /tidyTranscript\(heard/.test(handler), true)
 // The polish pass is the only part that can invent text, so it may never be
 // returned without having been checked first.
 check('polish is never used unguarded', /polishAcceptable\(tidied, polished\)/.test(handler), true)
-check('and a refusal falls back to the raw text', /accepted \? polished!\.trim\(\) : tidied/.test(handler), true)
+check(
+  'and a refusal falls back to the raw text',
+  /accepted \? polished!\.trim\(\) : tidied/.test(handler),
+  true
+)
 
 /**
  * The line this feature must not cross. Dictation fills the box; the user sends
@@ -252,9 +333,134 @@ check('the panel closing releases the microphone', /live\.current\?\.stop\(\)/.t
 check('a refused microphone is explained', /Privacy - Microphone/.test(hook), true)
 
 const panel = readFileSync('src/main/panel.ts', 'utf8')
-const perms = panel.slice(panel.indexOf('setPermissionRequestHandler'), panel.indexOf("'screen-saver'"))
+const perms = panel.slice(
+  panel.indexOf('setPermissionRequestHandler'),
+  panel.indexOf("'screen-saver'")
+)
 check('audio is the only permission granted', /permission !== 'media'/.test(perms), true)
 check('and only to our own page', /own\) return done\(false\)/.test(perms), true)
+
+/* --------------------------------- transcribing while you are still talking */
+
+// The whole clip used to go to Whisper when the user let go, so the wait grew
+// with how much had been said - and all of it landed after the talking
+// stopped, which is the worst moment for it. Pieces are cut at the pauses
+// instead, and where that cut falls is the whole question.
+const recOut = join(process.cwd(), '.dictation-rec.mjs')
+await build({
+  entryPoints: ['src/renderer/src/recorder.ts'],
+  bundle: true,
+  platform: 'node',
+  format: 'esm',
+  outfile: recOut,
+  logLevel: 'error'
+})
+const R = await import(pathToFileURL(recOut).href)
+rmSync(recOut, { force: true })
+
+const BASE = { pauseMs: 650, minMs: 1200, maxMs: 14_000 }
+const rotate = (o) => R.shouldRotate({ ...BASE, ...o })
+
+// Silence is what Whisper invents "Thank you." over, so a piece with nothing
+// in it is never cut loose.
+check(
+  'silence alone never starts a piece',
+  rotate({ heardSpeechInSegment: false, segmentMs: 9000, sinceSpeechMs: 9000 }),
+  false
+)
+check(
+  'not even past the ceiling',
+  rotate({ heardSpeechInSegment: false, segmentMs: 20_000, sinceSpeechMs: 20_000 }),
+  false
+)
+
+// Whisper is far worse on a fragment than on a phrase.
+check(
+  'a pause after one word is too early',
+  rotate({ heardSpeechInSegment: true, segmentMs: 700, sinceSpeechMs: 650 }),
+  false
+)
+check(
+  'just under the floor still waits',
+  rotate({ heardSpeechInSegment: true, segmentMs: 1199, sinceSpeechMs: 900 }),
+  false
+)
+check(
+  'at the floor, a pause cuts',
+  rotate({ heardSpeechInSegment: true, segmentMs: 1200, sinceSpeechMs: 650 }),
+  true
+)
+
+// The good cut: nothing is lost across it because nothing was being said.
+check(
+  'a breath between sentences cuts',
+  rotate({ heardSpeechInSegment: true, segmentMs: 4000, sinceSpeechMs: 700 }),
+  true
+)
+check(
+  'a short gap mid-sentence does not',
+  rotate({ heardSpeechInSegment: true, segmentMs: 4000, sinceSpeechMs: 200 }),
+  false
+)
+check(
+  'nor does talking straight through',
+  rotate({ heardSpeechInSegment: true, segmentMs: 9000, sinceSpeechMs: 0 }),
+  false
+)
+
+// The fallback, for someone who does not pause at all.
+check(
+  'the ceiling cuts without a pause',
+  rotate({ heardSpeechInSegment: true, segmentMs: 14_000, sinceSpeechMs: 0 }),
+  true
+)
+check(
+  'and beats the pause rule',
+  rotate({ heardSpeechInSegment: true, segmentMs: 30_000, sinceSpeechMs: 0 }),
+  true
+)
+check(
+  'but never beats the silence rule',
+  rotate({ heardSpeechInSegment: false, segmentMs: 30_000, sinceSpeechMs: 0 }),
+  false
+)
+
+// A piece ends the recording, not just the piece: the pause that cuts must be
+// shorter than the one that stops, or a cut could never happen on auto-stop.
+check('the cut pause is shorter than the stop pause', BASE.pauseMs < 1400, true)
+
+const rec = readFileSync('src/renderer/src/recorder.ts', 'utf8')
+// A webm stream is a container: the header is in the first chunk only, so
+// slicing one recorder's output does not give a decodable file.
+check(
+  'each piece is its own recorder',
+  rec.includes('new MediaRecorder(stream, { mimeType: format.mime })'),
+  true
+)
+check(
+  'the microphone is never released between them',
+  !/getUserMedia/.test(rec.split('const rotate')[1] ?? ''),
+  true
+)
+check('the whole clip is kept as well', rec.includes('const all: Blob[] = []'), true)
+check(
+  'a silent tail is flagged rather than transcribed',
+  rec.includes('silent: !heardInSegment'),
+  true
+)
+check('and the last piece always says so', rec.includes('final: true'), true)
+
+const dictationHook = readFileSync('src/renderer/src/hooks/useDictation.ts', 'utf8')
+// One worker holding one model: overlapping requests would queue inside it
+// anyway, and keeping the queue here means the order is ours.
+check('pieces are transcribed one at a time', dictationHook.includes('chain = chain.then'), true)
+check('and reassembled in order', dictationHook.includes('sort((a, b) => a[0] - b[0])'), true)
+check(
+  'a failed piece falls back to the whole clip',
+  /if \(!missing\)\s+joined/.test(dictationHook),
+  true
+)
+check('the joined text still gets the cleanup', dictationHook.includes('voice.tidy'), true)
 
 console.log(`\n${failed === 0 ? 'all' : `${failed} FAILED of`} dictation checks`)
 process.exit(failed === 0 ? 0 : 1)

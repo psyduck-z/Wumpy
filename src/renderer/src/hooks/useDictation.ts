@@ -62,6 +62,16 @@ export function useDictation(onText: (text: string) => void, commands: string[])
   const live = useRef<Recording | null>(null)
   const cancelled = useRef(false)
   /**
+   * Pieces transcribed while the user was still talking, by position.
+   *
+   * Held in a ref rather than state because nothing renders from it: it is
+   * assembled once the recording ends and then thrown away.
+   */
+  const segmentsRef = useRef<{
+    partials: Map<number, string>
+    settled: () => Promise<void>
+  } | null>(null)
+  /**
    * Whether the user still wants this recording.
    *
    * Starting is not instantaneous: the first time, the model has to load, and
@@ -134,96 +144,180 @@ export function useDictation(onText: (text: string) => void, commands: string[])
     }
   }, [apply])
 
-  const start = useCallback(async (held: boolean) => {
-    // One at a time. The guards on `state` cannot catch a second call during the
-    // awaits below, because state is still 'idle' until the recorder exists.
-    if (wanted.current) return
-    wanted.current = true
-    cancelled.current = false
-    setHeard(null)
-    setPolished(false)
-    setDetail(null)
+  const start = useCallback(
+    async (held: boolean) => {
+      // One at a time. The guards on `state` cannot catch a second call during the
+      // awaits below, because state is still 'idle' until the recorder exists.
+      if (wanted.current) return
+      wanted.current = true
+      cancelled.current = false
+      setHeard(null)
+      setPolished(false)
+      setDetail(null)
 
-    // Loading base.en takes a second or two the first time, and recording before
-    // it is ready would mean talking into a process that is not listening yet.
-    const status = await window.wumpy.voice.start()
-    if (!wanted.current) {
-      setState('idle')
-      return
-    }
-    if (status.kind !== 'ready') {
-      wanted.current = false
-      apply(status)
-      return
-    }
-
-    let recording: Recording
-    try {
-      setState('recording')
-      recording = await record({
-        onLevel: setLevel,
-        // Held: the release ends it, so no silence timeout at all. Otherwise
-        // null means push-to-talk with Ctrl+M at both ends.
-        silenceMs: held ? null : autoStop.current ? 1400 : null
-      })
-    } catch (err) {
-      // Almost always the microphone being refused, by Windows or by the user.
-      wanted.current = false
-      setState('error')
-      setDetail(
-        err instanceof Error && /denied|not allowed|NotAllowed/i.test(err.message)
-          ? 'Windows did not allow the microphone. Check Settings - Privacy - Microphone.'
-          : err instanceof Error
-            ? err.message
-            : 'Could not start recording.'
-      )
-      return
-    }
-
-    live.current = recording
-    // Let go while the microphone was opening: end it now rather than recording
-    // into an empty room until the sixty-second ceiling.
-    if (!wanted.current) recording.stop()
-
-    const clip = await recording.done
-    wanted.current = false
-    live.current = null
-    setLevel(0)
-
-    if (cancelled.current) {
-      setState('idle')
-      return
-    }
-    if (!clip) {
-      setState('idle')
-      setDetail('Did not hear anything.')
-      return
-    }
-
-    setState('working')
-    try {
-      const buffer = await clip.blob.arrayBuffer()
-      const result = await window.wumpy.voice.transcribe(buffer, clip.extension, commandsRef.current)
-      setState('idle')
-      setHeard(result.heard || null)
-      setPolished(result.polished)
-
-      if (!result.text) {
-        setDetail(result.heard ? 'Only heard noise.' : 'Did not hear anything.')
+      // Loading base.en takes a second or two the first time, and recording before
+      // it is ready would mean talking into a process that is not listening yet.
+      const status = await window.wumpy.voice.start()
+      if (!wanted.current) {
+        setState('idle')
         return
       }
-      // A low score usually means a word or two is wrong rather than the whole
-      // sentence, so the text still goes in - with a note, because silently
-      // presenting a guess as a transcript is the thing to avoid.
-      if (result.confidence > 0 && result.confidence < 0.4) {
-        setDetail('That was hard to make out - worth a read before sending.')
+      if (status.kind !== 'ready') {
+        wanted.current = false
+        apply(status)
+        return
       }
-      textRef.current(result.text)
-    } catch (err) {
-      setState('error')
-      setDetail(err instanceof Error ? err.message : 'Could not transcribe that.')
-    }
-  }, [apply])
+
+      let recording: Recording
+      try {
+        setState('recording')
+        /**
+         * Each pause closes a piece, and each piece is transcribed while the
+         * next is still being spoken.
+         *
+         * The whole clip used to go to Whisper when the user let go, so the
+         * wait was proportional to how much had been said - and all of it
+         * landed after the talking stopped, which is the worst possible moment
+         * for it. Now a long dictation is mostly transcribed before the last
+         * word, and what is left to do at the end is one phrase.
+         *
+         * Pieces are transcribed one at a time rather than all at once. The
+         * transcriber is a single worker holding one model, so overlapping
+         * requests would queue inside it anyway, and keeping the queue here
+         * means the order is ours to guarantee.
+         */
+        const partials = new Map<number, string>()
+        let chain: Promise<void> = Promise.resolve()
+
+        recording = await record({
+          onLevel: setLevel,
+          // Held: the release ends it, so no silence timeout at all. Otherwise
+          // null means push-to-talk with Ctrl+M at both ends.
+          silenceMs: held ? null : autoStop.current ? 1400 : null,
+          onSegment: (seg) => {
+            // Nothing but room tone, which is what Whisper hallucinates over.
+            if (seg.silent || seg.blob.size === 0) return
+            chain = chain.then(async () => {
+              if (cancelled.current) return
+              try {
+                const buffer = await seg.blob.arrayBuffer()
+                const part = await window.wumpy.voice.transcribe(
+                  buffer,
+                  seg.extension,
+                  commandsRef.current
+                )
+                if (part.heard?.trim()) partials.set(seg.index, part.heard.trim())
+              } catch {
+                // A piece that will not transcribe is not fatal: the whole clip
+                // is kept and the end falls back to transcribing that instead.
+                partials.set(seg.index, '')
+              }
+            })
+          }
+        })
+        segmentsRef.current = { partials, settled: () => chain }
+      } catch (err) {
+        // Almost always the microphone being refused, by Windows or by the user.
+        wanted.current = false
+        setState('error')
+        setDetail(
+          err instanceof Error && /denied|not allowed|NotAllowed/i.test(err.message)
+            ? 'Windows did not allow the microphone. Check Settings - Privacy - Microphone.'
+            : err instanceof Error
+              ? err.message
+              : 'Could not start recording.'
+        )
+        return
+      }
+
+      live.current = recording
+      // Let go while the microphone was opening: end it now rather than recording
+      // into an empty room until the sixty-second ceiling.
+      if (!wanted.current) recording.stop()
+
+      const clip = await recording.done
+      wanted.current = false
+      live.current = null
+      setLevel(0)
+
+      if (cancelled.current) {
+        setState('idle')
+        return
+      }
+      if (!clip) {
+        setState('idle')
+        setDetail('Did not hear anything.')
+        return
+      }
+
+      setState('working')
+      try {
+        /**
+         * Wait for the pieces, then assemble - or fall back to the whole clip.
+         *
+         * Most of the work is already done by now; this is usually the last
+         * phrase finishing. Falling back matters because a piece can fail on
+         * its own (a truncated container, a worker restart) and the complete
+         * recording is always kept, so one bad piece costs a little time
+         * rather than the dictation.
+         */
+        const pieces = segmentsRef.current
+        segmentsRef.current = null
+        let joined = ''
+        if (pieces) {
+          await pieces.settled()
+          const inOrder = [...pieces.partials.entries()].sort((a, b) => a[0] - b[0])
+          const missing = inOrder.some(([, text]) => text === '')
+          if (!missing)
+            joined = inOrder
+              .map(([, text]) => text)
+              .join(' ')
+              .trim()
+        }
+
+        if (cancelled.current) {
+          setState('idle')
+          return
+        }
+
+        /**
+         * The joined text still goes through the transcriber's own tidying.
+         *
+         * Vocabulary fixes, the noise filter and the polish pass all live
+         * behind this call, and a sentence assembled from pieces needs them as
+         * much as one clip did - more, since the seams are where a capital or
+         * a full stop goes missing. Passing text instead of audio skips Whisper
+         * and keeps everything after it.
+         */
+        const result = joined
+          ? await window.wumpy.voice.tidy(joined, commandsRef.current)
+          : await window.wumpy.voice.transcribe(
+              await clip.blob.arrayBuffer(),
+              clip.extension,
+              commandsRef.current
+            )
+        setState('idle')
+        setHeard(result.heard || null)
+        setPolished(result.polished)
+
+        if (!result.text) {
+          setDetail(result.heard ? 'Only heard noise.' : 'Did not hear anything.')
+          return
+        }
+        // A low score usually means a word or two is wrong rather than the whole
+        // sentence, so the text still goes in - with a note, because silently
+        // presenting a guess as a transcript is the thing to avoid.
+        if (result.confidence > 0 && result.confidence < 0.4) {
+          setDetail('That was hard to make out - worth a read before sending.')
+        }
+        textRef.current(result.text)
+      } catch (err) {
+        setState('error')
+        setDetail(err instanceof Error ? err.message : 'Could not transcribe that.')
+      }
+    },
+    [apply]
+  )
 
   const toggle = useCallback(() => {
     if (state === 'recording') {
@@ -264,5 +358,17 @@ export function useDictation(onText: (text: string) => void, commands: string[])
     setHeard(null)
   }, [])
 
-  return { state, enabled: on, level, detail, heard, polished, toggle, beginHold, finish, cancel, dismiss }
+  return {
+    state,
+    enabled: on,
+    level,
+    detail,
+    heard,
+    polished,
+    toggle,
+    beginHold,
+    finish,
+    cancel,
+    dismiss
+  }
 }

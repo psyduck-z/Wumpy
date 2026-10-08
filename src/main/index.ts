@@ -704,74 +704,78 @@ function registerIpc(): void {
    * result goes into the box, never straight to the model - dictation is typing,
    * and a mis-heard sentence has to be as easy to correct as a mistyped one.
    */
+  /**
+   * Everything after Whisper: vocabulary, noise, and the optional polish.
+   *
+   * Shared by the two ways a transcript arrives - a clip, or text already
+   * assembled from pieces transcribed while the user was still speaking.
+   */
+  async function finishTranscript(
+    heard: string,
+    commands: string[],
+    confidence: number,
+    ms: number
+  ): Promise<{
+    text: string
+    heard: string
+    polished: boolean
+    polishRefused: boolean
+    confidence: number
+    ms: number
+  }> {
+    const bare = { text: '', heard, polished: false, polishRefused: false, confidence, ms }
+
+    // The command list comes from the panel, which owns it, so a command added
+    // later is dictatable without this file having to hear about it.
+    const tidied = tidyTranscript(heard, { commands })
+    if (!tidied) return bare
+    if (!settings.get('voicePolish')) return { ...bare, text: tidied }
+
+    // The quickest installed model, for the same reason titles use it: the
+    // user is waiting to read this and press Enter.
+    const model = backgroundModel()
+    if (!model) return { ...bare, text: tidied }
+
+    const polished = await ollama.complete(
+      model,
+      [
+        { role: 'system', content: POLISH_PROMPT },
+        { role: 'user', content: tidied }
+      ],
+      { keepAlive: settings.get('keepAlive'), numPredict: 120, numCtx: NUM_CTX }
+    )
+
+    const accepted = polished !== null && polishAcceptable(tidied, polished)
+    if (polished !== null && !accepted) {
+      console.warn(`[wumpy] polish refused: ${JSON.stringify(polished.slice(0, 120))}`)
+    }
+    return {
+      ...bare,
+      text: accepted ? polished!.trim() : tidied,
+      polished: accepted,
+      polishRefused: polished !== null && !accepted
+    }
+  }
+
   ipcMain.handle(
     IPC.voiceTranscribe,
     async (_e, req: { audio: ArrayBuffer; extension?: string; commands?: string[] }) => {
       const clip = await speech.transcribe(new Uint8Array(req.audio), req.extension ?? 'webm')
-
-      const heard = clip.text.trim()
-      // The command list comes from the panel, which owns it, so a command added
-      // later is dictatable without this file having to hear about it.
-      const tidied = tidyTranscript(heard, { commands: req.commands ?? [] })
-      if (!tidied) {
-        return {
-          text: '',
-          heard,
-          polished: false,
-          polishRefused: false,
-          confidence: clip.confidence,
-          ms: clip.ms
-        }
-      }
-
-      if (!settings.get('voicePolish')) {
-        return {
-          text: tidied,
-          heard,
-          polished: false,
-          polishRefused: false,
-          confidence: clip.confidence,
-          ms: clip.ms
-        }
-      }
-
-      // The quickest installed model, for the same reason titles use it: the user
-      // is waiting to read this and press Enter.
-      const model = backgroundModel()
-      if (!model) {
-        return {
-          text: tidied,
-          heard,
-          polished: false,
-          polishRefused: false,
-          confidence: clip.confidence,
-          ms: clip.ms
-        }
-      }
-
-      const polished = await ollama.complete(
-        model,
-        [
-          { role: 'system', content: POLISH_PROMPT },
-          { role: 'user', content: tidied }
-        ],
-        { keepAlive: settings.get('keepAlive'), numPredict: 120, numCtx: NUM_CTX }
-      )
-
-      const accepted = polished !== null && polishAcceptable(tidied, polished)
-      if (polished !== null && !accepted) {
-        console.warn(`[wumpy] polish refused: ${JSON.stringify(polished.slice(0, 120))}`)
-      }
-
-      return {
-        text: accepted ? polished!.trim() : tidied,
-        heard,
-        polished: accepted,
-        polishRefused: polished !== null && !accepted,
-        confidence: clip.confidence,
-        ms: clip.ms
-      }
+      return finishTranscript(clip.text.trim(), req.commands ?? [], clip.confidence, clip.ms)
     }
+  )
+
+  /**
+   * The same cleanup, for text that has already been through Whisper.
+   *
+   * Dictation is transcribed in pieces as it is spoken, so by the time the
+   * user stops there is a string rather than a clip. It still needs the
+   * vocabulary fixes, the noise filter and the polish pass - more than one
+   * clip did, because the seams between pieces are where a capital or a full
+   * stop goes missing. This is that half of the pipeline on its own.
+   */
+  ipcMain.handle(IPC.voiceTidy, async (_e, req: { text: string; commands?: string[] }) =>
+    finishTranscript((req.text ?? '').trim(), req.commands ?? [], 1, 0)
   )
 
   /**
