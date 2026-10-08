@@ -78,7 +78,9 @@ for (const [command, tierTools, mode, want] of CASES) {
 const bypass = judge(RISKY, { tierTools: 'full', mode: 'all', confirmRisky: false })
 const ok = bypass.auto === true
 if (!ok) failed++
-console.log(`${ok ? 'ok  ' : 'FAIL'} destructive + confirmRisky:false in "all" -> ${outcome(bypass)}`)
+console.log(
+  `${ok ? 'ok  ' : 'FAIL'} destructive + confirmRisky:false in "all" -> ${outcome(bypass)}`
+)
 
 /* ------------------------------------------------- bypass attempts ------- */
 
@@ -134,6 +136,19 @@ const MUST_ALLOW = [
   'dotnet --list-sdks',
   'find . -name "*.ts"',
   'Get-ChildItem -Path . -File',
+  // "Open Spotify" has to find out whether Spotify is installed before it can
+  // choose between launching the app and opening the website, and a Quick
+  // tier should be able to answer that. Get-AppxPackage was missing, so the
+  // uninstall registry was searchable and Store apps - where half the
+  // consumer apps on Windows live - were not.
+  'Get-AppxPackage *spotify*',
+  'Get-StartApps',
+  // The aliases people and models actually type. Each is the exact cmdlet
+  // already on the list, so refusing them was a difference in spelling.
+  'Get-AppxPackage | Select Name',
+  'Get-ChildItem | Sort Name',
+  'Get-Process | Measure',
+  'gci | Select Name',
   'Get-Command ollama -ErrorAction SilentlyContinue',
   'systeminfo',
   'Test-Path C:/Windows',
@@ -153,10 +168,30 @@ for (const c of MUST_ALLOW) {
     console.log(`FAIL refuses a harmless read: ${c}`)
   }
 }
-console.log(`ok   ${MUST_BLOCK.length} unsafe commands need a click, ${MUST_ALLOW.length} reads do not`)
+console.log(
+  `ok   ${MUST_BLOCK.length} unsafe commands need a click, ${MUST_ALLOW.length} reads do not`
+)
 
 rmSync(out, { force: true })
 
-const total = CASES.length + 1 + MUST_BLOCK.length + MUST_ALLOW.length
+/* Launching an app changes nothing on disk, but it is still an action and
+   still needs a Developer tier. Removing one certainly does. */
+for (const c of [
+  'Start-Process spotify',
+  'Start-Process "spotify:"',
+  'Remove-AppxPackage x',
+  // Allowing the aliases must not allow a script block smuggled through one.
+  'Get-ChildItem | Select { Remove-Item C:/t -Recurse -Force }',
+  'gci | Sort { Remove-Item C:/t -Recurse -Force }'
+]) {
+  if (isReadOnly(c)) {
+    failed++
+    console.log(`FAIL treats an action as a read: ${c}`)
+  } else {
+    console.log(`ok   still needs Developer mode: ${c}`)
+  }
+}
+
+const total = CASES.length + 1 + MUST_BLOCK.length + MUST_ALLOW.length + 5
 console.log(`\n${total - failed}/${total} approval checks correct`)
 process.exit(failed === 0 ? 0 : 1)

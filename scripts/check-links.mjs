@@ -303,5 +303,55 @@ check(
   'electron'
 )
 
+/* --------------------------------- opening an app is not opening a site */
+
+// "Open Spotify" means the app if it is installed and the website if it is
+// not, and nothing here can tell which without looking. The model used to
+// pick one silently, so the user had no way to know whether it had checked.
+//
+// Measured on gemini-3.1-flash-lite after adding this: 4/4 asked for a check
+// when given an app name and went straight to the page for github.com, and
+// 3/3 branched correctly on the result - including treating
+// "DolbyDigitalPlusDecoder" as not a match for "git".
+const tiersOut = join(process.cwd(), '.links-tiers.mjs')
+await build({
+  entryPoints: ['src/shared/tiers.ts'],
+  bundle: true,
+  platform: 'node',
+  format: 'esm',
+  outfile: tiersOut,
+  logLevel: 'error'
+})
+const T = await import(pathToFileURL(tiersOut).href)
+rmSync(tiersOut, { force: true })
+
+check(
+  'the prompt separates an app from a website',
+  T.OPEN_PROMPT.includes('OPENING AN APP IS NOT THE SAME'),
+  true
+)
+check('it names a check for Store apps', T.OPEN_PROMPT.includes('Get-AppxPackage'), true)
+check('and for desktop installs', T.OPEN_PROMPT.includes('Uninstall'), true)
+check('part of a word is called out as not a match', T.OPEN_PROMPT.includes('is not a match'), true)
+check(
+  'empty output means absent, not failed',
+  T.OPEN_PROMPT.includes('does not mean the command failed'),
+  true
+)
+check('installed means launch it', T.OPEN_PROMPT.includes('Start-Process'), true)
+check(
+  'not installed means the website',
+  T.OPEN_PROMPT.includes('Not installed -> open the website'),
+  true
+)
+check(
+  'and the user is told which happened',
+  T.OPEN_PROMPT.includes('say which you did and why'),
+  true
+)
+// Canonical cmdlet names, not aliases: clearer to read, and the thing the
+// read-only allowlist parses most reliably.
+check('the check avoids the Select alias', T.OPEN_PROMPT.includes('| Select '), false)
+
 console.log(`\n${failed === 0 ? 'all' : `${failed} FAILED of`} link checks`)
 process.exit(failed === 0 ? 0 : 1)

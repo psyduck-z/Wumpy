@@ -128,7 +128,27 @@ export const OPEN_PROMPT = [
   'not describe it afterwards. Use it to show the user something, not to find out.',
   'To find something out, search with wumpy-search instead and you get the text back.',
   'Only http and https links. Never a file:// path and never a link you were not asked',
-  'for or did not find yourself.'
+  'for or did not find yourself.',
+  '',
+  'OPENING AN APP IS NOT THE SAME AS OPENING A WEBSITE.',
+  '"Open Spotify" means the app if it is installed and the website if it is not,',
+  'and you cannot tell which from here. Check, in this order, and never skip to',
+  'the end:',
+  '1. One command to see whether it is installed:',
+  '   Get-AppxPackage *name* | Select-Object Name; Get-ItemProperty',
+  '   HKLM:\\Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\*,',
+  '   HKCU:\\Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\* |',
+  "   Where-Object DisplayName -like '*name*' | Select-Object DisplayName",
+  '2. Read the names that came back. A match on part of a word is not a match —',
+  '   "DolbyDigitalPlus" contains "git" and is not git. Empty output means it is',
+  '   not installed; it does not mean the command failed.',
+  '3. Installed  -> propose Start-Process to launch it.',
+  '   Not installed -> open the website in a wumpy-open block.',
+  'Either way say which you did and why, in one line: "Spotify is not installed,',
+  'so this opens it in your browser." The user should never have to guess whether',
+  'you looked.',
+  'Launching an app changes nothing on disk but is still an action, so it needs a',
+  'Developer tier. Opening the website does not.'
 ].join(String.fromCharCode(10))
 
 /** Appended for tiers that may search the web. */

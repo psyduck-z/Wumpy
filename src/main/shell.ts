@@ -26,8 +26,14 @@ const RISKY: Array<{ pattern: RegExp; why: string }> = [
   { pattern: /\breg(\.exe)?\s+delete\b/i, why: 'deletes registry keys' },
   { pattern: /\bRemove-ItemProperty\b/i, why: 'deletes registry values' },
   { pattern: /\b(Set-ExecutionPolicy|icacls|takeown)\b/i, why: 'changes security settings' },
-  { pattern: /\b(curl|wget|Invoke-WebRequest|iwr)\b[^|]*\|\s*(iex|sh|bash|Invoke-Expression)/i, why: 'pipes a download straight into a shell' },
-  { pattern: /\bgit\s+(push|reset\s+--hard|clean\s+-[a-z]*f)/i, why: 'rewrites or publishes git state' },
+  {
+    pattern: /\b(curl|wget|Invoke-WebRequest|iwr)\b[^|]*\|\s*(iex|sh|bash|Invoke-Expression)/i,
+    why: 'pipes a download straight into a shell'
+  },
+  {
+    pattern: /\bgit\s+(push|reset\s+--hard|clean\s+-[a-z]*f)/i,
+    why: 'rewrites or publishes git state'
+  },
   { pattern: />\s*\/dev\/sd|dd\s+if=/i, why: 'writes directly to a device' }
 ]
 
@@ -40,19 +46,107 @@ const RISKY: Array<{ pattern: RegExp; why: string }> = [
  */
 const READ_ONLY = new Set([
   // PowerShell: Get-* is reporting by convention, plus a few explicit others.
-  'get-childitem', 'get-command', 'get-content', 'get-date', 'get-computerinfo',
-  'get-process', 'get-service', 'get-psdrive', 'get-location', 'get-host',
-  'get-item', 'get-itemproperty', 'get-member', 'get-module', 'get-volume',
-  'get-ciminstance', 'get-wmiobject', 'get-filehash', 'get-help', 'get-history',
-  'test-path', 'measure-object', 'select-object', 'where-object', 'sort-object',
-  'compare-object', 'format-table', 'format-list', 'resolve-path', 'split-path',
-  'join-path', 'convertfrom-json', 'convertto-json', 'out-string', 'write-output',
+  'get-childitem',
+  'get-command',
+  'get-content',
+  'get-date',
+  'get-computerinfo',
+  'get-process',
+  'get-service',
+  'get-psdrive',
+  'get-location',
+  'get-host',
+  'get-item',
+  'get-itemproperty',
+  'get-member',
+  'get-module',
+  'get-volume',
+  'get-ciminstance',
+  'get-wmiobject',
+  'get-filehash',
+  'get-help',
+  'get-history',
+  // Installed-app queries. Asked for by "is X installed" and by "open X",
+  // which has to find out before it can decide between launching the app and
+  // opening the website. Get-AppxPackage was missing, so a Quick tier could
+  // search the uninstall registry but not see a Store app - which on Windows
+  // is where half the consumer apps live.
+  'get-appxpackage',
+  'get-appxprovisionedpackage',
+  'get-startapps',
+  'get-package',
+  'test-path',
+  'measure-object',
+  'select-object',
+  'where-object',
+  'sort-object',
+  'compare-object',
+  'format-table',
+  'format-list',
+  'resolve-path',
+  'split-path',
+  // The aliases people and models actually type. Each is the exact cmdlet
+  // directly above it, so allowing one and refusing the other was a
+  // difference in spelling, not in what the command does - and it refused
+  // `Get-AppxPackage | Select Name`, which is the shape asked for by "is this
+  // app installed". A script block smuggled into any of them is caught
+  // separately and still is.
+  'select',
+  'sort',
+  'measure',
+  'group',
+  'group-object',
+  'ft',
+  'fl',
+  'gci',
+  'gi',
+  'gp',
+  'gm',
+  'gcm',
+  'gal',
+  'gl',
+  'gh',
+  'join-path',
+  'convertfrom-json',
+  'convertto-json',
+  'out-string',
+  'write-output',
   // Classic shell equivalents.
-  'dir', 'ls', 'cat', 'type', 'echo', 'where', 'whoami', 'hostname', 'date',
-  'systeminfo', 'tasklist', 'ver', 'tree', 'find', 'findstr', 'wc', 'head', 'tail',
+  'dir',
+  'ls',
+  'cat',
+  'type',
+  'echo',
+  'where',
+  'whoami',
+  'hostname',
+  'date',
+  'systeminfo',
+  'tasklist',
+  'ver',
+  'tree',
+  'find',
+  'findstr',
+  'wc',
+  'head',
+  'tail',
   // Version and status probes for common tools.
-  'node', 'npm', 'npx', 'python', 'python3', 'pip', 'dotnet', 'java', 'go',
-  'rustc', 'cargo', 'ollama', 'git', 'code', 'pwsh', 'powershell'
+  'node',
+  'npm',
+  'npx',
+  'python',
+  'python3',
+  'pip',
+  'dotnet',
+  'java',
+  'go',
+  'rustc',
+  'cargo',
+  'ollama',
+  'git',
+  'code',
+  'pwsh',
+  'powershell'
 ])
 
 /**
@@ -93,7 +187,7 @@ const VERSION_FLAGS = new Set(['--version', '-v', '-V', 'version', '--help', '-h
 /** Flags that make an otherwise harmless search tool act. */
 const DANGEROUS_FIND_FLAGS = /(^|\s)-(exec|execdir|delete|ok|okdir|fls|fprint|fprintf)(\s|$)/i
 
-/** Anything here means the command writes somewhere, whatever its head says. *//** Anything here means the command writes somewhere, whatever its head says. */
+/** Anything here means the command writes somewhere, whatever its head says. */ /** Anything here means the command writes somewhere, whatever its head says. */
 const WRITE_MARKERS =
   /(^|\s)(>|>>|\||&&|;)\s*(set-|new-|remove-|clear-|stop-|start-|restart-|rename-|move-|copy-|out-file|tee-object)|(^|\s)(set-|new-|remove-|clear-|rename-|move-|copy-|stop-|start-|restart-)[a-z]+|(^|\s)(rm|del|rmdir|rd|mkdir|md|move|copy|xcopy|robocopy|format|diskpart|reg|sc|net|shutdown|taskkill|icacls|takeown|attrib)(\s|$)|>\s*\S/i
 
@@ -132,7 +226,9 @@ export function isReadOnly(command: string): boolean {
       const first = args.find((a) => !a.startsWith('-')) ?? args[0]
       if (!reads.includes(first)) return false
       // A read subcommand must not then be handed a flag that writes.
-      if (/(^|\s)(--global|--system|-w\b|--write|--set\b|--delete\b|--force\b|-f\b)/i.test(segment)) {
+      if (
+        /(^|\s)(--global|--system|-w\b|--write|--set\b|--delete\b|--force\b|-f\b)/i.test(segment)
+      ) {
         return false
       }
     }
@@ -176,11 +272,7 @@ function clip(text: string): { text: string; truncated: boolean } {
  * Never rejects: a failure to launch is reported as a result with an exit code,
  * so the caller has one shape to handle.
  */
-export function runCommand(
-  command: string,
-  kind: ShellKind,
-  cwd?: string
-): Promise<ShellResult> {
+export function runCommand(command: string, kind: ShellKind, cwd?: string): Promise<ShellResult> {
   const started = Date.now()
   const workingDir = cwd && existsSync(cwd) ? cwd : homedir()
   const { file, args } = launcher(kind, command)
