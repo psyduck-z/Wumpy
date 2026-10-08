@@ -24,7 +24,7 @@ export type CommandAction =
   | { kind: 'voice'; setting: 'on' | 'polish' | 'autostop'; on: boolean | 'toggle' }
   | { kind: 'open'; what: string }
   | { kind: 'engine' }
-  | { kind: 'key'; provider: 'google' | 'groq' | null; value: string; clear: boolean }
+  | { kind: 'key'; provider: 'google' | 'groq' | 'mistral' | null; value: string; clear: boolean }
   | { kind: 'backend'; to: 'local' | 'api' | 'toggle' }
   | { kind: 'usage'; reset: boolean }
   | { kind: 'approve'; mode: 'manual' | 'auto' | 'all' | 'cycle' }
@@ -274,7 +274,7 @@ export const COMMANDS: CommandSpec[] = [
     name: 'key',
     aliases: ['apikey'],
     hint: 'Add or remove a hosted-model API key',
-    arg: 'google|groq <key>',
+    arg: 'google|groq|mistral <key>',
     /**
      * Parsed here rather than in a dialog because a key is pasted, and the
      * composer is where pasting happens. The value is handed straight to the
@@ -284,12 +284,12 @@ export const COMMANDS: CommandSpec[] = [
     run: (arg) => {
       const parts = arg.trim().split(/\s+/).filter(Boolean)
       const provider = parts[0]?.toLowerCase()
-      if (provider !== 'google' && provider !== 'groq') {
+      if (provider !== 'google' && provider !== 'groq' && provider !== 'mistral') {
         return {
           kind: 'error',
           message:
-            'Say which one: `/key google <key>` or `/key groq <key>`. ' +
-            'Use `/key google clear` to remove it.'
+            'Say which one: `/key google <key>`, `/key groq <key>` or ' +
+            '`/key mistral <key>`. Use `/key google clear` to remove it.'
         }
       }
       const rest = parts.slice(1).join(' ')

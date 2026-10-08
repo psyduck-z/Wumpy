@@ -54,7 +54,7 @@ export class KeyStore {
       const parsed = JSON.parse(json) as Partial<Record<ProviderId, string>>
       // Only keep what we recognise, so a hand-edited file cannot inject a
       // provider name that later gets used to build a URL.
-      for (const id of ['google', 'groq'] as ProviderId[]) {
+      for (const id of ['google', 'groq', 'mistral'] as ProviderId[]) {
         const value = parsed[id]
         if (typeof value === 'string' && value.trim()) this.cache[id] = value.trim()
       }
@@ -93,7 +93,7 @@ export class KeyStore {
   /** Which providers are configured. Safe to send to the renderer. */
   configured(): ProviderId[] {
     const data = this.load()
-    return (['google', 'groq'] as ProviderId[]).filter((id) => Boolean(data[id]))
+    return (['google', 'groq', 'mistral'] as ProviderId[]).filter((id) => Boolean(data[id]))
   }
 
   set(provider: ProviderId, key: string): void {

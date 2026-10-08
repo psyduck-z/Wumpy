@@ -472,7 +472,7 @@ export interface KeyStatus {
 }
 
 /** Mirrors ProviderId in @shared/cloud, kept here so types.ts stays leaf-level. */
-export type ProviderName = 'google' | 'groq'
+export type ProviderName = 'google' | 'groq' | 'mistral'
 
 /* --------------------------------------------------------------------- voice */
 

@@ -876,7 +876,7 @@ export default function App(): React.JSX.Element {
         case 'key': {
           const provider = action.provider
           if (!provider) return
-          const label = provider === 'google' ? 'Google AI Studio' : 'Groq'
+          const label = PROVIDERS[provider].label
 
           if (action.clear) {
             const result = await window.wumpy.keys.clear(provider)
@@ -897,7 +897,7 @@ export default function App(): React.JSX.Element {
               has
                 ? `A ${label} key is saved. Replace it with \`/key ${provider} <key>\`, ` +
                     `or remove it with \`/key ${provider} clear\`.`
-                : `No ${label} key yet. Get one at ${provider === 'google' ? 'aistudio.google.com/apikey' : 'console.groq.com/keys'} ` +
+                : `No ${label} key yet. Get one at ${PROVIDERS[provider].keyUrl} ` +
                     `and paste it with \`/key ${provider} <key>\`.`
             )
             return

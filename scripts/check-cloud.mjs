@@ -237,6 +237,38 @@ check('Groq caching is not planned around', C.PROVIDERS.groq.cacheBlockTokens, 0
 // at Wumpy's preamble size is most of three thousand, so three fill a minute.
 check('Groq is paced on tokens', C.PROVIDERS.groq.tokensPerMinute, 8000)
 check('Google is paced on requests instead', C.PROVIDERS.google.tokensPerMinute, 0)
+
+/* ------------------------------ the free tier that does not run out */
+
+// A billion tokens a month, against Groq's 200,000 a day and Google's
+// eighteen requests. At Wumpy's measured 2,858 tokens a call that is roughly
+// 350,000 calls a month, which is not a number anyone types.
+check('Mistral is a provider', Boolean(C.PROVIDERS.mistral), true)
+check('with an OpenAI-compatible base', C.PROVIDERS.mistral.base, 'https://api.mistral.ai/v1')
+check('one request a second, with margin', C.PROVIDERS.mistral.minGapMs >= 1000, true)
+check('and 500k tokens a minute', C.PROVIDERS.mistral.tokensPerMinute, 500_000)
+// Mistral does not take reasoning_effort at all; sending one is a 400.
+check('no reasoning_effort is sent to it', C.reasoningEffortFor('mistral', false), null)
+check('unlike Google', C.reasoningEffortFor('google', false), 'none')
+
+check('a mistral model routes there', C.providerFor('mistral-large-latest'), 'mistral')
+check('so does codestral', C.providerFor('codestral-latest'), 'mistral')
+check('and devstral', C.providerFor('devstral-small-latest'), 'mistral')
+check(
+  'it has its own rotation',
+  C.siblingModel('mistral-large-latest', new Set()),
+  'codestral-latest'
+)
+check(
+  'which stays with Mistral',
+  C.providerFor(C.siblingModel('codestral-latest', new Set())),
+  'mistral'
+)
+check(
+  'and it is offered in the picker',
+  C.CLOUD_MODELS.some((m) => m.provider === 'mistral'),
+  true
+)
 check('three turns fill a Groq minute', Math.floor(C.PROVIDERS.groq.tokensPerMinute / 2757), 2)
 check('pacing keeps Google under 10 a minute', C.PROVIDERS.google.minGapMs * 10 >= 60_000, true)
 check('and Groq under 30', C.PROVIDERS.groq.minGapMs * 30 >= 60_000, true)

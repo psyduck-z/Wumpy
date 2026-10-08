@@ -954,7 +954,7 @@ ${command}`
 
   ipcMain.handle(IPC.keySet, (_e, req: { provider: ProviderId; key: string }) => {
     const provider = req?.provider
-    if (provider !== 'google' && provider !== 'groq') {
+    if (provider !== 'google' && provider !== 'groq' && provider !== 'mistral') {
       return { ok: false, why: 'Unknown provider.' }
     }
     if (!keys.available()) {
@@ -971,7 +971,7 @@ ${command}`
   })
 
   ipcMain.handle(IPC.keyClear, (_e, req: { provider: ProviderId }) => {
-    if (req?.provider !== 'google' && req?.provider !== 'groq') {
+    if (req?.provider !== 'google' && req?.provider !== 'groq' && req?.provider !== 'mistral') {
       return { ok: false, why: 'Unknown provider.' }
     }
     keys.clear(req.provider)

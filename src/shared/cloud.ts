@@ -14,7 +14,7 @@
  * the live API, and three of the four fail silently.
  */
 
-export type ProviderId = 'google' | 'groq'
+export type ProviderId = 'google' | 'groq' | 'mistral'
 
 export interface Provider {
   id: ProviderId
@@ -78,6 +78,30 @@ export const PROVIDERS: Record<ProviderId, Provider> = {
     // 10 requests a minute on the free tier, so 6s plus a margin.
     minGapMs: 7000,
     tokensPerMinute: 0
+  },
+  /**
+   * The one whose free tier does not run out.
+   *
+   * A billion tokens a month, against Groq's 200,000 a day and Google's
+   * eighteen requests. At Wumpy's measured 2,858 tokens a call that is about
+   * 350,000 calls a month - a number no person types. The binding limit is
+   * one request a second, which for a window you talk to is no limit at all.
+   *
+   * The cost is the same one Google's free tier carries: the Experiment tier
+   * trains on what it is sent. So it gets the same treatment - fine for a
+   * script in Downloads, and the reason background work stays local.
+   */
+  mistral: {
+    id: 'mistral',
+    label: 'Mistral',
+    base: 'https://api.mistral.ai/v1',
+    keyUrl: 'https://console.mistral.ai/api-keys',
+    foldSystem: false,
+    cacheBlockTokens: 0,
+    // One request a second, with a little margin.
+    minGapMs: 1200,
+    // 500k a minute, which at Wumpy's size is 170 calls - not the binding limit.
+    tokensPerMinute: 500_000
   },
   groq: {
     id: 'groq',
@@ -172,6 +196,32 @@ export const CLOUD_MODELS: CloudModel[] = [
     blurb: 'Whatever Google currently points "latest" at. Moves without warning.'
   },
 
+  // --- Mistral: the free tier that does not run out ------------------------
+  {
+    id: 'mistral-large-latest',
+    provider: 'mistral',
+    label: 'Mistral Large',
+    blurb: 'Their most capable. Free tier is ~1B tokens a month.'
+  },
+  {
+    id: 'codestral-latest',
+    provider: 'mistral',
+    label: 'Codestral',
+    blurb: 'Built for code, which is most of what this app asks for.'
+  },
+  {
+    id: 'mistral-medium-latest',
+    provider: 'mistral',
+    label: 'Mistral Medium',
+    blurb: 'Between Large and Small.'
+  },
+  {
+    id: 'mistral-small-latest',
+    provider: 'mistral',
+    label: 'Mistral Small',
+    blurb: 'Quick and light, for the simple tiers.'
+  },
+
   // --- Groq ----------------------------------------------------------------
   {
     id: 'openai/gpt-oss-120b',
@@ -209,6 +259,9 @@ export function providerFor(model: string): ProviderId | null {
   if (known) return known.provider
 
   if (name.startsWith('gemini-') || name.startsWith('models/gemini-')) return 'google'
+  if (/^(mistral|codestral|ministral|open-mistral|magistral|devstral|pixtral)/i.test(name)) {
+    return 'mistral'
+  }
   if (name.startsWith('openai/') || name.startsWith('groq/') || name.startsWith('moonshotai/')) {
     return 'groq'
   }
@@ -260,7 +313,14 @@ export function siblingModel(model: string, spent: ReadonlySet<string>): string 
           'gemini-flash-latest',
           'gemini-3.1-flash-lite'
         ]
-      : ['openai/gpt-oss-120b', 'qwen/qwen3.8-27b', 'openai/gpt-oss-20b']
+      : provider === 'mistral'
+        ? [
+            'mistral-large-latest',
+            'codestral-latest',
+            'mistral-medium-latest',
+            'mistral-small-latest'
+          ]
+        : ['openai/gpt-oss-120b', 'qwen/qwen3.8-27b', 'openai/gpt-oss-20b']
   return order.find((m) => m !== model && !spent.has(m)) ?? null
 }
 
@@ -562,7 +622,11 @@ export const THINKING_ALLOWANCE = 1024
  */
 export function reasoningEffortFor(provider: ProviderId, thinking: boolean): 'none' | 'low' | null {
   if (thinking) return null
-  return provider === 'google' ? 'none' : 'low'
+  if (provider === 'google') return 'none'
+  // Mistral's models do not take this field at all, and an unknown parameter
+  // there is a 400 rather than something quietly ignored.
+  if (provider === 'mistral') return null
+  return 'low'
 }
 
 /** The output cap to send, given the tier's and whether reasoning is on. */
