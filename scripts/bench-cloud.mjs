@@ -25,9 +25,25 @@
  *
  * Note the message order: preamble, examples, then facts. The facts block holds
  * the date and the chat title, so it is the one part that changes mid-chat;
- * putting it last keeps everything before it byte-identical and cacheable. That
- * is the opposite of what the main process currently does, and whether it
- * matters is exactly what the round-two cached figure answers.
+ * putting it last keeps everything before it byte-identical and cacheable.
+ *
+ * On Google that reordering turns out not to matter, because nothing caches at
+ * this size. Measured on gemini-3.5-flash, sending an identical prefix twice:
+ *
+ *     1495 tokens  ->  0 cached
+ *     2775 tokens  ->  0 cached
+ *     7495 tokens  ->  4076 cached
+ *
+ * So caching is real and is reported through the OpenAI layer, but it appears
+ * to work in blocks of about 4096 tokens and a prefix shorter than one block
+ * caches nothing at all. Wumpy's preamble is 1080 tokens, which is a quarter of
+ * the way to the first block.
+ *
+ * Padding it to reach the threshold is not worth it: 4096 tokens billed at the
+ * cached rate costs about what 1080 uncached costs, and only after a first call
+ * that pays for all of it. Prefix caching is simply not a lever here, which is
+ * the opposite of Groq, where it is the single biggest one. Any budget estimate
+ * for Google should assume the preamble is paid in full on every turn.
  *
  * Both Groq and Google expose OpenAI-compatible endpoints, so one adapter
  * covers both - which is the point of the exercise.
