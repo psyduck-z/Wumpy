@@ -13,18 +13,18 @@
 export const TASKS = [
   {
     ask: "create a python file in my downloads folder that provides the specs of all the files in the current folder its in, the total memory taken, and all the file's names. don't run it",
-    wants: ["os", "getsize"],
+    wants: ['os', 'getsize']
   },
   {
-    ask: "write a .py file in my downloads folder that lists the 5 biggest files in it, with sizes in MB, newest first on ties",
-    wants: ["sort", "1024"],
+    ask: 'write a .py file in my downloads folder that lists the 5 biggest files in it, with sizes in MB, newest first on ties',
+    wants: ['sort', '1024']
   },
   {
-    ask: "make a python script in downloads that finds duplicate files by content hash and prints the groups",
-    wants: ["hashlib"],
+    ask: 'make a python script in downloads that finds duplicate files by content hash and prints the groups',
+    wants: ['hashlib']
   },
   {
-    ask: "write a python file in downloads that reads a csv and prints the mean of every numeric column, handling missing values",
-    wants: ["csv"],
-  },
-];
+    ask: 'write a python file in downloads that reads a csv and prints the mean of every numeric column, handling missing values',
+    wants: ['csv']
+  }
+]
