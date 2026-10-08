@@ -440,49 +440,101 @@ function registerIpc(): void {
 
     // Stand aside for the duration of the turn: tokens matter more than UI.
     priority.yieldToModel()
-    await clientFor(model).chat(
-      req.requestId,
-      model,
-      withContext(req, tier.label, scope),
-      {
-        thinking: tier.thinking,
-        options: optionsFor(tier),
-        keepAlive: settings.get('keepAlive'),
-        maxTurnMs: settings.get('maxTurnMs'),
-        systemPrompt
-      },
-      {
-        onDelta: (delta) => panel.send(IPC.chatDelta, { requestId: req.requestId, ...delta }),
-        onDone: (stats) => {
-          priority.restore()
-          // Counted here rather than inside either client, so both are counted
-          // the same way and neither has to know a usage store exists.
-          usage.add({
-            model,
-            via: providerFor(model) ?? 'local',
-            promptTokens: stats.promptTokens,
-            completionTokens: stats.completionTokens,
-            generatingMs:
-              stats.tokensPerSecond && stats.completionTokens
-                ? (stats.completionTokens / stats.tokensPerSecond) * 1000
-                : 0
-          })
-          panel.send(IPC.chatDone, { requestId: req.requestId, ...stats })
-        },
-        onError: (message) => {
-          priority.restore()
-          usage.add({
-            model,
-            via: providerFor(model) ?? 'local',
-            error: true,
-            // A quota message is worth distinguishing: it is the number that
-            // explains why the day stopped working.
-            limited: /quota|rate limit/i.test(message)
-          })
-          panel.send(IPC.chatError, { requestId: req.requestId, message })
-        }
+
+    /**
+     * Runs one turn on one model, and says whether the local model should be
+     * asked the same question instead.
+     *
+     * Resolves to the fallback model when the hosted one could not answer for
+     * a reason the local one does not share - a quota, a throttle, a dropped
+     * connection - and to null in every other case, including success.
+     */
+    async function attempt(on: string, announce: string | null): Promise<string | null> {
+      let streamed = false
+      let fallbackTo: string | null = null
+
+      if (announce) {
+        panel.send(IPC.chatDelta, { requestId: req.requestId, content: announce })
       }
-    )
+
+      await clientFor(on).chat(
+        req.requestId,
+        on,
+        withContext(req, tier.label, scope),
+        {
+          thinking: tier.thinking,
+          options: optionsFor(tier),
+          keepAlive: settings.get('keepAlive'),
+          maxTurnMs: settings.get('maxTurnMs'),
+          systemPrompt
+        },
+        {
+          onDelta: (delta) => {
+            if (delta.content || delta.thinking) streamed = true
+            panel.send(IPC.chatDelta, { requestId: req.requestId, ...delta })
+          },
+          onDone: (stats) => {
+            // Counted here rather than inside either client, so both are
+            // counted the same way and neither knows a usage store exists.
+            usage.add({
+              model: on,
+              via: providerFor(on) ?? 'local',
+              promptTokens: stats.promptTokens,
+              completionTokens: stats.completionTokens,
+              generatingMs:
+                stats.tokensPerSecond && stats.completionTokens
+                  ? (stats.completionTokens / stats.tokensPerSecond) * 1000
+                  : 0
+            })
+            panel.send(IPC.chatDone, { requestId: req.requestId, ...stats })
+          },
+          onError: (message, failure) => {
+            usage.add({
+              model: on,
+              via: providerFor(on) ?? 'local',
+              error: true,
+              limited: failure?.kind === 'limit'
+            })
+
+            const local = isCloudModel(on) ? backgroundModel(req.tier) : null
+            /**
+             * Only when nothing has been said yet.
+             *
+             * Half an answer from one model followed by a whole one from
+             * another is not a fallback, it is two answers stitched together,
+             * and the user would have no way to tell where the seam is. A
+             * rate limit always fails before the first token, so this costs
+             * nothing in the case it exists for.
+             */
+            if (settings.get('apiFallback') && failure?.elsewhere && local && !streamed) {
+              fallbackTo = local
+              return
+            }
+
+            panel.send(IPC.chatError, { requestId: req.requestId, message })
+          }
+        }
+      )
+      return fallbackTo
+    }
+
+    const fallback = await attempt(model, null)
+    if (fallback) {
+      /**
+       * Said out loud, every time, before the second answer starts.
+       *
+       * The whole point of the two backends is knowing which one answered.
+       * A silent downgrade to a 3.8B model would make the API backend
+       * untrustworthy in exactly the way that matters: you would not know
+       * whether the answer you are reading is the good one.
+       */
+      await attempt(
+        fallback,
+        `_${model} is rate limited — answering on ${fallback} instead._${String.fromCharCode(10, 10)}`
+      )
+    }
+
+    priority.restore()
   })
 
   ipcMain.handle(IPC.usageGet, () => ({

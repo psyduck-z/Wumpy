@@ -20,10 +20,28 @@ export interface StreamStats {
   completionTokens?: number
 }
 
+/**
+ * Why a turn failed, in the few categories anything acts on.
+ *
+ * Matching on the message text was the alternative and it is the kind of thing
+ * that works until someone rewords an error. 'limit' is the one that earns
+ * this: it is the difference between a turn that is over and a turn that the
+ * local model could have answered.
+ */
+export interface StreamFailure {
+  kind: 'limit' | 'auth' | 'network' | 'other'
+  /** True when the same request somewhere else stands a chance. */
+  elsewhere: boolean
+}
+
 export interface StreamHandlers {
   onDelta(delta: { content?: string; thinking?: string }): void
   onDone(stats: StreamStats): void
-  onError(message: string): void
+  /**
+   * `failure` is absent from the Ollama client, which has nowhere to fall back
+   * to and nothing useful to categorise.
+   */
+  onError(message: string, failure?: StreamFailure): void
 }
 
 export interface ChatOptions {

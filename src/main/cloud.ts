@@ -9,7 +9,7 @@ import {
   reasoningEffortFor,
   wireMessagesFor
 } from '@shared/cloud'
-import type { ChatOptions, StreamHandlers, StreamStats } from './ollama'
+import type { ChatOptions, StreamFailure, StreamHandlers, StreamStats } from './ollama'
 import type { KeyStore } from './keys'
 
 /**
@@ -154,7 +154,11 @@ export class CloudClient {
       } else if ((err as Error)?.name === 'AbortError') {
         handlers.onDone({})
       } else {
-        handlers.onError(describe(err))
+        const message = describe(err)
+        const failure: StreamFailure = /could not reach the provider/i.test(message)
+          ? { kind: 'network', elsewhere: true }
+          : { kind: 'other', elsewhere: false }
+        handlers.onError(message, failure)
       }
     } finally {
       if (cap) clearTimeout(cap)
@@ -190,13 +194,22 @@ export class CloudClient {
       const detail = await res.text().catch(() => '')
 
       if (res.status === 401 || res.status === 403) {
-        handlers.onError(`${PROVIDERS[provider].label} rejected the key. Add a new one with /key.`)
+        // Explicitly not answerable elsewhere. A bad key is bad everywhere,
+        // and quietly answering locally would hide the one thing the user
+        // actually has to go and fix.
+        handlers.onError(
+          `${PROVIDERS[provider].label} rejected the key. Add a new one with /key.`,
+          {
+            kind: 'auth',
+            elsewhere: false
+          }
+        )
         return null
       }
 
       const verdict = classifyLimit(res.status, detail, model)
       if (verdict.kind === 'exhausted') {
-        handlers.onError(verdict.message)
+        handlers.onError(verdict.message, { kind: 'limit', elsewhere: true })
         return null
       }
       if ((verdict.kind === 'throttle' || verdict.kind === 'busy') && attempt < 2) {
@@ -204,18 +217,24 @@ export class CloudClient {
         continue
       }
       if (verdict.kind !== 'other') {
-        handlers.onError(verdict.message)
+        handlers.onError(verdict.message, { kind: 'limit', elsewhere: true })
         return null
       }
 
       handlers.onError(
         `${PROVIDERS[provider].label} returned ${res.status}${
           detail ? `: ${truncate(stripKey(detail), 300)}` : ''
-        }`
+        }`,
+        // A 5xx is the provider's problem and the local model does not have
+        // it; a 4xx is usually ours and would fail again.
+        { kind: 'other', elsewhere: res.status >= 500 }
       )
       return null
     }
-    handlers.onError(`${PROVIDERS[provider].label} kept asking us to wait.`)
+    handlers.onError(`${PROVIDERS[provider].label} kept asking us to wait.`, {
+      kind: 'limit',
+      elsewhere: true
+    })
     return null
   }
 

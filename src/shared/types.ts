@@ -291,6 +291,14 @@ export interface WumpySettings {
    */
   backend: Backend
   /**
+   * Answer locally when the hosted model is rate limited.
+   *
+   * On by default, and always announced in the reply - a silent downgrade to
+   * a 3.8B model would make the API backend untrustworthy in the way that
+   * matters most, because you would not know which model you were reading.
+   */
+  apiFallback: boolean
+  /**
    * Dictation. Off until a transcriber is actually installed, because turning
    * it on without one would put a microphone button in the panel that only ever
    * reports an error.
@@ -445,6 +453,14 @@ export const IPC = {
 export interface UsageReport {
   lines: import('./usage').UsageLine[]
   backend: Backend
+  /**
+   * Answer locally when the hosted model is rate limited.
+   *
+   * On by default, and always announced in the reply - a silent downgrade to
+   * a 3.8B model would make the API backend untrustworthy in the way that
+   * matters most, because you would not know which model you were reading.
+   */
+  apiFallback: boolean
   date: string
 }
 

@@ -127,7 +127,12 @@ const day = C.classifyLimit(429, '{"error":{"code":429},"retryDelay":"65304s"}',
 check('eighteen hours is a cap, not a wait', day.kind, 'exhausted')
 check('so nothing is slept', day.waitMs, 0)
 check('and the message names the model', day.message.includes('gemini-3.8-flash'), true)
-check('and says when it comes back', day.message.includes('18h'), true)
+check('and says how long it asked for', day.message.includes('18h'), true)
+// Observed twice: a model asking for 18h answered normally 40 minutes later.
+// Nothing here can tell a spent day from a long throttle, so it must not say
+// it can.
+check('without asserting the day is gone', /used up|exhausted for today/.test(day.message), false)
+check('and it hedges', day.message.includes('often clears much sooner'), true)
 
 // This verdict was observably wrong once: gemini-3.5-flash was told its day was
 // over and answered normally forty minutes later. A delay of minutes is a limit
@@ -359,7 +364,9 @@ check(
   /backgroundModel\(\)[\s\S]{0,200}resolveTierModel/.test(main),
   false
 )
-check('the chat path picks a client by model', main.includes('clientFor(model).chat'), true)
+// Named `on` rather than `model` because a turn can be attempted twice, on
+// the hosted model and then on the local one.
+check('the chat path picks a client by model', /clientFor\(on\)\.chat/.test(main), true)
 check(
   'warming is skipped for a hosted model',
   /if \(isCloudModel\(model\)\) return/.test(main),

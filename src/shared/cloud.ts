@@ -289,11 +289,27 @@ export function classifyLimit(status: number, body: string, model: string): Limi
   }
 
   if (askedMs >= EXHAUSTED_AFTER_MS) {
+    /**
+     * Reported as a long limit, not as a fact about the day.
+     *
+     * The wording here has been wrong twice. First everything over two minutes
+     * was called an exhausted day; then only four hours or more was. Both were
+     * too confident: gemini-3.8-flash asked for 65304 seconds - eighteen hours
+     * - and answered normally forty minutes later, and gemini-3.5-flash did
+     * the same thing earlier the same evening.
+     *
+     * So Google's retryDelay does not reliably mean what it says, and nothing
+     * here can tell a spent day from a long throttle. The kind is kept because
+     * the usage counter wants to distinguish them, but the sentence shown to
+     * the user no longer claims to know, and says what to do either way.
+     */
     const hours = Math.round(askedMs / 3_600_000)
     return {
       kind: 'exhausted',
       waitMs: 0,
-      message: `${model} has used up its free quota for today — it frees up in about ${hours}h.`
+      message:
+        `${model} is rate limited — it asked to wait about ${hours}h, which usually means ` +
+        'the free quota for today is gone, though it often clears much sooner.'
     }
   }
 

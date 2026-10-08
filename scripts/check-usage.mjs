@@ -248,5 +248,35 @@ check(
   false
 )
 
+/* ----------------------------------------------- falling back, out loud */
+
+// The point of having two backends is knowing which one answered. A silent
+// downgrade to a 3.8B model would make the API side untrustworthy in exactly
+// the way that matters most, so the announcement is as much a requirement as
+// the fallback itself, and is checked as one.
+const cloudSrc = readFileSync('src/main/cloud.ts', 'utf8')
+const defaultsSrc = readFileSync('src/shared/defaults.ts', 'utf8')
+
+check('a limit is answerable elsewhere', /kind: 'limit', elsewhere: true/.test(cloudSrc), true)
+check('a rejected key is not', /kind: 'auth',[\s\S]{0,40}elsewhere: false/.test(cloudSrc), true)
+check("a provider's own 5xx is", /elsewhere: res\.status >= 500/.test(cloudSrc), true)
+check('a dropped connection is', /kind: 'network', elsewhere: true/.test(cloudSrc), true)
+
+check('the fallback announces itself', /is rate limited — answering on/.test(main), true)
+check(
+  'naming both models',
+  /\$\{model\} is rate limited[\s\S]{0,40}\$\{fallback\}/.test(main),
+  true
+)
+check(
+  'it fires only when nothing was streamed',
+  /failure\?\.elsewhere &&[\s\S]{0,80}!streamed/.test(main),
+  true
+)
+check('and only away from a hosted model', /isCloudModel\(on\) \? backgroundModel/.test(main), true)
+check('it can be switched off', /settings\.get\('apiFallback'\)/.test(main), true)
+check('and is on by default', defaultsSrc.includes('apiFallback: true'), true)
+check('the second attempt is counted too', (main.match(/usage\.add\(\{/g) ?? []).length >= 2, true)
+
 console.log(failures ? `\n${failures} usage checks FAILED` : '\nall usage checks')
 process.exitCode = failures ? 1 : 0
