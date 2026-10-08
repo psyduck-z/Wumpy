@@ -54,6 +54,17 @@ export interface Provider {
   cacheBlockTokens: number
   /** Gap to leave between requests to stay under the per-minute ceiling. */
   minGapMs: number
+  /**
+   * Tokens allowed per minute, or 0 where the ceiling is counted in requests.
+   *
+   * Groq's free tier is 8,000 a minute and that is the limit that actually
+   * bites: at Wumpy's preamble size a single turn is most of three thousand,
+   * so three of them fill the minute. Pacing on requests alone produced a
+   * steady stream of 429s - measured, a 6,578-token call blocked the next
+   * three outright. Google counts requests instead, so this is 0 there and
+   * minGapMs does the work.
+   */
+  tokensPerMinute: number
 }
 
 export const PROVIDERS: Record<ProviderId, Provider> = {
@@ -65,7 +76,8 @@ export const PROVIDERS: Record<ProviderId, Provider> = {
     foldSystem: true,
     cacheBlockTokens: 4096,
     // 10 requests a minute on the free tier, so 6s plus a margin.
-    minGapMs: 7000
+    minGapMs: 7000,
+    tokensPerMinute: 0
   },
   groq: {
     id: 'groq',
@@ -73,9 +85,20 @@ export const PROVIDERS: Record<ProviderId, Provider> = {
     base: 'https://api.groq.com/openai/v1',
     keyUrl: 'https://console.groq.com/keys',
     foldSystem: false,
+    /**
+     * Zero because none was observed, not because none is documented.
+     *
+     * Groq's docs say prompt caching is automatic on the gpt-oss models,
+     * costs nothing and is exempt from the rate limit. Measured, it does not
+     * appear: eight calls sharing a 2,118-token prefix reported 0 cached,
+     * and a deliberate back-to-back test with a 6,578-token identical prefix
+     * came back with prompt_tokens_details absent entirely. Until it is seen
+     * working it cannot be planned around.
+     */
     cacheBlockTokens: 0,
-    // 30 requests a minute on the free tier.
-    minGapMs: 2100
+    // 30 requests a minute, but 8,000 tokens a minute is what bites first.
+    minGapMs: 2100,
+    tokensPerMinute: 8000
   }
 }
 
@@ -161,6 +184,12 @@ export const CLOUD_MODELS: CloudModel[] = [
     provider: 'groq',
     label: 'GPT-OSS 20B',
     blurb: 'Faster and lighter on the token budget.'
+  },
+  {
+    id: 'qwen/qwen3.8-27b',
+    provider: 'groq',
+    label: 'Qwen3.8 27B',
+    blurb: 'The other size on Groq. Worth trying when gpt-oss is spent.'
   }
 ]
 
@@ -231,7 +260,7 @@ export function siblingModel(model: string, spent: ReadonlySet<string>): string 
           'gemini-flash-latest',
           'gemini-3.1-flash-lite'
         ]
-      : ['openai/gpt-oss-120b', 'openai/gpt-oss-20b']
+      : ['openai/gpt-oss-120b', 'qwen/qwen3.8-27b', 'openai/gpt-oss-20b']
   return order.find((m) => m !== model && !spent.has(m)) ?? null
 }
 

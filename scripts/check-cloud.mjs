@@ -226,7 +226,18 @@ check('Google is marked as needing the fold', C.PROVIDERS.google.foldSystem, tru
 check('Groq is not', C.PROVIDERS.groq.foldSystem, false)
 check('Google caches only in 4096-token blocks', C.PROVIDERS.google.cacheBlockTokens, 4096)
 check('so a 1080-token preamble caches nothing', 1080 >= C.PROVIDERS.google.cacheBlockTokens, false)
-check('Groq has no such floor', C.PROVIDERS.groq.cacheBlockTokens, 0)
+// Groq's docs say caching is automatic, free and exempt from the rate limit
+// on the gpt-oss models. Measured, it does not appear: eight calls sharing a
+// 2118-token prefix all reported 0 cached, and a back-to-back test with an
+// identical 6578-token prefix came back with prompt_tokens_details absent
+// entirely. Zero here records what was seen, not what was promised.
+check('Groq caching is not planned around', C.PROVIDERS.groq.cacheBlockTokens, 0)
+
+// 8,000 tokens a minute is the ceiling that actually bites on Groq: a turn
+// at Wumpy's preamble size is most of three thousand, so three fill a minute.
+check('Groq is paced on tokens', C.PROVIDERS.groq.tokensPerMinute, 8000)
+check('Google is paced on requests instead', C.PROVIDERS.google.tokensPerMinute, 0)
+check('three turns fill a Groq minute', Math.floor(C.PROVIDERS.groq.tokensPerMinute / 2757), 2)
 check('pacing keeps Google under 10 a minute', C.PROVIDERS.google.minGapMs * 10 >= 60_000, true)
 check('and Groq under 30', C.PROVIDERS.groq.minGapMs * 30 >= 60_000, true)
 check(

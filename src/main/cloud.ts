@@ -44,10 +44,57 @@ interface Delta {
 /** Per-provider pacing, so two tiers on one key do not race each other. */
 const lastRequestAt = new Map<ProviderId, number>()
 
-async function pace(provider: ProviderId): Promise<void> {
+/**
+ * Tokens spent in the last minute, per provider, as a list of stamped
+ * amounts. Trimmed on each use rather than on a timer.
+ */
+const recentTokens = new Map<ProviderId, Array<{ at: number; tokens: number }>>()
+
+function spentInLastMinute(provider: ProviderId): number {
+  const cutoff = Date.now() - 60_000
+  const kept = (recentTokens.get(provider) ?? []).filter((t) => t.at > cutoff)
+  recentTokens.set(provider, kept)
+  return kept.reduce((sum, t) => sum + t.tokens, 0)
+}
+
+export function recordSpend(provider: ProviderId, tokens: number): void {
+  if (tokens <= 0) return
+  const list = recentTokens.get(provider) ?? []
+  list.push({ at: Date.now(), tokens })
+  recentTokens.set(provider, list)
+}
+
+/**
+ * Waits long enough not to be refused.
+ *
+ * Two ceilings, and on Groq the second is the one that bites. Its free tier
+ * allows 8,000 tokens a minute, and a Wumpy turn is most of three thousand,
+ * so three of them fill the minute - pacing on the request gap alone
+ * produced a steady stream of 429s, with one 6,578-token call blocking the
+ * three that followed it outright.
+ *
+ * The estimate is deliberately rough. Being a little early costs one 429 and
+ * a retry, which already works; being late costs the user a wait they did
+ * not need.
+ */
+async function pace(provider: ProviderId, estimatedTokens = 0): Promise<void> {
   const gap = PROVIDERS[provider].minGapMs
   const wait = (lastRequestAt.get(provider) ?? 0) + gap - Date.now()
   if (wait > 0) await new Promise((r) => setTimeout(r, wait))
+
+  const perMinute = PROVIDERS[provider].tokensPerMinute
+  if (perMinute > 0 && estimatedTokens > 0) {
+    const list = recentTokens.get(provider) ?? []
+    while (spentInLastMinute(provider) + estimatedTokens > perMinute && list.length) {
+      // Wait until the oldest spend falls out of the window, plus a moment.
+      const oldest = (recentTokens.get(provider) ?? [])[0]
+      if (!oldest) break
+      const until = oldest.at + 60_000 - Date.now() + 250
+      if (until <= 0) break
+      await new Promise((r) => setTimeout(r, Math.min(until, 60_000)))
+    }
+  }
+
   lastRequestAt.set(provider, Date.now())
 }
 
@@ -147,7 +194,7 @@ export class CloudClient {
       const res = await this.send(provider, model, body, controller.signal, handlers)
       if (!res) return
 
-      await this.drain(res, handlers, startedAt)
+      await this.drain(res, handlers, startedAt, provider)
     } catch (err) {
       if (hitCap) {
         handlers.onError('That turn was taking too long, so Wumpy stopped it.')
@@ -255,7 +302,12 @@ export class CloudClient {
   }
 
   /** Reads the SSE body, forwarding deltas and totalling what it cost. */
-  private async drain(res: Response, handlers: StreamHandlers, startedAt: number): Promise<void> {
+  private async drain(
+    res: Response,
+    handlers: StreamHandlers,
+    startedAt: number,
+    provider: ProviderId
+  ): Promise<void> {
     const reader = res.body!.getReader()
     const decoder = new TextDecoder()
     let buffer = ''
@@ -290,6 +342,7 @@ export class CloudClient {
 
         if (chunk.usage) {
           const counted = countTokens(chunk.usage)
+          recordSpend(provider, counted.billed)
           completion = counted.completion
           stats = {
             ...stats,
