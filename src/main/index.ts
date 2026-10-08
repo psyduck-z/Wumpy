@@ -53,7 +53,8 @@ import {
   PROVIDERS,
   isCloudModel,
   looksLikeKey,
-  providerFor
+  providerFor,
+  siblingModel
 } from '@shared/cloud'
 import type { ProviderId } from '@shared/cloud'
 import { checkLink, isSearchEngine } from '@shared/links'
@@ -76,6 +77,15 @@ let ollama: OllamaClient
 let cloud: CloudClient
 let keys: KeyStore
 let usage: UsageStore
+/**
+ * Hosted models that have said they are out for the day.
+ *
+ * Google's allowance is per model, so one running out says nothing about the
+ * next; this is only here so a spent model is not tried again and again on
+ * every turn. Cleared when the process restarts, which is near enough to
+ * daily for something that costs one wasted request to be wrong about.
+ */
+const spentToday = new Set<string>()
 let panel: Panel
 let tray: (Tray & { refresh(): void }) | null = null
 let hotkeyState: HotkeyState = { active: null, failed: [], intercepted: null }
@@ -449,6 +459,9 @@ function registerIpc(): void {
      * a reason the local one does not share - a quota, a throttle, a dropped
      * connection - and to null in every other case, including success.
      */
+    /** Why the first attempt gave up, so the announcement can say so truthfully. */
+    let fallbackWhy = 'could not answer'
+
     async function attempt(on: string, announce: string | null): Promise<string | null> {
       let streamed = false
       let fallbackTo: string | null = null
@@ -500,7 +513,26 @@ function registerIpc(): void {
               exhausted: failure?.kind === 'limit' && /quota|used up|free quota/i.test(message)
             })
 
-            const local = isCloudModel(on) ? backgroundModel(req.tier) : null
+            if (failure?.kind === 'limit' && /used up its free requests/.test(message)) {
+              spentToday.add(on)
+            }
+
+            /**
+             * Sideways before down.
+             *
+             * The daily cap is per model, so when one Gemini is out another
+             * usually is not - measured, on the same key in the same minute.
+             * Dropping to a 3.8B local model while a perfectly good hosted
+             * one sits unused throws away the reason for being here at all.
+             */
+            const sibling =
+              isCloudModel(on) && failure?.kind === 'limit' ? siblingModel(on, spentToday) : null
+            const local =
+              sibling && cloud.ready(sibling).ok
+                ? sibling
+                : isCloudModel(on)
+                  ? backgroundModel(req.tier)
+                  : null
             /**
              * Only when nothing has been said yet.
              *
@@ -512,6 +544,12 @@ function registerIpc(): void {
              */
             if (settings.get('apiFallback') && failure?.elsewhere && local && !streamed) {
               fallbackTo = local
+              fallbackWhy =
+                failure.kind === 'network'
+                  ? 'could not be reached'
+                  : spentToday.has(on)
+                    ? 'is out of free requests for today'
+                    : 'is rate limited'
               return
             }
 
@@ -534,7 +572,8 @@ function registerIpc(): void {
        */
       await attempt(
         fallback,
-        `_${model} is rate limited — answering on ${fallback} instead._${String.fromCharCode(10, 10)}`
+        `_${model} ${fallbackWhy} — answering on ${fallback} instead._` +
+          String.fromCharCode(10, 10)
       )
     }
 

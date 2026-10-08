@@ -200,6 +200,40 @@ export function providerFor(model: string): ProviderId | null {
   return null
 }
 
+/**
+ * Another model from the same provider to try when this one is out.
+ *
+ * Google's free allowance is "RequestsPerDayPerProjectPerModel" - the quota
+ * id says so - which means each model has its own, and running out of one
+ * says nothing about the next. Measured: gemini-3.5-flash refused with 14.5
+ * hours to go while flash-lite and 3.8-flash both answered on the same key
+ * in the same minute.
+ *
+ * So a spent model should step sideways before it steps down. Falling back
+ * to a 3.8B local model when a perfectly good hosted one is sitting there
+ * unused throws away the whole reason for being on the API backend.
+ *
+ * Ordered by how much is left rather than how good they are: the caps are
+ * roughly twenty requests a day on the newer models and larger on the older
+ * ones, so this walks towards the ones more likely to answer. Excludes the
+ * model given, and anything already known to be spent.
+ */
+export function siblingModel(model: string, spent: ReadonlySet<string>): string | null {
+  const provider = providerFor(model)
+  if (!provider) return null
+  const order =
+    provider === 'google'
+      ? [
+          'gemini-3.5-flash',
+          'gemini-3.1-flash-lite',
+          'gemini-3.6-flash',
+          'gemini-3.5-flash-lite',
+          'gemini-2.5-flash'
+        ]
+      : ['openai/gpt-oss-120b', 'openai/gpt-oss-20b']
+  return order.find((m) => m !== model && !spent.has(m)) ?? null
+}
+
 export function isCloudModel(model: string): boolean {
   return providerFor(model) !== null
 }
@@ -326,6 +360,42 @@ export function classifyLimit(status: number, body: string, model: string): Limi
 
   const asked = /"retryDelay":\s*"(\d+(?:\.\d+)?)s"/.exec(body ?? '')
   const askedMs = asked ? Math.round(Number(asked[1]) * 1000) + 500 : 0
+
+  /**
+   * Google names the limit it hit, and the name is the truth.
+   *
+   * retryDelay was the wrong thing to read and it misled twice: a model
+   * asking for eighteen hours answered normally forty minutes later, which
+   * is what the two previous attempts at this were trying to work around.
+   *
+   * The error carries a quotaId instead, and it says which limit:
+   *
+   *   GenerateRequestsPerDayPerProjectPerModel-FreeTier
+   *   GenerateRequestsPerMinutePerProjectPerModel-FreeTier
+   *
+   * Per day is a day and waiting will not help. Per minute clears in a
+   * minute. No guessing from a duration, and no threshold to get wrong.
+   *
+   * Note the "PerModel": the allowance is per model, not per key, so another
+   * Gemini still answers when this one is out.
+   */
+  const quota = /"quotaId"\s*:\s*"([^"]+)"/.exec(body ?? '')?.[1] ?? ''
+  if (/PerDay/i.test(quota)) {
+    return {
+      kind: 'exhausted',
+      waitMs: 0,
+      message:
+        `${model} has used up its free requests for today` +
+        (askedMs ? ` — about ${Math.round(askedMs / 3_600_000)}h left.` : '.')
+    }
+  }
+  if (/PerMinute/i.test(quota)) {
+    return {
+      kind: 'throttle',
+      waitMs: Math.min(GIVE_UP_AFTER_MS, askedMs || 20_000),
+      message: `${model} is going too fast; waiting a moment.`
+    }
+  }
 
   if (status === 503) {
     return {

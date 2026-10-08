@@ -303,10 +303,10 @@ check('a rejected key is not', /kind: 'auth',[\s\S]{0,40}elsewhere: false/.test(
 check("a provider's own 5xx is", /elsewhere: res\.status >= 500/.test(cloudSrc), true)
 check('a dropped connection is', /kind: 'network', elsewhere: true/.test(cloudSrc), true)
 
-check('the fallback announces itself', /is rate limited — answering on/.test(main), true)
+check('the fallback announces itself', main.includes('answering on ${fallback} instead'), true)
 check(
   'naming both models',
-  /\$\{model\} is rate limited[\s\S]{0,40}\$\{fallback\}/.test(main),
+  /\$\{model\} \$\{fallbackWhy\}[\s\S]{0,40}\$\{fallback\}/.test(main),
   true
 )
 check(
@@ -314,7 +314,11 @@ check(
   /failure\?\.elsewhere &&[\s\S]{0,80}!streamed/.test(main),
   true
 )
-check('and only away from a hosted model', /isCloudModel\(on\) \? backgroundModel/.test(main), true)
+check(
+  'and only away from a hosted model',
+  /isCloudModel\(on\)[\s\S]{0,30}backgroundModel/.test(main),
+  true
+)
 check('it can be switched off', /settings\.get\('apiFallback'\)/.test(main), true)
 check('and is on by default', defaultsSrc.includes('apiFallback: true'), true)
 check('the second attempt is counted too', (main.match(/usage\.add\(\{/g) ?? []).length >= 2, true)

@@ -227,5 +227,21 @@ check(
   true
 )
 
+/* ------------------- a reopened chat must not do it all again */
+
+// Reported as "every time I reopen a chat it reruns the scripts". The command
+// card had been told since it was written that an automatic mode applies only
+// to this session - the comment on that guard literally says "without this an
+// automatic mode would run the whole transcript again on load" - and the
+// other three had not. So reopening a saved chat on accept-all re-opened
+// every link in it, rewrote every file and re-ran every search.
+check('the session guard exists', app.includes('const fresh = generated.current.has(m.id)'), true)
+check('commands use it', app.includes('canAutoRun={fresh ? claimAutoRun : undefined}'), true)
+check('writing uses it', app.includes('autoWrite={fresh &&'), true)
+check('links and searches use it', app.includes("linkMode={fresh ? linkMode : 'manual'}"), true)
+// Demoted to asking rather than disabled: a deliberate click on a reopened
+// card should still work.
+check('a reopened card keeps its buttons', app.includes("fresh ? linkMode : 'manual'"), true)
+
 console.log(failures ? `\n${failures} keyboard checks FAILED` : '\nall keyboard checks')
 process.exitCode = failures ? 1 : 0

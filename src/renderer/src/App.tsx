@@ -1666,32 +1666,51 @@ export default function App(): React.JSX.Element {
               compact={compact}
             />
           ) : (
-            messages.map((m) => (
-              <Message
-                key={m.id}
-                message={m}
-                streaming={m.id === streamingId}
-                showReasoning={settings?.showReasoning ?? false}
-                smoothText={settings?.smoothText ?? false}
-                tier={tier}
-                canAutoRun={generated.current.has(m.id) ? claimAutoRun : undefined}
-                onGrow={pinToBottom}
-                onRunCommand={canRunCommands ? runShellCommand : undefined}
-                onCommandResult={onCommandResult}
-                onAnswer={onAnswerQuestion}
-                onSearch={canSearch ? runSearch : undefined}
-                onSearchResults={onSearchResults}
-                onWriteFile={canRunCommands ? writeFile : undefined}
-                onCheckWrite={checkWrite}
-                onWritten={onWritten}
-                autoWrite={(settings?.approvalMode ?? 'manual') === 'all'}
-                onOpenLink={canOpenLinks ? openLink : undefined}
-                onOpenSearch={openSearch}
-                onOpened={onOpened}
-                linkMode={linkMode}
-                searchEngine={settings?.searchEngine ?? 'duckduckgo'}
-              />
-            ))
+            messages.map((m) => {
+              // Produced in this session, rather than loaded from disk.
+              const fresh = generated.current.has(m.id)
+              return (
+                <Message
+                  key={m.id}
+                  message={m}
+                  streaming={m.id === streamingId}
+                  showReasoning={settings?.showReasoning ?? false}
+                  smoothText={settings?.smoothText ?? false}
+                  tier={tier}
+                  canAutoRun={fresh ? claimAutoRun : undefined}
+                  onGrow={pinToBottom}
+                  onRunCommand={canRunCommands ? runShellCommand : undefined}
+                  onCommandResult={onCommandResult}
+                  onAnswer={onAnswerQuestion}
+                  onSearch={canSearch ? runSearch : undefined}
+                  onSearchResults={onSearchResults}
+                  onWriteFile={canRunCommands ? writeFile : undefined}
+                  onCheckWrite={checkWrite}
+                  onWritten={onWritten}
+                  /**
+                   * An automatic mode only applies to what was just said.
+                   *
+                   * Reopening a saved chat re-mounts every card in it, and
+                   * those are finished messages whose actions already
+                   * happened. The command card has been told this since it was
+                   * written - "without this an automatic mode would run the
+                   * whole transcript again on load" - and the other three were
+                   * not, so a reopened chat on accept-all re-opened every link,
+                   * rewrote every file and re-ran every search. Reported as
+                   * "every time I reopen a chat it reruns the scripts".
+                   *
+                   * A reopened card is not disabled, only demoted to asking:
+                   * the buttons come back and a deliberate click still works.
+                   */
+                  autoWrite={fresh && (settings?.approvalMode ?? 'manual') === 'all'}
+                  onOpenLink={canOpenLinks ? openLink : undefined}
+                  onOpenSearch={openSearch}
+                  onOpened={onOpened}
+                  linkMode={fresh ? linkMode : 'manual'}
+                  searchEngine={settings?.searchEngine ?? 'duckduckgo'}
+                />
+              )
+            })
           )}
 
           {/* Marks the end of a finished reply, so a long answer has a visible

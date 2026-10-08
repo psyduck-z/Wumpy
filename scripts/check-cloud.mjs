@@ -378,5 +378,70 @@ check(
   true
 )
 
+/* ------------------------------ the limit Google actually names */
+
+// retryDelay was the wrong thing to read, and it misled twice: a model asking
+// for eighteen hours answered normally forty minutes later. The error carries
+// a quotaId naming the limit that was hit, which is not a guess.
+const perDay = C.classifyLimit(
+  429,
+  '{"quotaId":"GenerateRequestsPerDayPerProjectPerModel-FreeTier","retryDelay":"52000s"}',
+  'gemini-3.5-flash'
+)
+check('a per-day quota means the day is over', perDay.kind, 'exhausted')
+check('so nothing is slept', perDay.waitMs, 0)
+check('and it says requests, not tokens', perDay.message.includes('free requests for today'), true)
+
+// The same enormous retryDelay, and this one clears in a minute - exactly the
+// case the old duration threshold got wrong.
+const perMin = C.classifyLimit(
+  429,
+  '{"quotaId":"GenerateRequestsPerMinutePerProjectPerModel-FreeTier","retryDelay":"52000s"}',
+  'm'
+)
+check('a per-minute quota is only a throttle', perMin.kind, 'throttle')
+check('despite asking for fourteen hours', perMin.waitMs <= C.GIVE_UP_AFTER_MS, true)
+check('and it does not claim the day is gone', perMin.message.includes('today'), false)
+
+/* ----------------------------------------- sideways before down */
+
+// The cap is per model - the quota id says PerModel, and it was measured:
+// gemini-3.5-flash refused with 14.5h to go while flash-lite and 3.8-flash
+// answered on the same key in the same minute.
+check(
+  'a spent model has a sibling to try',
+  C.siblingModel('gemini-3.5-flash', new Set()),
+  'gemini-3.1-flash-lite'
+)
+check(
+  'never itself',
+  C.siblingModel('gemini-3.1-flash-lite', new Set()) !== 'gemini-3.1-flash-lite',
+  true
+)
+check(
+  'nor one already known to be spent',
+  C.siblingModel('gemini-3.5-flash', new Set(['gemini-3.1-flash-lite'])),
+  'gemini-3.6-flash'
+)
+check(
+  'it stays with the same provider',
+  C.providerFor(C.siblingModel('openai/gpt-oss-120b', new Set())),
+  'groq'
+)
+check(
+  'and gives up when every one is spent',
+  C.siblingModel(
+    'gemini-3.5-flash',
+    new Set([
+      'gemini-3.1-flash-lite',
+      'gemini-3.6-flash',
+      'gemini-3.5-flash-lite',
+      'gemini-2.5-flash'
+    ])
+  ),
+  null
+)
+check('a local model has no sibling', C.siblingModel('phi4-mini:3.8b', new Set()), null)
+
 console.log(failures ? `\n${failures} cloud checks FAILED` : '\nall cloud checks')
 process.exitCode = failures ? 1 : 0
