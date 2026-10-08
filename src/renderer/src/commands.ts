@@ -24,6 +24,7 @@ export type CommandAction =
   | { kind: 'voice'; setting: 'on' | 'polish' | 'autostop'; on: boolean | 'toggle' }
   | { kind: 'open'; what: string }
   | { kind: 'engine' }
+  | { kind: 'key'; provider: 'google' | 'groq' | null; value: string; clear: boolean }
   | { kind: 'approve'; mode: 'manual' | 'auto' | 'all' | 'cycle' }
   | { kind: 'warm' }
   | { kind: 'compact' }
@@ -237,6 +238,36 @@ export const COMMANDS: CommandSpec[] = [
     aliases: ['searchengine'],
     hint: 'Choose which search engine the browser opens',
     run: () => ({ kind: 'engine' })
+  },
+  {
+    name: 'key',
+    aliases: ['apikey'],
+    hint: 'Add or remove a hosted-model API key',
+    arg: 'google|groq <key>',
+    /**
+     * Parsed here rather than in a dialog because a key is pasted, and the
+     * composer is where pasting happens. The value is handed straight to the
+     * main process and never stored in the renderer - not in state, not in the
+     * input history, which `/key` is excluded from for that reason.
+     */
+    run: (arg) => {
+      const parts = arg.trim().split(/\s+/).filter(Boolean)
+      const provider = parts[0]?.toLowerCase()
+      if (provider !== 'google' && provider !== 'groq') {
+        return {
+          kind: 'error',
+          message:
+            'Say which one: `/key google <key>` or `/key groq <key>`. ' +
+            'Use `/key google clear` to remove it.'
+        }
+      }
+      const rest = parts.slice(1).join(' ')
+      if (!rest) return { kind: 'key', provider, value: '', clear: false }
+      if (/^(clear|remove|forget|off)$/i.test(rest)) {
+        return { kind: 'key', provider, value: '', clear: true }
+      }
+      return { kind: 'key', provider, value: rest, clear: false }
+    }
   },
   {
     name: 'voice',

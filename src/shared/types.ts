@@ -381,8 +381,30 @@ export const IPC = {
   linkCheck: 'link:check',
   linkSearch: 'link:search',
   writeFile: 'write:file',
-  writeCheck: 'write:check'
+  writeCheck: 'write:check',
+  keyStatus: 'key:status',
+  keySet: 'key:set',
+  keyClear: 'key:clear'
 } as const
+
+/* --------------------------------------------------------------------- keys */
+
+/**
+ * What the renderer may know about API keys: which providers have one, and
+ * nothing else.
+ *
+ * No key, no prefix, no masked form ever crosses this boundary. The panel is a
+ * web page and whatever reaches it reaches anything that manages to run script
+ * in it; the only code that handles the plaintext is the fetch that sends it.
+ */
+export interface KeyStatus {
+  configured: ProviderName[]
+  /** False when the OS cannot encrypt, in which case Wumpy stores nothing. */
+  canStore: boolean
+}
+
+/** Mirrors ProviderId in @shared/cloud, kept here so types.ts stays leaf-level. */
+export type ProviderName = 'google' | 'groq'
 
 /* --------------------------------------------------------------------- voice */
 

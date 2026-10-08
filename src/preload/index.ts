@@ -11,6 +11,8 @@ import type {
   CommandVerdict,
   Dock,
   HotkeyState,
+  KeyStatus,
+  ProviderName,
   OllamaModel,
   OllamaStatus,
   SavedChat,
@@ -118,6 +120,17 @@ const api = {
   hotkey: {
     get: (): Promise<HotkeyState> => ipcRenderer.invoke(IPC.hotkeyState),
     onChange: (cb: (s: HotkeyState) => void) => on(IPC.hotkeyState, cb)
+  },
+  keys: {
+    /**
+     * Which providers have a key. Deliberately no getter for a key itself -
+     * there is no handler on the other side either. This boundary is one-way.
+     */
+    status: (): Promise<KeyStatus> => ipcRenderer.invoke(IPC.keyStatus),
+    set: (provider: ProviderName, key: string): Promise<{ ok: boolean; why: string; label?: string }> =>
+      ipcRenderer.invoke(IPC.keySet, { provider, key }),
+    clear: (provider: ProviderName): Promise<{ ok: boolean; why: string }> =>
+      ipcRenderer.invoke(IPC.keyClear, { provider })
   },
   files: {
     /** Writes a file the user approved. The main process vets the path again. */

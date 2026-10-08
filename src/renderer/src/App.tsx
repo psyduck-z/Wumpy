@@ -696,6 +696,46 @@ export default function App(): React.JSX.Element {
         case 'engine':
           setPicker('engine')
           return
+        case 'key': {
+          const provider = action.provider
+          if (!provider) return
+          const label = provider === 'google' ? 'Google AI Studio' : 'Groq'
+
+          if (action.clear) {
+            const result = await window.wumpy.keys.clear(provider)
+            chat.note(result.ok ? `Forgot the ${label} key.` : result.why)
+            return
+          }
+
+          if (!action.value) {
+            const status = await window.wumpy.keys.status()
+            if (!status.canStore) {
+              chat.note(
+                'This PC cannot store a key securely, so Wumpy will not store one at all.'
+              )
+              return
+            }
+            const has = status.configured.includes(provider)
+            chat.note(
+              has
+                ? `A ${label} key is saved. Replace it with \`/key ${provider} <key>\`, ` +
+                    `or remove it with \`/key ${provider} clear\`.`
+                : `No ${label} key yet. Get one at ${provider === 'google' ? 'aistudio.google.com/apikey' : 'console.groq.com/keys'} ` +
+                    `and paste it with \`/key ${provider} <key>\`.`
+            )
+            return
+          }
+
+          const result = await window.wumpy.keys.set(provider, action.value)
+          chat.note(
+            result.ok
+              ? `Saved the ${label} key, encrypted for this Windows account. ` +
+                  'Point a tier at a hosted model to use it — background work ' +
+                  '(titles, compaction, dictation polish) stays on the local model.'
+              : result.why
+          )
+          return
+        }
         case 'voice': {
           if (action.setting === 'on') {
             const next = action.on === 'toggle' ? !settings?.voiceEnabled : action.on

@@ -32,6 +32,8 @@ import { SettingsStore } from './store'
 import { ChatStore } from './chats'
 import { InputHistory } from './history'
 import { OllamaClient } from './ollama'
+import { CloudClient } from './cloud'
+import { KeyStore } from './keys'
 import { Panel } from './panel'
 import { createTray, resourcePath } from './tray'
 import { registerHotkeys, unregisterHotkeys } from './hotkey'
@@ -43,6 +45,8 @@ import { cleanTitle } from './titles'
 import { Speech } from './speech'
 import { openLink, openSearch } from './browser'
 import { inspectWriteTarget, writeProposedFile } from './writefile'
+import { PROVIDERS, isCloudModel, looksLikeKey, providerFor } from '@shared/cloud'
+import type { ProviderId } from '@shared/cloud'
 import { checkLink, isSearchEngine } from '@shared/links'
 import { POLISH_PROMPT, polishAcceptable, tidyTranscript } from '@shared/dictation'
 
@@ -60,6 +64,8 @@ let settings: SettingsStore
 let chats: ChatStore
 let inputHistory: InputHistory
 let ollama: OllamaClient
+let cloud: CloudClient
+let keys: KeyStore
 let panel: Panel
 let tray: (Tray & { refresh(): void }) | null = null
 let hotkeyState: HotkeyState = { active: null, failed: [], intercepted: null }
@@ -79,11 +85,59 @@ let installedModels: string[] = []
  */
 function resolveTierModel(id: TierId): string | null {
   const override = settings.get('tierModels')[id]
+  // A hosted model is not installed anywhere, so "available" means a key
+  // exists for it. Without this an override of gemini-3.5-flash would fall
+  // silently back to Ollama and the user would wonder why nothing changed.
+  if (override && isCloudModel(override)) {
+    return cloud?.ready(override).ok ? override : null
+  }
   if (override && installedModels.includes(override)) return override
 
   const tier = TIERS[id]
   const candidates = [tier.model, ...tier.alternates]
   return candidates.find((m) => installedModels.includes(m)) ?? null
+}
+
+/**
+ * The client that serves a model.
+ *
+ * The only place in the app that has to know there is more than one. Both
+ * expose the same chat(), complete() and abort(), so everything above - the
+ * permission cards, the approval modes, the unattended-run cap - is unchanged
+ * and unaware of where the tokens came from.
+ */
+function clientFor(model: string): OllamaClient | CloudClient {
+  return isCloudModel(model) ? cloud : ollama
+}
+
+/**
+ * A model for background work: titling, compaction, polishing a transcript.
+ *
+ * Always local, even when every tier has been pointed at a hosted model. Three
+ * reasons, in order of how much they cost to get wrong.
+ *
+ * Budget. Each of these is a whole extra request. Google's free tier caps
+ * requests rather than tokens, and the newest Flash models allow around 25 a
+ * day - measured, by exhausting one. Spending those on naming a chat the user
+ * may never look at is the worst possible use of them.
+ *
+ * Privacy. Compaction sends the *whole conversation*, which by then may hold
+ * command output and the contents of files. That is the single largest payload
+ * Wumpy produces, and the free tiers are the ones that train on what they are
+ * sent. It should not leave the machine to produce a four-word title.
+ *
+ * Reliability. These run in the background while the user is reading an answer.
+ * A rate limit there must never surface as a failure, and the quickest local
+ * model is always there.
+ */
+function backgroundModel(preferred?: TierId): string | null {
+  const candidates = [TIERS.flash, TIERS.fast, ...(preferred ? [TIERS[preferred]] : [])]
+  for (const tier of candidates) {
+    for (const name of [tier.model, ...tier.alternates]) {
+      if (installedModels.includes(name)) return name
+    }
+  }
+  return installedModels[0] ?? null
 }
 
 function tierStatuses(): TierStatus[] {
@@ -174,6 +228,10 @@ let primedWith: string | null = null
 async function warmTier(id: TierId): Promise<void> {
   const model = resolveTierModel(id)
   if (!model) return
+  // Nothing to warm on a hosted model: there is no load to skip and no KV
+  // cache of ours to prime. Its first-token cost is a round trip, which no
+  // amount of priming shortens.
+  if (isCloudModel(model)) return
 
   // Prime with exactly the shape a real turn has, so the cache it leaves
   // behind is the one the user's first message will hit.
@@ -277,11 +335,18 @@ function registerIpc(): void {
     const model = resolveTierModel(req.tier)
 
     if (!model) {
+      // A tier pointed at a hosted model is not missing an install, it is
+      // missing a key, and telling the user to `ollama pull gemini-3.5-flash`
+      // would send them somewhere that cannot help.
+      const wanted = settings.get('tierModels')[req.tier]
+      const provider = wanted ? providerFor(wanted) : null
       panel.send(IPC.chatError, {
         requestId: req.requestId,
-        message:
-          `No model installed for ${tier.label}. Install one with ` +
-          `\`ollama pull ${tier.model}\`, then reopen Wumpy.`
+        message: provider
+          ? `${tier.label} is set to ${wanted}, which needs a ${PROVIDERS[provider].label} key. ` +
+            `Add one with /key, or get one at ${PROVIDERS[provider].keyUrl}`
+          : `No model installed for ${tier.label}. Install one with ` +
+            `\`ollama pull ${tier.model}\`, then reopen Wumpy.`
       })
       return
     }
@@ -303,7 +368,7 @@ function registerIpc(): void {
 
     // Stand aside for the duration of the turn: tokens matter more than UI.
     priority.yieldToModel()
-    await ollama.chat(req.requestId, model, withContext(req, tier.label, scope), {
+    await clientFor(model).chat(req.requestId, model, withContext(req, tier.label, scope), {
       thinking: tier.thinking,
       options: tier.options,
       keepAlive: settings.get('keepAlive'),
@@ -333,7 +398,7 @@ function registerIpc(): void {
       // Summarising is a simple job, so always use the quickest installed model
       // rather than the active tier. Compacting on a 14B model would take
       // minutes, and the user is waiting to send their actual message.
-      const model = resolveTierModel('flash') ?? resolveTierModel(req.tier)
+      const model = backgroundModel(req.tier)
       if (!model || req.messages.length === 0) return null
 
       const transcript = req.messages
@@ -366,7 +431,7 @@ function registerIpc(): void {
   ipcMain.handle(
     IPC.chatTitle,
     async (_e, req: { messages: Array<{ role: string; content: string }> }) => {
-      const model = resolveTierModel('flash') ?? resolveTierModel('fast')
+      const model = backgroundModel()
       const question = req.messages.find((m) => m.role === 'user')?.content.trim()
       if (!model || !question) return null
 
@@ -487,7 +552,7 @@ function registerIpc(): void {
 
       // The quickest installed model, for the same reason titles use it: the user
       // is waiting to read this and press Enter.
-      const model = resolveTierModel('flash') ?? resolveTierModel('fast')
+      const model = backgroundModel()
       if (!model) {
         return { text: tidied, heard, polished: false, polishRefused: false, confidence: clip.confidence, ms: clip.ms }
       }
@@ -631,7 +696,53 @@ ${command}`
     }
   )
 
-  ipcMain.on(IPC.chatAbort, (_e, requestId: string) => ollama.abort(requestId))
+  /**
+   * Key management, deliberately one-way.
+   *
+   * The renderer can ask which providers are configured, set a key, and clear
+   * one. It cannot read a key back - there is no handler for that, which is
+   * the point. A reply carries only whether it worked and why not.
+   */
+  ipcMain.handle(IPC.keyStatus, () => ({
+    configured: keys.configured(),
+    canStore: keys.available()
+  }))
+
+  ipcMain.handle(IPC.keySet, (_e, req: { provider: ProviderId; key: string }) => {
+    const provider = req?.provider
+    if (provider !== 'google' && provider !== 'groq') {
+      return { ok: false, why: 'Unknown provider.' }
+    }
+    if (!keys.available()) {
+      // Refused rather than stored in the clear. A key the user believes is
+      // encrypted and is not would change which key they were willing to paste.
+      return { ok: false, why: 'This PC cannot store a key securely, so Wumpy will not store one.' }
+    }
+    const verdict = looksLikeKey(provider, req.key ?? '')
+    if (!verdict.ok) return { ok: false, why: verdict.why }
+
+    keys.set(provider, req.key.trim())
+    void refreshModels()
+    return { ok: true, why: '', label: PROVIDERS[provider].label }
+  })
+
+  ipcMain.handle(IPC.keyClear, (_e, req: { provider: ProviderId }) => {
+    if (req?.provider !== 'google' && req?.provider !== 'groq') {
+      return { ok: false, why: 'Unknown provider.' }
+    }
+    keys.clear(req.provider)
+    // A tier pointed at that provider has just become unavailable, and the
+    // status bar should say so rather than failing at send time.
+    void refreshModels()
+    return { ok: true, why: '' }
+  })
+
+  ipcMain.on(IPC.chatAbort, (_e, requestId: string) => {
+    // Asked of both, because the caller knows a request id and not a provider,
+    // and an id neither client holds is a no-op in both.
+    ollama.abort(requestId)
+    cloud.abort(requestId)
+  })
   ipcMain.on(IPC.panelHide, () => panel.hide())
   ipcMain.on(IPC.panelPin, (_e, pinned: boolean) => panel.setPinned(pinned))
   ipcMain.on(IPC.panelDock, (_e, dock: Dock) => panel.setDock(dock))
@@ -668,6 +779,8 @@ void app.whenReady().then(async () => {
   chats = new ChatStore()
   inputHistory = new InputHistory()
   ollama = new OllamaClient(settings.get('ollamaHost'))
+  keys = new KeyStore()
+  cloud = new CloudClient(keys)
   panel = new Panel(settings)
 
   priority = new PriorityManager(() => panel.browserWindow)

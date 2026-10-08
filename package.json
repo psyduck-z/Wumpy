@@ -10,7 +10,7 @@
     "dev": "electron-vite dev",
     "start": "electron-vite preview",
     "build": "electron-vite build",
-    "typecheck": "tsc --noEmit -p tsconfig.node.json && tsc --noEmit -p tsconfig.web.json && node scripts/check-blocks.mjs && node scripts/check-titles.mjs && node scripts/check-approval.mjs && node scripts/check-autorun.mjs && node scripts/check-history.mjs && node scripts/check-commands.mjs && node scripts/check-cache.mjs && node scripts/check-hotkey.mjs && node scripts/check-dictation.mjs && node scripts/check-links.mjs && node scripts/check-holdtotalk.mjs && node scripts/check-writefile.mjs",
+    "typecheck": "tsc --noEmit -p tsconfig.node.json && tsc --noEmit -p tsconfig.web.json && node scripts/check-blocks.mjs && node scripts/check-titles.mjs && node scripts/check-approval.mjs && node scripts/check-autorun.mjs && node scripts/check-history.mjs && node scripts/check-commands.mjs && node scripts/check-cache.mjs && node scripts/check-hotkey.mjs && node scripts/check-dictation.mjs && node scripts/check-links.mjs && node scripts/check-holdtotalk.mjs && node scripts/check-writefile.mjs && node scripts/check-cloud.mjs",
     "package": "npm run hook:build && electron-vite build && electron-builder --win",
     "hotkey:claim": "powershell -ExecutionPolicy Bypass -File scripts/claim-win-c.ps1",
     "hotkey:restore": "powershell -ExecutionPolicy Bypass -File scripts/restore-copilot.ps1",
@@ -34,7 +34,8 @@
     "check:holdtotalk": "node scripts/check-holdtotalk.mjs",
     "check:writefile": "node scripts/check-writefile.mjs",
     "speech:install": "node scripts/install-speech.mjs",
-    "bench:cloud": "node scripts/bench-cloud.mjs"
+    "bench:cloud": "node scripts/bench-cloud.mjs",
+    "check:cloud": "node scripts/check-cloud.mjs"
   },
   "dependencies": {
     "electron-updater": "^6.6.2"

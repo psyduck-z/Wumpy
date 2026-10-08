@@ -49,11 +49,26 @@ export function useInputHistory(): InputHistory {
   }, [])
 
   const push = useCallback((text: string) => {
+    const entry = text.trim()
+
+    /**
+     * A line carrying an API key is never remembered, here or on disk.
+     *
+     * Input history survives restarts, so without this a key would sit in a
+     * plain file and come back on one press of Up - which would undo the point
+     * of encrypting it with safeStorage in the first place. `/key google clear`
+     * is harmless and still worth not recording, so the whole command is
+     * excluded rather than only the lines with a secret in them.
+     */
+    if (/^\/(key|apikey)\b/i.test(entry)) {
+      setBrowsing(false)
+      return
+    }
+
     // Recorded locally first, so Up reaches the line just sent without waiting
     // for a round trip to the main process.
     walk.current.push(text)
     setBrowsing(false)
-    const entry = text.trim()
     if (!entry) return
     void window.wumpy.history.add(entry).then((list) => walk.current.load(list))
   }, [])
