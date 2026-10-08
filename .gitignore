@@ -455,3 +455,7 @@ FodyWeavers.xsd
 .bench-out.txt
 .bench-logic.txt
 bench-results.json
+
+# Bundled copies of src/shared that the benches build to import TypeScript.
+/.wf-*.mjs
+/.bc-*.mjs

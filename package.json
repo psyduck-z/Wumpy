@@ -33,7 +33,8 @@
     "check:links": "node scripts/check-links.mjs",
     "check:holdtotalk": "node scripts/check-holdtotalk.mjs",
     "check:writefile": "node scripts/check-writefile.mjs",
-    "speech:install": "node scripts/install-speech.mjs"
+    "speech:install": "node scripts/install-speech.mjs",
+    "bench:cloud": "node scripts/bench-cloud.mjs"
   },
   "dependencies": {
     "electron-updater": "^6.6.2"
