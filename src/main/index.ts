@@ -493,7 +493,11 @@ function registerIpc(): void {
               model: on,
               via: providerFor(on) ?? 'local',
               error: true,
-              limited: failure?.kind === 'limit'
+              limited: failure?.kind === 'limit',
+              // "Out for the day" rather than "slow down": the request count
+              // at this moment is the only cap figure anyone here can trust,
+              // since the published ones contradict each other.
+              exhausted: failure?.kind === 'limit' && /quota|used up|free quota/i.test(message)
             })
 
             const local = isCloudModel(on) ? backgroundModel(req.tier) : null

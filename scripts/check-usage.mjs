@@ -319,5 +319,80 @@ check('it can be switched off', /settings\.get\('apiFallback'\)/.test(main), tru
 check('and is on by default', defaultsSrc.includes('apiFallback: true'), true)
 check('the second attempt is counted too', (main.match(/usage\.add\(\{/g) ?? []).length >= 2, true)
 
+/* --------------------------------- learning a cap by walking into it */
+
+// The published caps contradict each other and reality - one source had
+// gemini-3.8-flash at 1500 requests a day, another at 20, and it ran out
+// after about 25 here. The figure this machine observed is the only one worth
+// showing, so it is recorded the moment a model says it is out.
+let learn = { date: 'd', models: {} }
+for (let i = 0; i < 12; i++) learn = U.record(learn, { model: 'gemini-9-x', via: 'google' })
+learn = U.record(learn, {
+  model: 'gemini-9-x',
+  via: 'google',
+  error: true,
+  limited: true,
+  exhausted: true
+})
+const learned = U.summarise(learn)[0]
+check('the cap is the count when it ran out', learned.exhaustedAt, 12)
+check('so the day reads as spent', learned.usedFraction, 1)
+check('and the note says where that came from', learned.note.includes('measured here'), true)
+check('naming the count', learned.note.includes('12'), true)
+
+// Hitting the same wall again must not move the figure.
+const again = U.record(learn, { model: 'gemini-9-x', via: 'google', error: true, exhausted: true })
+check('a second refusal does not change it', U.summarise(again)[0].exhaustedAt, 12)
+
+// A throttle is not a spent day; only the stronger signal teaches anything.
+const throttled = U.record(
+  { date: 'd', models: {} },
+  { model: 'm', via: 'google', error: true, limited: true }
+)
+check('a plain rate limit teaches nothing', U.summarise(throttled)[0].exhaustedAt, undefined)
+check('and leaves the cap unknown', U.summarise(throttled)[0].usedFraction, null)
+
+// What was seen here beats what was published.
+let beats = { date: 'd', models: {} }
+for (let i = 0; i < 8; i++) beats = U.record(beats, { model: 'gemini-3.8-flash', via: 'google' })
+beats = U.record(beats, { model: 'gemini-3.8-flash', via: 'google', error: true, exhausted: true })
+check('an observed cap overrides the table', U.summarise(beats)[0].exhaustedAt, 8)
+
+/* ------------------------- a stopped command has not finished */
+
+// Observed: an install was cut off on the time limit and the model answered
+// "I have successfully installed the official Spotify app" while winget was
+// still working. The closing line said the command was done, whatever had
+// actually happened to it.
+const appSrc = readFileSync('src/renderer/src/App.tsx', 'utf8')
+check(
+  'a killed command is reported as stopped',
+  appSrc.includes('Wumpy STOPPED that command'),
+  true
+)
+check(
+  'and said to be possibly still running',
+  appSrc.includes('still be running in the background'),
+  true
+)
+check(
+  'with success and failure both forbidden',
+  /Do NOT say it succeeded, and do not say it failed/.test(appSrc),
+  true
+)
+check('"that command is done" is only for one that is', /result\.timedOut\s*\?/.test(appSrc), true)
+check('the quiet path excludes a timeout', appSrc.includes('!result.timedOut && !clipped'), true)
+// Two minutes killed real installs; nothing is blocked while one runs.
+check(
+  'the ceiling allows an install to finish',
+  readFileSync('src/main/shell.ts', 'utf8').includes('TIMEOUT_MS = 600_000'),
+  true
+)
+check(
+  'and the model is told an install is not done on return',
+  T.OPEN_PROMPT.includes('INSTALLING SOMETHING IS NOT FINISHED'),
+  true
+)
+
 console.log(failures ? `\n${failures} usage checks FAILED` : '\nall usage checks')
 process.exitCode = failures ? 1 : 0

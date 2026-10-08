@@ -30,6 +30,16 @@ export interface ModelUsage {
   errors: number
   /** Turns refused because a limit had been reached. */
   limited: number
+  /**
+   * Requests made before the model first said it was out, today.
+   *
+   * The published caps for these disagreed with each other and with reality -
+   * one source had gemini-3.8-flash at 1500 requests a day and another at 20 -
+   * so the only figure worth showing is the one this machine observed. When a
+   * model reports an exhausted quota, the count at that moment is the cap, as
+   * far as anyone here can tell.
+   */
+  exhaustedAt?: number
 }
 
 /** One day's worth, keyed by model. */
@@ -64,6 +74,8 @@ export interface UsageEvent {
   generatingMs?: number
   error?: boolean
   limited?: boolean
+  /** The provider said the day's allowance is gone, not merely to slow down. */
+  exhausted?: boolean
 }
 
 /** Folds one turn into a day. Returns a new object; never mutates the input. */
@@ -79,7 +91,10 @@ export function record(day: DayUsage, event: UsageEvent): DayUsage {
     cachedTokens: prev.cachedTokens + (event.cachedTokens ?? 0),
     generatingMs: prev.generatingMs + (event.generatingMs ?? 0),
     errors: prev.errors + (event.error ? 1 : 0),
-    limited: prev.limited + (event.limited ? 1 : 0)
+    limited: prev.limited + (event.limited ? 1 : 0),
+    // The first one is the honest number. Later refusals are just the same
+    // wall being hit again.
+    exhaustedAt: prev.exhaustedAt ?? (event.exhausted ? prev.requests : undefined)
   }
   return { ...day, models: { ...day.models, [key]: next } }
 }
@@ -153,6 +168,8 @@ export interface UsageLine {
   /** Fraction of the day's allowance used, or null when there is no known cap. */
   usedFraction: number | null
   note: string
+  /** Requests made before this model first said it was out today, if it did. */
+  exhaustedAt?: number
 }
 
 export function summarise(day: DayUsage): UsageLine[] {
@@ -161,9 +178,13 @@ export function summarise(day: DayUsage): UsageLine[] {
       const billed = u.promptTokens + u.completionTokens + u.thinkingTokens - u.cachedTokens
       const allowance = ALLOWANCES[u.model]
       let usedFraction: number | null = null
-      if (allowance) {
-        const byRequests = allowance.requestsPerDay ? u.requests / allowance.requestsPerDay : 0
-        const byTokens = allowance.tokensPerDay ? billed / allowance.tokensPerDay : 0
+
+      // What this machine saw beats what anyone published. If the model has
+      // already said it is out today, the count at that moment is the cap.
+      const cap = u.exhaustedAt ?? allowance?.requestsPerDay ?? 0
+      if (cap || allowance?.tokensPerDay) {
+        const byRequests = cap ? u.requests / cap : 0
+        const byTokens = allowance?.tokensPerDay ? billed / allowance.tokensPerDay : 0
         const worst = Math.max(byRequests, byTokens)
         if (worst > 0) usedFraction = Math.min(1, worst)
       }
@@ -177,7 +198,11 @@ export function summarise(day: DayUsage): UsageLine[] {
         errors: u.errors,
         limited: u.limited,
         usedFraction,
-        note: allowance?.note ?? (u.via === 'local' ? 'no limit — runs on this PC' : '')
+        exhaustedAt: u.exhaustedAt,
+        note:
+          u.exhaustedAt !== undefined
+            ? `ran out after ${u.exhaustedAt} requests today — measured here`
+            : (allowance?.note ?? (u.via === 'local' ? 'no limit — runs on this PC' : ''))
       }
     })
     .sort((a, b) => b.requests - a.requests)

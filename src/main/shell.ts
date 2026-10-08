@@ -3,8 +3,21 @@ import { homedir } from 'node:os'
 import { existsSync } from 'node:fs'
 import type { ShellKind, ShellResult } from '@shared/types'
 
-/** Hard ceiling on a single command, in ms. */
-const TIMEOUT_MS = 120_000
+/**
+ * Hard ceiling on a single command, in ms.
+ *
+ * Two minutes was enough while commands were questions - a version, a listing,
+ * whether something is installed. It stopped being enough once Wumpy could be
+ * asked to install something: `winget install Spotify.Spotify` on an ordinary
+ * connection runs well past it, and the kill arrives in the middle of a real
+ * installation.
+ *
+ * Ten minutes instead. Nothing is blocked while it runs - the panel stays
+ * usable and the card says "running…" - so the cost of waiting too long is
+ * patience, while the cost of cutting too early was an install reported as
+ * finished when it was not.
+ */
+const TIMEOUT_MS = 600_000
 /** Captured output is truncated past this, per stream. */
 const MAX_OUTPUT = 100_000
 

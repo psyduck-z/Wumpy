@@ -148,7 +148,15 @@ export const OPEN_PROMPT = [
   'so this opens it in your browser." The user should never have to guess whether',
   'you looked.',
   'Launching an app changes nothing on disk but is still an action, so it needs a',
-  'Developer tier. Opening the website does not.'
+  'Developer tier. Opening the website does not.',
+  '',
+  'INSTALLING SOMETHING IS NOT FINISHED WHEN THE COMMAND RETURNS.',
+  'An installer can keep working after its command exits, and a command Wumpy',
+  'had to stop has told you nothing about whether it worked. Never announce an',
+  'install from the fact that you proposed one. Check that the thing is actually',
+  'there — the same installed-check as above — and say what that check found.',
+  'If Wumpy says it stopped the command, it is still going: say so and check,',
+  'do not report success.'
 ].join(String.fromCharCode(10))
 
 /** Appended for tiers that may search the web. */
