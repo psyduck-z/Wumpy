@@ -254,6 +254,24 @@ export interface LimitVerdict {
  */
 export const GIVE_UP_AFTER_MS = 120_000
 
+/**
+ * Past this, the delay is describing a day, not a minute.
+ *
+ * There were two thresholds here and one was wrong. Treating everything over
+ * two minutes as an exhausted day was too eager: gemini-3.5-flash was told it
+ * "has used up its quota for today — it frees up in about 18h" and answered
+ * normally forty minutes later. A daily cap does not refill in forty minutes,
+ * so that verdict was simply false, and the cost of being wrong that way is
+ * Wumpy refusing a model that would have worked.
+ *
+ * So the long delays are split. Four hours or more is a day being over, which
+ * is what an exhausted model actually reports (65304s, or 18 hours). Anything
+ * between two minutes and that is a limit which will clear, but not soon
+ * enough to sit and wait for - worth saying so, and worth falling back to the
+ * local model, but not worth claiming the day is gone.
+ */
+export const EXHAUSTED_AFTER_MS = 4 * 3_600_000
+
 export function classifyLimit(status: number, body: string, model: string): LimitVerdict {
   if (status !== 429 && status !== 503) {
     return { kind: 'other', waitMs: 0, message: '' }
@@ -270,14 +288,20 @@ export function classifyLimit(status: number, body: string, model: string): Limi
     }
   }
 
-  if (askedMs > GIVE_UP_AFTER_MS) {
-    const hours = askedMs / 3_600_000
+  if (askedMs >= EXHAUSTED_AFTER_MS) {
+    const hours = Math.round(askedMs / 3_600_000)
     return {
       kind: 'exhausted',
       waitMs: 0,
-      message:
-        `${model} has used up its quota for today` +
-        (hours >= 1 ? ` — it frees up in about ${Math.round(hours)}h.` : '.')
+      message: `${model} has used up its free quota for today — it frees up in about ${hours}h.`
+    }
+  }
+
+  if (askedMs > GIVE_UP_AFTER_MS) {
+    return {
+      kind: 'throttle',
+      waitMs: 0,
+      message: `${model} is rate limited for the moment. Try again shortly.`
     }
   }
 

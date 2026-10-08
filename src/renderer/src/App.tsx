@@ -15,11 +15,13 @@ import type {
   WriteResult,
   SearchResult,
   TierStatus,
+  KeyStatus,
   WumpySettings
 } from '@shared/types'
 import { isTall } from '@shared/types'
 import { looksLikeUrl, SEARCH_ENGINES, type LinkApproval } from '@shared/links'
 import { TIERS, TIER_ORDER, defaultTierFor } from '@shared/tiers'
+import { CLOUD_MODELS, PROVIDERS } from '@shared/cloud'
 import { useChat, nextId, type ChatStats } from './hooks/useChat'
 import { allCommands, parseCommand, helpText, SHORTCUT_FOR, type CommandAction } from './commands'
 import { newestPending } from './pending'
@@ -44,6 +46,8 @@ export default function App(): React.JSX.Element {
 
   const [settings, setSettings] = useState<WumpySettings | null>(null)
   const [tierStatuses, setTierStatuses] = useState<TierStatus[]>([])
+  /** Which providers have a key. Never the keys themselves. */
+  const [keyStatus, setKeyStatus] = useState<KeyStatus | null>(null)
   const [models, setModels] = useState<OllamaModel[]>([])
   const [status, setStatus] = useState<OllamaStatus | null>(null)
   const [hotkey, setHotkey] = useState<HotkeyState>({
@@ -72,9 +76,9 @@ export default function App(): React.JSX.Element {
 
   // Saved chats
   /** Which picker is open, if any. One list UI serves them all. */
-  const [picker, setPicker] = useState<null | 'command' | 'resume' | 'delete' | 'tier' | 'model' | 'dock' | 'engine'>(
-    null
-  )
+  const [picker, setPicker] = useState<
+    null | 'command' | 'resume' | 'delete' | 'tier' | 'model' | 'dock' | 'engine'
+  >(null)
   const [savedChats, setSavedChats] = useState<ChatSummary[]>([])
   const [chatId, setChatId] = useState<string>(() => nextId())
   const [chatTitle, setChatTitle] = useState<string | null>(null)
@@ -97,6 +101,7 @@ export default function App(): React.JSX.Element {
     void window.wumpy.settings.get().then(setSettings)
     void window.wumpy.hotkey.get().then(setHotkey)
     void window.wumpy.tiers.status().then(setTierStatuses)
+    void window.wumpy.keys.status().then(setKeyStatus)
     void window.wumpy.chats.list().then(setSavedChats)
     return window.wumpy.hotkey.onChange(setHotkey)
   }, [])
@@ -528,7 +533,8 @@ export default function App(): React.JSX.Element {
    * per token and grew with the conversation, while the model was generating.
    */
   const estimateTokens = useMemo(
-    () => Math.ceil(messages.reduce((n, m) => (m.error || m.local ? n : n + m.content.length), 0) / 4),
+    () =>
+      Math.ceil(messages.reduce((n, m) => (m.error || m.local ? n : n + m.content.length), 0) / 4),
     [messages]
   )
 
@@ -646,7 +652,8 @@ export default function App(): React.JSX.Element {
           return
         }
         case 'mode': {
-          const next: Mode = action.mode === 'toggle' ? (mode === 'quick' ? 'dev' : 'quick') : action.mode
+          const next: Mode =
+            action.mode === 'toggle' ? (mode === 'quick' ? 'dev' : 'quick') : action.mode
           await patch({ mode: next, tier: defaultTierFor(next) })
           return
         }
@@ -665,8 +672,7 @@ export default function App(): React.JSX.Element {
           setPicker('model')
           return
         case 'reasoning': {
-          const show =
-            action.show === 'toggle' ? !(settings?.showReasoning ?? false) : action.show
+          const show = action.show === 'toggle' ? !(settings?.showReasoning ?? false) : action.show
           await patch({ showReasoning: show })
           chat.note(`Reasoning ${show ? 'shown' : 'hidden'}.`)
           return
@@ -703,6 +709,8 @@ export default function App(): React.JSX.Element {
 
           if (action.clear) {
             const result = await window.wumpy.keys.clear(provider)
+            setKeyStatus(await window.wumpy.keys.status())
+            void window.wumpy.tiers.status().then(setTierStatuses)
             chat.note(result.ok ? `Forgot the ${label} key.` : result.why)
             return
           }
@@ -710,9 +718,7 @@ export default function App(): React.JSX.Element {
           if (!action.value) {
             const status = await window.wumpy.keys.status()
             if (!status.canStore) {
-              chat.note(
-                'This PC cannot store a key securely, so Wumpy will not store one at all.'
-              )
+              chat.note('This PC cannot store a key securely, so Wumpy will not store one at all.')
               return
             }
             const has = status.configured.includes(provider)
@@ -727,6 +733,8 @@ export default function App(): React.JSX.Element {
           }
 
           const result = await window.wumpy.keys.set(provider, action.value)
+          setKeyStatus(await window.wumpy.keys.status())
+          void window.wumpy.tiers.status().then(setTierStatuses)
           chat.note(
             result.ok
               ? `Saved the ${label} key, encrypted for this Windows account. ` +
@@ -1016,9 +1024,7 @@ export default function App(): React.JSX.Element {
     if (tops.length === 0) return
     const here = el.scrollTop
     const next =
-      delta === -1
-        ? [...tops].reverse().find((t) => t < here - 4)
-        : tops.find((t) => t > here + 4)
+      delta === -1 ? [...tops].reverse().find((t) => t < here - 4) : tops.find((t) => t > here + 4)
     if (next === undefined) {
       el.scrollTop = delta === -1 ? 0 : el.scrollHeight
     } else {
@@ -1055,7 +1061,6 @@ export default function App(): React.JSX.Element {
     stickToBottom.current = near
     setAtBottom(near)
   }, [])
-
 
   /* ------------------------------------------------------------- shortcuts */
 
@@ -1163,7 +1168,19 @@ export default function App(): React.JSX.Element {
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [chat, close, newChat, retitle, runCommand, scrollBy, stepMessage, setTier, picker, streaming, toggleMode])
+  }, [
+    chat,
+    close,
+    newChat,
+    retitle,
+    runCommand,
+    scrollBy,
+    stepMessage,
+    setTier,
+    picker,
+    streaming,
+    toggleMode
+  ])
 
   const warnedRef = useRef(false)
   useEffect(() => {
@@ -1260,23 +1277,62 @@ export default function App(): React.JSX.Element {
 
     if (kind === 'model') {
       const current = tierStatus?.resolvedModel
+
+      /**
+       * Local models first, then hosted ones.
+       *
+       * Hosted entries are listed whether or not a key exists, because the list
+       * is also how the user discovers that the option is there - and picking
+       * one without a key explains how to get a key, which is more use than
+       * hiding it and leaving them to guess. The row says which it would be.
+       */
+      const localItems = models.map((m) => ({
+        id: m.name,
+        title: m.name,
+        meta: `${m.parameterSize || m.family}  ·  ${(m.size / 1e9).toFixed(1)} GB  ·  on this PC`,
+        active: m.name === current
+      }))
+
+      const cloudItems = CLOUD_MODELS.map((m) => {
+        const ready = keyStatus?.configured.includes(m.provider) ?? false
+        return {
+          id: m.id,
+          title: m.label,
+          meta: `${PROVIDERS[m.provider].label}  ·  ${ready ? m.blurb : 'needs a key — /key ' + m.provider}`,
+          active: m.id === current
+        }
+      })
+
       return {
         heading: `Model for ${activeTier.label}`,
         placeholder: 'Filter models…',
         emptyText: 'No models installed. Pull one with `ollama pull`.',
         onClose: close,
         onPick: (name) => {
+          const hosted = CLOUD_MODELS.find((m) => m.id === name)
+          if (hosted && !(keyStatus?.configured.includes(hosted.provider) ?? false)) {
+            // Not set, because setting it would leave the tier pointing at
+            // something that cannot answer and the next question would fail
+            // instead of explaining itself.
+            chat.note(
+              `**${hosted.label}** needs a ${PROVIDERS[hosted.provider].label} key first. ` +
+                `Get one at ${PROVIDERS[hosted.provider].keyUrl} and paste it with ` +
+                `\`/key ${hosted.provider} <key>\`, then pick it again.`
+            )
+            close()
+            return
+          }
           void patch({ tierModels: { ...(settings?.tierModels ?? {}), [tier]: name } })
           void window.wumpy.tiers.status().then(setTierStatuses)
-          chat.note(`**${activeTier.label}** now uses \`${name}\`.`)
+          chat.note(
+            hosted
+              ? `**${activeTier.label}** now uses **${hosted.label}**, over the network. ` +
+                  'Titles, compaction and dictation stay on the local model.'
+              : `**${activeTier.label}** now uses \`${name}\`.`
+          )
           close()
         },
-        items: models.map((m) => ({
-          id: m.name,
-          title: m.name,
-          meta: `${m.parameterSize || m.family}  ·  ${(m.size / 1e9).toFixed(1)} GB`,
-          active: m.name === current
-        }))
+        items: [...localItems, ...cloudItems]
       }
     }
 
@@ -1388,12 +1444,7 @@ export default function App(): React.JSX.Element {
         title={chatTitle}
       />
 
-      <TierBar
-        mode={mode}
-        tier={tier}
-        statuses={tierStatuses}
-        onPick={(id) => void setTier(id)}
-      />
+      <TierBar mode={mode} tier={tier} statuses={tierStatuses} onPick={(id) => void setTier(id)} />
 
       {picker ? (
         <Picker {...pickerProps(picker)} />
@@ -1455,8 +1506,15 @@ export default function App(): React.JSX.Element {
       {/* Scrolling up stops the view following the answer, and there was no way
           back but to scroll all the way down by hand. */}
       {!picker && !atBottom && messages.length > 0 && (
-        <button type="button" className="jump-bottom" onClick={jumpToBottom} title="Latest (Ctrl+End)">
-          <span className="caret-glyph is-open" aria-hidden="true">&#9656;</span>
+        <button
+          type="button"
+          className="jump-bottom"
+          onClick={jumpToBottom}
+          title="Latest (Ctrl+End)"
+        >
+          <span className="caret-glyph is-open" aria-hidden="true">
+            &#9656;
+          </span>
           Latest
         </button>
       )}
@@ -1484,9 +1542,7 @@ export default function App(): React.JSX.Element {
           setPrefill(queued ?? '')
           setQueued(null)
         }}
-        placeholder={
-          mode === 'quick' ? 'Ask Wumpy…' : `Ask ${activeTier.label}… (slower, deeper)`
-        }
+        placeholder={mode === 'quick' ? 'Ask Wumpy…' : `Ask ${activeTier.label}… (slower, deeper)`}
       />
     </div>
   )

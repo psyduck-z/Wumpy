@@ -129,6 +129,20 @@ check('so nothing is slept', day.waitMs, 0)
 check('and the message names the model', day.message.includes('gemini-3.8-flash'), true)
 check('and says when it comes back', day.message.includes('18h'), true)
 
+// This verdict was observably wrong once: gemini-3.5-flash was told its day was
+// over and answered normally forty minutes later. A delay of minutes is a limit
+// that clears; only hours mean the day.
+const middling = C.classifyLimit(429, '{"retryDelay":"600s"}', 'gemini-3.5-flash')
+check('ten minutes is not the day being over', middling.kind, 'throttle')
+check('but is too long to sit and wait for', middling.waitMs, 0)
+check('and does not claim tomorrow', middling.message.includes('today'), false)
+check(
+  'four hours is where the day begins',
+  C.classifyLimit(429, '{"retryDelay":"14400s"}', 'x').kind,
+  'exhausted'
+)
+check('just under it is not', C.classifyLimit(429, '{"retryDelay":"14000s"}', 'x').kind, 'throttle')
+
 const brief = C.classifyLimit(429, '{"retryDelay":"58s"}', 'gemini-3.5-flash')
 check('a short delay is a throttle', brief.kind, 'throttle')
 check('and is honoured', brief.waitMs, 58_500)
