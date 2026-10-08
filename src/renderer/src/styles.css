@@ -1,4 +1,4 @@
-@import 'highlight.js/styles/github-dark.css';
+@import "highlight.js/styles/github-dark.css";
 
 /*
  * Two themes, one layout. Quick mode is light and calm; Developer mode is dark
@@ -9,12 +9,12 @@
 :root {
   --radius: 14px;
   --gutter: 12px;
-  --font: 'Segoe UI Variable Text', 'Segoe UI', system-ui, sans-serif;
-  --mono: 'Cascadia Code', 'Consolas', ui-monospace, monospace;
+  --font: "Segoe UI Variable Text", "Segoe UI", system-ui, sans-serif;
+  --mono: "Cascadia Code", "Consolas", ui-monospace, monospace;
 }
 
 /* ---- Quick mode (light grey) ---- */
-[data-theme='light'] {
+[data-theme="light"] {
   --bg: 226 227 233;
   --surface: 240 241 245;
   --raised: 213 215 223;
@@ -43,7 +43,7 @@
   Darker overall as well. This mode is for the tiers that can change the
   machine, and it should not look like the quick one with the lights off.
 */
-[data-theme='dark'] {
+[data-theme="dark"] {
   --bg: 10 10 11;
   --surface: 17 17 19;
   --raised: 28 28 30;
@@ -105,16 +105,34 @@ body {
   opacity: 1;
 }
 
-
 /* The compact card trims chrome so the transcript still gets room. */
-.is-compact .scroll { padding: 10px 12px; gap: 9px; }
-.is-compact .header { padding: 7px 7px 7px 11px; }
-.is-compact .tierbar { padding: 0 8px 6px; }
-.is-compact .status { padding: 0 11px 4px; }
-.is-compact .composer { padding: 7px 9px 9px; }
-.is-compact .empty h1 { display: none; }
-.is-compact .empty-mark { width: 34px; height: 34px; margin-bottom: 8px; }
-.is-compact .status-tip { display: none; }
+.is-compact .scroll {
+  padding: 10px 12px;
+  gap: 9px;
+}
+.is-compact .header {
+  padding: 7px 7px 7px 11px;
+}
+.is-compact .tierbar {
+  padding: 0 8px 6px;
+}
+.is-compact .status {
+  padding: 0 11px 4px;
+}
+.is-compact .composer {
+  padding: 7px 9px 9px;
+}
+.is-compact .empty h1 {
+  display: none;
+}
+.is-compact .empty-mark {
+  width: 34px;
+  height: 34px;
+  margin-bottom: 8px;
+}
+.is-compact .status-tip {
+  display: none;
+}
 
 /* ----------------------------------------------------------------- header */
 
@@ -199,7 +217,9 @@ body {
 
 .dot-on {
   background: #22c55e;
-  box-shadow: 0 0 0 1.5px rgb(var(--bg)), 0 0 6px #22c55e99;
+  box-shadow:
+    0 0 0 1.5px rgb(var(--bg)),
+    0 0 6px #22c55e99;
 }
 
 .dot-off {
@@ -435,15 +455,29 @@ body {
   font-size: 12.5px;
 }
 
-.msg-assistant p { margin: 0 0 9px; }
-.msg-assistant > .msg-body > :last-child { margin-bottom: 0; }
+.msg-assistant p {
+  margin: 0 0 9px;
+}
+.msg-assistant > .msg-body > :last-child {
+  margin-bottom: 0;
+}
 .msg-assistant ul,
-.msg-assistant ol { margin: 0 0 9px; padding-left: 20px; }
-.msg-assistant li { margin: 2px 0; }
+.msg-assistant ol {
+  margin: 0 0 9px;
+  padding-left: 20px;
+}
+.msg-assistant li {
+  margin: 2px 0;
+}
 .msg-assistant h1,
 .msg-assistant h2,
-.msg-assistant h3 { font-size: 14px; margin: 14px 0 6px; }
-.msg-assistant a { color: rgb(var(--accent-text)); }
+.msg-assistant h3 {
+  font-size: 14px;
+  margin: 14px 0 6px;
+}
+.msg-assistant a {
+  color: rgb(var(--accent-text));
+}
 
 .msg-assistant table {
   border-collapse: collapse;
@@ -493,11 +527,11 @@ body {
 }
 
 /* highlight.js ships a dark theme; keep its palette legible on light mode. */
-[data-theme='light'] .codeblock pre,
-[data-theme='light'] .codeblock pre code {
+[data-theme="light"] .codeblock pre,
+[data-theme="light"] .codeblock pre code {
   color: #e6edf3;
 }
-[data-theme='light'] .codeblock pre {
+[data-theme="light"] .codeblock pre {
   background: #15181e;
   border-color: transparent;
 }
@@ -522,8 +556,12 @@ body {
   cursor: pointer;
 }
 
-.codeblock:hover .copy { opacity: 1; }
-.codeblock .copy:hover { background: rgb(255 255 255 / 0.18); }
+.codeblock:hover .copy {
+  opacity: 1;
+}
+.codeblock .copy:hover {
+  background: rgb(255 255 255 / 0.18);
+}
 
 .picker-heading {
   font-size: 11px;
@@ -552,13 +590,19 @@ body {
   vertical-align: middle;
 }
 
-.picker-row.is-disabled { opacity: 0.4; }
-.picker-row.is-disabled .picker-main { cursor: not-allowed; }
+.picker-row.is-disabled {
+  opacity: 0.4;
+}
+.picker-row.is-disabled .picker-main {
+  cursor: not-allowed;
+}
 .picker-row.is-removing.is-cursor {
   background: rgb(var(--danger-soft));
   border-color: rgb(var(--danger) / 0.45);
 }
-.picker-row.is-removing .picker-del { opacity: 1; }
+.picker-row.is-removing .picker-del {
+  opacity: 1;
+}
 
 /* ----------------------------------------------------------- web search */
 
@@ -568,14 +612,18 @@ body {
   font-size: 12px;
 }
 
-.search-results li { margin: 0 0 7px; }
+.search-results li {
+  margin: 0 0 7px;
+}
 
 .search-results a {
   color: rgb(var(--accent-text));
   text-decoration: none;
 }
 
-.search-results a:hover { text-decoration: underline; }
+.search-results a:hover {
+  text-decoration: underline;
+}
 
 .search-snippet {
   display: block;
@@ -601,7 +649,9 @@ body {
   border-radius: 10px;
 }
 
-.ask.is-answered { opacity: 0.75; }
+.ask.is-answered {
+  opacity: 0.75;
+}
 
 .ask-question {
   margin: 0 0 9px;
@@ -631,7 +681,10 @@ body {
   color: rgb(var(--accent-text));
 }
 
-.ask-option:disabled { cursor: default; opacity: 0.5; }
+.ask-option:disabled {
+  cursor: default;
+  opacity: 0.5;
+}
 
 .ask-option.is-chosen {
   background: rgb(var(--accent-soft));
@@ -656,8 +709,12 @@ body {
   background: rgb(var(--surface));
 }
 
-.cmd.is-risky { border-color: rgb(var(--danger) / 0.55); }
-.cmd.is-failed { border-color: rgb(var(--danger) / 0.4); }
+.cmd.is-risky {
+  border-color: rgb(var(--danger) / 0.55);
+}
+.cmd.is-failed {
+  border-color: rgb(var(--danger) / 0.4);
+}
 
 .cmd-head {
   display: flex;
@@ -668,7 +725,9 @@ body {
   font-size: 10.5px;
 }
 
-.cmd.is-risky .cmd-head { background: rgb(var(--danger-soft)); }
+.cmd.is-risky .cmd-head {
+  background: rgb(var(--danger-soft));
+}
 
 .cmd-shell {
   font-weight: 600;
@@ -677,7 +736,9 @@ body {
   color: rgb(var(--accent-text));
 }
 
-.cmd.is-risky .cmd-shell { color: rgb(var(--danger)); }
+.cmd.is-risky .cmd-shell {
+  color: rgb(var(--danger));
+}
 
 .cmd-risk {
   color: rgb(var(--danger));
@@ -690,7 +751,9 @@ body {
   max-width: 180px;
 }
 
-.cmd-head .spacer { flex: 1; }
+.cmd-head .spacer {
+  flex: 1;
+}
 
 .cmd-run,
 .cmd-skip {
@@ -703,14 +766,32 @@ body {
   cursor: pointer;
 }
 
-.cmd-run { background: rgb(var(--accent)); color: #fff; }
-.cmd.is-risky .cmd-run { background: rgb(var(--danger)); }
-.cmd-skip { background: transparent; color: rgb(var(--muted)); font-weight: 400; }
-.cmd-skip:hover { color: rgb(var(--text)); }
+.cmd-run {
+  background: rgb(var(--accent));
+  color: #fff;
+}
+.cmd.is-risky .cmd-run {
+  background: rgb(var(--danger));
+}
+.cmd-skip {
+  background: transparent;
+  color: rgb(var(--muted));
+  font-weight: 400;
+}
+.cmd-skip:hover {
+  color: rgb(var(--text));
+}
 
-.cmd-status { color: rgb(var(--muted)); font-variant-numeric: tabular-nums; }
-.cmd-status.is-ok { color: #22c55e; }
-.cmd-status.is-failed { color: rgb(var(--danger)); }
+.cmd-status {
+  color: rgb(var(--muted));
+  font-variant-numeric: tabular-nums;
+}
+.cmd-status.is-ok {
+  color: #22c55e;
+}
+.cmd-status.is-failed {
+  color: rgb(var(--danger));
+}
 
 .cmd-reason {
   margin: 0;
@@ -745,7 +826,7 @@ body {
  * command invisible — the one thing on the card the user must be able to read
  * before approving it.
  */
-[data-theme='light'] .cmd-body {
+[data-theme="light"] .cmd-body {
   background: #15181e;
   color: #e6edf3;
 }
@@ -768,7 +849,9 @@ body {
   cursor: pointer;
 }
 
-.cmd-toggle:hover { color: rgb(var(--text)); }
+.cmd-toggle:hover {
+  color: rgb(var(--text));
+}
 
 .cmd-output pre {
   margin: 6px 0 0;
@@ -801,7 +884,7 @@ body {
 
 .turn-end::before,
 .turn-end::after {
-  content: '';
+  content: "";
   flex: 1;
   height: 1px;
   background: linear-gradient(90deg, transparent, rgb(var(--text) / 0.28));
@@ -893,14 +976,18 @@ body {
   cursor: pointer;
 }
 
-.thinking button:hover { color: rgb(var(--text)); }
+.thinking button:hover {
+  color: rgb(var(--text));
+}
 
 .caret-glyph {
   display: inline-block;
   font-size: 9px;
 }
 
-.caret-glyph.is-open { transform: rotate(90deg); }
+.caret-glyph.is-open {
+  transform: rotate(90deg);
+}
 
 .thinking pre {
   margin: 6px 0 0;
@@ -924,7 +1011,7 @@ body {
  * a second for the life of every answer.
  */
 .msg-body.is-streaming > :last-child::after {
-  content: '';
+  content: "";
   display: inline-block;
   width: 2px;
   height: 1.02em;
@@ -955,11 +1042,63 @@ body {
   border-radius: 50%;
   background: rgb(var(--muted));
   opacity: 0.5;
+
+  /*
+    Only opacity and transform are animated.
+
+    These were a static opacity ramp on purpose: generation on this machine is
+    CPU-bound and anything repainting during a turn competes with the tokens
+    being generated. That reasoning still holds, and these two properties are
+    the way round it - the compositor animates them on its own thread without
+    laying out, painting, or waking the main thread each frame. Animating
+    width, margin or a colour here would put the cost straight back.
+
+    will-change keeps each dot on its own layer for the duration rather than
+    promoting and demoting it every cycle. Three 5px dots is a trivial amount
+    of layer to hold.
+  */
+  animation: dot-pulse 1.3s ease-in-out infinite;
+  will-change: opacity, transform;
 }
 
-/* A static ramp still reads as "working" without repainting. */
-.dots i:nth-child(2) { opacity: 0.7; }
-.dots i:nth-child(3) { opacity: 0.9; }
+/* Offsets, so it reads as a wave travelling rather than three dots blinking. */
+.dots i:nth-child(2) {
+  animation-delay: 0.18s;
+}
+.dots i:nth-child(3) {
+  animation-delay: 0.36s;
+}
+
+@keyframes dot-pulse {
+  0%,
+  70%,
+  100% {
+    opacity: 0.35;
+    transform: translateY(0);
+  }
+  35% {
+    opacity: 1;
+    transform: translateY(-3px);
+  }
+}
+
+/*
+  Motion is a preference, and this one repeats indefinitely while the user
+  waits, which is exactly the kind that provokes it. The static ramp it
+  replaced was perfectly legible, so that is what reduced motion gets back.
+*/
+@media (prefers-reduced-motion: reduce) {
+  .dots i {
+    animation: none;
+    will-change: auto;
+  }
+  .dots i:nth-child(2) {
+    opacity: 0.7;
+  }
+  .dots i:nth-child(3) {
+    opacity: 0.9;
+  }
+}
 
 /* ------------------------------------------------------------ empty state */
 
@@ -978,8 +1117,15 @@ body {
   border-radius: 13px;
 }
 
-.empty h1 { margin: 0 0 6px; font-size: 16px; color: rgb(var(--text)); }
-.empty p { margin: 0; font-size: 12.5px; }
+.empty h1 {
+  margin: 0 0 6px;
+  font-size: 16px;
+  color: rgb(var(--text));
+}
+.empty p {
+  margin: 0;
+  font-size: 12.5px;
+}
 
 .empty code,
 .empty kbd {
@@ -1027,7 +1173,9 @@ body {
   border-color: rgb(var(--accent) / 0.65);
 }
 
-.picker-filter::placeholder { color: rgb(var(--muted) / 0.8); }
+.picker-filter::placeholder {
+  color: rgb(var(--muted) / 0.8);
+}
 
 .picker-foot {
   display: flex;
@@ -1086,15 +1234,28 @@ body {
   border-radius: 9px;
 }
 
-.picker-row:hover { background: rgb(var(--surface)); border-color: rgb(var(--border)); }
-.picker-row.is-cursor { background: rgb(var(--accent-soft)); border-color: rgb(var(--accent) / 0.4); }
+.picker-row:hover {
+  background: rgb(var(--surface));
+  border-color: rgb(var(--border));
+}
+.picker-row.is-cursor {
+  background: rgb(var(--accent-soft));
+  border-color: rgb(var(--accent) / 0.4);
+}
 .picker-row.is-deleting.is-cursor {
   background: rgb(var(--danger-soft));
   border-color: rgb(var(--danger) / 0.45);
 }
-.picker-row.is-deleting .picker-del { opacity: 1; }
-.picker-row.is-active .picker-title { color: rgb(var(--accent-text)); font-weight: 600; }
-.picker-row.is-cursor .picker-del { opacity: 1; }
+.picker-row.is-deleting .picker-del {
+  opacity: 1;
+}
+.picker-row.is-active .picker-title {
+  color: rgb(var(--accent-text));
+  font-weight: 600;
+}
+.picker-row.is-cursor .picker-del {
+  opacity: 1;
+}
 
 .picker-main {
   flex: 1;
@@ -1118,7 +1279,10 @@ body {
   text-overflow: ellipsis;
 }
 
-.picker-meta { font-size: 10px; color: rgb(var(--muted)); }
+.picker-meta {
+  font-size: 10px;
+  color: rgb(var(--muted));
+}
 
 .picker-del {
   width: 30px;
@@ -1132,9 +1296,14 @@ body {
   opacity: 0;
 }
 
-.picker-row:hover .picker-del { opacity: 1; }
+.picker-row:hover .picker-del {
+  opacity: 1;
+}
 
-.picker-del:hover { color: rgb(var(--danger)); background: rgb(var(--danger-soft)); }
+.picker-del:hover {
+  color: rgb(var(--danger));
+  background: rgb(var(--danger-soft));
+}
 
 .picker-del.is-armed {
   opacity: 1;
@@ -1155,8 +1324,14 @@ body {
   color: rgb(var(--muted));
 }
 
-.status-tier { font-weight: 600; color: rgb(var(--accent-text)); white-space: nowrap; }
-.status-sep { opacity: 0.35; }
+.status-tier {
+  font-weight: 600;
+  color: rgb(var(--accent-text));
+  white-space: nowrap;
+}
+.status-sep {
+  opacity: 0.35;
+}
 .status-model {
   white-space: nowrap;
   overflow: hidden;
@@ -1170,9 +1345,17 @@ body {
   white-space: nowrap;
 }
 /* Tabular figures stop the readout jittering as digits change. */
-.status-num { font-variant-numeric: tabular-nums; opacity: 0.85; }
-.status .spacer { flex: 1; }
-.status-tip { opacity: 0.55; white-space: nowrap; }
+.status-num {
+  font-variant-numeric: tabular-nums;
+  opacity: 0.85;
+}
+.status .spacer {
+  flex: 1;
+}
+.status-tip {
+  opacity: 0.55;
+  white-space: nowrap;
+}
 
 /* ---- approval mode ---- */
 
@@ -1190,7 +1373,9 @@ body {
   white-space: nowrap;
 }
 
-.approval:hover { color: rgb(var(--text)); }
+.approval:hover {
+  color: rgb(var(--text));
+}
 
 /* Automatic modes are stated louder, because they act without being asked. */
 .approval.is-auto {
@@ -1220,7 +1405,9 @@ body {
   cursor: pointer;
 }
 
-.ctx:hover { background: rgb(var(--raised)); }
+.ctx:hover {
+  background: rgb(var(--raised));
+}
 
 .ctx-track {
   position: relative;
@@ -1238,8 +1425,12 @@ body {
   background: rgb(var(--accent));
 }
 
-.ctx.is-warn .ctx-fill { background: #f59e0b; }
-.ctx.is-critical .ctx-fill { background: rgb(var(--danger)); }
+.ctx.is-warn .ctx-fill {
+  background: #f59e0b;
+}
+.ctx.is-critical .ctx-fill {
+  background: rgb(var(--danger));
+}
 
 .ctx-label {
   font-variant-numeric: tabular-nums;
@@ -1247,11 +1438,18 @@ body {
   text-align: right;
 }
 
-.ctx.is-warn .ctx-label { color: #f59e0b; }
-.ctx.is-critical .ctx-label { color: rgb(var(--danger)); }
+.ctx.is-warn .ctx-label {
+  color: #f59e0b;
+}
+.ctx.is-critical .ctx-label {
+  color: rgb(var(--danger));
+}
 
 /* Marks the figure as estimated rather than counted. */
-.ctx-est { opacity: 0.5; margin-left: 1px; }
+.ctx-est {
+  opacity: 0.5;
+  margin-left: 1px;
+}
 
 .composer-wrap {
   position: relative;
@@ -1284,16 +1482,24 @@ body {
   border-color: rgb(var(--accent) / 0.65);
 }
 
-.composer textarea::placeholder { color: rgb(var(--muted) / 0.8); }
+.composer textarea::placeholder {
+  color: rgb(var(--muted) / 0.8);
+}
 
-.composer textarea::-webkit-scrollbar { width: 7px; }
-.composer textarea::-webkit-scrollbar-track { background: transparent; }
+.composer textarea::-webkit-scrollbar {
+  width: 7px;
+}
+.composer textarea::-webkit-scrollbar-track {
+  background: transparent;
+}
 .composer textarea::-webkit-scrollbar-thumb {
   background: rgb(var(--text) / 0.16);
   border-radius: 4px;
 }
 /* Chromium otherwise draws stepper arrows, which read as a stray widget. */
-.composer textarea::-webkit-scrollbar-button { display: none; }
+.composer textarea::-webkit-scrollbar-button {
+  display: none;
+}
 
 .btn-send,
 .btn-stop {
@@ -1309,9 +1515,18 @@ body {
   cursor: pointer;
 }
 
-.btn-send { background: rgb(var(--accent)); color: #fff; }
-.btn-send:disabled { opacity: 0.3; cursor: default; }
-.btn-stop { background: rgb(var(--raised)); color: rgb(var(--text)); }
+.btn-send {
+  background: rgb(var(--accent));
+  color: #fff;
+}
+.btn-send:disabled {
+  opacity: 0.3;
+  cursor: default;
+}
+.btn-stop {
+  background: rgb(var(--raised));
+  color: rgb(var(--text));
+}
 
 /* ------------------------------------------------------------ file writes */
 
@@ -1323,7 +1538,7 @@ body {
  */
 .write-path {
   margin: 6px 0 0;
-  font-family: var(--mono, ui-monospace, 'Cascadia Code', Consolas, monospace);
+  font-family: var(--mono, ui-monospace, "Cascadia Code", Consolas, monospace);
   font-size: 11.5px;
   color: rgb(var(--text));
   word-break: break-all;
@@ -1341,7 +1556,9 @@ body {
   text-align: left;
 }
 
-.write-toggle:hover { color: rgb(var(--text)); }
+.write-toggle:hover {
+  color: rgb(var(--text));
+}
 
 .write-body {
   margin-top: 6px;
@@ -1365,7 +1582,7 @@ body {
  * about to approve, this is the thing they are approving.
  */
 .link-host {
-  font-family: var(--mono, ui-monospace, 'Cascadia Code', Consolas, monospace);
+  font-family: var(--mono, ui-monospace, "Cascadia Code", Consolas, monospace);
   color: rgb(var(--text));
   background: rgb(var(--raised));
   border-radius: 5px;
@@ -1398,7 +1615,9 @@ body {
   overflow: hidden;
 }
 
-.mic:hover { color: rgb(var(--text)); }
+.mic:hover {
+  color: rgb(var(--text));
+}
 
 .mic-off {
   opacity: 0.35;
@@ -1447,7 +1666,9 @@ body {
   max-width: calc(100% - 24px);
 }
 
-.mic-status-note { color: rgb(var(--text)); }
+.mic-status-note {
+  color: rgb(var(--text));
+}
 
 .mic-dismiss {
   background: none;
@@ -1482,7 +1703,9 @@ body {
   z-index: 20;
 }
 
-.palette::-webkit-scrollbar { width: 8px; }
+.palette::-webkit-scrollbar {
+  width: 8px;
+}
 .palette::-webkit-scrollbar-thumb {
   background: rgb(var(--text) / 0.16);
   border-radius: 4px;
@@ -1503,7 +1726,9 @@ body {
   cursor: pointer;
 }
 
-.palette-row.is-selected { background: rgb(var(--accent-soft)); }
+.palette-row.is-selected {
+  background: rgb(var(--accent-soft));
+}
 
 .palette-name {
   font-family: var(--mono);
@@ -1512,9 +1737,13 @@ body {
   white-space: nowrap;
 }
 
-.palette-row.is-selected .palette-name { color: rgb(var(--accent-text)); }
+.palette-row.is-selected .palette-name {
+  color: rgb(var(--accent-text));
+}
 
-.palette-arg { opacity: 0.55; }
+.palette-arg {
+  opacity: 0.55;
+}
 
 .palette-hint {
   margin-left: auto;
@@ -1631,7 +1860,9 @@ body {
   white-space: nowrap;
 }
 
-.backend:hover { color: rgb(var(--text)); }
+.backend:hover {
+  color: rgb(var(--text));
+}
 
 .backend.is-api {
   color: #38bdf8;
