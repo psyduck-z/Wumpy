@@ -144,7 +144,10 @@ function openFenceBody(text: string): string | null {
     if (/^\s*```/.test(lines[i])) opensAt = opensAt === -1 ? i : -1
   }
   if (opensAt === -1) return null
-  return lines.slice(opensAt + 1).join('\n').trim()
+  return lines
+    .slice(opensAt + 1)
+    .join('\n')
+    .trim()
 }
 
 /** Maps a fence tag to the shell it should run in, or null for ordinary code. */
@@ -165,11 +168,12 @@ function readFence(children: ReactNode): { shell: ShellKind; code: string } | nu
   const shell = runnableShell(props.className)
   if (!shell) return null
 
-  const code = typeof props.children === 'string'
-    ? props.children
-    : Array.isArray(props.children)
-      ? props.children.filter((c) => typeof c === 'string').join('')
-      : ''
+  const code =
+    typeof props.children === 'string'
+      ? props.children
+      : Array.isArray(props.children)
+        ? props.children.filter((c) => typeof c === 'string').join('')
+        : ''
   const trimmed = code.trim()
   return trimmed ? { shell, code: trimmed } : null
 }
@@ -191,7 +195,9 @@ export interface MarkdownProps {
   /** Which message this is, so one message can only run one command. */
   messageId?: string
   /** Supplied for assistant turns that may search the web. */
-  onSearch?: (query: string) => Promise<{ results: SearchResult[]; provider: string; error?: string }>
+  onSearch?: (
+    query: string
+  ) => Promise<{ results: SearchResult[]; provider: string; error?: string }>
   onSearchResults?: (
     query: string,
     results: SearchResult[],
@@ -288,7 +294,9 @@ export const Markdown = memo(function Markdown({
                 mode={linkMode}
                 engine={searchEngine}
                 onOpen={onOpenLink!}
-                onSearch={onOpenSearch ?? (async () => ({ opened: false, url: '', host: '', error: 'off' }))}
+                onSearch={
+                  onOpenSearch ?? (async () => ({ opened: false, url: '', host: '', error: 'off' }))
+                }
                 onOpened={onOpened ?? (() => {})}
                 messageId={messageId ?? ''}
               />

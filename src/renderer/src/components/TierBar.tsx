@@ -1,4 +1,6 @@
+import { useRef } from 'react'
 import type { Mode, TierId, TierStatus } from '@shared/types'
+import { arrowNavigate } from '../keyboard'
 import { TIERS, tiersForMode, SPEED_LABEL } from '@shared/tiers'
 
 /**
@@ -18,9 +20,21 @@ export function TierBar({
   onPick(id: TierId): void
 }): React.JSX.Element {
   const byId = new Map(statuses.map((s) => [s.id, s]))
+  const barRef = useRef<HTMLDivElement>(null)
 
   return (
-    <div className="tierbar" role="radiogroup" aria-label="Thinking tier">
+    <div
+      ref={barRef}
+      className="tierbar"
+      role="radiogroup"
+      aria-label="Thinking tier"
+      // A radiogroup is expected to move with the arrows, and this one has
+      // the mode's two tiers in it. Ctrl+1..4 still works and is still
+      // printed on each button.
+      onKeyDown={(e) => {
+        if (arrowNavigate(e, barRef.current)) e.preventDefault()
+      }}
+    >
       {tiersForMode(mode).map((id, i) => {
         const t = TIERS[id]
         const status = byId.get(id)

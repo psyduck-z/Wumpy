@@ -199,8 +199,7 @@ export function Picker({
 
       <div className="picker-foot">
         <kbd>&uarr;</kbd>
-        <kbd>&darr;</kbd> move &middot; <kbd>Enter</kbd>{' '}
-        {removeMode ? 'delete (twice)' : 'choose'}
+        <kbd>&darr;</kbd> move &middot; <kbd>Enter</kbd> {removeMode ? 'delete (twice)' : 'choose'}
         {onRemove && !removeMode && (
           <>
             {' '}

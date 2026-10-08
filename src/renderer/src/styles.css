@@ -1,4 +1,4 @@
-@import "highlight.js/styles/github-dark.css";
+@import 'highlight.js/styles/github-dark.css';
 
 /*
  * Two themes, one layout. Quick mode is light and calm; Developer mode is dark
@@ -9,12 +9,12 @@
 :root {
   --radius: 14px;
   --gutter: 12px;
-  --font: "Segoe UI Variable Text", "Segoe UI", system-ui, sans-serif;
-  --mono: "Cascadia Code", "Consolas", ui-monospace, monospace;
+  --font: 'Segoe UI Variable Text', 'Segoe UI', system-ui, sans-serif;
+  --mono: 'Cascadia Code', 'Consolas', ui-monospace, monospace;
 }
 
 /* ---- Quick mode (light grey) ---- */
-[data-theme="light"] {
+[data-theme='light'] {
   --bg: 226 227 233;
   --surface: 240 241 245;
   --raised: 213 215 223;
@@ -43,7 +43,7 @@
   Darker overall as well. This mode is for the tiers that can change the
   machine, and it should not look like the quick one with the lights off.
 */
-[data-theme="dark"] {
+[data-theme='dark'] {
   --bg: 10 10 11;
   --surface: 17 17 19;
   --raised: 28 28 30;
@@ -527,11 +527,11 @@ body {
 }
 
 /* highlight.js ships a dark theme; keep its palette legible on light mode. */
-[data-theme="light"] .codeblock pre,
-[data-theme="light"] .codeblock pre code {
+[data-theme='light'] .codeblock pre,
+[data-theme='light'] .codeblock pre code {
   color: #e6edf3;
 }
-[data-theme="light"] .codeblock pre {
+[data-theme='light'] .codeblock pre {
   background: #15181e;
   border-color: transparent;
 }
@@ -826,7 +826,7 @@ body {
  * command invisible — the one thing on the card the user must be able to read
  * before approving it.
  */
-[data-theme="light"] .cmd-body {
+[data-theme='light'] .cmd-body {
   background: #15181e;
   color: #e6edf3;
 }
@@ -884,7 +884,7 @@ body {
 
 .turn-end::before,
 .turn-end::after {
-  content: "";
+  content: '';
   flex: 1;
   height: 1px;
   background: linear-gradient(90deg, transparent, rgb(var(--text) / 0.28));
@@ -1011,7 +1011,7 @@ body {
  * a second for the life of every answer.
  */
 .msg-body.is-streaming > :last-child::after {
-  content: "";
+  content: '';
   display: inline-block;
   width: 2px;
   height: 1.02em;
@@ -1538,7 +1538,7 @@ body {
  */
 .write-path {
   margin: 6px 0 0;
-  font-family: var(--mono, ui-monospace, "Cascadia Code", Consolas, monospace);
+  font-family: var(--mono, ui-monospace, 'Cascadia Code', Consolas, monospace);
   font-size: 11.5px;
   color: rgb(var(--text));
   word-break: break-all;
@@ -1582,7 +1582,7 @@ body {
  * about to approve, this is the thing they are approving.
  */
 .link-host {
-  font-family: var(--mono, ui-monospace, "Cascadia Code", Consolas, monospace);
+  font-family: var(--mono, ui-monospace, 'Cascadia Code', Consolas, monospace);
   color: rgb(var(--text));
   background: rgb(var(--raised));
   border-radius: 5px;
@@ -1867,4 +1867,34 @@ body {
 .backend.is-api {
   color: #38bdf8;
   border-color: #38bdf866;
+}
+
+/* ---- keyboard focus ----
+   One visible ring, everywhere, for everything you can land on.
+
+   Before this, three elements in the whole app styled their focus and the
+   rest inherited whatever the platform did, which in a dark frameless window
+   is close to invisible. Arrow-key navigation is useless if you cannot see
+   where you are, so this is part of that feature and not a polish pass.
+
+   :focus-visible rather than :focus, so a clicked button does not keep a ring
+   it never needed. */
+:where(button, [href], input, select, textarea, [tabindex]):focus-visible {
+  outline: 2px solid rgb(var(--accent));
+  outline-offset: 2px;
+  border-radius: 6px;
+}
+
+/* The destructive ones ring in their own colour, so the moment before you
+   press Enter still says what kind of thing you are about to do. */
+.cmd-run.is-risky:focus-visible,
+.cmd-run.is-destructive:focus-visible {
+  outline-color: rgb(var(--danger));
+}
+
+/* A card holding focus is lifted slightly out of the transcript, so it is
+   obvious which proposal the keys apply to when several are on screen. */
+.cmd:focus-within,
+.ask:focus-within {
+  border-color: rgb(var(--accent) / 0.45);
 }

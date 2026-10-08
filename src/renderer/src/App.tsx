@@ -1166,6 +1166,20 @@ export default function App(): React.JSX.Element {
   useEffect(() => {
     const onKey = (e: KeyboardEvent): void => {
       if (e.key === 'Escape') {
+        /**
+         * From inside a proposal, Escape steps back out to the composer.
+         *
+         * Without this, stepping into a card with Ctrl+Down left the only
+         * obvious way out closing the whole panel - and losing the proposal
+         * along with it. Escape should undo the last thing you did, and the
+         * last thing you did was move focus.
+         */
+        const insideCard = (e.target as HTMLElement | null)?.closest?.('.cmd, .ask')
+        if (insideCard) {
+          e.preventDefault()
+          document.querySelector<HTMLTextAreaElement>('.composer textarea')?.focus()
+          return
+        }
         e.preventDefault()
         if (streaming) chat.stop()
         else if (picker) setPicker(null)
@@ -1223,6 +1237,27 @@ export default function App(): React.JSX.Element {
           if (!pending) return
           e.preventDefault()
           pending.run()
+          return
+        }
+        /**
+         * Ctrl+Down steps into the newest proposal; Esc comes back.
+         *
+         * Ctrl+Enter approves it outright, which is the quick path when the
+         * card says what you expected. This is the other one: when you want
+         * to read the command, open the contents, or pick a different button,
+         * you have to be able to get there - and tabbing meant walking the
+         * whole transcript first.
+         *
+         * Once inside, the arrow keys move between the card's own controls.
+         */
+        if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+          const cards = document.querySelectorAll<HTMLElement>('.cmd, .ask')
+          const card = e.key === 'ArrowDown' ? cards[cards.length - 1] : cards[0]
+          const first = card?.querySelector<HTMLElement>('button:not([disabled])')
+          if (!first) return
+          e.preventDefault()
+          first.focus()
+          card.scrollIntoView({ block: 'nearest' })
           return
         }
         // Ctrl+Home / Ctrl+End jump to the ends of the transcript.

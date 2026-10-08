@@ -75,7 +75,9 @@ export const Message = memo(function Message({
   onOpened?: (result: LinkResult, messageId: string) => void
   linkMode?: LinkApproval
   searchEngine?: string
-  onSearch?: (query: string) => Promise<{ results: SearchResult[]; provider: string; error?: string }>
+  onSearch?: (
+    query: string
+  ) => Promise<{ results: SearchResult[]; provider: string; error?: string }>
   onSearchResults?: (
     query: string,
     results: SearchResult[],

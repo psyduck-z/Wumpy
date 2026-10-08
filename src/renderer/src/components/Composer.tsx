@@ -221,7 +221,10 @@ export function Composer({
      */
     if (dictation.enabled && isPlainSpace(e)) {
       const el = e.currentTarget
-      applyHold(hold.current.down(performance.now(), { value: el.value, caret: el.selectionStart }), e)
+      applyHold(
+        hold.current.down(performance.now(), { value: el.value, caret: el.selectionStart }),
+        e
+      )
       if (hold.current.state !== 'idle') return
     }
 
@@ -315,7 +318,9 @@ export function Composer({
           ref={ref}
           value={value}
           rows={1}
-          placeholder={streaming ? 'Still answering — Enter queues, /also adds a note' : placeholder}
+          placeholder={
+            streaming ? 'Still answering — Enter queues, /also adds a note' : placeholder
+          }
           onChange={(e) => {
             setValue(e.target.value)
             // Editing a recalled line makes it the draft again, so Down stops

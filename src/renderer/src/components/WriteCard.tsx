@@ -1,6 +1,8 @@
 import { useEffect, useRef, useState } from 'react'
 import { readWriteRequest } from '@shared/writefile'
 import type { WriteResult, WriteTarget } from '@shared/types'
+import { arrowNavigate } from '../keyboard'
+import { registerPending } from '../pending'
 
 /**
  * A file the model wants to create, and the button that allows it.
@@ -79,8 +81,33 @@ export function WriteCard({
   const bytes = new TextEncoder().encode(content).length
   const waiting = state === 'idle' && complete && target?.ok && !autoWrite
 
+  /**
+   * Registered so Ctrl+Enter reaches this too.
+   *
+   * Commands could always be approved from the keyboard and these could not,
+   * which made the shortcut a half-truth: the hands stayed put for one kind
+   * of proposal and went to the mouse for the other two.
+   */
+  useEffect(() => {
+    if (!waiting) return
+    return registerPending(messageId + (target?.path ?? path ?? 'a file'), {
+      command: target?.path ?? path ?? 'a file',
+      run: () => void go(),
+      skip: () => setState('skipped')
+    })
+  }, [waiting, messageId])
+
+  /** The card itself, so the arrow keys can find its buttons. */
+  const cardRef = useRef<HTMLDivElement>(null)
+
   return (
-    <div className={`cmd write ${state === 'failed' || target?.ok === false ? 'is-failed' : ''}`}>
+    <div
+      ref={cardRef}
+      onKeyDown={(e) => {
+        if (arrowNavigate(e, cardRef.current)) e.preventDefault()
+      }}
+      className={`cmd write ${state === 'failed' || target?.ok === false ? 'is-failed' : ''}`}
+    >
       <div className="cmd-head">
         <span className="cmd-shell">{target?.exists ? 'Replace file' : 'New file'}</span>
         <span className="spacer" />

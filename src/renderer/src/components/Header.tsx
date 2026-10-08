@@ -1,14 +1,7 @@
 import type { Dock, Mode, OllamaStatus } from '@shared/types'
 import logo from '../assets/logo.png'
 
-const DOCK_CYCLE: Dock[] = [
-  'right',
-  'bottom-right',
-  'bottom-left',
-  'left',
-  'top-left',
-  'top-right'
-]
+const DOCK_CYCLE: Dock[] = ['right', 'bottom-right', 'bottom-left', 'left', 'top-left', 'top-right']
 
 /** Small glyph showing where on the screen the panel currently sits. */
 function DockGlyph({ dock }: { dock: Dock }): React.JSX.Element {
@@ -23,7 +16,16 @@ function DockGlyph({ dock }: { dock: Dock }): React.JSX.Element {
 
   return (
     <svg viewBox="0 0 16 16" width="13" height="13" aria-hidden="true">
-      <rect x="0.5" y="0.5" width="15" height="15" rx="2.5" fill="none" stroke="currentColor" opacity="0.4" />
+      <rect
+        x="0.5"
+        y="0.5"
+        width="15"
+        height="15"
+        rx="2.5"
+        fill="none"
+        stroke="currentColor"
+        opacity="0.4"
+      />
       <rect x={x} y={y} width={w} height={h} rx="1.5" fill="currentColor" />
     </svg>
   )

@@ -7,6 +7,8 @@ import {
   type LinkApproval
 } from '@shared/links'
 import type { LinkResult } from '@shared/types'
+import { arrowNavigate } from '../keyboard'
+import { registerPending } from '../pending'
 
 /**
  * A page the model wants to open, and the button that allows it.
@@ -46,7 +48,9 @@ export function LinkCard({
 
   // A search is checked against the URL this app would build, not the query, so
   // the card describes the page that will actually open.
-  const check = checkLink(query ? searchUrl(query, isEngine(engine) ? engine : 'duckduckgo') : (target ?? ''))
+  const check = checkLink(
+    query ? searchUrl(query, isEngine(engine) ? engine : 'duckduckgo') : (target ?? '')
+  )
   const source = query ? 'search' : 'model'
 
   const [state, setState] = useState<'idle' | 'opening' | 'done' | 'skipped' | 'failed'>('idle')
@@ -78,8 +82,33 @@ export function LinkCard({
 
   const waiting = state === 'idle' && complete && check.ok && !itself
 
+  /**
+   * Registered so Ctrl+Enter reaches this too.
+   *
+   * Commands could always be approved from the keyboard and these could not,
+   * which made the shortcut a half-truth: the hands stayed put for one kind
+   * of proposal and went to the mouse for the other two.
+   */
+  useEffect(() => {
+    if (!waiting) return
+    return registerPending(messageId + (check.host ?? 'a page'), {
+      command: check.host ?? 'a page',
+      run: () => void go(),
+      skip: () => setState('skipped')
+    })
+  }, [waiting, messageId])
+
+  /** The card itself, so the arrow keys can find its buttons. */
+  const cardRef = useRef<HTMLDivElement>(null)
+
   return (
-    <div className={`cmd link ${state === 'failed' || !check.ok ? 'is-failed' : ''}`}>
+    <div
+      ref={cardRef}
+      onKeyDown={(e) => {
+        if (arrowNavigate(e, cardRef.current)) e.preventDefault()
+      }}
+      className={`cmd link ${state === 'failed' || !check.ok ? 'is-failed' : ''}`}
+    >
       <div className="cmd-head">
         <span className="cmd-shell">{query ? 'Web search' : 'Open page'}</span>
         {check.ok && <span className="cmd-status link-host">{check.host}</span>}

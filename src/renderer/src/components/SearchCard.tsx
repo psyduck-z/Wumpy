@@ -1,5 +1,6 @@
-import { useState } from 'react'
+import { useState, useRef } from 'react'
 import type { SearchResult } from '@shared/types'
+import { arrowNavigate } from '../keyboard'
 
 const PROVIDER_LABEL: Record<string, string> = {
   brave: 'Brave Search',
@@ -54,8 +55,17 @@ export function SearchCard({
     onResults(query, r.results, r.provider, r.error)
   }
 
+  /** The card itself, so the arrow keys can find its buttons. */
+  const cardRef = useRef<HTMLDivElement>(null)
+
   return (
-    <div className={`cmd search ${error ? 'is-failed' : ''}`}>
+    <div
+      ref={cardRef}
+      onKeyDown={(e) => {
+        if (arrowNavigate(e, cardRef.current)) e.preventDefault()
+      }}
+      className={`cmd search ${error ? 'is-failed' : ''}`}
+    >
       <div className="cmd-head">
         <span className="cmd-shell">Web search</span>
         {state === 'done' && provider && (

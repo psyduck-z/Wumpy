@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { registerPending } from '../pending'
 import type { ShellKind, ShellResult, TierId } from '@shared/types'
+import { arrowNavigate } from '../keyboard'
 
 const SHELL_LABEL: Record<ShellKind, string> = {
   powershell: 'PowerShell',
@@ -149,7 +150,8 @@ export function CommandCard({
     void run(true)
   }, [wouldRun, refused, allowed, state])
 
-  const waiting = state === 'idle' && judged && allowed === true && complete && Boolean(command) && !unattended
+  const waiting =
+    state === 'idle' && judged && allowed === true && complete && Boolean(command) && !unattended
 
   // Only while it is actually waiting, so Ctrl+Enter always means the card the
   // user is looking at.
@@ -178,11 +180,24 @@ export function CommandCard({
   const failed = result !== null && result.exitCode !== 0
   const output = result ? [result.stdout, result.stderr].filter(Boolean).join('\n').trim() : ''
 
+  /** The card itself, so the arrow keys can find its buttons. */
+  const cardRef = useRef<HTMLDivElement>(null)
+
   return (
-    <div className={`cmd ${risk ? 'is-risky' : ''} ${failed ? 'is-failed' : ''}`}>
+    <div
+      ref={cardRef}
+      onKeyDown={(e) => {
+        if (arrowNavigate(e, cardRef.current)) e.preventDefault()
+      }}
+      className={`cmd ${risk ? 'is-risky' : ''} ${failed ? 'is-failed' : ''}`}
+    >
       <div className="cmd-head">
         <span className="cmd-shell">{SHELL_LABEL[shell]}</span>
-        {risk && <span className="cmd-risk" title={`This command ${risk}.`}>{risk}</span>}
+        {risk && (
+          <span className="cmd-risk" title={`This command ${risk}.`}>
+            {risk}
+          </span>
+        )}
         <span className="spacer" />
         {state === 'idle' && allowed === true && unattended && (
           <span className="cmd-status">running automatically…</span>
@@ -212,12 +227,8 @@ export function CommandCard({
         {state === 'cancelled' && <span className="cmd-status">skipped</span>}
         {state === 'done' && result && (
           <span className={`cmd-status ${failed ? 'is-failed' : 'is-ok'}`}>
-            {result.timedOut
-              ? 'timed out'
-              : failed
-                ? `exit ${result.exitCode}`
-                : 'done'}{' '}
-            · {duration(result.durationMs)}
+            {result.timedOut ? 'timed out' : failed ? `exit ${result.exitCode}` : 'done'} ·{' '}
+            {duration(result.durationMs)}
           </span>
         )}
       </div>

@@ -14,7 +14,12 @@ export function Mic({ dictation }: { dictation: Dictation }): React.JSX.Element 
   // hover - a button that only ever produces an error is worse than no button.
   if (state === 'unavailable') {
     return detail ? (
-      <button type="button" className="mic mic-off" title={`Dictation unavailable. ${detail}`} disabled>
+      <button
+        type="button"
+        className="mic mic-off"
+        title={`Dictation unavailable. ${detail}`}
+        disabled
+      >
         <MicGlyph muted />
       </button>
     ) : null
@@ -52,7 +57,12 @@ export function Mic({ dictation }: { dictation: Dictation }): React.JSX.Element 
           {state === 'working' && <>Transcribing…</>}
           {state === 'loading' && <>Loading the speech model…</>}
           {state !== 'recording' && state !== 'working' && state !== 'loading' && detail && (
-            <button type="button" className="mic-dismiss" onClick={dictation.dismiss} title="Dismiss">
+            <button
+              type="button"
+              className="mic-dismiss"
+              onClick={dictation.dismiss}
+              title="Dismiss"
+            >
               {detail}
             </button>
           )}
@@ -83,7 +93,9 @@ function MicGlyph({ muted = false }: { muted?: boolean }): React.JSX.Element {
         d="M3.75 7a.75.75 0 0 1 1.5 0 2.75 2.75 0 0 0 5.5 0 .75.75 0 0 1 1.5 0 4.25 4.25 0 0 1-3.5 4.18V13h1.5a.75.75 0 0 1 0 1.5h-4.5a.75.75 0 0 1 0-1.5h1.5v-1.82A4.25 4.25 0 0 1 3.75 7Z"
         fill="currentColor"
       />
-      {muted && <path d="M2 2l12 12" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />}
+      {muted && (
+        <path d="M2 2l12 12" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+      )}
     </svg>
   )
 }
