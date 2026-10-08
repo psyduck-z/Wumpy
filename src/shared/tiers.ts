@@ -219,13 +219,59 @@ const BASE_PROMPT = [
  * caveat is that correctness was 4/4 on both, so that column cannot show a
  * regression - the length is the real signal, and it is not subtle.
  */
+/**
+ * Asked for, and so far unproven. Worth saying plainly.
+ *
+ * The verification half below - check rather than assert, read what came back,
+ * separate observed from inferred - was measured twice against the prompt
+ * without it, on gemini-3.1-flash-lite, and made no difference either time.
+ *
+ * One shot, four questions, three of which can only be answered by looking at
+ * this machine: 3/3 proposed a check and both correctly answered the control
+ * from memory. Identical with and without.
+ *
+ * Multi-turn, three cases where the output is not what a careless reader would
+ * assume - an empty result, an error where a version was expected, and a
+ * version contradicting what the user asserted: 3/3 both ways. "Python 3.11.9
+ * is installed, not 3.14" came back from the prompt that was never told to
+ * check its assumptions.
+ *
+ * Both tests were saturated, so neither could have shown an improvement. They
+ * do rule out the sizes of effect they could see. It costs 325 tokens over the
+ * local voice, or 138 net once the worked examples come out.
+ *
+ * Kept because it was asked for and is not harmful, and because the parts most
+ * likely to matter - not re-proposing a command that already failed, flagging
+ * the assumption that would change the answer - need a harder test than either
+ * of these to show up at all. Not kept because it was shown to work.
+ */
 const API_BASE_PROMPT = [
   'You are Wumpy, an assistant in the Windows system tray.',
-  'Be accurate and concrete. Length should fit the question: a sentence for a',
-  'simple one, and as much as it genuinely needs for a hard one. Do not pad, and',
-  'do not truncate something that is not finished.',
-  'Say plainly when you are unsure or when something cannot be known from here,',
-  'rather than guessing and sounding certain.',
+  '',
+  'CHECK, DO NOT GUESS.',
+  'You can propose a command and be given its output. Anything about THIS',
+  'machine — versions, paths, whether something is installed, what is in a',
+  'folder, what a service is doing — is something you can find out, so find out',
+  'instead of asserting. A confident wrong answer about the user’s own computer',
+  'is the worst thing you can produce here, because it looks exactly like a',
+  'right one.',
+  'If you need two facts, ask for the first, read it, then decide.',
+  '',
+  'READ WHAT CAME BACK.',
+  'When output contradicts what you expected, say so and change your mind —',
+  'do not restate the plan as though it had worked. An empty result, a',
+  'non-zero exit and an error are three different things. If a command failed,',
+  'work out why from the actual message before proposing another; proposing a',
+  'near-identical command again is almost never the fix.',
+  '',
+  'SAY WHAT YOU DO NOT KNOW.',
+  'Separate what you observed from what you are inferring. Flag the assumption',
+  'you are making when it would change the answer if it were wrong.',
+  '"I cannot tell from here" is a real answer.',
+  'Never invent a path, a version number, a flag or a file you have not seen.',
+  '',
+  'Length fits the question: a sentence for a simple one, as much as it',
+  'genuinely needs for a hard one. Do not pad, and do not stop halfway.',
   'Markdown where it earns its place; fenced code blocks with a language tag.'
 ].join(String.fromCharCode(10))
 

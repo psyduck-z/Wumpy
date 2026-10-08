@@ -196,14 +196,55 @@ check(
   false
 )
 check(
-  'the API prompt asks for length to fit the question',
-  T.TIERS.fast.apiSystemPrompt.includes('fit the question'),
+  'the API prompt lets length follow the question',
+  T.TIERS.fast.apiSystemPrompt.includes('Length fits the question'),
   true
 )
 check(
-  'and for uncertainty to be said out loud',
-  T.TIERS.fast.apiSystemPrompt.includes('unsure'),
+  'and asks for uncertainty to be said out loud',
+  T.TIERS.fast.apiSystemPrompt.includes('SAY WHAT YOU DO NOT KNOW'),
   true
+)
+
+/* ------------------------------------------------- the verification habit */
+
+// The point of this prompt is a model that checks instead of asserting. A
+// confident wrong answer about the user's own machine is the worst thing it
+// can produce here, because it is indistinguishable from a right one.
+const apiPrompt = T.TIERS.thinker.apiSystemPrompt
+check('it is told to check rather than guess', /CHECK, DO NOT GUESS/.test(apiPrompt), true)
+check(
+  'and reminded it can see command output',
+  /propose a command and be given its output/.test(apiPrompt),
+  true
+)
+check('it is told to read what came back', /READ WHAT CAME BACK/.test(apiPrompt), true)
+check('and to change its mind when contradicted', /change your mind/.test(apiPrompt), true)
+check(
+  're-proposing a failed command is called out',
+  /near-identical command again/.test(apiPrompt),
+  true
+)
+check(
+  'observed is separated from inferred',
+  /observed from what you are inferring/.test(apiPrompt),
+  true
+)
+check('inventing a path or version is forbidden', /Never invent a path/.test(apiPrompt), true)
+check('"I cannot tell from here" is a real answer', /cannot tell from here/.test(apiPrompt), true)
+check(
+  'every acting tier gets the discipline',
+  ['fast', 'thinker', 'deep'].every((id) =>
+    /CHECK, DO NOT GUESS/.test(T.TIERS[id].apiSystemPrompt)
+  ),
+  true
+)
+// Not added to the local prompt: it is long, and the 3.8B model it would be
+// aimed at already carries 1080 tokens of preamble per turn.
+check(
+  'the local prompt is left alone',
+  /CHECK, DO NOT GUESS/.test(T.TIERS.thinker.systemPrompt),
+  false
 )
 check(
   'every tier has an API voice',

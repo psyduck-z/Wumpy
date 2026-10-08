@@ -16,7 +16,7 @@ export type CommandAction =
   | { kind: 'rename'; title: string }
   | { kind: 'renameChoice'; question: string; options: string[] }
   | { kind: 'tier'; tier: TierId | null }
-  | { kind: 'model' }
+  | { kind: 'model'; name: string }
   | { kind: 'mode'; mode: Mode | 'toggle' }
   | { kind: 'dock'; dock: Dock | null }
   | { kind: 'reasoning'; show: boolean | 'toggle' }
@@ -225,9 +225,12 @@ export const COMMANDS: CommandSpec[] = [
   },
   {
     name: 'model',
-    aliases: ['models'],
-    hint: 'Pick which installed model this tier uses',
-    run: () => ({ kind: 'model' })
+    aliases: ['models', 'gemini'],
+    hint: 'Choose the model for this tier — local or hosted',
+    arg: 'name',
+    // With a name it sets directly, which is quicker than the picker once you
+    // know what you want and is the only way to reach a model not in the list.
+    run: (arg) => ({ kind: 'model', name: arg.trim() })
   },
   {
     name: 'open',

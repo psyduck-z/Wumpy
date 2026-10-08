@@ -667,10 +667,41 @@ export default function App(): React.JSX.Element {
           setSettings((prev) => (prev ? { ...prev, dock: next } : prev))
           return
         }
-        case 'model':
-          setModels(await window.wumpy.ollama.models())
-          setPicker('model')
+        case 'model': {
+          if (!action.name) {
+            setModels(await window.wumpy.ollama.models())
+            setPicker('model')
+            return
+          }
+
+          // Named directly. A hosted model needs its key first, and a local
+          // one has to be installed; anything else would set a tier that
+          // cannot answer and fail at the next question instead of here.
+          const wanted = action.name
+          const hosted = CLOUD_MODELS.find(
+            (m) => m.id === wanted || m.label.toLowerCase() === wanted.toLowerCase()
+          )
+          const id = hosted?.id ?? wanted
+
+          if (hosted && !(keyStatus?.configured.includes(hosted.provider) ?? false)) {
+            chat.note(
+              `**${hosted.label}** needs a ${PROVIDERS[hosted.provider].label} key. ` +
+                `Add one with \`/key ${hosted.provider} <key>\`.`
+            )
+            return
+          }
+
+          await patch({ tierModels: { ...(settings?.tierModels ?? {}), [tier]: id } })
+          void window.wumpy.tiers.status().then(setTierStatuses)
+          chat.note(
+            `**${activeTier.label}** now uses \`${id}\`` +
+              (hosted ? `, over the network.` : '.') +
+              (hosted && settings?.backend !== 'api'
+                ? ' You are on **Local** — switch with `/api` to actually use it.'
+                : '')
+          )
           return
+        }
         case 'reasoning': {
           const show = action.show === 'toggle' ? !(settings?.showReasoning ?? false) : action.show
           await patch({ showReasoning: show })

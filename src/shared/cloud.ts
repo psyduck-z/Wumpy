@@ -97,31 +97,78 @@ export interface CloudModel {
 }
 
 export const CLOUD_MODELS: CloudModel[] = [
+  // --- Google, in the order worth trying them -----------------------------
   {
     id: 'gemini-3.5-flash',
     provider: 'google',
     label: 'Gemini 3.5 Flash',
-    blurb: 'Free, fast, and writes code that compiles. The one to start with.'
-  },
-  {
-    id: 'gemini-3.8-flash',
-    provider: 'google',
-    label: 'Gemini 3.8 Flash',
-    // Measured the hard way: roughly 25 requests and the day is over. Google
-    // answered the next one with retryDelay 65304s, which is eighteen hours.
-    blurb: 'Newer, but the free tier allows only ~25 requests a day.'
+    blurb: 'Measured 8/8 writing files that compile. The one to start with.'
   },
   {
     id: 'gemini-3.1-flash-lite',
     provider: 'google',
     label: 'Gemini 3.1 Flash Lite',
-    blurb: 'Smaller and cheaper, for quick lookups.'
+    blurb: 'Quickest and lightest. Also scored 4/4 here. Good for lookups.'
   },
+  {
+    id: 'gemini-3.6-flash',
+    provider: 'google',
+    label: 'Gemini 3.6 Flash',
+    blurb: 'Between 3.5 and 3.8. Untested here.'
+  },
+  {
+    id: 'gemini-3.7-flash',
+    provider: 'google',
+    label: 'Gemini 3.7 Flash',
+    blurb: 'Newer Flash. Untested here, and the newer ones have small quotas.'
+  },
+  {
+    id: 'gemini-3.8-flash',
+    provider: 'google',
+    label: 'Gemini 3.8 Flash',
+    // Measured the hard way: roughly 25 requests and it asked for 18 hours.
+    blurb: 'Newest Flash — but it ran out after about 25 requests in a day.'
+  },
+  {
+    id: 'gemini-3.5-flash-lite',
+    provider: 'google',
+    label: 'Gemini 3.5 Flash Lite',
+    blurb: 'Newer Lite. Cheap on quota, weaker on code.'
+  },
+  {
+    id: 'gemini-3.1-pro-preview',
+    provider: 'google',
+    label: 'Gemini 3.1 Pro',
+    // Pro moved behind billing in May 2026, so on a free key this is likely
+    // to refuse. Listed because a key with billing on can use it, and finding
+    // out costs one request.
+    blurb: 'Most capable Gemini — but Pro is paid only, so a free key is refused.'
+  },
+  {
+    id: 'gemini-flash-latest',
+    provider: 'google',
+    label: 'Gemini Flash (latest)',
+    blurb: 'Whatever Google currently points "latest" at. Moves without warning.'
+  },
+  {
+    id: 'gemini-flash-lite-latest',
+    provider: 'google',
+    label: 'Gemini Flash Lite (latest)',
+    blurb: 'The moving pointer to the lightest Flash.'
+  },
+  {
+    id: 'gemini-2.5-flash',
+    provider: 'google',
+    label: 'Gemini 2.5 Flash',
+    blurb: 'Previous generation. Larger free allowance, visibly older.'
+  },
+
+  // --- Groq ----------------------------------------------------------------
   {
     id: 'openai/gpt-oss-120b',
     provider: 'groq',
     label: 'GPT-OSS 120B',
-    blurb: 'Very fast. Prompt caching is free and does not count against limits.'
+    blurb: 'Very fast. Caching is free and does not count against the limits.'
   },
   {
     id: 'openai/gpt-oss-20b',

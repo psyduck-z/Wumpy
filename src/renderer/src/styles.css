@@ -31,20 +31,32 @@
 }
 
 /* ---- Developer mode (dark) ---- */
+/*
+  Developer mode: near-black and neutral.
+
+  The greys were tinted blue-violet (16 16 22, with text at 232 232 242) which
+  read as a dark purple rather than a dark grey, especially next to the purple
+  accent. These are flat neutrals - red, green and blue within a point or two
+  of each other - so the only colour on screen is the colour that means
+  something: the accent, the danger red, the backend badge.
+
+  Darker overall as well. This mode is for the tiers that can change the
+  machine, and it should not look like the quick one with the lights off.
+*/
 [data-theme='dark'] {
-  --bg: 16 16 22;
-  --surface: 24 24 32;
-  --raised: 36 36 46;
-  --border: 255 255 255 / 0.09;
-  --text: 232 232 242;
-  --muted: 148 148 170;
+  --bg: 10 10 11;
+  --surface: 17 17 19;
+  --raised: 28 28 30;
+  --border: 255 255 255 / 0.08;
+  --text: 228 228 230;
+  --muted: 136 136 140;
   --accent: 139 128 255;
   --accent-soft: 139 128 255 / 0.16;
   --accent-text: 173 165 255;
   --danger: 248 113 113;
   --danger-soft: 248 113 113 / 0.12;
-  --shadow: 0 18px 48px rgb(0 0 0 / 0.55), 0 2px 8px rgb(0 0 0 / 0.35);
-  --code-bg: 18 18 24;
+  --shadow: 0 18px 48px rgb(0 0 0 / 0.7), 0 2px 8px rgb(0 0 0 / 0.5);
+  --code-bg: 13 13 14;
 }
 
 * {
