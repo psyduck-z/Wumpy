@@ -212,7 +212,15 @@ function retryAfterMs(status, attempt, detail) {
 
 async function chat(provider, model, messages) {
   const p = PROVIDERS[provider]
-  const started = Date.now()
+  /**
+   * Set after the pacing and backoff waits, not before.
+   *
+   * It started before them, and a task that happened to land behind a 58s
+   * throttle reported 62.3s to first token - a number that says nothing about
+   * the provider and everything about this script's own queue. The clock now
+   * starts when the attempt that actually streams goes out.
+   */
+  let started = Date.now()
   let firstToken = 0
 
   async function send(body) {
@@ -236,11 +244,10 @@ async function chat(provider, model, messages) {
   })
 
   await pace(provider)
+  started = Date.now()
   let res = await send(bodyFor())
 
-  // Back off and try again while the provider is asking us to. The wait comes
-  // out of the measurement, not the generation timings, which are taken from
-  // the attempt that actually streams.
+  // Back off and try again while the provider is asking us to.
   for (let attempt = 0; attempt < 3 && (res.status === 429 || res.status === 503); attempt++) {
     const detail = await res.text()
     const waitMs = retryAfterMs(res.status, attempt, detail)
@@ -254,6 +261,7 @@ async function chat(provider, model, messages) {
     console.log(`        (${res.status}, waiting ${Math.round(waitMs / 1000)}s)`)
     await new Promise((r) => setTimeout(r, waitMs))
     await pace(provider)
+    started = Date.now()
     res = await send(bodyFor())
   }
 
