@@ -145,5 +145,45 @@ check(
   true
 )
 
+/* ------------------------- an automatic mode should not keep asking */
+
+// Accept-all means accept all. A card that still draws Skip and Run in that
+// mode makes the setting a lie - and the search card did exactly that in every
+// mode, while being the only proposal that touches nothing on this machine.
+for (const card of ['CommandCard', 'WriteCard', 'LinkCard', 'SearchCard']) {
+  const src = read(`src/renderer/src/components/${card}.tsx`)
+  check(`${card} hides its buttons behind waiting`, src.includes('{waiting && ('), true)
+  check(
+    `${card} leaves the automatic case out of waiting`,
+    /const waiting =[\s\S]{0,140}!(unattended|autoWrite|itself)/.test(src),
+    true
+  )
+}
+
+const searchSrc = read('src/renderer/src/components/SearchCard.tsx')
+check(
+  'a search runs itself in both automatic modes',
+  searchSrc.includes("mode === 'all' || mode === 'auto'"),
+  true
+)
+check('and says so rather than going quiet', searchSrc.includes('searching automatically'), true)
+check('it cannot fire twice for one commit', /searched\.current/.test(searchSrc), true)
+
+// Risky commands are the deliberate exception: the verdict refuses auto for
+// them whatever the mode, so those buttons come back on purpose.
+const mainSrc = read('src/main/index.ts')
+check(
+  'risk still overrides accept-all',
+  mainSrc.includes("const risky = risk !== null && settings.get('confirmRisky')"),
+  true
+)
+check('and auto requires not-risky', mainSrc.includes('const auto = allowed && !risky'), true)
+// A link to something on this machine is what an injected link would aim at.
+check(
+  'a local link still asks, even on accept-all',
+  read('src/shared/links.ts').includes('if (check.local) return false'),
+  true
+)
+
 console.log(failures ? `\n${failures} keyboard checks FAILED` : '\nall keyboard checks')
 process.exitCode = failures ? 1 : 0

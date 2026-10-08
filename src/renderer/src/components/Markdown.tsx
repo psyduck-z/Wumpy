@@ -309,6 +309,8 @@ export const Markdown = memo(function Markdown({
               <SearchCard
                 query={query}
                 complete={settled(query)}
+                mode={linkMode}
+                messageId={messageId}
                 onSearch={onSearch!}
                 onResults={onSearchResults ?? (() => {})}
               />
