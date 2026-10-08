@@ -139,8 +139,30 @@ export default function App(): React.JSX.Element {
       setVisible(true)
       setFocusToken((n) => n + 1)
     })
+
+    /**
+     * The panel coming back to the front also puts the caret in the box.
+     *
+     * panelShown only fires when the main process shows the window. Clicking
+     * back to a panel that was already open, or returning to it after
+     * Alt+Tab, does not go through that path - and until now you arrived at a
+     * window with nothing focused and had to click before you could type.
+     *
+     * Only when nothing in the page holds focus, so stepping into a card and
+     * switching away briefly does not lose your place, and only when no
+     * picker is open, since a picker focuses its own filter.
+     */
+    const onWindowFocus = (): void => {
+      const active = document.activeElement
+      if (active && active !== document.body) return
+      if (document.querySelector('.picker')) return
+      setFocusToken((n) => n + 1)
+    }
+    window.addEventListener('focus', onWindowFocus)
+
     return () => {
       cancelAnimationFrame(raf)
+      window.removeEventListener('focus', onWindowFocus)
       off()
     }
   }, [])

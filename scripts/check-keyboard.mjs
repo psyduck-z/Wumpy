@@ -185,5 +185,47 @@ check(
   true
 )
 
+/* ------------------------------ the caret is in the box when it opens */
+
+// Wumpy opens on a keystroke, so arriving at a window you have to click
+// before you can type undoes most of the point of the hotkey.
+const composer = read('src/renderer/src/components/Composer.tsx')
+
+check('showing the panel focuses the box', composer.includes('[focusToken]'), true)
+// The hotkey arrives in a background hook, so Windows hands the foreground
+// over asynchronously and a focus() made before that lands is dropped.
+check(
+  'and tries again on the next frame',
+  /requestAnimationFrame\([\s\S]{0,140}preventScroll/.test(composer),
+  true
+)
+// The composer sits at the bottom; focusing it the ordinary way yanks a long
+// transcript down to the end, which is not what reopening should do to what
+// you were reading.
+check('without dragging the transcript to the end', composer.includes('preventScroll: true'), true)
+
+check(
+  'coming back to the window focuses it too',
+  app.includes("window.addEventListener('focus'"),
+  true
+)
+check('but never over something already focused', app.includes('active !== document.body'), true)
+check('nor over an open picker', app.includes("querySelector('.picker')"), true)
+check(
+  'and the composer will not steal from one either',
+  composer.includes("querySelector('.picker')"),
+  true
+)
+check(
+  'the listener is cleaned up',
+  app.includes("removeEventListener('focus', onWindowFocus)"),
+  true
+)
+check(
+  '.picker is a class that exists',
+  read('src/renderer/src/components/Picker.tsx').includes('className="picker"'),
+  true
+)
+
 console.log(failures ? `\n${failures} keyboard checks FAILED` : '\nall keyboard checks')
 process.exitCode = failures ? 1 : 0

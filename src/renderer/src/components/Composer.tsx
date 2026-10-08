@@ -172,7 +172,33 @@ export function Composer({
   }, [value])
 
   useEffect(() => setSelected(0), [value])
-  useEffect(() => ref.current?.focus(), [focusToken])
+
+  /**
+   * Put the caret in the box whenever the panel is shown.
+   *
+   * Once is not enough. The hotkey arrives in a background hook, so Windows
+   * hands the foreground over asynchronously and the show message can reach
+   * the page a frame before the window actually has it - and a focus() made
+   * in that gap is quietly dropped. Trying again on the next frame costs
+   * nothing and covers it.
+   *
+   * preventScroll because the composer sits at the bottom: focusing it the
+   * ordinary way yanks a long transcript down to the end, which is not what
+   * reopening the panel should do to what you were reading.
+   */
+  useEffect(() => {
+    const el = ref.current
+    if (!el) return
+    // A picker focuses its own filter, and reopening the panel over one
+    // should leave the user in the list they were choosing from.
+    if (document.querySelector('.picker')) return
+    el.focus({ preventScroll: true })
+    const again = requestAnimationFrame(() => {
+      if (document.querySelector('.picker')) return
+      el.focus({ preventScroll: true })
+    })
+    return () => cancelAnimationFrame(again)
+  }, [focusToken])
 
   useEffect(() => {
     if (!prefill || prefill.token === 0) return
