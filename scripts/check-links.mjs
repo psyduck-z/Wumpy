@@ -353,5 +353,69 @@ check(
 // read-only allowlist parses most reliably.
 check('the check avoids the Select alias', T.OPEN_PROMPT.includes('| Select '), false)
 
+/* ----------------------------------- searching on a site, not about it */
+
+// Reported: "Open YouTube and search up the deadliest self-defense move"
+// opened DuckDuckGo for "deadliest self defense move youtube" - a results
+// page about YouTube rather than a search inside it. `search:` always goes to
+// the user's own engine, and nothing told the model that naming a site means
+// using that site's own search.
+//
+// Measured on gemini-3.1-flash-lite after adding this: YouTube, Wikipedia and
+// GitHub all went to the right place, and "google the weather in sydney" used
+// wumpy-search to fetch an answer rather than opening a tab, which is better
+// than what was asked for.
+check(
+  'a site search is separated from a web search',
+  T.OPEN_PROMPT.includes('SEARCHING *ON* A SITE IS NOT A WEB SEARCH'),
+  true
+)
+check(
+  "YouTube's own search URL is given",
+  T.OPEN_PROMPT.includes('youtube.com/results?search_query='),
+  true
+)
+check(
+  'along with several more',
+  ['wikipedia.org', 'github.com/search', 'reddit.com/search', 'amazon.com/s?k='].every((u) =>
+    T.OPEN_PROMPT.includes(u)
+  ),
+  true
+)
+// "deadliest self defense move youtube" is asking YouTube about YouTube.
+check(
+  'the site name is dropped from the query',
+  T.OPEN_PROMPT.includes('asking YouTube about YouTube'),
+  true
+)
+check('and the query is encoded', T.OPEN_PROMPT.includes('percent-encoded'), true)
+check(
+  'search: is still right with no site named',
+  T.OPEN_PROMPT.includes('Use `search:` when no site was named'),
+  true
+)
+
+/* ------------------------------------------------- acting exactly once */
+
+// Observed: one proposal, two "Opened duckduckgo.com in your browser." A ref
+// guarding the action dies with the component, so anything that remounts a
+// card lets it act again - a page in two tabs, a file written twice, a search
+// charged twice to a quota.
+const once = readFileSync('src/renderer/src/once.ts', 'utf8')
+check('claims are kept outside React', once.includes('const claimed = new Set<string>()'), true)
+check('and keyed per message and target', once.includes('per message and per target'), true)
+for (const card of ['LinkCard', 'WriteCard', 'SearchCard']) {
+  const src = readFileSync(`src/renderer/src/components/${card}.tsx`, 'utf8')
+  check(`${card} claims before it acts`, src.includes('claimOnce('), true)
+}
+const appSrc = readFileSync('src/renderer/src/App.tsx', 'utf8')
+check('a new chat forgets them', /newChat[\s\S]{0,400}forgetClaims\(\)/.test(appSrc), true)
+// Otherwise a reopened chat finds its own proposals already claimed.
+check(
+  'reopening one forgets them too',
+  /chat\.replace\(loaded\.messages\)[\s\S]{0,300}forgetClaims\(\)/.test(appSrc),
+  true
+)
+
 console.log(`\n${failed === 0 ? 'all' : `${failed} FAILED of`} link checks`)
 process.exit(failed === 0 ? 0 : 1)

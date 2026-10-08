@@ -3,6 +3,7 @@ import { readWriteRequest } from '@shared/writefile'
 import type { WriteResult, WriteTarget } from '@shared/types'
 import { arrowNavigate } from '../keyboard'
 import { registerPending } from '../pending'
+import { claimOnce } from '../once'
 
 /**
  * A file the model wants to create, and the button that allows it.
@@ -58,7 +59,10 @@ export function WriteCard({
   }, [complete, path])
 
   const go = async (): Promise<void> => {
-    if (written.current || !path) return
+    // Claimed outside React, so a remount cannot hand this card a fresh ref
+    // and write the file a second time.
+    if (!path) return
+    if (!claimOnce(`write:${messageId}:${target?.path ?? path}`)) return
     written.current = true
     setState('writing')
     const result = await onWrite(path, content)

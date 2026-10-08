@@ -3,6 +3,7 @@ import type { SearchResult } from '@shared/types'
 import type { LinkApproval } from '@shared/links'
 import { arrowNavigate } from '../keyboard'
 import { registerPending } from '../pending'
+import { claimOnce } from '../once'
 
 const PROVIDER_LABEL: Record<string, string> = {
   brave: 'Brave Search',
@@ -85,6 +86,9 @@ export function SearchCard({
   const searched = useRef(false)
   useEffect(() => {
     if (!itself || state !== 'idle' || searched.current) return
+    // Claimed outside React: a remount would otherwise give this card a fresh
+    // ref and spend a second request from the quota on the same query.
+    if (!claimOnce(`search:${messageId}:${query}`)) return
     searched.current = true
     void go()
   }, [itself, state])

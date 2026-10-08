@@ -25,6 +25,7 @@ import { CLOUD_MODELS, PROVIDERS } from '@shared/cloud'
 import { useChat, nextId, type ChatStats } from './hooks/useChat'
 import { allCommands, parseCommand, helpText, SHORTCUT_FOR, type CommandAction } from './commands'
 import { newestPending } from './pending'
+import { forgetClaims } from './once'
 import { matchIntent } from './intents'
 import { AUTO_RUN_LIMIT, autoRunEligible } from './autorun'
 import { Header } from './components/Header'
@@ -207,6 +208,10 @@ export default function App(): React.JSX.Element {
 
   const newChat = useCallback(() => {
     chat.clear()
+    // The claims are per message id, and a new conversation has none of the
+    // old ones. Left to grow they would also outlive every chat in the
+    // session for no reason.
+    forgetClaims()
     const fresh = nextId()
     setChatId(fresh)
     setChatTitle(null)
@@ -267,6 +272,10 @@ export default function App(): React.JSX.Element {
         return
       }
       chat.replace(loaded.messages)
+      // A reopened chat brings back proposals whose ids were claimed when
+      // they first ran. Without this it would find them all already done and
+      // refuse to act on any of them.
+      forgetClaims()
       setChatId(loaded.id)
       setChatTitle(loaded.title)
       setTitleLocked(loaded.titleLocked ?? false)

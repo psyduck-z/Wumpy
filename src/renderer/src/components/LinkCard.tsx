@@ -9,6 +9,7 @@ import {
 import type { LinkResult } from '@shared/types'
 import { arrowNavigate } from '../keyboard'
 import { registerPending } from '../pending'
+import { claimOnce } from '../once'
 
 /**
  * A page the model wants to open, and the button that allows it.
@@ -58,7 +59,7 @@ export function LinkCard({
   const opened = useRef(false)
 
   const go = async (): Promise<void> => {
-    if (opened.current) return
+    if (!claimOnce(`open:${messageId}:${check.url}`)) return
     opened.current = true
     setState('opening')
     const result = query ? await onSearch(query) : await onOpen(check.url)
