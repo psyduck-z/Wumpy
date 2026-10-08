@@ -80,7 +80,11 @@ check('file:// is named specifically', /file:\/\//.test(L.checkLink('file:///C:/
 
 check('credentials in the host', L.checkLink('https://www.google.com@evil.example/').ok, false)
 check('a password too', L.checkLink('https://user:pw@evil.example/').ok, false)
-check('a newline hiding a second link', L.checkLink('https://good.example\njavascript:alert(1)').ok, false)
+check(
+  'a newline hiding a second link',
+  L.checkLink('https://good.example\njavascript:alert(1)').ok,
+  false
+)
 check('a tab', L.checkLink('https://good.example\tx').ok, false)
 check('nothing at all', L.checkLink('   ').ok, false)
 check('not a link', L.checkLink('what is the capital of France').ok, false)
@@ -99,7 +103,11 @@ check('a homograph is shown punycoded', homograph.host, 'xn--pple-43d.com')
 check('a plain https link', L.checkLink('https://example.com/a/b?c=d').ok, true)
 check('http as well', L.checkLink('http://example.com').ok, true)
 check('a bare host gets https', L.checkLink('youtube.com').url, 'https://youtube.com/')
-check('a bare host with a path', L.checkLink('github.com/psyduck-z').url, 'https://github.com/psyduck-z')
+check(
+  'a bare host with a path',
+  L.checkLink('github.com/psyduck-z').url,
+  'https://github.com/psyduck-z'
+)
 check('the host is reported', L.checkLink('https://www.bbc.co.uk/news').host, 'www.bbc.co.uk')
 
 /* -------------------------------------------------------- local destinations */
@@ -133,8 +141,16 @@ check(
   L.searchUrl('rust & c++ #1 "best"'),
   'https://duckduckgo.com/?q=rust%20%26%20c%2B%2B%20%231%20%22best%22'
 )
-check('the engine can change', L.searchUrl('cats', 'google').startsWith('https://www.google.com/search?q='), true)
-check('every engine is https', Object.values(L.SEARCH_ENGINES).every((e) => e.url.startsWith('https://')), true)
+check(
+  'the engine can change',
+  L.searchUrl('cats', 'google').startsWith('https://www.google.com/search?q='),
+  true
+)
+check(
+  'every engine is https',
+  Object.values(L.SEARCH_ENGINES).every((e) => e.url.startsWith('https://')),
+  true
+)
 check('a built search is always allowed', L.checkLink(L.searchUrl('anything at all')).ok, true)
 
 /* ------------------------------------------------- opening without a click */
@@ -170,9 +186,21 @@ const r2 = L.readLinkRequest('# Open the repository\nhttps://github.com/psyduck-
 check('a url request', r2.target, 'https://github.com/psyduck-z/Wumpy')
 check('its reason', r2.reason, 'Open the repository')
 
-check('an autolink is unwrapped', L.readLinkRequest('<https://example.com/>').target, 'https://example.com/')
-check('a markdown link is unwrapped', L.readLinkRequest('[docs](https://example.com/d)').target, 'https://example.com/d')
-check('trailing punctuation goes', L.readLinkRequest('https://example.com/a.').target, 'https://example.com/a')
+check(
+  'an autolink is unwrapped',
+  L.readLinkRequest('<https://example.com/>').target,
+  'https://example.com/'
+)
+check(
+  'a markdown link is unwrapped',
+  L.readLinkRequest('[docs](https://example.com/d)').target,
+  'https://example.com/d'
+)
+check(
+  'trailing punctuation goes',
+  L.readLinkRequest('https://example.com/a.').target,
+  'https://example.com/a'
+)
 check('a comment-only block asks for nothing', L.readLinkRequest('# just thinking').target, null)
 
 /* ----------------------------------------------- nothing bypasses the check */
@@ -187,7 +215,10 @@ check('the opener checks the link itself', /checkLink\(/.test(main), true)
 check('and refuses rather than trusting the caller', /if \(!check\.ok\)/.test(main), true)
 
 const panel = readFileSync('src/main/panel.ts', 'utf8')
-const handler = panel.slice(panel.indexOf('setWindowOpenHandler'), panel.indexOf('ELECTRON_RENDERER_URL'))
+const handler = panel.slice(
+  panel.indexOf('setWindowOpenHandler'),
+  panel.indexOf('ELECTRON_RENDERER_URL')
+)
 check('links clicked in an answer are checked too', /openLink/.test(handler), true)
 check('nothing calls openExternal directly', /openExternal/.test(panel), false)
 
@@ -199,6 +230,77 @@ check(
   // With the paren, so the mention of it in browser.ts's own comment does not count.
   (all.match(/shell\.openExternal\(/g) ?? []).length,
   1
+)
+
+/* ------------------------------- a link with something else on the line */
+
+// Seen in use: the model put the address and some stray words on one line and
+// the card said "That is not a link" with the link plainly visible on it.
+// Refusing there is the worst outcome - a proposal the user can see is right
+// and cannot act on.
+check(
+  'a link with trailing junk is still a link',
+  L.readLinkRequest('# Open Google\nhttps://www.google.com float: right').target,
+  'https://www.google.com'
+)
+check(
+  'and with words in front of it',
+  L.readLinkRequest('# Open it\nGo to https://example.com/x now').target,
+  'https://example.com/x'
+)
+check(
+  'the first link wins when there are two',
+  L.readLinkRequest('https://a.example/1 or https://b.example/2').target,
+  'https://a.example/1'
+)
+// A bare word with a dot is as likely to be the end of a sentence as a host,
+// so only an explicit scheme is dug out of a multi-word line.
+check(
+  'prose with no scheme is not mined for a host',
+  L.readLinkRequest('# hmm\nmaybe google.com would work').target,
+  'maybe google.com would work'
+)
+check('which checkLink then refuses', L.checkLink('maybe google.com would work').ok, false)
+check(
+  'a lone bare host still works',
+  L.readLinkRequest('# Open it\nexample.com').target,
+  'example.com'
+)
+
+/* ------------------------------------ a search that is really an address */
+
+// Measured on llama3.2:3b asked to open google.com: `search:
+// https://www.google.com` twice in three. Taken literally that searches for
+// the address instead of going there.
+check(
+  'a search for a URL is treated as the URL',
+  L.readLinkRequest('# Open Google\nsearch: https://www.google.com').target,
+  'https://www.google.com'
+)
+check(
+  'and is not left as a query',
+  L.readLinkRequest('# Open Google\nsearch: https://www.google.com').query,
+  null
+)
+check(
+  'a bare host in a search counts too',
+  L.readLinkRequest('search: google.com').target,
+  'google.com'
+)
+check(
+  'but real words stay a search',
+  L.readLinkRequest('search: how do i open google').query,
+  'how do i open google'
+)
+check(
+  'and that search has no target',
+  L.readLinkRequest('search: how do i open google').target,
+  null
+)
+check(
+  'a search for one word stays a search',
+  L.readLinkRequest('search: electron').query,
+  'electron'
 )
 
 console.log(`\n${failed === 0 ? 'all' : `${failed} FAILED of`} link checks`)

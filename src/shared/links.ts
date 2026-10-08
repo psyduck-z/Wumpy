@@ -63,7 +63,8 @@ function isLocal(host: string): boolean {
   if (h === 'localhost' || h.endsWith('.localhost') || h.endsWith('.local')) return true
   if (h === '::1' || h.startsWith('fe80:') || h.startsWith('fc') || h.startsWith('fd')) return true
   if (!h.includes('.')) return true
-  if (/^127\./.test(h) || /^10\./.test(h) || /^192\.168\./.test(h) || /^169\.254\./.test(h)) return true
+  if (/^127\./.test(h) || /^10\./.test(h) || /^192\.168\./.test(h) || /^169\.254\./.test(h))
+    return true
   if (/^172\.(1[6-9]|2\d|3[01])\./.test(h)) return true
   // 0.0.0.0 and friends.
   if (/^0\./.test(h)) return true
@@ -128,7 +129,13 @@ export function checkLink(raw: string): LinkCheck {
   }
   if (!url.hostname) return refuse('That link has no site in it.')
 
-  return { ok: true, url: url.toString(), host: url.hostname, why: null, local: isLocal(url.hostname) }
+  return {
+    ok: true,
+    url: url.toString(),
+    host: url.hostname,
+    why: null,
+    local: isLocal(url.hostname)
+  }
 }
 
 /* ------------------------------------------------------------------ searching */
@@ -219,16 +226,75 @@ export function readLinkRequest(raw: string): LinkRequest {
   const first = body[0] ?? ''
   const search = /^search:\s*(.+)$/i.exec(first)
 
+  /**
+   * A search whose query is a link is a link.
+   *
+   * Measured on llama3.2:3b, asked to open google.com: `search:
+   * https://www.google.com` twice out of three, and `search: google.com` the
+   * rest. Taken literally that searches DuckDuckGo for the address instead of
+   * going there - the user asked to open a page and got a results page about
+   * it, which looks like the app ignoring them.
+   *
+   * Only an unambiguous address is promoted. "search: how do i open google"
+   * stays a search, because a query with spaces in it is a query.
+   */
+  if (search) {
+    const query = search[1].trim()
+    if (looksLikeUrl(query)) {
+      return { reason: reason || null, query: null, target: stripMarkdown(query) || null }
+    }
+    return { reason: reason || null, query: query || null, target: null }
+  }
+
   return {
     reason: reason || null,
-    query: search ? search[1].trim() || null : null,
+    query: null,
     // Markdown often arrives as <https://…> or [text](url); take the URL.
-    target: search ? null : stripMarkdown(first) || null
+    target: stripMarkdown(first) || null
   }
 }
 
+/**
+ * Gets the link out of a line that has a link in it somewhere.
+ *
+ * A small model does not reliably put the URL on a line by itself. Observed in
+ * use: `https://www.google.com float: right`, which was refused with "That is
+ * not a link" when the link was plainly right there. The same shape turns up
+ * as a trailing full stop, a markdown link, angle brackets, or a few words of
+ * commentary the model could not resist adding.
+ *
+ * Taking the first http(s) token out of the line is safe to do here because
+ * nothing is opened on the strength of it: the result still goes through
+ * checkLink, the host is shown on the card, and on the manual approval mode
+ * the user clicks. Extracting is strictly better than refusing, because
+ * refusing leaves them with a proposal they can see is correct and cannot act
+ * on.
+ */
 function stripMarkdown(text: string): string {
   const link = /\[[^\]]*\]\(([^)\s]+)\)/.exec(text)
   if (link) return link[1]
-  return text.replace(/^<|>$/g, '').replace(/[.,;:)]+$/, '').trim()
+
+  const trimmed = text.trim()
+  // Already one token: the common case, and the only one where a bare host
+  // with no scheme is still acceptable.
+  if (!/\s/.test(trimmed)) {
+    return trimmed
+      .replace(/^<|>$/g, '')
+      .replace(/[.,;:)]+$/, '')
+      .trim()
+  }
+
+  // Several tokens. Only an explicit http(s) URL is worth digging out - a bare
+  // word with a dot in it is as likely to be the end of a sentence as a host.
+  const url = /\bhttps?:\/\/[^\s<>"']+/i.exec(trimmed)
+  if (url)
+    return url[0]
+      .replace(/^<|>$/g, '')
+      .replace(/[.,;:)]+$/, '')
+      .trim()
+
+  return trimmed
+    .replace(/^<|>$/g, '')
+    .replace(/[.,;:)]+$/, '')
+    .trim()
 }
