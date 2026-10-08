@@ -130,37 +130,23 @@ export const CLOUD_MODELS: CloudModel[] = [
     blurb: 'Newest Flash — but it ran out after about 25 requests in a day.'
   },
   {
-    id: 'gemini-3.5-flash-lite',
-    provider: 'google',
-    label: 'Gemini 3.5 Flash Lite',
-    blurb: 'Newer Lite. Cheap on quota, weaker on code.'
-  },
-  {
     id: 'gemini-3.1-pro-preview',
     provider: 'google',
     label: 'Gemini 3.1 Pro',
     // Pro moved behind billing in May 2026, so on a free key this is likely
     // to refuse. Listed because a key with billing on can use it, and finding
     // out costs one request.
-    blurb: 'Most capable Gemini — but Pro is paid only, so a free key is refused.'
+    // Probed: a 429 naming ContentInputTokensPerModelPerMinute-FreeTier on a
+    // two-token request, so it is reachable but the free input allowance is
+    // too small to be worth routing to. Not "paid only", which is what this
+    // said before measuring it.
+    blurb: 'Most capable Gemini — but its free input allowance is far too small to use.'
   },
   {
     id: 'gemini-flash-latest',
     provider: 'google',
     label: 'Gemini Flash (latest)',
     blurb: 'Whatever Google currently points "latest" at. Moves without warning.'
-  },
-  {
-    id: 'gemini-flash-lite-latest',
-    provider: 'google',
-    label: 'Gemini Flash Lite (latest)',
-    blurb: 'The moving pointer to the lightest Flash.'
-  },
-  {
-    id: 'gemini-2.5-flash',
-    provider: 'google',
-    label: 'Gemini 2.5 Flash',
-    blurb: 'Previous generation. Larger free allowance, visibly older.'
   },
 
   // --- Groq ----------------------------------------------------------------
@@ -221,14 +207,29 @@ export function providerFor(model: string): ProviderId | null {
 export function siblingModel(model: string, spent: ReadonlySet<string>): string | null {
   const provider = providerFor(model)
   if (!provider) return null
+  /**
+   * Probed against the live API, one request each, rather than taken from a
+   * listing. The /models endpoint lists plenty that will not generate:
+   * gemini-3.5-flash-lite and gemini-flash-lite-latest both answer 400 and
+   * gemini-2.5-flash answers 404, while appearing in it perfectly happily.
+   * All three were in this list, so a model running out would step sideways
+   * onto one of them and fail - visible in /usage as two rows with one turn,
+   * no tokens and one failure.
+   *
+   * Ordered by capability, since this only runs when the preferred model is
+   * already spent: 3.5 scored 8/8 on the write-a-file tasks, the numbered
+   * Flash models descend from there, and Lite is last because it is the
+   * weakest and the most likely to still have requests left.
+   */
   const order =
     provider === 'google'
       ? [
           'gemini-3.5-flash',
-          'gemini-3.1-flash-lite',
           'gemini-3.6-flash',
-          'gemini-3.5-flash-lite',
-          'gemini-2.5-flash'
+          'gemini-3.7-flash',
+          'gemini-3.8-flash',
+          'gemini-flash-latest',
+          'gemini-3.1-flash-lite'
         ]
       : ['openai/gpt-oss-120b', 'openai/gpt-oss-20b']
   return order.find((m) => m !== model && !spent.has(m)) ?? null

@@ -221,13 +221,29 @@ export class CloudClient {
         return null
       }
 
+      /**
+       * A model that cannot generate at all is worth stepping away from.
+       *
+       * Probed against the live API: gemini-3.5-flash-lite and
+       * gemini-flash-lite-latest answer 400 and gemini-2.5-flash answers
+       * 404, all three while appearing in the /models listing. Those three
+       * are no longer shipped, but a listing that changes under us will
+       * produce more, and the right response is to try something else rather
+       * than hand the user a status code.
+       *
+       * A 5xx is the provider having a bad minute, which another model or
+       * the local one does not share. Every other 4xx is ours - a malformed
+       * request will be malformed again anywhere.
+       */
+      const unusableModel = res.status === 404 || res.status === 400
       handlers.onError(
         `${PROVIDERS[provider].label} returned ${res.status}${
           detail ? `: ${truncate(stripKey(detail), 300)}` : ''
         }`,
-        // A 5xx is the provider's problem and the local model does not have
-        // it; a 4xx is usually ours and would fail again.
-        { kind: 'other', elsewhere: res.status >= 500 }
+        {
+          kind: unusableModel ? 'unusable' : 'other',
+          elsewhere: unusableModel || res.status >= 500
+        }
       )
       return null
     }

@@ -29,7 +29,8 @@ export interface StreamStats {
  * local model could have answered.
  */
 export interface StreamFailure {
-  kind: 'limit' | 'auth' | 'network' | 'other'
+  /** 'unusable' is a model this provider will not generate with at all. */
+  kind: 'limit' | 'auth' | 'network' | 'unusable' | 'other'
   /** True when the same request somewhere else stands a chance. */
   elsewhere: boolean
 }

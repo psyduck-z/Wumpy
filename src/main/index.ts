@@ -516,6 +516,10 @@ function registerIpc(): void {
             if (failure?.kind === 'limit' && /used up its free requests/.test(message)) {
               spentToday.add(on)
             }
+            // A model the provider will not generate with is worse than
+            // spent: it will never work today or any other day, so it must
+            // not be offered as somewhere to step sideways to.
+            if (failure?.kind === 'unusable') spentToday.add(on)
 
             /**
              * Sideways before down.
@@ -547,9 +551,11 @@ function registerIpc(): void {
               fallbackWhy =
                 failure.kind === 'network'
                   ? 'could not be reached'
-                  : spentToday.has(on)
-                    ? 'is out of free requests for today'
-                    : 'is rate limited'
+                  : failure.kind === 'unusable'
+                    ? 'is not available on this key'
+                    : spentToday.has(on)
+                      ? 'is out of free requests for today'
+                      : 'is rate limited'
               return
             }
 

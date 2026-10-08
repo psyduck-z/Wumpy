@@ -411,7 +411,7 @@ check('and it does not claim the day is gone', perMin.message.includes('today'),
 check(
   'a spent model has a sibling to try',
   C.siblingModel('gemini-3.5-flash', new Set()),
-  'gemini-3.1-flash-lite'
+  'gemini-3.6-flash'
 )
 check(
   'never itself',
@@ -420,8 +420,8 @@ check(
 )
 check(
   'nor one already known to be spent',
-  C.siblingModel('gemini-3.5-flash', new Set(['gemini-3.1-flash-lite'])),
-  'gemini-3.6-flash'
+  C.siblingModel('gemini-3.5-flash', new Set(['gemini-3.6-flash'])),
+  'gemini-3.7-flash'
 )
 check(
   'it stays with the same provider',
@@ -433,13 +433,44 @@ check(
   C.siblingModel(
     'gemini-3.5-flash',
     new Set([
-      'gemini-3.1-flash-lite',
       'gemini-3.6-flash',
-      'gemini-3.5-flash-lite',
-      'gemini-2.5-flash'
+      'gemini-3.7-flash',
+      'gemini-3.8-flash',
+      'gemini-flash-latest',
+      'gemini-3.1-flash-lite'
     ])
   ),
   null
+)
+
+/**
+ * Probed one request each against the live API.
+ *
+ * The /models listing happily includes models that answer 400 or 404 when
+ * asked to generate. Three of them were in the rotation, so a model running
+ * out stepped sideways onto one and failed - visible in /usage as rows with
+ * one turn, no tokens and one failure.
+ */
+for (const dead of ['gemini-3.5-flash-lite', 'gemini-2.5-flash', 'gemini-flash-lite-latest']) {
+  check(
+    `${dead} is not offered`,
+    C.CLOUD_MODELS.some((m) => m.id === dead),
+    false
+  )
+}
+// A dud that appears later should move the turn along rather than hand the
+// user a status code.
+check(
+  'an unusable model is answerable elsewhere',
+  readFileSync('src/main/cloud.ts', 'utf8').includes("kind: unusableModel ? 'unusable' : 'other'"),
+  true
+)
+check(
+  'and is never rotated to again',
+  readFileSync('src/main/index.ts', 'utf8').includes(
+    "if (failure?.kind === 'unusable') spentToday.add(on)"
+  ),
+  true
 )
 check('a local model has no sibling', C.siblingModel('phi4-mini:3.8b', new Set()), null)
 
