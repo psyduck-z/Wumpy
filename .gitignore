@@ -458,4 +458,5 @@ bench-results.json
 
 # Bundled copies of src/shared that the benches build to import TypeScript.
 /.wf-*.mjs
+/.cloud-check.mjs
 /.bc-*.mjs
