@@ -45,7 +45,13 @@ import { cleanTitle } from './titles'
 import { Speech } from './speech'
 import { openLink, openSearch } from './browser'
 import { inspectWriteTarget, writeProposedFile } from './writefile'
-import { PROVIDERS, isCloudModel, looksLikeKey, providerFor } from '@shared/cloud'
+import {
+  FALLBACK_CLOUD_MODEL,
+  PROVIDERS,
+  isCloudModel,
+  looksLikeKey,
+  providerFor
+} from '@shared/cloud'
 import type { ProviderId } from '@shared/cloud'
 import { checkLink, isSearchEngine } from '@shared/links'
 import { POLISH_PROMPT, polishAcceptable, tidyTranscript } from '@shared/dictation'
@@ -95,7 +101,15 @@ function resolveTierModel(id: TierId): string | null {
 
   const tier = TIERS[id]
   const candidates = [tier.model, ...tier.alternates]
-  return candidates.find((m) => installedModels.includes(m)) ?? null
+  const local = candidates.find((m) => installedModels.includes(m))
+  if (local) return local
+
+  // Nothing installed. If a key is saved there is still a model available, it
+  // is just not on this machine - which is a far better answer than telling
+  // someone whose Ollama is stopped or mid-update to go and pull one.
+  const fallback = FALLBACK_CLOUD_MODEL[id]
+  if (fallback && cloud?.ready(fallback).ok) return fallback
+  return null
 }
 
 /**
@@ -147,7 +161,10 @@ function tierStatuses(): TierStatus[] {
       id,
       resolvedModel,
       installed: resolvedModel !== null,
-      warm: resolvedModel ? ollama.isWarm(resolvedModel) : false
+      // A hosted model is always ready in the sense this flag means: there is
+      // no load to wait for. Asking Ollama whether it is warm would say false
+      // forever and the tier bar would show it as cold.
+      warm: resolvedModel ? isCloudModel(resolvedModel) || ollama.isWarm(resolvedModel) : false
     }
   })
 }
@@ -345,8 +362,11 @@ function registerIpc(): void {
         message: provider
           ? `${tier.label} is set to ${wanted}, which needs a ${PROVIDERS[provider].label} key. ` +
             `Add one with /key, or get one at ${PROVIDERS[provider].keyUrl}`
-          : `No model installed for ${tier.label}. Install one with ` +
-            `\`ollama pull ${tier.model}\`, then reopen Wumpy.`
+          : installedModels.length === 0
+            ? 'No model available. Either start Ollama, or add a hosted one with ' +
+              '`/key google <key>` — get a free key at https://aistudio.google.com/apikey'
+            : `No model installed for ${tier.label}. Install one with ` +
+              `\`ollama pull ${tier.model}\`, then reopen Wumpy.`
       })
       return
     }
@@ -368,23 +388,29 @@ function registerIpc(): void {
 
     // Stand aside for the duration of the turn: tokens matter more than UI.
     priority.yieldToModel()
-    await clientFor(model).chat(req.requestId, model, withContext(req, tier.label, scope), {
-      thinking: tier.thinking,
-      options: tier.options,
-      keepAlive: settings.get('keepAlive'),
-      maxTurnMs: settings.get('maxTurnMs'),
-      systemPrompt
-    }, {
-      onDelta: (delta) => panel.send(IPC.chatDelta, { requestId: req.requestId, ...delta }),
-      onDone: (stats) => {
-        priority.restore()
-        panel.send(IPC.chatDone, { requestId: req.requestId, ...stats })
+    await clientFor(model).chat(
+      req.requestId,
+      model,
+      withContext(req, tier.label, scope),
+      {
+        thinking: tier.thinking,
+        options: tier.options,
+        keepAlive: settings.get('keepAlive'),
+        maxTurnMs: settings.get('maxTurnMs'),
+        systemPrompt
       },
-      onError: (message) => {
-        priority.restore()
-        panel.send(IPC.chatError, { requestId: req.requestId, message })
+      {
+        onDelta: (delta) => panel.send(IPC.chatDelta, { requestId: req.requestId, ...delta }),
+        onDone: (stats) => {
+          priority.restore()
+          panel.send(IPC.chatDone, { requestId: req.requestId, ...stats })
+        },
+        onError: (message) => {
+          priority.restore()
+          panel.send(IPC.chatError, { requestId: req.requestId, message })
+        }
       }
-    })
+    )
   })
 
   /**
@@ -473,7 +499,13 @@ function registerIpc(): void {
    */
   ipcMain.handle(IPC.writeFile, (_e, req: { path: string; content: string }) => {
     if (!settings.get('shellEnabled')) {
-      return { written: false, path: '', bytes: 0, overwrote: false, error: 'Commands are turned off.' }
+      return {
+        written: false,
+        path: '',
+        bytes: 0,
+        overwrote: false,
+        error: 'Commands are turned off.'
+      }
     }
     return writeProposedFile(req.path, req.content, settings.get('shellCwd') || homedir())
   })
@@ -536,25 +568,46 @@ function registerIpc(): void {
   ipcMain.handle(
     IPC.voiceTranscribe,
     async (_e, req: { audio: ArrayBuffer; extension?: string; commands?: string[] }) => {
-        const clip = await speech.transcribe(new Uint8Array(req.audio), req.extension ?? 'webm')
+      const clip = await speech.transcribe(new Uint8Array(req.audio), req.extension ?? 'webm')
 
-        const heard = clip.text.trim()
-        // The command list comes from the panel, which owns it, so a command added
-        // later is dictatable without this file having to hear about it.
-        const tidied = tidyTranscript(heard, { commands: req.commands ?? [] })
+      const heard = clip.text.trim()
+      // The command list comes from the panel, which owns it, so a command added
+      // later is dictatable without this file having to hear about it.
+      const tidied = tidyTranscript(heard, { commands: req.commands ?? [] })
       if (!tidied) {
-        return { text: '', heard, polished: false, polishRefused: false, confidence: clip.confidence, ms: clip.ms }
+        return {
+          text: '',
+          heard,
+          polished: false,
+          polishRefused: false,
+          confidence: clip.confidence,
+          ms: clip.ms
+        }
       }
 
       if (!settings.get('voicePolish')) {
-        return { text: tidied, heard, polished: false, polishRefused: false, confidence: clip.confidence, ms: clip.ms }
+        return {
+          text: tidied,
+          heard,
+          polished: false,
+          polishRefused: false,
+          confidence: clip.confidence,
+          ms: clip.ms
+        }
       }
 
       // The quickest installed model, for the same reason titles use it: the user
       // is waiting to read this and press Enter.
       const model = backgroundModel()
       if (!model) {
-        return { text: tidied, heard, polished: false, polishRefused: false, confidence: clip.confidence, ms: clip.ms }
+        return {
+          text: tidied,
+          heard,
+          polished: false,
+          polishRefused: false,
+          confidence: clip.confidence,
+          ms: clip.ms
+        }
       }
 
       const polished = await ollama.complete(
@@ -630,7 +683,10 @@ function registerIpc(): void {
    */
   ipcMain.handle(
     IPC.shellRun,
-    async (_e, req: { command: string; shell: ShellKind; tier: TierId }): Promise<ShellResult | null> => {
+    async (
+      _e,
+      req: { command: string; shell: ShellKind; tier: TierId }
+    ): Promise<ShellResult | null> => {
       const command = req.command.trim()
       if (!command) return null
 
@@ -831,7 +887,6 @@ app.on('will-quit', () => {
   speech?.stop()
   ollama?.abortAll()
 })
-
 
 /**
  * Live facts, handed to the model every turn.

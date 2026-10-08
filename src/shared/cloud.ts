@@ -336,6 +336,31 @@ export function looksLikeKey(provider: ProviderId, raw: string): { ok: boolean; 
   return { ok: true, why: '' }
 }
 
+/**
+ * What each tier uses when there is nothing local to use.
+ *
+ * Ollama is not always there. It can be stopped, mid-update, or never
+ * installed, and before this every tier simply resolved to null and Wumpy sat
+ * there telling the user to `ollama pull` something. With a key already saved
+ * that is a silly thing to say: there is a model available, it is just not on
+ * this machine.
+ *
+ * So a tier with no local option and a usable key falls through to here rather
+ * than to nothing. It is a fallback and not a preference - anything installed
+ * locally still wins, because local is free, private and works on a plane.
+ *
+ * Flash Lite for the quick tiers and 3.5 Flash for the ones that act, which is
+ * the split the measurements support: 3.5 Flash scored 8/8 on the write-a-file
+ * tasks, and the quick tiers are answering one-liners that do not need it.
+ * Never 3.8 Flash, whose free tier is about 25 requests a day.
+ */
+export const FALLBACK_CLOUD_MODEL: Record<string, string> = {
+  flash: 'gemini-3.1-flash-lite',
+  fast: 'gemini-3.5-flash',
+  thinker: 'gemini-3.5-flash',
+  deep: 'gemini-3.5-flash'
+}
+
 /* ------------------------------------------------------------- the thinking */
 
 /**

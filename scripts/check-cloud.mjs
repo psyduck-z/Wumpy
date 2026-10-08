@@ -264,6 +264,42 @@ check(
   true
 )
 
+/* ------------------------------------------- when there is nothing local */
+
+// Ollama is not always there: stopped, mid-update, or never installed. With a
+// key saved there is still a model available, it is just not on this machine.
+check(
+  'every tier has a hosted fallback',
+  C.CLOUD_MODELS.length > 0 &&
+    ['flash', 'fast', 'thinker', 'deep'].every((t) => C.FALLBACK_CLOUD_MODEL[t]),
+  true
+)
+check(
+  'each one is a real catalogue model',
+  ['flash', 'fast', 'thinker', 'deep'].every((t) =>
+    C.CLOUD_MODELS.some((m) => m.id === C.FALLBACK_CLOUD_MODEL[t])
+  ),
+  true
+)
+check(
+  'and routes to a provider',
+  ['flash', 'fast', 'thinker', 'deep'].every(
+    (t) => C.providerFor(C.FALLBACK_CLOUD_MODEL[t]) !== null
+  ),
+  true
+)
+// 25 requests a day is not something to land on by default.
+check(
+  'never the 25-a-day model',
+  Object.values(C.FALLBACK_CLOUD_MODEL).includes('gemini-3.8-flash'),
+  false
+)
+check(
+  'the acting tiers get the one that scored 8/8',
+  C.FALLBACK_CLOUD_MODEL.thinker,
+  'gemini-3.5-flash'
+)
+
 /* ------------------------------------------------- the key never comes back */
 
 /**
