@@ -13,6 +13,7 @@ import type {
   HotkeyState,
   KeyStatus,
   ProviderName,
+  UsageReport,
   OllamaModel,
   OllamaStatus,
   SavedChat,
@@ -64,9 +65,8 @@ const api = {
       messages: Array<{ role: string; content: string }>
     }): Promise<string | null> => ipcRenderer.invoke(IPC.chatCompact, req),
     /** Names a conversation from its opening exchange. */
-    title: (req: {
-      messages: Array<{ role: string; content: string }>
-    }): Promise<string | null> => ipcRenderer.invoke(IPC.chatTitle, req)
+    title: (req: { messages: Array<{ role: string; content: string }> }): Promise<string | null> =>
+      ipcRenderer.invoke(IPC.chatTitle, req)
   },
   /** What the user has typed before, oldest first. */
   history: {
@@ -90,11 +90,8 @@ const api = {
   },
   shell: {
     /** Runs an approved command. Resolves null if the user cancelled. */
-    run: (req: {
-      command: string
-      shell: ShellKind
-      tier: TierId
-    }): Promise<ShellResult | null> => ipcRenderer.invoke(IPC.shellRun, req),
+    run: (req: { command: string; shell: ShellKind; tier: TierId }): Promise<ShellResult | null> =>
+      ipcRenderer.invoke(IPC.shellRun, req),
     /**
      * Whether this tier may run the command, and why it looks risky if it does.
      * Drives the card: a command the tier cannot run gets no Run button.
@@ -104,7 +101,9 @@ const api = {
   },
   search: {
     /** Runs an approved web search. */
-    run: (query: string): Promise<{
+    run: (
+      query: string
+    ): Promise<{
       results: SearchResult[]
       provider: string
       error?: string
@@ -121,13 +120,21 @@ const api = {
     get: (): Promise<HotkeyState> => ipcRenderer.invoke(IPC.hotkeyState),
     onChange: (cb: (s: HotkeyState) => void) => on(IPC.hotkeyState, cb)
   },
+  usage: {
+    /** Today's totals, per model. Counts only — no prompt text is kept. */
+    get: (): Promise<UsageReport> => ipcRenderer.invoke(IPC.usageGet),
+    reset: (): Promise<UsageReport> => ipcRenderer.invoke(IPC.usageReset)
+  },
   keys: {
     /**
      * Which providers have a key. Deliberately no getter for a key itself -
      * there is no handler on the other side either. This boundary is one-way.
      */
     status: (): Promise<KeyStatus> => ipcRenderer.invoke(IPC.keyStatus),
-    set: (provider: ProviderName, key: string): Promise<{ ok: boolean; why: string; label?: string }> =>
+    set: (
+      provider: ProviderName,
+      key: string
+    ): Promise<{ ok: boolean; why: string; label?: string }> =>
       ipcRenderer.invoke(IPC.keySet, { provider, key }),
     clear: (provider: ProviderName): Promise<{ ok: boolean; why: string }> =>
       ipcRenderer.invoke(IPC.keyClear, { provider })

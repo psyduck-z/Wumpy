@@ -51,6 +51,22 @@ export type TierId = 'flash' | 'fast' | 'thinker' | 'deep'
  */
 export type Mode = 'quick' | 'dev'
 
+/**
+ * Which half of the app is answering.
+ *
+ * Wumpy is two assistants sharing one window. Local runs on Ollama: free,
+ * private, offline, and limited by this machine's memory bandwidth to about
+ * 13 tokens a second. API runs on a hosted model: ten times faster and
+ * markedly better at code, at the cost of a quota, a network, and sending the
+ * conversation to someone else.
+ *
+ * Neither is a fallback for the other. They have different models, different
+ * output budgets and different prompts - a 3.8B model needs worked examples
+ * and short-answer rules that only hold a capable model back - so the choice
+ * is explicit and visible rather than inferred.
+ */
+export type Backend = 'local' | 'api'
+
 /** Rough expectation set for the user before they commit to a slow answer. */
 export type SpeedHint = 'instant' | 'quick' | 'slow' | 'slowest'
 
@@ -120,9 +136,11 @@ export interface Tier {
   blurb: string
   mode: Mode
   speed: SpeedHint
-  /** Preferred model; falls back through `alternates` when not installed. */
+  /** Preferred local model; falls back through `alternates` when not installed. */
   model: string
   alternates: string[]
+  /** The hosted model this tier uses on the API backend. */
+  apiModel: string
   /** Ask a reasoning-capable model to reason. Never sends `think: false`. */
   thinking: boolean
   /**
@@ -135,7 +153,25 @@ export interface Tier {
    */
   tools: 'none' | 'read' | 'full'
   options: TierOptions
+  /**
+   * Overrides for the API backend, where the constraints are different.
+   *
+   * num_predict is the one that matters. Locally it is a patience budget: at
+   * 13 tok/s, 800 tokens is a minute of waiting. On a hosted model at 170
+   * tok/s the same 800 tokens is five seconds, and the cap stops being a
+   * kindness and starts being a truncation.
+   */
+  apiOptions?: Partial<TierOptions>
   systemPrompt: string
+  /**
+   * The system prompt for the API backend.
+   *
+   * Separate because the local one is shaped around a 3.8B model's failure
+   * modes - told to stop talking, kept to one or two sentences, given worked
+   * examples to imitate - and those are instructions to be less useful when
+   * the model on the other end does not need them.
+   */
+  apiSystemPrompt?: string
 }
 
 export interface TierStatus {
@@ -248,6 +284,12 @@ export interface WumpySettings {
   shellCwd: string
   /** Per-tier model overrides, keyed by tier id. */
   tierModels: Partial<Record<TierId, string>>
+  /**
+   * Local (Ollama) or API (hosted). Local by default: Wumpy works with no
+   * account, no network and no quota, and switching away from that should be
+   * something the user did on purpose.
+   */
+  backend: Backend
   /**
    * Dictation. Off until a transcriber is actually installed, because turning
    * it on without one would put a microphone button in the panel that only ever
@@ -382,6 +424,8 @@ export const IPC = {
   linkSearch: 'link:search',
   writeFile: 'write:file',
   writeCheck: 'write:check',
+  usageGet: 'usage:get',
+  usageReset: 'usage:reset',
   keyStatus: 'key:status',
   keySet: 'key:set',
   keyClear: 'key:clear'
@@ -397,6 +441,13 @@ export const IPC = {
  * web page and whatever reaches it reaches anything that manages to run script
  * in it; the only code that handles the plaintext is the fetch that sends it.
  */
+/** What `/usage` shows. */
+export interface UsageReport {
+  lines: import('./usage').UsageLine[]
+  backend: Backend
+  date: string
+}
+
 export interface KeyStatus {
   configured: ProviderName[]
   /** False when the OS cannot encrypt, in which case Wumpy stores nothing. */

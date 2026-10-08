@@ -702,6 +702,74 @@ export default function App(): React.JSX.Element {
         case 'engine':
           setPicker('engine')
           return
+        case 'backend': {
+          const now = settings?.backend ?? 'local'
+          const next = action.to === 'toggle' ? (now === 'local' ? 'api' : 'local') : action.to
+
+          if (next === 'api' && !(keyStatus?.configured.length ?? 0)) {
+            chat.note(
+              'No hosted key yet, so there is nothing to switch to. ' +
+                'Get a free one at https://aistudio.google.com/apikey and paste it with ' +
+                '`/key google <key>`.'
+            )
+            return
+          }
+
+          await patch({ backend: next })
+          void window.wumpy.tiers.status().then(setTierStatuses)
+          chat.note(
+            next === 'api'
+              ? '**API** — answering on a hosted model. Much faster and better at code, ' +
+                  'and it spends quota. Titles, compaction and dictation stay on this PC. ' +
+                  '`/usage` shows what today has cost.'
+              : '**Local** — answering on this PC. Free, private, and works with no network.'
+          )
+          return
+        }
+        case 'usage': {
+          const report = action.reset
+            ? await window.wumpy.usage.reset()
+            : await window.wumpy.usage.get()
+
+          if (!report.lines.length) {
+            chat.note(
+              action.reset
+                ? 'Usage cleared.'
+                : `Nothing used yet today. Currently on **${report.backend === 'api' ? 'API' : 'Local'}**.`
+            )
+            return
+          }
+
+          const rows = report.lines.map((l) => {
+            const rate = l.tokensPerSecond ? `${l.tokensPerSecond.toFixed(0)} tok/s` : '—'
+            const used =
+              l.usedFraction !== null ? `${Math.round(l.usedFraction * 100)}% of today` : '—'
+            const trouble = [
+              l.limited ? `${l.limited} rate limited` : '',
+              l.errors - l.limited > 0 ? `${l.errors - l.limited} failed` : ''
+            ]
+              .filter(Boolean)
+              .join(', ')
+            return (
+              `| ${l.model} | ${l.via} | ${l.requests} | ${l.tokens.toLocaleString()}` +
+              `${l.thinking ? ` (${l.thinking.toLocaleString()} thinking)` : ''} | ${rate} | ` +
+              `${used}${trouble ? ` · ${trouble}` : ''} |`
+            )
+          })
+
+          chat.note(
+            [
+              `**Today (${report.date})** — on **${report.backend === 'api' ? 'API' : 'Local'}**`,
+              '',
+              '| model | via | turns | tokens | speed | quota |',
+              '| --- | --- | --- | --- | --- | --- |',
+              ...rows,
+              '',
+              ...report.lines.filter((l) => l.note).map((l) => `_${l.model}: ${l.note}_`)
+            ].join(String.fromCharCode(10))
+          )
+          return
+        }
         case 'key': {
           const provider = action.provider
           if (!provider) return
@@ -1527,6 +1595,8 @@ export default function App(): React.JSX.Element {
         usage={usage}
         compact={compact}
         approvalMode={settings?.approvalMode ?? 'manual'}
+        backend={settings?.backend ?? 'local'}
+        onToggleBackend={() => void runCommand({ kind: 'backend', to: 'toggle' }, '/backend')}
         onCycleApproval={() => void runCommand({ kind: 'approve', mode: 'cycle' }, '/approve')}
         onCompact={() => void compactHistory()}
       />

@@ -54,6 +54,8 @@ export const DEFAULT_SETTINGS: WumpySettings = {
   searchApiKey: '',
 
   tierModels: {},
+  // Local until asked otherwise. Nothing leaves the machine by default.
+  backend: 'local',
   // Off until asked for with /voice. It is not only a microphone button: with it
   // on, holding the spacebar means something, and the most-pressed key on the
   // keyboard does not change behaviour because an app was installed.

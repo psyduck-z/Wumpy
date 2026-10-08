@@ -1599,3 +1599,29 @@ body {
   border-style: dashed;
   font-style: italic;
 }
+
+/* ---- backend ----
+   Which half of the app is answering. Stated first in the status bar because
+   it decides where the question goes, what it costs, and whether it leaves
+   the machine. Local is quiet; API is marked, the same way the automatic
+   approval modes are, because it is the state with consequences outside. */
+.backend {
+  padding: 1px 7px;
+  margin-right: 1px;
+  background: none;
+  border: 1px solid rgb(var(--border));
+  border-radius: 20px;
+  color: rgb(var(--muted));
+  font: inherit;
+  font-size: 9.5px;
+  letter-spacing: 0.3px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.backend:hover { color: rgb(var(--text)); }
+
+.backend.is-api {
+  color: #38bdf8;
+  border-color: #38bdf866;
+}

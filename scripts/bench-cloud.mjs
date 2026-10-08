@@ -115,8 +115,19 @@ async function bundle(entry, name) {
 const T = await bundle('src/shared/tiers.ts', 'tiers')
 const W = await bundle('src/shared/writefile.ts', 'wf')
 
+/**
+ * Which prompt is being measured.
+ *
+ * WUMPY_PROMPT=api uses the hosted-backend prompt and drops the worked
+ * examples; anything else uses the local one. The two are a real experiment,
+ * not a preference: the local prompt's rules were measured into existence
+ * against a 3.8B model, and whether they help or hinder a capable one is not
+ * something that can be reasoned out from here.
+ */
+const USE_API_PROMPT = (process.env.WUMPY_PROMPT ?? 'local') === 'api'
+
 const SYSTEM = [
-  T.TIERS.thinker.systemPrompt,
+  USE_API_PROMPT ? T.TIERS.thinker.apiSystemPrompt : T.TIERS.thinker.systemPrompt,
   T.APP_PROMPT,
   T.SHELL_PROMPT,
   T.SEARCH_PROMPT,
@@ -138,7 +149,7 @@ const FACTS = [
 function messagesFor(ask) {
   return [
     { role: 'system', content: SYSTEM },
-    ...T.shellExamples('full'),
+    ...(USE_API_PROMPT ? T.API_EXAMPLES : T.shellExamples('full')),
     { role: 'system', content: FACTS },
     { role: 'user', content: ask }
   ]

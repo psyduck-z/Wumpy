@@ -25,6 +25,8 @@ export type CommandAction =
   | { kind: 'open'; what: string }
   | { kind: 'engine' }
   | { kind: 'key'; provider: 'google' | 'groq' | null; value: string; clear: boolean }
+  | { kind: 'backend'; to: 'local' | 'api' | 'toggle' }
+  | { kind: 'usage'; reset: boolean }
   | { kind: 'approve'; mode: 'manual' | 'auto' | 'all' | 'cycle' }
   | { kind: 'warm' }
   | { kind: 'compact' }
@@ -60,57 +62,61 @@ const TIER_NAMES: Record<string, TierId> = {
  * Prompt wrappers. These are the "commands Claude has" that a plain chat box
  * does not: they reshape the request rather than issuing an app action.
  */
-const PROMPT_COMMANDS: Array<{ name: string; hint: string; label: string; wrap(t: string): string }> =
-  [
-    {
-      name: 'plan',
-      hint: 'Plan the approach before writing anything',
-      label: 'plan',
-      wrap: (t) =>
-        `Produce a short implementation plan for the following. Number the steps, ` +
-        `name the files or commands each step touches, and call out anything risky ` +
-        `or ambiguous. Do not write the full solution yet.\n\n${t}`
-    },
-    {
-      name: 'btw',
-      hint: 'Quick aside — answer in one line, no preamble',
-      label: 'btw',
-      wrap: (t) => `Answer in a single short line. No preamble, no caveats.\n\n${t}`
-    },
-    {
-      name: 'explain',
-      hint: 'Explain it plainly, with a concrete example',
-      label: 'explain',
-      wrap: (t) =>
-        `Explain the following clearly, assuming a competent engineer who is new to ` +
-        `this specific thing. Include one concrete example.\n\n${t}`
-    },
-    {
-      name: 'fix',
-      hint: 'Diagnose an error and give the corrected code',
-      label: 'fix',
-      wrap: (t) =>
-        `Diagnose this problem. State the root cause in one sentence, then give the ` +
-        `corrected code. Do not restate the original code unchanged.\n\n${t}`
-    },
-    {
-      name: 'review',
-      hint: 'Review code for real bugs, not style',
-      label: 'review',
-      wrap: (t) =>
-        `Review the following for correctness bugs, edge cases and failure modes. ` +
-        `Ignore formatting and style. If you find nothing real, say so plainly.\n\n${t}`
-    },
-    {
-      name: 'cmd',
-      hint: 'Give just the command line, nothing else',
-      label: 'cmd',
-      wrap: (t) =>
-        `Give only the command line that does this, in a fenced code block, with a ` +
-        `one-line explanation beneath it. Target Windows PowerShell unless told ` +
-        `otherwise.\n\n${t}`
-    }
-  ]
+const PROMPT_COMMANDS: Array<{
+  name: string
+  hint: string
+  label: string
+  wrap(t: string): string
+}> = [
+  {
+    name: 'plan',
+    hint: 'Plan the approach before writing anything',
+    label: 'plan',
+    wrap: (t) =>
+      `Produce a short implementation plan for the following. Number the steps, ` +
+      `name the files or commands each step touches, and call out anything risky ` +
+      `or ambiguous. Do not write the full solution yet.\n\n${t}`
+  },
+  {
+    name: 'btw',
+    hint: 'Quick aside — answer in one line, no preamble',
+    label: 'btw',
+    wrap: (t) => `Answer in a single short line. No preamble, no caveats.\n\n${t}`
+  },
+  {
+    name: 'explain',
+    hint: 'Explain it plainly, with a concrete example',
+    label: 'explain',
+    wrap: (t) =>
+      `Explain the following clearly, assuming a competent engineer who is new to ` +
+      `this specific thing. Include one concrete example.\n\n${t}`
+  },
+  {
+    name: 'fix',
+    hint: 'Diagnose an error and give the corrected code',
+    label: 'fix',
+    wrap: (t) =>
+      `Diagnose this problem. State the root cause in one sentence, then give the ` +
+      `corrected code. Do not restate the original code unchanged.\n\n${t}`
+  },
+  {
+    name: 'review',
+    hint: 'Review code for real bugs, not style',
+    label: 'review',
+    wrap: (t) =>
+      `Review the following for correctness bugs, edge cases and failure modes. ` +
+      `Ignore formatting and style. If you find nothing real, say so plainly.\n\n${t}`
+  },
+  {
+    name: 'cmd',
+    hint: 'Give just the command line, nothing else',
+    label: 'cmd',
+    wrap: (t) =>
+      `Give only the command line that does this, in a fenced code block, with a ` +
+      `one-line explanation beneath it. Target Windows PowerShell unless told ` +
+      `otherwise.\n\n${t}`
+  }
+]
 
 function bool(arg: string, fallback: boolean | 'toggle' = 'toggle'): boolean | 'toggle' {
   const a = arg.trim().toLowerCase()
@@ -231,13 +237,35 @@ export const COMMANDS: CommandSpec[] = [
     run: (arg) =>
       arg.trim()
         ? { kind: 'open', what: arg.trim() }
-        : { kind: 'error', message: 'Give me a link or something to search for: `/open wikipedia.org`' }
+        : {
+            kind: 'error',
+            message: 'Give me a link or something to search for: `/open wikipedia.org`'
+          }
   },
   {
     name: 'engine',
     aliases: ['searchengine'],
     hint: 'Choose which search engine the browser opens',
     run: () => ({ kind: 'engine' })
+  },
+  {
+    name: 'local',
+    aliases: ['ollama', 'offline'],
+    hint: 'Answer on this PC — free, private, works offline',
+    run: () => ({ kind: 'backend', to: 'local' })
+  },
+  {
+    name: 'api',
+    aliases: ['cloud', 'hosted'],
+    hint: 'Answer on a hosted model — much faster, better at code, uses quota',
+    run: () => ({ kind: 'backend', to: 'api' })
+  },
+  {
+    name: 'usage',
+    aliases: ['tokens', 'quota', 'spend'],
+    hint: 'What today has cost, per model',
+    arg: 'reset',
+    run: (arg) => ({ kind: 'usage', reset: /^reset$|^clear$/i.test(arg.trim()) })
   },
   {
     name: 'key',
@@ -331,17 +359,15 @@ export const COMMANDS: CommandSpec[] = [
   { name: 'help', aliases: ['?'], hint: 'List every command', run: () => ({ kind: 'help' }) },
   { name: 'quit', aliases: ['exit'], hint: 'Quit Wumpy', run: () => ({ kind: 'quit' }) },
 
-  ...PROMPT_COMMANDS.map(
-    (p): CommandSpec => ({
-      name: p.name,
-      hint: p.hint,
-      arg: 'text',
-      run: (arg) =>
-        arg.trim()
-          ? { kind: 'prompt', text: p.wrap(arg.trim()), label: p.label }
-          : { kind: 'error', message: `Usage: /${p.name} <text>` }
-    })
-  )
+  ...PROMPT_COMMANDS.map((p): CommandSpec => ({
+    name: p.name,
+    hint: p.hint,
+    arg: 'text',
+    run: (arg) =>
+      arg.trim()
+        ? { kind: 'prompt', text: p.wrap(arg.trim()), label: p.label }
+        : { kind: 'error', message: `Usage: /${p.name} <text>` }
+  }))
 ]
 
 /**

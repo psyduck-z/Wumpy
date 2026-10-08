@@ -71,7 +71,9 @@ export const READ_SHELL_PROMPT = [
  * They sit at the front of the request, where they are identical every turn and
  * so stay in the KV cache; they cost one prefill, not one per message.
  */
-export function shellExamples(scope: 'read' | 'full'): Array<{ role: 'user' | 'assistant'; content: string }> {
+export function shellExamples(
+  scope: 'read' | 'full'
+): Array<{ role: 'user' | 'assistant'; content: string }> {
   const refusal =
     scope === 'read'
       ? 'That needs Developer mode — press Ctrl+D.'
@@ -187,6 +189,65 @@ const BASE_PROMPT = [
 ].join(String.fromCharCode(10))
 
 /**
+ * The same job, said to a model that does not need managing.
+ *
+ * Every line of BASE_PROMPT is there because of something a 3.8B model did.
+ * "Answer directly and stop" because it padded; "never deliberate in the open"
+ * because it thought out loud and then contradicted itself; the tier prompts
+ * cap length because a small model rambles when it is unsure. Pointed at a
+ * capable model those stop being corrections and become a ceiling - an
+ * instruction to give the shallow version of the answer.
+ *
+ * What survives is the part that is a genuine requirement rather than a
+ * correction: the block formats, who is allowed to run what, and the fact that
+ * Wumpy never executes anything by itself. Those are the contract with the
+ * rest of the app and they hold whoever is answering.
+ *
+ * Measured against the local prompt on gemini-3.1-flash-lite, same four
+ * write-a-file tasks, same checks:
+ *
+ *                      local prompt    this one
+ *   block/compile      4/4, 4/4        4/4, 4/4
+ *   on task, path ok   4/4, 4/4        4/4, 4/4
+ *   script length      12 lines avg    24 lines avg
+ *   input tokens       1154            1099
+ *   output tokens      148             246
+ *   billed             1302            1345
+ *
+ * Twice the substance for three percent more, with correctness unmoved and the
+ * input actually cheaper because the worked examples come out. The honest
+ * caveat is that correctness was 4/4 on both, so that column cannot show a
+ * regression - the length is the real signal, and it is not subtle.
+ */
+const API_BASE_PROMPT = [
+  'You are Wumpy, an assistant in the Windows system tray.',
+  'Be accurate and concrete. Length should fit the question: a sentence for a',
+  'simple one, and as much as it genuinely needs for a hard one. Do not pad, and',
+  'do not truncate something that is not finished.',
+  'Say plainly when you are unsure or when something cannot be known from here,',
+  'rather than guessing and sounding certain.',
+  'Markdown where it earns its place; fenced code blocks with a language tag.'
+].join(String.fromCharCode(10))
+
+/**
+ * The worked examples are deliberately absent from the API path.
+ *
+ * They were measured into existence: on phi4-mini, prose rules alone scored
+ * 5/8, the rules with the examples described scored 7/8, and the examples as
+ * real turns scored 8/8 at two temperatures. A small model imitates far better
+ * than it follows instructions.
+ *
+ * That same mechanism is a liability on a capable model, which will imitate
+ * the register of the examples as readily as their structure - and the
+ * examples are terse one-liners written for a 3.8B. They also cost 110 tokens
+ * on every single turn, against a quota counted in requests and tokens.
+ *
+ * Kept as a named constant rather than an inline `[]` so the reason travels
+ * with the decision.
+ */
+export const API_EXAMPLES: Array<{ role: 'user' | 'assistant'; content: string }> = []
+
+/**
  * The four thinking tiers.
  *
  * Models are chosen for a CPU-only machine, where the deciding factor is not
@@ -262,10 +323,16 @@ export const TIERS: Record<TierId, Tier> = {
     speed: 'instant',
     model: 'llama3.2:3b',
     alternates: ['llama3.2:1b', 'phi4-mini:3.8b', 'qwen2.5:3b'],
+    // The cheapest capable hosted model, because this tier answers one-liners
+    // and spending the better model's quota on them is what runs it out.
+    apiModel: 'gemini-3.1-flash-lite',
     thinking: false,
     tools: 'none',
     options: { num_ctx: NUM_CTX, num_predict: 384, temperature: 0.4, top_p: 0.9 },
-    systemPrompt: `${BASE_PROMPT} One or two sentences.`
+    apiOptions: { num_predict: 700 },
+    systemPrompt: `${BASE_PROMPT} One or two sentences.`,
+    apiSystemPrompt: `${API_BASE_PROMPT}
+Keep it to a couple of sentences unless the question truly needs more.`
   },
 
   fast: {
@@ -276,10 +343,13 @@ export const TIERS: Record<TierId, Tier> = {
     speed: 'quick',
     model: 'phi4-mini:3.8b',
     alternates: ['llama3.2:3b', 'qwen2.5:3b'],
+    apiModel: 'gemini-3.5-flash',
     thinking: false,
     tools: 'read',
     options: { num_ctx: NUM_CTX, num_predict: 1024, temperature: 0.6, top_p: 0.9 },
-    systemPrompt: `${BASE_PROMPT} A short paragraph, or bullets if it is genuinely a list.`
+    apiOptions: { num_predict: 1600 },
+    systemPrompt: `${BASE_PROMPT} A short paragraph, or bullets if it is genuinely a list.`,
+    apiSystemPrompt: API_BASE_PROMPT
   },
 
   thinker: {
@@ -290,10 +360,20 @@ export const TIERS: Record<TierId, Tier> = {
     speed: 'quick',
     model: 'phi4-mini:3.8b',
     alternates: ['qwen2.5:7b', 'llama3.2:3b'],
+    // Measured 8/8 on the write-a-file tasks: used the block, compiled, and
+    // chose a destination that survives checkWritePath.
+    apiModel: 'gemini-3.5-flash',
     thinking: false,
     tools: 'full',
+    // 800 is a patience budget at 13 tok/s. At 170 it is a truncation, and
+    // this is the tier that writes files.
     options: { num_ctx: NUM_CTX, num_predict: 800, temperature: 0.6, top_p: 0.95 },
-    systemPrompt: `${BASE_PROMPT} Give the conclusion, plus any assumption in one line.`
+    apiOptions: { num_predict: 2400, temperature: 0.4 },
+    systemPrompt: `${BASE_PROMPT} Give the conclusion, plus any assumption in one line.`,
+    apiSystemPrompt:
+      `${API_BASE_PROMPT}
+When you write a file, write the whole thing properly: ` +
+      'handle the errors that will actually happen, and do not leave a stub.'
   },
 
   deep: {
@@ -304,12 +384,19 @@ export const TIERS: Record<TierId, Tier> = {
     speed: 'slowest',
     model: 'qwen2.5-coder:14b',
     alternates: ['qwen2.5-coder:7b', 'qwen3:8b'],
+    apiModel: 'gemini-3.5-flash',
     thinking: false,
     tools: 'full',
     options: { num_ctx: NUM_CTX, num_predict: 1500, temperature: 0.3, top_p: 0.9 },
+    apiOptions: { num_predict: 4000, temperature: 0.3 },
     systemPrompt:
       `${BASE_PROMPT} Thorough where it matters only. Working code over prose ` +
-      'about code. Name edge cases briefly.'
+      'about code. Name edge cases briefly.',
+    apiSystemPrompt:
+      `${API_BASE_PROMPT}
+This is the tier chosen deliberately for hard things, so take ` +
+      'the time the problem deserves. Working code over prose about code. Name the edge ' +
+      'cases that matter and say which you have not handled.'
   }
 }
 

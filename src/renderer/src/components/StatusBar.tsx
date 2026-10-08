@@ -1,4 +1,4 @@
-import type { ApprovalMode, ContextUsage } from '@shared/types'
+import type { ApprovalMode, Backend, ContextUsage } from '@shared/types'
 import type { ChatStats } from '../hooks/useChat'
 
 /**
@@ -55,7 +55,11 @@ function ContextMeter({
       </span>
       <span className="ctx-label">
         {pct.toFixed(0)}%
-        {usage.estimated && <span className="ctx-est" title="Estimated from characters">~</span>}
+        {usage.estimated && (
+          <span className="ctx-est" title="Estimated from characters">
+            ~
+          </span>
+        )}
       </span>
     </button>
   )
@@ -65,7 +69,8 @@ const APPROVAL: Record<ApprovalMode, { label: string; title: string }> = {
   manual: { label: 'manual', title: 'Every command waits for you. Click to change.' },
   auto: {
     label: 'auto',
-    title: 'Read-only commands run themselves; anything that changes something asks. Click to change.'
+    title:
+      'Read-only commands run themselves; anything that changes something asks. Click to change.'
   },
   all: {
     label: 'accept all',
@@ -81,11 +86,15 @@ export function StatusBar({
   usage,
   compact,
   approvalMode,
+  backend,
+  onToggleBackend,
   onCycleApproval,
   onCompact
 }: {
   tierLabel: string
   model: string
+  backend: Backend
+  onToggleBackend(): void
   streaming: boolean
   stats: ChatStats
   usage: ContextUsage
@@ -106,6 +115,25 @@ export function StatusBar({
 
   return (
     <footer className="status">
+      {/*
+        Which half of the app is answering, always visible and always one
+        click from the other. It decides where the question goes, what it
+        costs and whether it leaves the machine, which is too much to leave
+        to a setting the user has to remember.
+      */}
+      <button
+        type="button"
+        className={`backend is-${backend}`}
+        onClick={onToggleBackend}
+        title={
+          backend === 'api'
+            ? 'Hosted model — fast, better at code, spends quota. Click for local.'
+            : 'On this PC — free, private, works offline. Click for the hosted model.'
+        }
+      >
+        {backend === 'api' ? 'API' : 'Local'}
+      </button>
+      <span className="status-sep">·</span>
       <span className="status-tier">{tierLabel}</span>
       {!compact && (
         <>
@@ -125,7 +153,6 @@ export function StatusBar({
       >
         {APPROVAL[approvalMode].label}
       </button>
-
 
       {streaming ? (
         <span className="status-live">
@@ -147,24 +174,22 @@ export function StatusBar({
         // Nothing measured yet, so use the space for discoverability.
         !compact && <span className="status-tip">Ctrl+K for commands</span>
       ) : (
-        (
-          <span className="status-live">
-            <span className="status-num">{stats.speed.toFixed(1)} tok/s</span>
-            {!compact && stats.lastCompletionTokens !== null && (
-              <>
-                <span className="status-sep">·</span>
-                <span className="status-num">{compactTokens(stats.lastCompletionTokens)} tok</span>
-              </>
-            )}
-            {/* Only worth showing when the model actually had to load. */}
-            {!compact && stats.loadMs !== null && stats.loadMs > 500 && (
-              <>
-                <span className="status-sep">·</span>
-                <span className="status-num">{duration(stats.loadMs)} load</span>
-              </>
-            )}
-          </span>
-        )
+        <span className="status-live">
+          <span className="status-num">{stats.speed.toFixed(1)} tok/s</span>
+          {!compact && stats.lastCompletionTokens !== null && (
+            <>
+              <span className="status-sep">·</span>
+              <span className="status-num">{compactTokens(stats.lastCompletionTokens)} tok</span>
+            </>
+          )}
+          {/* Only worth showing when the model actually had to load. */}
+          {!compact && stats.loadMs !== null && stats.loadMs > 500 && (
+            <>
+              <span className="status-sep">·</span>
+              <span className="status-num">{duration(stats.loadMs)} load</span>
+            </>
+          )}
+        </span>
       )}
 
       <ContextMeter usage={usage} onCompact={onCompact} />

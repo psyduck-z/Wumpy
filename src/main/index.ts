@@ -10,6 +10,7 @@ import type {
   ChatSummary,
   Dock,
   HotkeyState,
+  Backend,
   Tier,
   TierId,
   TierStatus,
@@ -26,6 +27,7 @@ import {
   SEARCH_PROMPT,
   OPEN_PROMPT,
   shellExamples,
+  API_EXAMPLES,
   NUM_CTX
 } from '@shared/tiers'
 import { SettingsStore } from './store'
@@ -34,6 +36,7 @@ import { InputHistory } from './history'
 import { OllamaClient } from './ollama'
 import { CloudClient } from './cloud'
 import { KeyStore } from './keys'
+import { UsageStore } from './usage'
 import { Panel } from './panel'
 import { createTray, resourcePath } from './tray'
 import { registerHotkeys, unregisterHotkeys } from './hotkey'
@@ -72,6 +75,7 @@ let inputHistory: InputHistory
 let ollama: OllamaClient
 let cloud: CloudClient
 let keys: KeyStore
+let usage: UsageStore
 let panel: Panel
 let tray: (Tray & { refresh(): void }) | null = null
 let hotkeyState: HotkeyState = { active: null, failed: [], intercepted: null }
@@ -89,7 +93,31 @@ let installedModels: string[] = []
  * first choice and then its alternates. Returns null when none are present, so
  * the UI can say "not installed" instead of failing at send time.
  */
+/**
+ * Which half of the app is answering, allowing for it being unusable.
+ *
+ * A setting of 'api' with no key would otherwise leave every tier resolving to
+ * nothing, which is a worse outcome than quietly answering locally - so the
+ * backend is what was asked for only when it can actually serve.
+ */
+function activeBackend(): Backend {
+  const wanted = settings.get('backend')
+  if (wanted === 'api' && !keys?.configured().length) return 'local'
+  return wanted
+}
+
 function resolveTierModel(id: TierId): string | null {
+  const tierSpec = TIERS[id]
+
+  // The API backend goes to the hosted model for the tier, and says so rather
+  // than silently answering locally - a question sent to the wrong one of
+  // these costs either quota or quality, and the user chose which.
+  if (activeBackend() === 'api') {
+    const hosted = settings.get('tierModels')[id]
+    const chosen = hosted && isCloudModel(hosted) ? hosted : tierSpec.apiModel
+    return cloud?.ready(chosen).ok ? chosen : null
+  }
+
   const override = settings.get('tierModels')[id]
   // A hosted model is not installed anywhere, so "available" means a key
   // exists for it. Without this an override of gemini-3.5-flash would fall
@@ -218,8 +246,13 @@ let lastChatTitle: string | null = null
  * just be slow for a reason nobody could see.
  */
 function systemPromptFor(tier: Tier, scope: 'none' | 'read' | 'full'): string {
+  // The tier's own voice differs by backend; the rules about blocks and what
+  // may be run do not, because those are the contract with the rest of the app
+  // and hold whoever is answering.
+  const voice =
+    activeBackend() === 'api' ? (tier.apiSystemPrompt ?? tier.systemPrompt) : tier.systemPrompt
   return [
-    tier.systemPrompt,
+    voice,
     APP_PROMPT,
     scope === 'full' ? SHELL_PROMPT : scope === 'read' ? READ_SHELL_PROMPT : NO_SHELL_PROMPT,
     scope !== 'none' && settings.get('searchEnabled') ? SEARCH_PROMPT : '',
@@ -278,6 +311,25 @@ async function warmTier(id: TierId): Promise<void> {
     options: tier.options
   })
   panel.send(IPC.tiersStatus, tierStatuses())
+}
+
+/**
+ * The generation options for a tier on the backend in use.
+ *
+ * num_predict is the one that moves. Locally it is a patience budget - at 13
+ * tok/s, 800 tokens is a minute of waiting - and on a hosted model at 170 the
+ * same number stops being a kindness and becomes a truncation.
+ */
+function optionsFor(tier: Tier): Tier['options'] {
+  return activeBackend() === 'api' && tier.apiOptions
+    ? { ...tier.options, ...tier.apiOptions }
+    : tier.options
+}
+
+/** The worked examples, which are for a small model and only a small model. */
+function examplesFor(scope: 'none' | 'read' | 'full'): ReturnType<typeof shellExamples> {
+  if (scope === 'none') return []
+  return activeBackend() === 'api' ? API_EXAMPLES : shellExamples(scope)
 }
 
 /* ----------------------------------------------------------------- hotkeys */
@@ -394,7 +446,7 @@ function registerIpc(): void {
       withContext(req, tier.label, scope),
       {
         thinking: tier.thinking,
-        options: tier.options,
+        options: optionsFor(tier),
         keepAlive: settings.get('keepAlive'),
         maxTurnMs: settings.get('maxTurnMs'),
         systemPrompt
@@ -403,14 +455,45 @@ function registerIpc(): void {
         onDelta: (delta) => panel.send(IPC.chatDelta, { requestId: req.requestId, ...delta }),
         onDone: (stats) => {
           priority.restore()
+          // Counted here rather than inside either client, so both are counted
+          // the same way and neither has to know a usage store exists.
+          usage.add({
+            model,
+            via: providerFor(model) ?? 'local',
+            promptTokens: stats.promptTokens,
+            completionTokens: stats.completionTokens,
+            generatingMs:
+              stats.tokensPerSecond && stats.completionTokens
+                ? (stats.completionTokens / stats.tokensPerSecond) * 1000
+                : 0
+          })
           panel.send(IPC.chatDone, { requestId: req.requestId, ...stats })
         },
         onError: (message) => {
           priority.restore()
+          usage.add({
+            model,
+            via: providerFor(model) ?? 'local',
+            error: true,
+            // A quota message is worth distinguishing: it is the number that
+            // explains why the day stopped working.
+            limited: /quota|rate limit/i.test(message)
+          })
           panel.send(IPC.chatError, { requestId: req.requestId, message })
         }
       }
     )
+  })
+
+  ipcMain.handle(IPC.usageGet, () => ({
+    lines: usage.lines(),
+    backend: activeBackend(),
+    date: usage.today().date
+  }))
+
+  ipcMain.handle(IPC.usageReset, () => {
+    usage.reset()
+    return { lines: usage.lines(), backend: activeBackend(), date: usage.today().date }
   })
 
   /**
@@ -837,6 +920,7 @@ void app.whenReady().then(async () => {
   ollama = new OllamaClient(settings.get('ollamaHost'))
   keys = new KeyStore()
   cloud = new CloudClient(keys)
+  usage = new UsageStore()
   panel = new Panel(settings)
 
   priority = new PriorityManager(() => panel.browserWindow)
@@ -905,8 +989,7 @@ function withContext(
 
   // Worked examples go at the very front, where they are byte-identical every
   // turn and so stay in the KV cache. They cost one prefill, not one per turn.
-  const examples: Array<Pick<ChatMessage, 'role' | 'content'>> =
-    scope === 'none' ? [] : shellExamples(scope)
+  const examples: Array<Pick<ChatMessage, 'role' | 'content'>> = examplesFor(scope)
 
   const messages: Array<Pick<ChatMessage, 'role' | 'content'>> = [
     ...examples,
