@@ -39,7 +39,7 @@ export class LowLevelHook {
       try {
         // stdin stays open on purpose: the helper exits when it hits EOF, which
         // guarantees it cannot outlive this process even on a hard crash.
-        this.child = spawn(exe, [this.key], {
+        this.child = spawn(exe, [this.key, `--grant-foreground=${process.pid}`], {
           stdio: ['pipe', 'pipe', 'pipe'],
           windowsHide: true
         })

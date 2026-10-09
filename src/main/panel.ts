@@ -242,6 +242,20 @@ export class Panel {
      * wrong in the harmless direction.
      */
     if (!win.isFocused()) {
+      /**
+       * The fallback, and no longer the mechanism.
+       *
+       * The hook now calls AllowSetForegroundWindow before it reports the
+       * toggle, so focus() above usually just works and this never runs.
+       * It is kept for the paths with no keystroke behind them - the tray
+       * icon, a second instance - where nothing has granted anything.
+       *
+       * It flickers, which is what the user saw. Hiding that behind
+       * setOpacity(0) was the obvious fix and is measurably wrong: making
+       * the window layered stopped Windows activating it at all, taking
+       * real hotkey presses from 2-of-3 to 0-of-3. Left visible rather than
+       * broken quietly.
+       */
       win.minimize()
       win.restore()
       win.focus()

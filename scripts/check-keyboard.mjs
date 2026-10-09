@@ -482,7 +482,7 @@ check('app.focus is still tried first', /app\.focus\(\{ steal: true \}\)/.test(p
 // the foreground the process has, it has it then and not after.
 check(
   'with a restore fallback when it fails',
-  /if \(!win\.isFocused\(\)\)[\s\S]{0,120}win\.minimize\(\)[\s\S]{0,60}win\.restore\(\)/.test(
+  /if \(!win\.isFocused\(\)\)[\s\S]{0,900}win\.minimize\(\)[\s\S]{0,60}win\.restore\(\)/.test(
     panelSrc
   ),
   true
@@ -492,6 +492,52 @@ check(
   'and only when it failed',
   /win\.minimize\(\)/.test(panelSrc) && /!win\.isFocused\(\)/.test(panelSrc),
   true
+)
+
+/**
+ * The grant, which is what makes focus work without a trick.
+ *
+ * Windows refuses SetForegroundWindow from a process that did not receive
+ * the last input, and Wumpy never does: the keystroke arrives in the hook,
+ * and Wumpy only hears about it on stdout afterwards. Everything tried in
+ * the main process was working around that rather than fixing it.
+ *
+ * Measured over real Win+C presses, with the minimize/restore fallback as
+ * the only mechanism: 2 of 3. Not a race I could see from the renderer, and
+ * not something a retry loop can fix.
+ *
+ * The hook DID receive the input, so it may hand the right on with
+ * AllowSetForegroundWindow before it reports the toggle. One call, no
+ * flicker, nothing to retry.
+ */
+const hookSrc = read('src/hook/Program.cs')
+check('the hook grants foreground rights', hookSrc.includes('AllowSetForegroundWindow'), true)
+check('to a pid it was told', hookSrc.includes('--grant-foreground='), true)
+check(
+  'before the toggle, not after',
+  /AllowSetForegroundWindow\(_grantPid\);[\s\S]{0,120}WriteLine\("TOGGLE"\)/.test(hookSrc),
+  true
+)
+check('and only when it has one', hookSrc.includes('_grantPid != 0'), true)
+check(
+  'Wumpy passes its own pid',
+  read('src/main/lowlevelhook.ts').includes('--grant-foreground=${process.pid}'),
+  true
+)
+
+/**
+ * setOpacity is NOT used to hide the activation flicker.
+ *
+ * It was the obvious way to stop the panel visibly vanishing and coming
+ * back, and measured over real hotkey presses it took focus from 2-of-3 to
+ * 0-of-3: making the window layered stops Windows activating it at all. A
+ * negative result worth keeping, because the idea is an appealing one.
+ */
+// A call, not the comment recording why there is no call.
+check(
+  'opacity is not used around activation',
+  panelSrc.split(String.fromCharCode(10)).some((l) => /^\s*win\.setOpacity\(/.test(l)),
+  false
 )
 
 /**

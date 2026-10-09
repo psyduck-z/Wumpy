@@ -116,6 +116,25 @@ internal static class Program
     [DllImport("user32.dll")]
     private static extern void PostQuitMessage(int nExitCode);
 
+    /// <summary>
+    /// Lets another process take the foreground.
+    ///
+    /// Windows refuses SetForegroundWindow from a process that did not
+    /// receive the last input, which Wumpy never has: the keystroke arrives
+    /// here, in the hook, and Wumpy only hears about it afterwards. So the
+    /// panel came up without the keyboard, and the fallback for that was to
+    /// minimise and restore the window - the only route Windows does grant -
+    /// which flickers and, measured over real hotkey presses, worked about
+    /// two times in three.
+    ///
+    /// This process DID receive the input, so it is allowed to hand the
+    /// right on. One call before the toggle is sent and Wumpy can simply
+    /// focus itself: no flicker, nothing to retry.
+    /// </summary>
+    [DllImport("user32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool AllowSetForegroundWindow(uint dwProcessId);
+
     [DllImport("kernel32.dll", SetLastError = true)]
     private static extern IntPtr GetModuleHandleW(string? lpModuleName);
 
@@ -129,6 +148,9 @@ internal static class Program
     private static readonly HookProc Callback = OnKey;
     private static IntPtr _hook = IntPtr.Zero;
     private static uint _mainThreadId;
+
+    /// <summary>Process allowed to take the foreground, or 0 for none.</summary>
+    private static uint _grantPid;
 
     /// <summary>Virtual-key code to intercept while a Windows key is held.</summary>
     private static uint _targetVk = 'C';
@@ -165,6 +187,15 @@ internal static class Program
         // Flags are skipped rather than read as the key: taking args[0] blindly
         // meant `--selftest` set the target to '-', so the self-test watched a
         // key nobody presses and every scenario in it was vacuous.
+        // --grant-foreground=<pid>: who may take the foreground when the
+        // hotkey fires. Optional, so the helper still runs standalone and
+        // the self-test needs no process to point at.
+        var grant = Array.Find(args, a => a.StartsWith("--grant-foreground=", StringComparison.OrdinalIgnoreCase));
+        if (grant is not null && uint.TryParse(grant["--grant-foreground=".Length..], out var grantPid))
+        {
+            _grantPid = grantPid;
+        }
+
         var key = Array.Find(args, a => a.Length > 0 && !a.StartsWith('-'));
         if (key is not null)
         {
@@ -298,6 +329,10 @@ internal static class Program
 
         if (act == Act.Toggle)
         {
+            // Before the toggle, not after: the grant has to be in place by
+            // the time Wumpy calls focus, and Wumpy acts on the line below.
+            if (_grantPid != 0) AllowSetForegroundWindow(_grantPid);
+
             Console.WriteLine("TOGGLE");
             Console.Out.Flush();
 
