@@ -327,9 +327,17 @@ rmSync(tiersOut, { force: true })
 
 check(
   'the prompt separates an app from a website',
-  T.OPEN_PROMPT.includes('OPENING AN APP IS NOT THE SAME'),
+  T.OPEN_PROMPT.includes('ASKING ABOUT AN APP IS NOT ASKING YOU TO OPEN IT'),
   true
 )
+// Asked "is spotify installed", Wumpy opened Spotify - because the check and
+// the launch had been merged into one command. They are two commands again,
+// and check-openapp proves the asking one starts nothing by counting
+// processes around it.
+check('there are two commands, not one', T.OPEN_PROMPT.includes('TWO commands'), true)
+check('a question is answered, not acted on', T.OPEN_PROMPT.includes('A QUESTION —'), true)
+check('and an instruction is the one that acts', T.OPEN_PROMPT.includes('AN INSTRUCTION —'), true)
+check('the asking one is told to stop there', T.OPEN_PROMPT.includes('Then STOP'), true)
 /**
  * The installed-check, after it got Spotify wrong twice.
  *
@@ -394,14 +402,14 @@ check(
 const example = T.OPEN_PROMPT.split(String.fromCharCode(10)).filter((l) =>
   l.includes('Get-StartApps |')
 )
-check('the example appears once', example.length, 1)
+check('one command to ask, one to act', example.length, 2)
 // The example is run for real by scripts/check-openapp.mjs. Here we only
 // assert it is one line, because that is what broke it twice.
 check('and is a single line', (example[0] ?? '').includes(String.fromCharCode(10)), false)
 check(
-  'that resolves the AppID and launches it',
-  /Get-StartApps[\s\S]*AppID[\s\S]*Start-Process/.test(example[0] ?? ''),
-  true
+  'and only the acting one launches',
+  example.filter((l) => l.includes('Start-Process')).length,
+  1
 )
 // No multi-line registry walk left to get wrong.
 check('the fragile registry block is gone', T.OPEN_PROMPT.includes('WOW6432Node'), false)
@@ -487,7 +495,7 @@ check(
   T.OPEN_PROMPT.includes('NOT INSTALLED -> open the website'),
   true
 )
-check('and the user is told which happened', T.OPEN_PROMPT.includes('what you did and why'), true)
+check('and the user is told which happened', T.OPEN_PROMPT.includes('say what you'), true)
 // Canonical cmdlet names, not aliases: clearer to read, and the thing the
 // read-only allowlist parses most reliably.
 check('the check avoids the Select alias', T.OPEN_PROMPT.includes('| Select '), false)

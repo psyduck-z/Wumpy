@@ -199,6 +199,57 @@ check('and uncertainty is said out loud', a.systemPrompt.includes('SAY WHAT YOU 
 // imitates their terse register as readily as their structure.
 check('the worked examples are gone', typeof T.shellExamples, 'undefined')
 
+/* ------------------------------------- doing only what was asked */
+
+/**
+ * Asked "is spotify installed", Wumpy opened Spotify.
+ *
+ * Not a model failure first - a design one. I had merged the check and the
+ * launch into one command to save a round trip on "open Spotify", which made
+ * every question about an app also start it. The user was mid-task and got a
+ * Spotify login window over the top of their work.
+ *
+ * Then, asked about it, the model said "I did not open Spotify. I checked
+ * whether it is installed" - while the output of its own command read
+ * LAUNCHED. That second part is the worse one: a wrong action can be undone,
+ * and an account of your own actions that the user cannot trust cannot.
+ *
+ * The commands are separated again, asserted in check-openapp by running the
+ * asking one and counting processes. This is the general rule behind it.
+ */
+const voice = T.VOICE_PROMPT
+check('a question is not an instruction', /A QUESTION IS NOT AN INSTRUCTION/.test(voice), true)
+check('and the question words are named', /"Is X installed", "do I have X"/.test(voice), true)
+check(
+  'nothing is started on the back of one',
+  /Do not install, launch, open, start, create, change or delete/.test(voice),
+  true
+)
+// The specific trap I built: a command that answers and acts at once.
+check(
+  'the answering command wins when both exist',
+  /use the one that only answers/.test(voice),
+  true
+)
+check('acting unasked is not a bonus', /never a free bonus/.test(voice), true)
+// The alternative to doing it: say it, and let them ask.
+check('an obvious next step is named, not taken', /Naming is not doing/.test(voice), true)
+check('and scope is held to what was asked', /not the three/.test(voice), true)
+
+// Saying what happened, from the output rather than from intent.
+check(
+  'it reports what the command did',
+  /Say what the command DID, not what you meant it to do/.test(voice),
+  true
+)
+check('reading LAUNCHED as having launched', /If the output says/.test(voice), true)
+check(
+  'denial is called out as the worse failure',
+  /worse than the original\s*mistake|worse than the original/.test(voice),
+  true
+)
+check('and owning it is required', /say so plainly and briefly/.test(voice), true)
+
 /* ------------------------------------------------- the verification habit */
 
 // The point of this prompt is a model that checks instead of asserting. A

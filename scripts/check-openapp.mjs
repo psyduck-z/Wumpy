@@ -54,9 +54,41 @@ function check(label, actual, expected) {
 const lines = T.OPEN_PROMPT.split(String.fromCharCode(10)).filter((l) =>
   l.includes('Get-StartApps |')
 )
-check('exactly one example command', lines.length, 1)
-const TEMPLATE = (lines[0] ?? '').trim()
-check('it is one line', TEMPLATE.includes(String.fromCharCode(10)), false)
+check('two commands: one to ask, one to act', lines.length, 2)
+
+const ASK = (lines.find((l) => !l.includes('Start-Process')) ?? '').trim()
+const ACT = (lines.find((l) => l.includes('Start-Process')) ?? '').trim()
+
+/**
+ * The separation is the whole point of this pair.
+ *
+ * They were merged into one command that checked and launched together, to
+ * save a round trip on "open Spotify". The consequence was that asking "is
+ * Spotify installed" - a question - opened Spotify. The user had not asked
+ * for that, was in the middle of something, and got a login window over the
+ * top of it. Then the model said "I did not open Spotify. I checked whether
+ * it is installed", while the output of its own command read LAUNCHED.
+ *
+ * A command that answers a question must not be able to start anything. That
+ * is asserted here rather than left to the prose above it.
+ */
+check('the asking one exists', ASK.length > 0, true)
+check(
+  'and cannot start anything',
+  /Start-Process|Invoke-Item|explorer|cmd \/c|&\s/.test(ASK),
+  false
+)
+check('it only reads', /^Get-StartApps \| Where-Object [^;]*\| Select-Object/.test(ASK), true)
+check('with no statement separator to hide a second command', ASK.includes(';'), false)
+check('the acting one exists', ACT.length > 0, true)
+check('and is the one that launches', ACT.includes('Start-Process'), true)
+
+check(
+  'both are one line',
+  ASK.includes(String.fromCharCode(10)) || ACT.includes(String.fromCharCode(10)),
+  false
+)
+const TEMPLATE = ACT
 
 if (!TEMPLATE) {
   console.log('\nno command found in OPEN_PROMPT — nothing to run')
@@ -64,6 +96,28 @@ if (!TEMPLATE) {
 } else if (process.platform !== 'win32') {
   console.log('\nnot Windows — the command itself was not run')
 } else {
+  function runRaw(cmd) {
+    return new Promise((resolve) => {
+      const p = spawn(
+        'powershell.exe',
+        ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-Command', cmd],
+        { windowsHide: true }
+      )
+      let stdout = ''
+      let stderr = ''
+      p.stdout.on('data', (d) => (stdout += d))
+      p.stderr.on('data', (d) => (stderr += d))
+      p.on('close', (code) => resolve({ code, stdout: stdout.trim(), stderr: stderr.trim() }))
+    })
+  }
+
+  async function processCount(name) {
+    const res = await runRaw(
+      `(Get-Process ${name} -ErrorAction SilentlyContinue | Measure-Object).Count`
+    )
+    return Number(res.stdout.trim()) || 0
+  }
+
   function run(name) {
     // Start-Process becomes Write-Output, so resolution is real and the
     // launch is not. A check that opened Spotify on every run would be its
@@ -85,6 +139,21 @@ if (!TEMPLATE) {
       p.on('close', (code) => resolve({ code, stdout: stdout.trim(), stderr: stderr.trim() }))
     })
   }
+
+  /**
+   * The asking command, run for real with nothing neutered.
+   *
+   * Spotify is deliberately not running when this starts, and must still not
+   * be running after. This is the check that would have caught the merged
+   * command: it looked like a question and started an app.
+   */
+  const before = await processCount('Spotify')
+  const asked = await runRaw(ASK.split('*name*').join('*Spotify*'))
+  const after = await processCount('Spotify')
+  check('asking runs cleanly', asked.code, 0)
+  check('and answers the question', asked.stdout.includes('Spotify'), true)
+  check('and started nothing', after <= before, true)
+  check('with nothing on stderr', asked.stderr, '')
 
   const spotify = await run('Spotify')
   check('a desktop app: the command parses and runs', spotify.code, 0)
