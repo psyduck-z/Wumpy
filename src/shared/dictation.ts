@@ -123,7 +123,10 @@ const VOCABULARY: Fix[] = [
   // tier - never alone, where it is more likely about crying or ripping.
   { from: /\b(tear|teer)s? (list|picker|menu)\b/gi, to: 'tier $2' },
   { from: /\b(fast|quick|deep|thinker|coder) (tear|teer)s?\b/gi, to: '$1 tier' },
-  { from: /\b(switch|change|changed|go|going|move) (to|into) the (tear|teer)\b/gi, to: '$1 $2 the tier' },
+  {
+    from: /\b(switch|change|changed|go|going|move) (to|into) the (tear|teer)\b/gi,
+    to: '$1 $2 the tier'
+  },
   { from: /\baccept (edits|at its|additives)\b/gi, to: 'accept edits' },
   { from: /\bkeep[ -]?alive\b/gi, to: 'keep-alive' },
 

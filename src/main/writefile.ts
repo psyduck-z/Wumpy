@@ -15,11 +15,7 @@ import type { WriteResult } from '@shared/types'
  * UTF-8 with no BOM, because the whole point of this path is that a `$`, a
  * backtick or a brace in someone's script reaches the disk as itself.
  */
-export function writeProposedFile(
-  rawPath: string,
-  content: string,
-  cwd: string
-): WriteResult {
+export function writeProposedFile(rawPath: string, content: string, cwd: string): WriteResult {
   const home = homedir()
   const check = checkWritePath(rawPath, {
     home,
@@ -30,7 +26,13 @@ export function writeProposedFile(
 
   if (!check.ok) {
     console.warn(`[wumpy] refused to write ${JSON.stringify(rawPath)}: ${check.why}`)
-    return { written: false, path: check.path, bytes: 0, overwrote: false, error: check.why ?? 'Refused.' }
+    return {
+      written: false,
+      path: check.path,
+      bytes: 0,
+      overwrote: false,
+      error: check.why ?? 'Refused.'
+    }
   }
 
   const bytes = Buffer.byteLength(content, 'utf8')
@@ -84,7 +86,10 @@ export function writeProposedFile(
 }
 
 /** Describes a destination without writing anything, for the card. */
-export function inspectWriteTarget(rawPath: string, cwd: string): {
+export function inspectWriteTarget(
+  rawPath: string,
+  cwd: string
+): {
   ok: boolean
   path: string
   why: string | null

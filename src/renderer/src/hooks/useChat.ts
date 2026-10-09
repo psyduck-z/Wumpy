@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import type { ChatMessage, TierId } from '@shared/types'
+import type { ChatMessage } from '@shared/types'
 
 let counter = 0
 export const nextId = (): string => `m${Date.now().toString(36)}${(counter++).toString(36)}`
@@ -34,7 +34,7 @@ export interface ChatState {
   streamingId: string | null
   stats: ChatStats
   /** False when a turn is already in flight and the message was not sent. */
-  send(text: string, tier: TierId, displayText?: string): boolean
+  send(text: string, displayText?: string): boolean
   /** Live facts handed to the model each turn; set by the app. */
   setContext(ctx: { chatTitle: string | null }): void
   /** Messages as the model would see them, for size estimates and compaction. */
@@ -168,7 +168,7 @@ export function useChat(): ChatState {
     }
   }, [patchActive])
 
-  const send = useCallback((text: string, tier: TierId, displayText?: string): boolean => {
+  const send = useCallback((text: string, displayText?: string): boolean => {
     const trimmed = text.trim()
     // Refused rather than queued: the caller knows what to do with the message
     // it could not send, and silently dropping a command's output left the
@@ -186,8 +186,7 @@ export function useChat(): ChatState {
       id: nextId(),
       role: 'assistant',
       content: '',
-      createdAt: Date.now(),
-      tier
+      createdAt: Date.now()
     }
 
     // History comes from the ref, never from inside a state updater: React
@@ -222,7 +221,6 @@ export function useChat(): ChatState {
     void window.wumpy.chat.send({
       requestId,
       messages: history,
-      tier,
       context: { chatTitle: context.current.chatTitle, messageCount: history.length }
     })
     return true
@@ -265,22 +263,19 @@ export function useChat(): ChatState {
     context.current = ctx
   }, [])
 
-  const askLocal = useCallback(
-    (question: string, options: string[], kind: 'rename') => {
-      setMessages((prev) => [
-        ...prev,
-        {
-          id: nextId(),
-          role: 'assistant',
-          content: '',
-          createdAt: Date.now(),
-          local: true,
-          localAsk: { question, options, kind }
-        }
-      ])
-    },
-    []
-  )
+  const askLocal = useCallback((question: string, options: string[], kind: 'rename') => {
+    setMessages((prev) => [
+      ...prev,
+      {
+        id: nextId(),
+        role: 'assistant',
+        content: '',
+        createdAt: Date.now(),
+        local: true,
+        localAsk: { question, options, kind }
+      }
+    ])
+  }, [])
 
   const recordAnswer = useCallback((messageId: string, option: string) => {
     setMessages((prev) => prev.map((m) => (m.id === messageId ? { ...m, answered: option } : m)))
@@ -345,5 +340,21 @@ export function useChat(): ChatState {
     [stop]
   )
 
-  return { messages, streaming, streamingId, stats, send, setContext, history, note, notice, aside, askLocal, recordAnswer, stop, clear, replace }
+  return {
+    messages,
+    streaming,
+    streamingId,
+    stats,
+    send,
+    setContext,
+    history,
+    note,
+    notice,
+    aside,
+    askLocal,
+    recordAnswer,
+    stop,
+    clear,
+    replace
+  }
 }

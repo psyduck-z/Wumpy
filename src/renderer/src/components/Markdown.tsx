@@ -4,7 +4,6 @@ import type {
   SearchResult,
   ShellKind,
   ShellResult,
-  TierId,
   WriteResult,
   WriteTarget
 } from '@shared/types'
@@ -186,8 +185,6 @@ export interface MarkdownProps {
   answered?: string | null
   /** Supplied for assistant turns that may propose commands. */
   onRunCommand?: (command: string, shell: ShellKind) => Promise<ShellResult | null>
-  /** The tier asking, which decides what it is allowed to run. */
-  tier: TierId
   /** False while the message is still arriving, so half-written commands wait. */
   complete?: boolean
   /** Whether a given command may still run unattended. */
@@ -243,7 +240,6 @@ export const Markdown = memo(function Markdown({
   onCommandResult,
   onAnswer,
   answered = null,
-  tier,
   complete = true,
   canAutoRun,
   messageId,
@@ -335,7 +331,6 @@ export const Markdown = memo(function Markdown({
               <CommandCard
                 command={fence.code}
                 shell={fence.shell}
-                tier={tier}
                 fallbackReason={leadIn(text)}
                 complete={settled(fence.code)}
                 canAutoRun={canAutoRun}

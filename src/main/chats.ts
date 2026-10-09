@@ -1,7 +1,14 @@
 import { app } from 'electron'
-import { readFileSync, writeFileSync, mkdirSync, readdirSync, unlinkSync, existsSync } from 'node:fs'
+import {
+  readFileSync,
+  writeFileSync,
+  mkdirSync,
+  readdirSync,
+  unlinkSync,
+  existsSync
+} from 'node:fs'
 import { join } from 'node:path'
-import type { ChatMessage, ChatSummary, SavedChat, TierId } from '@shared/types'
+import type { ChatMessage, ChatSummary, SavedChat } from '@shared/types'
 
 /**
  * Saved conversations, one JSON file per chat under the user data directory.
@@ -45,7 +52,6 @@ export class ChatStore {
           createdAt: chat.createdAt,
           updatedAt: chat.updatedAt,
           messageCount: chat.messages?.length ?? 0,
-          tier: chat.tier,
           titleLocked: chat.titleLocked
         })
       } catch {
@@ -67,7 +73,6 @@ export class ChatStore {
     id: string
     title?: string
     messages: ChatMessage[]
-    tier: TierId
     createdAt?: number
     titleLocked?: boolean
   }): ChatSummary | null {
@@ -79,7 +84,6 @@ export class ChatStore {
       createdAt: existing?.createdAt ?? chat.createdAt ?? now,
       updatedAt: now,
       messageCount: chat.messages.length,
-      tier: chat.tier,
       titleLocked: chat.titleLocked ?? existing?.titleLocked,
       messages: chat.messages
     }

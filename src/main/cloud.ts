@@ -10,7 +10,7 @@ import {
   thinkingKwargsFor,
   wireMessagesFor
 } from '@shared/cloud'
-import type { ChatOptions, StreamFailure, StreamHandlers, StreamStats } from './ollama'
+import type { ChatOptions, StreamFailure, StreamHandlers, StreamStats } from './stream'
 import type { KeyStore } from './keys'
 
 /**
@@ -383,16 +383,20 @@ export class CloudClient {
   /**
    * One non-streamed answer, for titles, compaction and transcript polish.
    *
-   * Returns null on any failure, exactly as the Ollama one does, because every
-   * caller treats those as optional niceties and must carry on without them.
+   * Returns null on any failure, because every caller treats these as optional
+   * niceties and must carry on without them.
+   *
+   * These three used to be pinned to a local model whatever the tiers said,
+   * and the reason was not speed: compaction sends the whole conversation,
+   * which can hold command output and the contents of files, and the free
+   * tiers train on what they are sent. That guarantee died with Ollama. It is
+   * recorded here rather than quietly dropped, because it is the one real
+   * thing the user gave up by removing the local path.
    */
   async complete(
     model: string,
     messages: Array<Pick<ChatMessage, 'role' | 'content'>>,
-    // keepAlive and numCtx are Ollama's and are accepted only so the two
-    // clients stay drop-in for one another at the call site. There is nothing
-    // resident to keep alive and the context window is the provider's business.
-    opts: { keepAlive?: string; numPredict?: number; numCtx?: number }
+    opts: { numPredict?: number }
   ): Promise<string | null> {
     const check = this.ready(model)
     if (!check.ok || !check.provider) return null

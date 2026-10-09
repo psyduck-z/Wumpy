@@ -20,7 +20,8 @@ const ROUNDS = Number(process.env.BENCH_ROUNDS ?? 4)
 /** Context roughly the size of a real conversation with the preamble in it. */
 function filler(words) {
   const out = []
-  for (let i = 0; i < words; i++) out.push(`item${i} value${(i * 7919) % 1000} tag${(i * 104729) % 97}`)
+  for (let i = 0; i < words; i++)
+    out.push(`item${i} value${(i * 7919) % 1000} tag${(i * 104729) % 97}`)
   return out.join(' ')
 }
 
@@ -80,7 +81,9 @@ for (let i = 1; i <= ROUNDS; i++) {
   }
   a.push(ra.gen)
   b.push(rb.gen)
-  console.log(`${String(i).padStart(5)} ${ra.gen.toFixed(2).padStart(22)} ${rb.gen.toFixed(2).padStart(22)}`)
+  console.log(
+    `${String(i).padStart(5)} ${ra.gen.toFixed(2).padStart(22)} ${rb.gen.toFixed(2).padStart(22)}`
+  )
 }
 
 const ma = median(a)

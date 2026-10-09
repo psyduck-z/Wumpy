@@ -14,8 +14,7 @@ import type {
   KeyStatus,
   ProviderName,
   UsageReport,
-  OllamaModel,
-  OllamaStatus,
+  AssistantStatus,
   SavedChat,
   Dictation,
   LinkResult,
@@ -24,8 +23,6 @@ import type {
   WriteTarget,
   ShellKind,
   ShellResult,
-  TierId,
-  TierStatus,
   VoiceStatus,
   WumpySettings
 } from '@shared/types'
@@ -44,14 +41,9 @@ const api = {
       ipcRenderer.invoke(IPC.settingsSet, patch),
     onChange: (cb: (s: WumpySettings) => void) => on<WumpySettings>(IPC.settingsChanged, cb)
   },
-  ollama: {
-    status: (): Promise<OllamaStatus> => ipcRenderer.invoke(IPC.ollamaStatus),
-    models: (): Promise<OllamaModel[]> => ipcRenderer.invoke(IPC.ollamaModels)
-  },
-  tiers: {
-    status: (): Promise<TierStatus[]> => ipcRenderer.invoke(IPC.tiersStatus),
-    warm: (id: TierId): Promise<TierStatus[]> => ipcRenderer.invoke(IPC.tiersWarm, id),
-    onStatus: (cb: (s: TierStatus[]) => void) => on(IPC.tiersStatus, cb)
+  assistant: {
+    status: (): Promise<AssistantStatus> => ipcRenderer.invoke(IPC.assistantStatus),
+    onStatus: (cb: (s: AssistantStatus) => void) => on(IPC.assistantStatus, cb)
   },
   chat: {
     send: (req: ChatRequest): Promise<void> => ipcRenderer.invoke(IPC.chatSend, req),
@@ -61,7 +53,6 @@ const api = {
     onError: (cb: (d: ChatError) => void) => on(IPC.chatError, cb),
     /** Summarise older turns; resolves to the summary text, or null on failure. */
     compact: (req: {
-      tier: TierId
       messages: Array<{ role: string; content: string }>
     }): Promise<string | null> => ipcRenderer.invoke(IPC.chatCompact, req),
     /** Names a conversation from its opening exchange. */
@@ -80,7 +71,6 @@ const api = {
       id: string
       title?: string
       messages: ChatMessage[]
-      tier: TierId
       titleLocked?: boolean
     }): Promise<ChatSummary | null> => ipcRenderer.invoke(IPC.chatsSave, chat),
     rename: (id: string, title: string): Promise<ChatSummary | null> =>
@@ -90,13 +80,13 @@ const api = {
   },
   shell: {
     /** Runs an approved command. Resolves null if the user cancelled. */
-    run: (req: { command: string; shell: ShellKind; tier: TierId }): Promise<ShellResult | null> =>
+    run: (req: { command: string; shell: ShellKind }): Promise<ShellResult | null> =>
       ipcRenderer.invoke(IPC.shellRun, req),
     /**
-     * Whether this tier may run the command, and why it looks risky if it does.
-     * Drives the card: a command the tier cannot run gets no Run button.
+     * Whether Wumpy may run the command, and why it looks risky if it does.
+     * Drives the card: a command it may not run gets no Run button.
      */
-    check: (req: { command: string; tier: TierId }): Promise<CommandVerdict> =>
+    check: (req: { command: string }): Promise<CommandVerdict> =>
       ipcRenderer.invoke(IPC.shellRisk, req)
   },
   search: {

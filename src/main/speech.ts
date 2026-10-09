@@ -179,7 +179,11 @@ export class Speech {
 
     if (msg.ready === true) {
       this.restarts = 0
-      this.state = { kind: 'ready', model: String(msg.model ?? ''), loadMs: Number(msg.load_ms ?? 0) }
+      this.state = {
+        kind: 'ready',
+        model: String(msg.model ?? ''),
+        loadMs: Number(msg.load_ms ?? 0)
+      }
       console.log(`[wumpy] transcriber ready (${msg.model}, loaded in ${msg.load_ms}ms)`)
       settle(true)
       return
@@ -211,7 +215,10 @@ export class Speech {
    */
   async transcribe(audio: Uint8Array, extension = 'webm'): Promise<Transcript> {
     const ok = await this.start()
-    if (!ok) throw new Error(this.state.kind === 'absent' ? this.state.detail : 'the transcriber is not running')
+    if (!ok)
+      throw new Error(
+        this.state.kind === 'absent' ? this.state.detail : 'the transcriber is not running'
+      )
 
     const dir = join(app.getPath('temp'), 'wumpy-voice')
     mkdirSync(dir, { recursive: true })

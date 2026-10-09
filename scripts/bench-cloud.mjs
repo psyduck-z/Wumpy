@@ -154,7 +154,7 @@ async function bundle(entry, name) {
   })
   return import(pathToFileURL(out).href)
 }
-const T = await bundle('src/shared/tiers.ts', 'tiers')
+const T = await bundle('src/shared/assistant.ts', 'tiers')
 const W = await bundle('src/shared/writefile.ts', 'wf')
 
 /**
@@ -169,7 +169,7 @@ const W = await bundle('src/shared/writefile.ts', 'wf')
 const USE_API_PROMPT = (process.env.WUMPY_PROMPT ?? 'local') === 'api'
 
 const SYSTEM = [
-  USE_API_PROMPT ? T.TIERS.thinker.apiSystemPrompt : T.TIERS.thinker.systemPrompt,
+  T.VOICE_PROMPT,
   T.APP_PROMPT,
   T.SHELL_PROMPT,
   T.SEARCH_PROMPT,

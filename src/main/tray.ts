@@ -2,14 +2,13 @@ import { Tray, Menu, nativeImage, app, shell } from 'electron'
 import { join } from 'node:path'
 import type { Panel } from './panel'
 import type { SettingsStore } from './store'
-import type { Dock, HotkeyState, TierStatus } from '@shared/types'
-import { TIERS, TIER_ORDER, defaultTierFor, SPEED_LABEL } from '@shared/tiers'
+import type { AssistantStatus, Dock, HotkeyState } from '@shared/types'
 
 export interface TrayDeps {
   panel: Panel
   settings: SettingsStore
   getHotkeyState(): HotkeyState
-  getTierStatuses(): TierStatus[]
+  getAssistantStatus(): AssistantStatus
   onToggleLaunchAtLogin(enabled: boolean): void
 }
 
@@ -37,8 +36,7 @@ export function createTray(deps: TrayDeps): Tray {
     const { active, intercepted } = deps.getHotkeyState()
     const live = intercepted ?? active
     const settings = deps.settings.all()
-    const statuses = deps.getTierStatuses()
-    const byId = new Map(statuses.map((s) => [s.id, s]))
+    const assistant = deps.getAssistantStatus()
 
     tray.setToolTip(live ? `Wumpy — ${prettify(live)}` : 'Wumpy — no hotkey registered')
 
@@ -51,51 +49,15 @@ export function createTray(deps: TrayDeps): Tray {
         { type: 'separator' },
 
         {
-          label: settings.mode === 'quick' ? 'Mode: Quick' : 'Mode: Developer',
-          submenu: [
-            {
-              label: 'Quick  — Flash & Fast',
-              type: 'radio',
-              checked: settings.mode === 'quick',
-              click: () => {
-                deps.settings.patch({ mode: 'quick', tier: defaultTierFor('quick') })
-                render()
-              }
-            },
-            {
-              label: 'Developer  — Thinker & Deep Thinker',
-              type: 'radio',
-              checked: settings.mode === 'dev',
-              click: () => {
-                deps.settings.patch({ mode: 'dev', tier: defaultTierFor('dev') })
-                render()
-              }
-            }
-          ]
+          // One model now, so this is a readout rather than a picker: the
+          // tray cannot know which models a key can reach, and /model in the
+          // panel can.
+          label: assistant.ready
+            ? `Model: ${assistant.model}`
+            : `Model: ${assistant.model} (no key)`,
+          enabled: false
         },
-        {
-          label: `Tier: ${TIERS[settings.tier]?.label ?? settings.tier}`,
-          submenu: TIER_ORDER.map((id) => {
-            const tier = TIERS[id]
-            const status = byId.get(id)
-            const suffix = !status?.installed
-              ? '  (not installed)'
-              : status.warm
-                ? '  • warm'
-                : ''
-            return {
-              label: `${tier.label}  — ${SPEED_LABEL[tier.speed]}${suffix}`,
-              type: 'radio' as const,
-              checked: settings.tier === id,
-              enabled: status?.installed ?? false,
-              click: () => {
-                // Selecting a tier follows its mode, so the theme matches.
-                deps.settings.patch({ tier: id, mode: tier.mode })
-                render()
-              }
-            }
-          })
-        },
+        { type: 'separator' },
         {
           label: 'Position',
           submenu: DOCK_LABELS.map(({ dock, label }) => ({
@@ -173,15 +135,6 @@ export function createTray(deps: TrayDeps): Tray {
           checked: settings.hideOnBlur,
           click: (item) => {
             deps.settings.patch({ hideOnBlur: item.checked })
-            render()
-          }
-        },
-        {
-          label: 'Preload models at startup',
-          type: 'checkbox',
-          checked: settings.warmOnStart,
-          click: (item) => {
-            deps.settings.patch({ warmOnStart: item.checked })
             render()
           }
         },

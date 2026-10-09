@@ -1,4 +1,4 @@
-import type { Dock, Mode, ProviderName, TierId } from '@shared/types'
+import type { Dock, ProviderName } from '@shared/types'
 import { PROVIDER_IDS, isProviderId } from '@shared/cloud'
 
 /**
@@ -16,9 +16,7 @@ export type CommandAction =
   | { kind: 'delete' }
   | { kind: 'rename'; title: string }
   | { kind: 'renameChoice'; question: string; options: string[] }
-  | { kind: 'tier'; tier: TierId | null }
   | { kind: 'model'; name: string }
-  | { kind: 'mode'; mode: Mode | 'toggle' }
   | { kind: 'dock'; dock: Dock | null }
   | { kind: 'reasoning'; show: boolean | 'toggle' }
   | { kind: 'pin'; pinned: boolean | 'toggle' }
@@ -26,10 +24,8 @@ export type CommandAction =
   | { kind: 'open'; what: string }
   | { kind: 'engine' }
   | { kind: 'key'; provider: ProviderName | null; value: string; clear: boolean }
-  | { kind: 'backend'; to: 'local' | 'api' | 'toggle' }
   | { kind: 'usage'; reset: boolean }
   | { kind: 'approve'; mode: 'manual' | 'auto' | 'all' | 'cycle' }
-  | { kind: 'warm' }
   | { kind: 'compact' }
   | { kind: 'stop' }
   | { kind: 'help' }
@@ -48,17 +44,6 @@ export interface CommandSpec {
 }
 
 const DOCKS: Dock[] = ['left', 'right', 'top-left', 'top-right', 'bottom-left', 'bottom-right']
-const TIER_NAMES: Record<string, TierId> = {
-  flash: 'flash',
-  fast: 'fast',
-  thinker: 'thinker',
-  think: 'thinker',
-  smart: 'thinker',
-  deep: 'deep',
-  deepthinker: 'deep',
-  smartest: 'deep'
-}
-
 /**
  * Prompt wrappers. These are the "commands Claude has" that a plain chat box
  * does not: they reshape the request rather than issuing an app action.
@@ -165,37 +150,6 @@ export const COMMANDS: CommandSpec[] = [
         : { kind: 'error', message: 'Usage: /rename <title>' }
   },
   {
-    name: 'tier',
-    aliases: ['smart', 'level', 'think'],
-    hint: 'Switch thinking level, keeping the conversation',
-    arg: 'name',
-    run: (arg) => {
-      // No name given: show the list rather than make the user remember them.
-      if (!arg.trim()) return { kind: 'tier', tier: null }
-      const key = arg.trim().toLowerCase().replace(/[\s-]/g, '')
-      const tier = TIER_NAMES[key]
-      if (!tier) {
-        return {
-          kind: 'error',
-          message: `Unknown tier "${arg.trim()}". Try flash, fast, thinker or deep.`
-        }
-      }
-      return { kind: 'tier', tier }
-    }
-  },
-  {
-    name: 'mode',
-    aliases: ['dev'],
-    hint: 'Toggle Quick / Developer mode',
-    arg: 'quick|dev',
-    run: (arg) => {
-      const a = arg.trim().toLowerCase()
-      if (a === 'quick') return { kind: 'mode', mode: 'quick' }
-      if (a === 'dev' || a === 'developer') return { kind: 'mode', mode: 'dev' }
-      return { kind: 'mode', mode: 'toggle' }
-    }
-  },
-  {
     name: 'dock',
     aliases: ['move', 'pos'],
     hint: 'Move the panel: left | right | top-right | …',
@@ -251,18 +205,6 @@ export const COMMANDS: CommandSpec[] = [
     aliases: ['searchengine'],
     hint: 'Choose which search engine the browser opens',
     run: () => ({ kind: 'engine' })
-  },
-  {
-    name: 'local',
-    aliases: ['ollama', 'offline'],
-    hint: 'Answer on this PC — free, private, works offline',
-    run: () => ({ kind: 'backend', to: 'local' })
-  },
-  {
-    name: 'api',
-    aliases: ['cloud', 'hosted'],
-    hint: 'Answer on a hosted model — much faster, better at code, uses quota',
-    run: () => ({ kind: 'backend', to: 'api' })
   },
   {
     name: 'usage',
@@ -338,12 +280,6 @@ export const COMMANDS: CommandSpec[] = [
     }
   },
   {
-    name: 'warm',
-    aliases: ['preload'],
-    hint: 'Preload this tier’s model so answers start instantly',
-    run: () => ({ kind: 'warm' })
-  },
-  {
     name: 'compact',
     aliases: ['summarise', 'summarize'],
     hint: 'Summarise older turns to free up context',
@@ -385,8 +321,7 @@ export const SHORTCUT_FOR: Record<string, string | undefined> = {
   also: 'while busy',
   new: 'Ctrl+N',
   resume: 'Ctrl+R',
-  mode: 'Ctrl+D',
-  tier: 'Ctrl+1-4',
+  model: 'Ctrl+M',
   approve: 'Shift+Tab',
   stop: 'Esc',
   quit: 'Esc',

@@ -30,13 +30,29 @@ const DELETE = 'Remove-Item -Path "C:\\Users\\zecha\\Music\\test.txt" -Force'
 
 const CASES = [
   ['first command of a turn', { command: DELETE, ranCommands: [], autoRuns: 0 }, true],
-  ['a different second command', { command: 'ollama list', ranCommands: [DELETE], autoRuns: 1 }, true],
+  [
+    'a different second command',
+    { command: 'ollama list', ranCommands: [DELETE], autoRuns: 1 },
+    true
+  ],
   // The loop, in one line: the model proposes what it just ran.
   ['the same command again', { command: DELETE, ranCommands: [DELETE], autoRuns: 1 }, false],
-  ['the same command, reindented', { command: `  ${DELETE}  `, ranCommands: [DELETE], autoRuns: 1 }, false],
-  ['run earlier in the turn', { command: DELETE, ranCommands: ['ollama list', DELETE, 'git status'], autoRuns: 3 }, false],
+  [
+    'the same command, reindented',
+    { command: `  ${DELETE}  `, ranCommands: [DELETE], autoRuns: 1 },
+    false
+  ],
+  [
+    'run earlier in the turn',
+    { command: DELETE, ranCommands: ['ollama list', DELETE, 'git status'], autoRuns: 3 },
+    false
+  ],
   // The cap, whatever the commands are.
-  ['one below the cap', { command: 'git status', ranCommands: [], autoRuns: AUTO_RUN_LIMIT - 1 }, true],
+  [
+    'one below the cap',
+    { command: 'git status', ranCommands: [], autoRuns: AUTO_RUN_LIMIT - 1 },
+    true
+  ],
   ['at the cap', { command: 'git status', ranCommands: [], autoRuns: AUTO_RUN_LIMIT }, false],
   ['past the cap', { command: 'git log', ranCommands: [], autoRuns: AUTO_RUN_LIMIT + 4 }, false],
   ['empty command', { command: '   ', ranCommands: [], autoRuns: 0 }, false]

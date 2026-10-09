@@ -60,14 +60,16 @@ export class Panel {
      * the screen as well, so each request is answered on its own: audio capture
      * for our own page, nothing for anything else.
      */
-    this.window.webContents.session.setPermissionRequestHandler((contents, permission, done, details) => {
-      const own = contents === this.window?.webContents
-      if (!own) return done(false)
-      if (permission !== 'media') return done(false)
-      // mediaTypes is absent on some requests; audio-only is the only shape we want.
-      const types = (details as { mediaTypes?: string[] }).mediaTypes
-      done(types === undefined ? true : types.length === 1 && types[0] === 'audio')
-    })
+    this.window.webContents.session.setPermissionRequestHandler(
+      (contents, permission, done, details) => {
+        const own = contents === this.window?.webContents
+        if (!own) return done(false)
+        if (permission !== 'media') return done(false)
+        // mediaTypes is absent on some requests; audio-only is the only shape we want.
+        const types = (details as { mediaTypes?: string[] }).mediaTypes
+        done(types === undefined ? true : types.length === 1 && types[0] === 'audio')
+      }
+    )
 
     // 'screen-saver' is the only level that reliably floats over fullscreen browsers.
     this.window.setAlwaysOnTop(true, 'screen-saver')
@@ -136,8 +138,7 @@ export class Panel {
     if (isTall(dock)) {
       const width = s.tallWidth + EDGE_MARGIN * 2
       const height = workArea.height - EDGE_MARGIN * 2
-      const x =
-        dock === 'right' ? workArea.x + workArea.width - width : workArea.x
+      const x = dock === 'right' ? workArea.x + workArea.width - width : workArea.x
       return { x, y: workArea.y + EDGE_MARGIN, width, height }
     }
 

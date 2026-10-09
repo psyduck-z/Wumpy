@@ -35,7 +35,7 @@ const { readWriteRequest } = await import(pathToFileURL(out).href)
 
 const tiersOut = join(process.cwd(), '.wf-tiers.mjs')
 await build({
-  entryPoints: ['src/shared/tiers.ts'],
+  entryPoints: ['src/shared/assistant.ts'],
   bundle: true,
   platform: 'node',
   format: 'esm',
@@ -44,7 +44,7 @@ await build({
 })
 const T = await import(pathToFileURL(tiersOut).href)
 
-const system = [T.TIERS.thinker.systemPrompt, T.SHELL_PROMPT].filter(Boolean).join('\n\n')
+const system = [T.VOICE_PROMPT, T.SHELL_PROMPT].filter(Boolean).join('\n\n')
 
 async function ask(model, content) {
   const started = Date.now()

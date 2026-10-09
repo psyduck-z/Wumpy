@@ -39,13 +39,21 @@ const check = (what, got, want) => {
   const ok = JSON.stringify(got) === JSON.stringify(want)
   if (!ok) failed++
   console.log(`${ok ? 'ok  ' : 'FAIL'} ${pad(what, 50)} ${JSON.stringify(got)?.slice(0, 60)}`)
-  if (!ok) console.log(`${' '.repeat(5)}${pad('', 50)} expected ${JSON.stringify(want)?.slice(0, 60)}`)
+  if (!ok)
+    console.log(`${' '.repeat(5)}${pad('', 50)} expected ${JSON.stringify(want)?.slice(0, 60)}`)
 }
 
 /* ---------------------------------------------------------------- the block */
 
 const full = W.readWriteRequest(
-  ['# Create the folder analysis script', 'path: ~/Downloads/analysis.py', '---', 'import os', '', 'print(1)'].join('\n')
+  [
+    '# Create the folder analysis script',
+    'path: ~/Downloads/analysis.py',
+    '---',
+    'import os',
+    '',
+    'print(1)'
+  ].join('\n')
 )
 check('the reason', full.reason, 'Create the folder analysis script')
 check('the path', full.path, '~/Downloads/analysis.py')
@@ -125,7 +133,11 @@ const env = {
 const where = (p) => W.checkWritePath(p, env)
 
 check('a tilde path', where('~/Downloads/a.py').path, 'C:\\Users\\zecha\\Downloads\\a.py')
-check('$HOME, as the model writes it', where('$HOME\\Downloads\\a.py').path, 'C:\\Users\\zecha\\Downloads\\a.py')
+check(
+  '$HOME, as the model writes it',
+  where('$HOME\\Downloads\\a.py').path,
+  'C:\\Users\\zecha\\Downloads\\a.py'
+)
 check('%USERPROFILE%', where('%USERPROFILE%\\a.py').path, 'C:\\Users\\zecha\\a.py')
 check('$env:USERPROFILE', where('$env:USERPROFILE\\a.py').path, 'C:\\Users\\zecha\\a.py')
 check('a bare name lands in the working folder', where('a.py').path, 'C:\\Users\\zecha\\a.py')
@@ -144,7 +156,11 @@ check(
   where('~/AppData/Roaming/Microsoft/Windows/Start Menu/Programs/Startup/x.bat').ok,
   false
 )
-check('and the Start Menu above it', where('~/AppData/Roaming/Microsoft/Windows/Start Menu/x.lnk').ok, false)
+check(
+  'and the Start Menu above it',
+  where('~/AppData/Roaming/Microsoft/Windows/Start Menu/x.lnk').ok,
+  false
+)
 check('ssh keys', where('~/.ssh/authorized_keys').ok, false)
 check('aws credentials', where('~/.aws/credentials').ok, false)
 check('a network share', where('\\\\attacker\\share\\a.py').ok, false)
@@ -174,11 +190,15 @@ check('the size ceiling is enforced', /MAX_BYTES/.test(main), true)
 check('written as plain utf-8', /'utf8'/.test(main), true)
 
 const prompt = W.WRITE_PROMPT
-check('the model is told not to use a shell for this', /never use a shell command/i.test(prompt), true)
+check(
+  'the model is told not to use a shell for this',
+  /never use a shell command/i.test(prompt),
+  true
+)
 check('New-Item is named, since that is what it reached for', /New-Item/.test(prompt), true)
 check('and how to run a python file', /python "<full path>"/.test(prompt), true)
 
-const tiers = readFileSync('src/shared/tiers.ts', 'utf8')
+const tiers = readFileSync('src/shared/assistant.ts', 'utf8')
 check('the prompt is actually included', /WRITE_PROMPT/.test(tiers), true)
 
 console.log(`\n${failed === 0 ? 'all' : `${failed} FAILED of`} write-file checks`)

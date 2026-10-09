@@ -17,7 +17,11 @@ import { join } from 'node:path'
 import { pathToFileURL } from 'node:url'
 
 const CASES = [
-  ['powershell command', '```wumpy-run\n# Check whether Ollama is installed\nollama list\n```', 'CommandCard'],
+  [
+    'powershell command',
+    '```wumpy-run\n# Check whether Ollama is installed\nollama list\n```',
+    'CommandCard'
+  ],
   ['cmd command', '```wumpy-run-cmd\n# list files\ndir\n```', 'CommandCard'],
   ['bash command', '```wumpy-run-bash\n# list files\nls -la\n```', 'CommandCard'],
   ['question', '```wumpy-ask\nWhich folder?\n- Downloads\n- Documents\n```', 'AskCard'],
@@ -95,8 +99,6 @@ try {
   rmSync(entry, { force: true })
 }
 
-
-
 function classify(html) {
   if (html.includes('class="cmd search')) return 'SearchCard'
   if (html.includes('class="ask')) return 'AskCard'
@@ -110,7 +112,9 @@ for (const [name, md, want] of CASES) {
   const got = classify(render(md))
   const ok = got === want
   if (!ok) failed++
-  console.log(`${ok ? 'ok  ' : 'FAIL'} ${name.padEnd(20)} ${got}${ok ? '' : `   (expected ${want})`}`)
+  console.log(
+    `${ok ? 'ok  ' : 'FAIL'} ${name.padEnd(20)} ${got}${ok ? '' : `   (expected ${want})`}`
+  )
 }
 
 /* --------------------------------------------- the streaming-prefix cascade */

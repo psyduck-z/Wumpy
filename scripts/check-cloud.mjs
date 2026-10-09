@@ -646,29 +646,22 @@ check(
 )
 
 check('errors strip anything key-shaped', read('src/main/cloud.ts').includes('stripKey('), true)
-check(
-  'titles and compaction stay on an installed local model',
-  /function backgroundModel[\s\S]*?installedModels\.includes/.test(main),
-  true
-)
-check(
-  'nothing in the background path resolves a cloud tier',
-  /backgroundModel\(\)[\s\S]{0,200}resolveTierModel/.test(main),
-  false
-)
-// Named `on` rather than `model` because a turn can be attempted twice, on
-// the hosted model and then on the local one.
-check('the chat path picks a client by model', /clientFor\(on\)\.chat/.test(main), true)
-check(
-  'warming is skipped for a hosted model',
-  /if \(isCloudModel\(model\)\) return/.test(main),
-  true
-)
-check(
-  'aborting reaches both clients',
-  /ollama\.abort\(requestId\)[\s\S]{0,80}cloud\.abort\(requestId\)/.test(main),
-  true
-)
+/**
+ * Background work is no longer guaranteed to stay on this machine.
+ *
+ * It used to be pinned to a local model however the tiers were set, and the
+ * reason that mattered was not speed: compaction sends the whole conversation,
+ * which by then may hold command output and the contents of files, and the
+ * free tiers train on what they are sent. Removing Ollama removed the only
+ * answer to that, and the honest thing is to assert what is true now rather
+ * than quietly drop the check.
+ */
+check('titling goes through the one client', /cloud\.complete\(/.test(main), true)
+check('and the comment says what that cost', /no longer[\s\S]{0,40}has an answer/i.test(main), true)
+check('there is one client, so nothing picks between them', /clientFor\(/.test(main), false)
+check('warming is gone with the local path', /function warmTier/.test(main), false)
+check('and the measurement that justified it is kept', /30\.6-36\.2s of prefill/.test(main), true)
+check('aborting reaches the client', /cloud\.abort\(requestId\)/.test(main), true)
 
 /* ------------------------------ the limit Google actually names */
 

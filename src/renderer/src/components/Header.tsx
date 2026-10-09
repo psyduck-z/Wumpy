@@ -1,4 +1,4 @@
-import type { Dock, Mode, OllamaStatus } from '@shared/types'
+import type { AssistantStatus, Dock } from '@shared/types'
 import logo from '../assets/logo.png'
 
 const DOCK_CYCLE: Dock[] = ['right', 'bottom-right', 'bottom-left', 'left', 'top-left', 'top-right']
@@ -32,8 +32,6 @@ function DockGlyph({ dock }: { dock: Dock }): React.JSX.Element {
 }
 
 export function Header({
-  mode,
-  onToggleMode,
   status,
   dock,
   onCycleDock,
@@ -46,9 +44,7 @@ export function Header({
   hotkeyLabel,
   title
 }: {
-  mode: Mode
-  onToggleMode(): void
-  status: OllamaStatus | null
+  status: AssistantStatus | null
   dock: Dock
   onCycleDock(next: Dock): void
   pinned: boolean
@@ -61,7 +57,7 @@ export function Header({
   hotkeyLabel: string
   title: string | null
 }): React.JSX.Element {
-  const online = status?.reachable ?? false
+  const online = status?.ready ?? false
   const nextDock = DOCK_CYCLE[(DOCK_CYCLE.indexOf(dock) + 1) % DOCK_CYCLE.length]
 
   return (
@@ -81,23 +77,10 @@ export function Header({
         ) : (
           <strong>Wumpy</strong>
         )}
-        <span className="hint">{online ? hotkeyLabel : (status?.error ?? 'connecting…')}</span>
+        <span className="hint">{online ? hotkeyLabel : (status?.why ?? 'no key yet')}</span>
       </div>
 
       <div className="header-actions">
-        <button
-          type="button"
-          className={`mode-toggle ${mode === 'dev' ? 'is-dev' : ''}`}
-          onClick={onToggleMode}
-          title={
-            mode === 'quick'
-              ? 'Switch to Developer mode — Thinker & Deep Thinker (Ctrl+D)'
-              : 'Back to Quick mode — Flash & Fast (Ctrl+D)'
-          }
-        >
-          {mode === 'quick' ? 'Quick' : 'Dev'}
-        </button>
-
         <button type="button" onClick={onShowChats} title="Saved chats (/chats)">
           <svg viewBox="0 0 16 16" width="13" height="13" aria-hidden="true">
             <path

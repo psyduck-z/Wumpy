@@ -21,12 +21,15 @@ interface Intent {
 }
 
 // Character classes as strings, so they can be composed into regexes below.
-const QUOTE_OPEN = "[\"'‘“]"
-const QUOTE_CLOSE = "[\"'’”]"
+const QUOTE_OPEN = '["\'‘“]'
+const QUOTE_CLOSE = '["\'’”]'
 
 /** Trailing sentence punctuation, which is never part of a name. */
 function trimTail(raw: string): string {
-  return raw.trim().replace(/[.!?]+$/, '').trim()
+  return raw
+    .trim()
+    .replace(/[.!?]+$/, '')
+    .trim()
 }
 
 /**
@@ -48,16 +51,6 @@ function readTitle(raw: string): { title: string; alternative: string | null } {
   // Only worth asking when the two readings actually differ.
   if (!stripped || stripped === trimmed) return { title: trimmed, alternative: null }
   return { title: trimmed, alternative: stripped }
-}
-
-const TIER_WORDS: Record<string, 'flash' | 'fast' | 'thinker' | 'deep'> = {
-  flash: 'flash',
-  fast: 'fast',
-  thinker: 'thinker',
-  think: 'thinker',
-  deep: 'deep',
-  deepthinker: 'deep',
-  'deep thinker': 'deep'
 }
 
 const INTENTS: Intent[] = [
@@ -89,15 +82,8 @@ const INTENTS: Intent[] = [
     build: () => ({ kind: 'new' })
   },
   {
-    pattern: /^(?:please\s+)?(?:switch|change|go)\s+to\s+(.+?)\s*(?:tier|mode|model)?\.?$/i,
-    build: (m) => {
-      const key = m[1].trim().toLowerCase().replace(/[\s-]/g, '')
-      const tier = TIER_WORDS[key]
-      return tier ? { kind: 'tier', tier } : null
-    }
-  },
-  {
-    pattern: /^(?:please\s+)?(?:compact|summarise|summarize)\s+(?:this\s+)?(?:chat|conversation|context)\.?$/i,
+    pattern:
+      /^(?:please\s+)?(?:compact|summarise|summarize)\s+(?:this\s+)?(?:chat|conversation|context)\.?$/i,
     build: () => ({ kind: 'compact' })
   },
   {

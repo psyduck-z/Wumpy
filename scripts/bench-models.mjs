@@ -62,7 +62,12 @@ const CONTEXT = [
 ].join('\n')
 
 const TIER = tiers.TIERS.fast
-const SYS_CHAT = [TIER.systemPrompt, tiers.APP_PROMPT, tiers.NO_SHELL_PROMPT, tiers.ASK_PROMPT].join('\n\n')
+const SYS_CHAT = [
+  TIER.systemPrompt,
+  tiers.APP_PROMPT,
+  tiers.NO_SHELL_PROMPT,
+  tiers.ASK_PROMPT
+].join('\n\n')
 const SYS_SHELL = [
   TIER.systemPrompt,
   tiers.APP_PROMPT,

@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { registerPending } from '../pending'
-import type { ShellKind, ShellResult, TierId } from '@shared/types'
+import type { ShellKind, ShellResult } from '@shared/types'
 import { arrowNavigate } from '../keyboard'
 
 const SHELL_LABEL: Record<ShellKind, string> = {
@@ -57,7 +57,6 @@ function splitReason(raw: string): { reason: string | null; command: string } {
 export function CommandCard({
   command: raw,
   shell,
-  tier,
   fallbackReason = null,
   complete = true,
   canAutoRun,
@@ -67,7 +66,6 @@ export function CommandCard({
 }: {
   command: string
   shell: ShellKind
-  tier: TierId
   /** Used when the block omits its `# why` line but the prose above explains it. */
   fallbackReason?: string | null
   /**
@@ -113,7 +111,7 @@ export function CommandCard({
   useEffect(() => {
     if (!command) return
     let live = true
-    void window.wumpy.shell.check({ command, tier }).then((r) => {
+    void window.wumpy.shell.check({ command }).then((r) => {
       if (!live) return
       setRisk(r.risk)
       setAllowed(r.allowed)
@@ -123,7 +121,7 @@ export function CommandCard({
     return () => {
       live = false
     }
-  }, [command, tier])
+  }, [command])
 
   // The verdict comes from the main process, so the mode cannot be widened
   // here; this only decides whether to press the button on the user's behalf.

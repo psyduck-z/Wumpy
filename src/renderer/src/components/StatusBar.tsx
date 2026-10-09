@@ -1,4 +1,4 @@
-import type { ApprovalMode, Backend, ContextUsage } from '@shared/types'
+import type { ApprovalMode, ContextUsage } from '@shared/types'
 import type { ChatStats } from '../hooks/useChat'
 
 /**
@@ -79,22 +79,19 @@ const APPROVAL: Record<ApprovalMode, { label: string; title: string }> = {
 }
 
 export function StatusBar({
-  tierLabel,
   model,
+  ready,
   streaming,
   stats,
   usage,
   compact,
   approvalMode,
-  backend,
-  onToggleBackend,
   onCycleApproval,
   onCompact
 }: {
-  tierLabel: string
   model: string
-  backend: Backend
-  onToggleBackend(): void
+  /** False when no key is saved for this model's provider. */
+  ready: boolean
   streaming: boolean
   stats: ChatStats
   usage: ContextUsage
@@ -107,7 +104,7 @@ export function StatusBar({
   const elapsed = stats.elapsedMs !== null ? duration(stats.elapsedMs) : null
 
   // While streaming, derive a live rate from what has arrived so far; once the
-  // turn lands, show the rate Ollama reported.
+  // turn lands, show the rate the provider reported.
   const liveRate =
     streaming && stats.elapsedMs && stats.elapsedMs > 600
       ? (stats.liveTokens / (stats.elapsedMs / 1000)).toFixed(1)
@@ -116,31 +113,13 @@ export function StatusBar({
   return (
     <footer className="status">
       {/*
-        Which half of the app is answering, always visible and always one
-        click from the other. It decides where the question goes, what it
-        costs and whether it leaves the machine, which is too much to leave
-        to a setting the user has to remember.
+        The model, which is the whole of what used to be a backend button and
+        a tier name. It is still worth a permanent place: it is the one thing
+        that decides what an answer costs and where the question goes.
       */}
-      <button
-        type="button"
-        className={`backend is-${backend}`}
-        onClick={onToggleBackend}
-        title={
-          backend === 'api'
-            ? 'Hosted model — fast, better at code, spends quota. Click for local.'
-            : 'On this PC — free, private, works offline. Click for the hosted model.'
-        }
-      >
-        {backend === 'api' ? 'API' : 'Local'}
-      </button>
-      <span className="status-sep">·</span>
-      <span className="status-tier">{tierLabel}</span>
-      {!compact && (
-        <>
-          <span className="status-sep">·</span>
-          <span className="status-model">{model}</span>
-        </>
-      )}
+      <span className={`status-model${ready ? '' : ' is-unready'}`} title={model}>
+        {ready ? model : `${model} — no key`}
+      </span>
 
       <span className="spacer" />
 

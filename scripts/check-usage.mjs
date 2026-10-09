@@ -27,7 +27,8 @@ async function load(entry, name) {
   return import(pathToFileURL(out).href)
 }
 const U = await load('src/shared/usage.ts', 'u')
-const T = await load('src/shared/tiers.ts', 't')
+const T = await load('src/shared/assistant.ts', 't')
+const C = await load('src/shared/cloud.ts', 'c')
 
 let failures = 0
 function check(label, actual, expected) {
@@ -149,69 +150,61 @@ check(
 check('today is a local date, not UTC', U.todayKey(new Date(2026, 0, 5)), '2026-01-05')
 check('and is zero padded', U.todayKey(new Date(2026, 10, 1)), '2026-11-01')
 
-/* -------------------------------------------------------- the two backends */
+/* ----------------------------------------------------- the one assistant */
 
-for (const id of ['flash', 'fast', 'thinker', 'deep']) {
-  const tier = T.TIERS[id]
-  check(`${id} has a local model`, Boolean(tier.model), true)
-  check(`${id} has a hosted one`, Boolean(tier.apiModel), true)
-  check(`${id} never defaults to the 25-a-day model`, tier.apiModel === 'gemini-3.8-flash', false)
-}
-
-// A cap sized for 13 tok/s is a truncation at 170.
+/**
+ * There were four tiers in two modes on two backends, and each needed its own
+ * model, output cap and voice. The measurements ended that: Codestral took
+ * every column of the write-a-file benchmark at 0.51s to first token and 511
+ * billed tokens a call, so there is nothing left to ration between tiers.
+ */
+check('there is one model, and it is the measured one', T.DEFAULT_MODEL, 'codestral-latest')
+check('it is a model the cloud layer can route', C.providerFor(T.DEFAULT_MODEL), 'mistral')
 check(
-  'the acting tier gets more room on the API',
-  T.TIERS.thinker.apiOptions.num_predict > T.TIERS.thinker.options.num_predict,
-  true
-)
-check(
-  'so does the deep one',
-  T.TIERS.deep.apiOptions.num_predict > T.TIERS.deep.options.num_predict,
-  true
-)
-check(
-  'every tier that overrides raises the cap',
-  ['flash', 'fast', 'thinker', 'deep'].every((id) => {
-    const t = T.TIERS[id]
-    return !t.apiOptions?.num_predict || t.apiOptions.num_predict >= t.options.num_predict
-  }),
+  'and one the picker offers',
+  C.CLOUD_MODELS.some((m) => m.id === T.DEFAULT_MODEL),
   true
 )
 
-// The local prompts are corrections for a 3.8B model; carrying them over would
-// be an instruction to give the shallow answer.
+const a = T.assistantFor(T.DEFAULT_MODEL, true)
+check('it may act, because that is the app', a.tools, 'full')
 check(
-  'the local base tells the model to stop talking',
-  T.TIERS.fast.systemPrompt.includes('Answer directly and stop'),
-  true
+  'and /shell off is what turns that down',
+  T.assistantFor(T.DEFAULT_MODEL, false).tools,
+  'none'
 )
+// 384 was a patience budget at 13 tok/s. At 121 it is a truncation, and this
+// is the only tier there is.
+check('the output cap is sized for a hosted model', a.options.num_predict >= 2000, true)
+check('reasoning is off by default', a.thinking, false)
+
+// The prompt that survived is the one written for a capable model. The local
+// voice told a 3.8B model to stop talking, which on a capable one is an
+// instruction to give the shallow answer.
 check(
-  'the API one does not',
-  T.TIERS.fast.apiSystemPrompt.includes('Answer directly and stop'),
+  'the voice does not cap length verbatim',
+  a.systemPrompt.includes('One or two sentences.'),
   false
 )
+check('nor tell it to stop talking', a.systemPrompt.includes('Answer directly and stop'), false)
 check(
-  'nor does it cap Flash at two sentences verbatim',
-  T.TIERS.flash.apiSystemPrompt.includes('One or two sentences.'),
-  false
-)
-check(
-  'the API prompt lets length follow the question',
-  T.TIERS.fast.apiSystemPrompt.includes('Length fits the question'),
+  'length follows the question instead',
+  a.systemPrompt.includes('Length fits the question'),
   true
 )
-check(
-  'and asks for uncertainty to be said out loud',
-  T.TIERS.fast.apiSystemPrompt.includes('SAY WHAT YOU DO NOT KNOW'),
-  true
-)
+check('and uncertainty is said out loud', a.systemPrompt.includes('SAY WHAT YOU DO NOT KNOW'), true)
+
+// The worked examples went with the local path: they were measured into
+// existence on phi4-mini (5/8 -> 8/8) and are a liability on a model that
+// imitates their terse register as readily as their structure.
+check('the worked examples are gone', typeof T.shellExamples, 'undefined')
 
 /* ------------------------------------------------- the verification habit */
 
 // The point of this prompt is a model that checks instead of asserting. A
 // confident wrong answer about the user's own machine is the worst thing it
 // can produce here, because it is indistinguishable from a right one.
-const apiPrompt = T.TIERS.thinker.apiSystemPrompt
+const apiPrompt = T.VOICE_PROMPT
 check('it is told to check rather than guess', /CHECK, DO NOT GUESS/.test(apiPrompt), true)
 check(
   'and reminded it can see command output',
@@ -232,42 +225,22 @@ check(
 )
 check('inventing a path or version is forbidden', /Never invent a path/.test(apiPrompt), true)
 check('"I cannot tell from here" is a real answer', /cannot tell from here/.test(apiPrompt), true)
-check(
-  'every acting tier gets the discipline',
-  ['fast', 'thinker', 'deep'].every((id) =>
-    /CHECK, DO NOT GUESS/.test(T.TIERS[id].apiSystemPrompt)
-  ),
-  true
-)
-// Not added to the local prompt: it is long, and the 3.8B model it would be
-// aimed at already carries 1080 tokens of preamble per turn.
-check(
-  'the local prompt is left alone',
-  /CHECK, DO NOT GUESS/.test(T.TIERS.thinker.systemPrompt),
-  false
-)
-check(
-  'every tier has an API voice',
-  ['flash', 'fast', 'thinker', 'deep'].every((id) => Boolean(T.TIERS[id].apiSystemPrompt)),
-  true
-)
+// The discipline reaches the one voice there is. It was measured as making no
+// difference on two saturated tests and kept anyway, because it was asked for
+// and because the parts most likely to matter need a harder test to show up.
+check('the one voice carries the discipline', /CHECK, DO NOT GUESS/.test(T.VOICE_PROMPT), true)
+check('and there is only one voice', typeof T.VOICE_PROMPT, 'string')
 
-// Worked examples exist because a small model imitates. A capable one imitates
-// their register too, and they cost 110 tokens of a request-capped quota.
-check('the local path has worked examples', T.shellExamples('full').length > 0, true)
-check('the API path has none', T.API_EXAMPLES.length, 0)
+// Worked examples existed because a small model imitates. A capable one
+// imitates their terse register too, and they cost 110 tokens a turn.
+check('the worked examples went with Ollama', typeof T.API_EXAMPLES, 'undefined')
 
 /* ------------------------------------------------- the split is real in code */
 
 const main = readFileSync('src/main/index.ts', 'utf8')
-check('resolution branches on the backend', /activeBackend\(\) === 'api'/.test(main), true)
-check('the prompt does too', /apiSystemPrompt \?\? tier\.systemPrompt/.test(main), true)
-check('and the options', /apiOptions[\s\S]{0,60}tier\.options/.test(main), true)
-check(
-  'API with no key falls back rather than dying',
-  /wanted === 'api' && !keys\?\.configured\(\)\.length/.test(main),
-  true
-)
+check('there is one model, resolved in one place', /function resolveModel/.test(main), true)
+check('and no backend to branch on', /activeBackend/.test(main), false)
+check('nor a per-tier model map', /tierModels/.test(main), false)
 check(
   'usage is recorded on success',
   /usage\.add\(\{[\s\S]{0,200}promptTokens: stats\.promptTokens/.test(main),
@@ -275,8 +248,8 @@ check(
 )
 check('and on failure', /usage\.add\(\{[\s\S]{0,160}error: true/.test(main), true)
 check(
-  'local is the default',
-  readFileSync('src/shared/defaults.ts', 'utf8').includes("backend: 'local'"),
+  'the default model is the measured one',
+  readFileSync('src/shared/defaults.ts', 'utf8').includes('model: DEFAULT_MODEL'),
   true
 )
 check(
@@ -317,11 +290,16 @@ check(
   /failure\?\.elsewhere &&[\s\S]{0,80}!streamed/.test(main),
   true
 )
+// Sideways, not down. The daily cap is per model, so when one is out another
+// on the same key usually is not - measured, in the same minute. With the
+// local path gone this is the only step left, which makes it the whole of the
+// fallback rather than the first half of it.
 check(
-  'and only away from a hosted model',
-  /isCloudModel\(on\)[\s\S]{0,30}backgroundModel/.test(main),
+  'and only to a sibling the key can reach',
+  /siblingModel\(on, spentToday\)[\s\S]{0,120}cloud\.ready\(sibling\)\.ok/.test(main),
   true
 )
+check('there is nothing local to step down to', /backgroundModel\(req/.test(main), false)
 check('it can be switched off', /settings\.get\('apiFallback'\)/.test(main), true)
 check('and is on by default', defaultsSrc.includes('apiFallback: true'), true)
 check('the second attempt is counted too', (main.match(/usage\.add\(\{/g) ?? []).length >= 2, true)

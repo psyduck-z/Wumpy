@@ -1,11 +1,9 @@
 import type { WumpySettings } from './types'
+import { DEFAULT_MODEL } from './assistant'
 
 export const DEFAULT_SETTINGS: WumpySettings = {
-  ollamaHost: 'http://127.0.0.1:11434',
-
-  // Opens in the light, quick mode. Toggle to dev mode for the thinking tiers.
-  mode: 'quick',
-  tier: 'fast',
+  // The one model. Chosen by measurement, not by name - see assistant.ts.
+  model: DEFAULT_MODEL,
 
   dock: 'right',
   tallWidth: 440,
@@ -24,17 +22,10 @@ export const DEFAULT_SETTINGS: WumpySettings = {
   // src/hook), which is the only way to get it since Windows reserves it.
   hotkeys: [],
 
-  // Measured: a cold model load costs ~3.5s and a warm one ~8ms, which moves
-  // time-to-first-word from 4.7s to 0.19s. Keeping models resident is by far
-  // the largest speed lever available on CPU-only inference.
-  keepAlive: '30m',
-  warmOnStart: true,
-
   // Costs CPU during generation, which is the worst moment to spend it.
   smoothText: false,
 
-  // Measured: qwen3:4b spent 9m37s reasoning about a single question. At ~5
-  // tok/s on CPU there is no answer worth waiting longer than this for.
+  // A hosted model that has not started in three minutes is not going to.
   maxTurnMs: 180_000,
 
   launchAtLogin: false,
@@ -53,16 +44,16 @@ export const DEFAULT_SETTINGS: WumpySettings = {
   searchEnabled: true,
   searchApiKey: '',
 
-  tierModels: {},
-  // Local until asked otherwise. Nothing leaves the machine by default.
-  backend: 'local',
-  // Better a slower answer than none, so long as it says which it is.
+  // Better another model than none, so long as the answer says which it is.
   apiFallback: true,
   // Off until asked for with /voice. It is not only a microphone button: with it
   // on, holding the spacebar means something, and the most-pressed key on the
   // keyboard does not change behaviour because an app was installed.
   voiceEnabled: false,
-  voicePolish: true,
+  // Off by default now. Polishing used to be guaranteed local; without Ollama
+  // it sends what you dictated to the provider, which is a different bargain
+  // and should be opted into rather than inherited.
+  voicePolish: false,
   voiceAutoStop: true,
 
   // Opening a page is allowed to be proposed; whether it happens without a click

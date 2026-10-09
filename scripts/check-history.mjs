@@ -92,7 +92,10 @@ rmSync(out, { force: true })
  * passing its own tests says nothing about whether a key reaches it.
  */
 const composer = readFileSync('src/renderer/src/components/Composer.tsx', 'utf8')
-const handler = composer.slice(composer.indexOf('const onKeyDown'), composer.indexOf('atFirstLine(el: '))
+const handler = composer.slice(
+  composer.indexOf('const onKeyDown'),
+  composer.indexOf('atFirstLine(el: ')
+)
 
 check('Up is bound to the older entry', /ArrowUp'[\s\S]*?history\.older/.test(handler), true)
 check('Down is bound to the newer one', /ArrowDown'[\s\S]*?history\.newer/.test(handler), true)

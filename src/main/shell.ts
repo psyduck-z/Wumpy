@@ -207,8 +207,8 @@ const WRITE_MARKERS =
 /**
  * Classifies a command as read-only or not.
  *
- * Used to let the Quick tiers act without handing them the whole machine: they
- * may look things up, and anything that changes state needs a Developer tier.
+ * Used to decide what may run unattended: a read can run itself on the `auto`
+ * approval mode, and anything that changes state waits for a click.
  */
 export function isReadOnly(command: string): boolean {
   const trimmed = command.trim()

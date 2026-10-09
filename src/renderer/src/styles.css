@@ -13,37 +13,21 @@
   --mono: 'Cascadia Code', 'Consolas', ui-monospace, monospace;
 }
 
-/* ---- Quick mode (light grey) ---- */
-[data-theme='light'] {
-  --bg: 226 227 233;
-  --surface: 240 241 245;
-  --raised: 213 215 223;
-  --border: 18 18 32 / 0.12;
-  --text: 26 26 36;
-  --muted: 92 94 112;
-  --accent: 91 82 224;
-  --accent-soft: 91 82 224 / 0.1;
-  --accent-text: 91 82 224;
-  --danger: 198 46 46;
-  --danger-soft: 198 46 46 / 0.08;
-  --shadow: 0 18px 44px rgb(20 20 50 / 0.18), 0 2px 6px rgb(20 20 50 / 0.1);
-  --code-bg: 244 244 250;
-}
-
-/* ---- Developer mode (dark) ---- */
 /*
-  Developer mode: near-black and neutral.
+  The theme. Near-black and neutral, and now the only one.
+
+  This was Developer mode, and there was a light grey Quick mode beside it
+  that switched with the tier. With one assistant there is nothing to switch,
+  so the light theme is gone and this is simply how Wumpy looks.
 
   The greys were tinted blue-violet (16 16 22, with text at 232 232 242) which
   read as a dark purple rather than a dark grey, especially next to the purple
   accent. These are flat neutrals - red, green and blue within a point or two
   of each other - so the only colour on screen is the colour that means
-  something: the accent, the danger red, the backend badge.
-
-  Darker overall as well. This mode is for the tiers that can change the
-  machine, and it should not look like the quick one with the lights off.
+  something: the accent and the danger red.
 */
-[data-theme='dark'] {
+[data-theme='dark'],
+:root {
   --bg: 10 10 11;
   --surface: 17 17 19;
   --raised: 28 28 30;
@@ -113,10 +97,7 @@ body {
 .is-compact .header {
   padding: 7px 7px 7px 11px;
 }
-.is-compact .tierbar {
-  padding: 0 8px 6px;
-}
-.is-compact .status {
+.is-compact .is-compact .status {
   padding: 0 11px 4px;
 }
 .is-compact .composer {
@@ -254,103 +235,6 @@ body {
 .header-actions button.is-on {
   background: rgb(var(--accent-soft));
   color: rgb(var(--accent-text));
-}
-
-/* The mode switch is the one text button, because it changes everything. */
-.mode-toggle {
-  width: auto !important;
-  padding: 0 9px !important;
-  font: inherit;
-  font-size: 10.5px;
-  font-weight: 600;
-  letter-spacing: 0.3px;
-  text-transform: uppercase;
-  border: 1px solid rgb(var(--border)) !important;
-  color: rgb(var(--muted));
-}
-
-.mode-toggle.is-dev {
-  background: rgb(var(--accent-soft));
-  border-color: rgb(var(--accent) / 0.4) !important;
-  color: rgb(var(--accent-text));
-}
-
-/* ---------------------------------------------------------------- tierbar */
-
-.tierbar {
-  display: flex;
-  gap: 6px;
-  padding: 0 12px 8px;
-}
-
-.tier {
-  flex: 1;
-  min-width: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 1px;
-  padding: 6px 9px;
-  text-align: left;
-  background: rgb(var(--surface));
-  border: 1px solid rgb(var(--border));
-  border-radius: 9px;
-  color: rgb(var(--muted));
-  font: inherit;
-  cursor: pointer;
-}
-
-.tier:hover:not(.is-missing) {
-  border-color: rgb(var(--accent) / 0.45);
-  color: rgb(var(--text));
-}
-
-.tier.is-active {
-  background: rgb(var(--accent-soft));
-  border-color: rgb(var(--accent) / 0.55);
-  color: rgb(var(--accent-text));
-}
-
-.tier.is-missing {
-  opacity: 0.45;
-  cursor: not-allowed;
-}
-
-.tier-label {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  font-size: 12px;
-  font-weight: 600;
-  color: rgb(var(--text));
-}
-
-.tier.is-active .tier-label {
-  color: rgb(var(--accent-text));
-}
-
-.tier-key {
-  margin-left: auto;
-  font: inherit;
-  font-size: 9px;
-  letter-spacing: 0.2px;
-  opacity: 0.5;
-}
-
-.tier-meta {
-  display: flex;
-  align-items: center;
-  gap: 5px;
-  font-size: 10px;
-  letter-spacing: 0.1px;
-}
-
-/* Green pip: the model is resident, so answers start immediately. */
-.warm-dot {
-  width: 5px;
-  height: 5px;
-  border-radius: 50%;
-  background: #22c55e;
-  box-shadow: 0 0 5px #22c55eaa;
 }
 
 /* -------------------------------------------------------------- transcript */
@@ -527,15 +411,6 @@ body {
 }
 
 /* highlight.js ships a dark theme; keep its palette legible on light mode. */
-[data-theme='light'] .codeblock pre,
-[data-theme='light'] .codeblock pre code {
-  color: #e6edf3;
-}
-[data-theme='light'] .codeblock pre {
-  background: #15181e;
-  border-color: transparent;
-}
-
 .codeblock pre code {
   background: none;
   padding: 0;
@@ -826,11 +701,6 @@ body {
  * command invisible — the one thing on the card the user must be able to read
  * before approving it.
  */
-[data-theme='light'] .cmd-body {
-  background: #15181e;
-  color: #e6edf3;
-}
-
 .cmd-output {
   border-top: 1px solid rgb(var(--border));
   padding: 6px 10px 8px;
@@ -1324,11 +1194,6 @@ body {
   color: rgb(var(--muted));
 }
 
-.status-tier {
-  font-weight: 600;
-  color: rgb(var(--accent-text));
-  white-space: nowrap;
-}
 .status-sep {
   opacity: 0.35;
 }
@@ -1841,34 +1706,6 @@ body {
   font-style: italic;
 }
 
-/* ---- backend ----
-   Which half of the app is answering. Stated first in the status bar because
-   it decides where the question goes, what it costs, and whether it leaves
-   the machine. Local is quiet; API is marked, the same way the automatic
-   approval modes are, because it is the state with consequences outside. */
-.backend {
-  padding: 1px 7px;
-  margin-right: 1px;
-  background: none;
-  border: 1px solid rgb(var(--border));
-  border-radius: 20px;
-  color: rgb(var(--muted));
-  font: inherit;
-  font-size: 9.5px;
-  letter-spacing: 0.3px;
-  cursor: pointer;
-  white-space: nowrap;
-}
-
-.backend:hover {
-  color: rgb(var(--text));
-}
-
-.backend.is-api {
-  color: #38bdf8;
-  border-color: #38bdf866;
-}
-
 /* ---- keyboard focus ----
    One visible ring, everywhere, for everything you can land on.
 
@@ -1897,4 +1734,10 @@ body {
 .cmd:focus-within,
 .ask:focus-within {
   border-color: rgb(var(--accent) / 0.45);
+}
+
+/* The model, where the backend badge and the tier name used to be. It is the
+   one thing in the status bar that decides what an answer costs. */
+.status-model.is-unready {
+  color: rgb(var(--danger));
 }

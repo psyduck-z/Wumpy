@@ -5,7 +5,6 @@ import type {
   SearchResult,
   ShellKind,
   ShellResult,
-  TierId,
   WriteResult,
   WriteTarget
 } from '@shared/types'
@@ -26,7 +25,6 @@ export const Message = memo(function Message({
   streaming,
   showReasoning,
   smoothText,
-  tier,
   canAutoRun,
   onGrow,
   onRunCommand,
@@ -50,8 +48,6 @@ export const Message = memo(function Message({
   showReasoning: boolean
   /** Reveal character by character rather than token by token. */
   smoothText: boolean
-  /** The active tier, which decides what a proposed command may do. */
-  tier: TierId
   /**
    * Whether a command this message proposes may run unattended. Omitted for
    * messages that were not generated in this session, so reopening a saved chat
@@ -60,12 +56,12 @@ export const Message = memo(function Message({
   canAutoRun?: (command: string, messageId: string) => boolean
   /** Called as revealed text grows, so the transcript can stay pinned. */
   onGrow?: () => void
-  /** Supplied only when the active tier may propose commands. */
+  /** Supplied only when Wumpy may propose commands. */
   onRunCommand?: (command: string, shell: ShellKind) => Promise<ShellResult | null>
   onCommandResult?: (result: ShellResult, unattended: boolean) => void
   /** Called when the user picks an option from a question the model asked. */
   onAnswer?: (messageId: string, option: string) => void
-  /** Supplied when the tier may search the web. */
+  /** Supplied when Wumpy may search the web. */
   onWriteFile?: (path: string, content: string) => Promise<WriteResult>
   onCheckWrite?: (path: string) => Promise<WriteTarget>
   onWritten?: (result: WriteResult, messageId: string) => void
@@ -142,7 +138,7 @@ export const Message = memo(function Message({
         </button>
         {open && (
           <div className="summary-body">
-            <Markdown text={message.content} tier={tier} />
+            <Markdown text={message.content} />
           </div>
         )}
       </div>
@@ -188,7 +184,6 @@ export const Message = memo(function Message({
         <div className={`msg-body ${animating && !waiting ? 'is-streaming' : ''}`}>
           <Markdown
             text={shown}
-            tier={tier}
             complete={!animating}
             canAutoRun={canAutoRun}
             messageId={message.id}

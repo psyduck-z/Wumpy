@@ -315,7 +315,7 @@ check(
 // "DolbyDigitalPlusDecoder" as not a match for "git".
 const tiersOut = join(process.cwd(), '.links-tiers.mjs')
 await build({
-  entryPoints: ['src/shared/tiers.ts'],
+  entryPoints: ['src/shared/assistant.ts'],
   bundle: true,
   platform: 'node',
   format: 'esm',

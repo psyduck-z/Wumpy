@@ -10,7 +10,6 @@ export interface ChatMessage {
   thinking?: string
   createdAt: number
   model?: string
-  tier?: TierId
   error?: string
   /**
    * Written by the app rather than the model (command output, confirmations).
@@ -41,37 +40,26 @@ export interface ChatMessage {
   localAsk?: { question: string; options: string[]; kind: 'rename' }
 }
 
-/* ------------------------------------------------------------------ tiers */
-
-export type TierId = 'flash' | 'fast' | 'thinker' | 'deep'
+/* -------------------------------------------------------- the one assistant */
 
 /**
- * Which half of the app a tier belongs to. `quick` is the light, get-an-answer
- * mode; `dev` is the dark mode for work worth waiting on.
- */
-export type Mode = 'quick' | 'dev'
-
-/**
- * Which half of the app is answering.
+ * Wumpy used to be eight assistants: four tiers, each in a local and a hosted
+ * form, chosen by hand. That made sense while the local models were the point
+ * - a 3.8B model needs worked examples and a short-answer rule that only hold
+ * a capable model back, and a 14B one needs a patience budget rather than a
+ * truncation limit, so a single config could not serve both.
  *
- * Wumpy is two assistants sharing one window. Local runs on Ollama: free,
- * private, offline, and limited by this machine's memory bandwidth to about
- * 13 tokens a second. API runs on a hosted model: ten times faster and
- * markedly better at code, at the cost of a quota, a network, and sending the
- * conversation to someone else.
+ * It stopped making sense once the measurements came in. Codestral scored 8/8
+ * on block, compile, on-task and legal path - the only model to take every
+ * column - at 0.51s to first token and 511 billed tokens a call, which is
+ * 25,000 questions a day against a free tier that reports no daily meter at
+ * all. There is no question in this app that wants a worse answer, slower, and
+ * no budget to ration between tiers.
  *
- * Neither is a fallback for the other. They have different models, different
- * output budgets and different prompts - a 3.8B model needs worked examples
- * and short-answer rules that only hold a capable model back - so the choice
- * is explicit and visible rather than inferred.
+ * So there is one assistant now. The tier picker, the quick/dev split, the
+ * local backend and the model warm-up are gone with it.
  */
-export type Backend = 'local' | 'api'
-
-/** Rough expectation set for the user before they commit to a slow answer. */
-export type SpeedHint = 'instant' | 'quick' | 'slow' | 'slowest'
-
-export interface TierOptions {
-  num_ctx: number
+export interface GenerationOptions {
   num_predict: number
   temperature: number
   top_p?: number
@@ -94,7 +82,7 @@ export type ApprovalMode = 'manual' | 'auto' | 'all'
 export interface CommandVerdict {
   /** Why it looks destructive, or null. */
   risk: string | null
-  /** Whether this tier may run it at all. */
+  /** Whether Wumpy may run it at all. */
   allowed: boolean
   scope: 'none' | 'read' | 'full'
   /** True when it should run without waiting for a click. */
@@ -130,57 +118,32 @@ export interface SearchResult {
   snippet: string
 }
 
-export interface Tier {
-  id: TierId
-  label: string
-  blurb: string
-  mode: Mode
-  speed: SpeedHint
-  /** Preferred local model; falls back through `alternates` when not installed. */
+export interface Assistant {
+  /** The hosted model to answer with. */
   model: string
-  alternates: string[]
-  /** The hosted model this tier uses on the API backend. */
-  apiModel: string
-  /** Ask a reasoning-capable model to reason. Never sends `think: false`. */
+  /** Ask a reasoning-capable model to reason. */
   thinking: boolean
   /**
-   * What the tier may propose.
+   * What Wumpy may propose.
    *
-   * 'read' lets Quick-mode tiers look things up — versions, files, whether
-   * something is installed — while anything that changes the machine still
-   * needs a Developer tier. The restriction is enforced in the main process
-   * against an allowlist, not merely requested in the prompt.
+   * Kept as a field rather than hard-wired to 'full' because turning it down
+   * is the one honest way to make the app safe on a machine where you do not
+   * want it proposing changes - /shell off writes 'none' here. The restriction
+   * is enforced in the main process against an allowlist, not requested in the
+   * prompt.
    */
   tools: 'none' | 'read' | 'full'
-  options: TierOptions
-  /**
-   * Overrides for the API backend, where the constraints are different.
-   *
-   * num_predict is the one that matters. Locally it is a patience budget: at
-   * 13 tok/s, 800 tokens is a minute of waiting. On a hosted model at 170
-   * tok/s the same 800 tokens is five seconds, and the cap stops being a
-   * kindness and starts being a truncation.
-   */
-  apiOptions?: Partial<TierOptions>
+  options: GenerationOptions
   systemPrompt: string
-  /**
-   * The system prompt for the API backend.
-   *
-   * Separate because the local one is shaped around a 3.8B model's failure
-   * modes - told to stop talking, kept to one or two sentences, given worked
-   * examples to imitate - and those are instructions to be less useful when
-   * the model on the other end does not need them.
-   */
-  apiSystemPrompt?: string
 }
 
-export interface TierStatus {
-  id: TierId
-  /** The model actually resolved for this tier, or null when none is installed. */
-  resolvedModel: string | null
-  installed: boolean
-  /** True once the model is resident in Ollama, so answers start instantly. */
-  warm: boolean
+/** Whether the hosted model can actually be reached, for the status bar. */
+export interface AssistantStatus {
+  model: string
+  /** False when no key is saved for the provider this model belongs to. */
+  ready: boolean
+  /** Why not, when it is not. */
+  why: string
 }
 
 /* ------------------------------------------------------------- panel shape */
@@ -209,7 +172,6 @@ export interface ChatSummary {
   createdAt: number
   updatedAt: number
   messageCount: number
-  tier: TierId
 }
 
 export interface SavedChat extends ChatSummary {
@@ -219,11 +181,8 @@ export interface SavedChat extends ChatSummary {
 /* ---------------------------------------------------------------- settings */
 
 export interface WumpySettings {
-  ollamaHost: string
-  /** Which tier set and theme the panel opens in. */
-  mode: Mode
-  /** Selected tier within the current mode. */
-  tier: TierId
+  /** The hosted model to answer with. One model, no tiers. */
+  model: string
   dock: Dock
   /** Width of the full-height bar, in px. */
   tallWidth: number
@@ -247,13 +206,6 @@ export interface WumpySettings {
    */
   hotkeys: string[]
   /**
-   * How long Ollama keeps a model resident. This is the single biggest lever on
-   * perceived speed: a cold load costs ~3.5s, a warm one ~8ms.
-   */
-  keepAlive: string
-  /** Preload tier models at startup so the first question is instant. */
-  warmOnStart: boolean
-  /**
    * Reveal answers character by character instead of token by token.
    *
    * Off by default. It looks better, but it runs an animation frame loop and
@@ -261,19 +213,16 @@ export interface WumpySettings {
    * when the CPU is needed for tokens.
    */
   smoothText: boolean
-  /**
-   * Hard ceiling on a single turn, in ms. A reasoning model on CPU will
-   * otherwise happily spend ten minutes on scratchpad.
-   */
+  /** Hard ceiling on a single turn, in ms. */
   maxTurnMs: number
   launchAtLogin: boolean
-  /** Allow tiers that support it to propose shell commands. */
+  /** Allow Wumpy to propose shell commands. */
   shellEnabled: boolean
   /** How much runs without being asked. */
   approvalMode: ApprovalMode
   /** Keep the native dialog for destructive commands even in `all`. */
   confirmRisky: boolean
-  /** Allow tiers that support it to propose web searches. */
+  /** Allow Wumpy to propose web searches. */
   searchEnabled: boolean
   /**
    * Brave Search API key. Without one, search covers encyclopedic questions
@@ -282,20 +231,14 @@ export interface WumpySettings {
   searchApiKey: string
   /** Working directory for commands. Empty means the user's home directory. */
   shellCwd: string
-  /** Per-tier model overrides, keyed by tier id. */
-  tierModels: Partial<Record<TierId, string>>
   /**
-   * Local (Ollama) or API (hosted). Local by default: Wumpy works with no
-   * account, no network and no quota, and switching away from that should be
-   * something the user did on purpose.
-   */
-  backend: Backend
-  /**
-   * Answer locally when the hosted model is rate limited.
+   * Try another model from the same provider when this one is rate limited.
    *
-   * On by default, and always announced in the reply - a silent downgrade to
-   * a 3.8B model would make the API backend untrustworthy in the way that
-   * matters most, because you would not know which model you were reading.
+   * On by default, and always announced in the reply. It used to mean "fall
+   * back to the local model", which mattered more: a silent downgrade to a
+   * 3.8B model would have made the answer untrustworthy in the way that counts,
+   * because you would not know which model you were reading. The announcement
+   * stays for the same reason even though the step sideways is now smaller.
    */
   apiFallback: boolean
   /**
@@ -305,10 +248,14 @@ export interface WumpySettings {
    */
   voiceEnabled: boolean
   /**
-   * Send the transcript through the local model to punctuate it.
+   * Send the transcript through the model to punctuate it.
    *
    * The vocabulary table in shared/dictation.ts runs either way; this is only
-   * the part that needs judgement, and it costs a second or so.
+   * the part that needs judgement.
+   *
+   * This used to be guaranteed local, and that guarantee is gone with Ollama.
+   * Polishing now sends what you dictated to the hosted provider, like every
+   * other turn - so it is off by default and the setting says what it does.
    */
   voicePolish: boolean
   /** Stop recording by itself once you stop talking. */
@@ -319,27 +266,11 @@ export interface WumpySettings {
   searchEngine: string
 }
 
-/* ------------------------------------------------------------------- ollama */
-
-export interface OllamaModel {
-  name: string
-  size: number
-  family: string
-  parameterSize: string
-}
-
-export interface OllamaStatus {
-  reachable: boolean
-  version?: string
-  error?: string
-}
-
 /* ---------------------------------------------------------------- messaging */
 
 export interface ChatRequest {
   requestId: string
   messages: Array<Pick<ChatMessage, 'role' | 'content'>>
-  tier: TierId
   /**
    * Live facts the model has no other way to know. Without these it guesses
    * at things it could simply be told, like what the current chat is called.
@@ -402,10 +333,7 @@ export const IPC = {
   chatDelta: 'chat:delta',
   chatDone: 'chat:done',
   chatError: 'chat:error',
-  ollamaStatus: 'ollama:status',
-  ollamaModels: 'ollama:models',
-  tiersStatus: 'tiers:status',
-  tiersWarm: 'tiers:warm',
+  assistantStatus: 'assistant:status',
   panelHide: 'panel:hide',
   panelPin: 'panel:pin',
   panelDock: 'panel:dock',
@@ -453,15 +381,8 @@ export const IPC = {
 /** What `/usage` shows. */
 export interface UsageReport {
   lines: import('./usage').UsageLine[]
-  backend: Backend
-  /**
-   * Answer locally when the hosted model is rate limited.
-   *
-   * On by default, and always announced in the reply - a silent downgrade to
-   * a 3.8B model would make the API backend untrustworthy in the way that
-   * matters most, because you would not know which model you were reading.
-   */
-  apiFallback: boolean
+  /** The model currently answering, so the report names what it is counting. */
+  model: string
   date: string
 }
 

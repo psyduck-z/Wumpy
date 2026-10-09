@@ -35,18 +35,27 @@ if (process.platform !== 'win32') {
 } else {
   // A binary older than the source proves nothing about the source.
   const fresh = statSync(exe).mtimeMs >= statSync(source).mtimeMs
-  check(fresh, fresh ? 'the built helper is current' : `${source} is newer than ${exe}; run npm run hook:build`)
+  check(
+    fresh,
+    fresh ? 'the built helper is current' : `${source} is newer than ${exe}; run npm run hook:build`
+  )
 
   if (fresh) {
     let out = ''
     let ok = true
     try {
-      out = execFileSync(exe, ['--selftest'], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] })
+      out = execFileSync(exe, ['--selftest'], {
+        encoding: 'utf8',
+        stdio: ['ignore', 'pipe', 'pipe']
+      })
     } catch (err) {
       ok = false
       out = `${err.stdout ?? ''}${err.stderr ?? ''}`
     }
-    check(ok && /keys=ok/.test(out), `helper key scenarios: ${out.trim().split('\n').pop() ?? 'no output'}`)
+    check(
+      ok && /keys=ok/.test(out),
+      `helper key scenarios: ${out.trim().split('\n').pop() ?? 'no output'}`
+    )
     check(/sendinput=ok/.test(out), 'SendInput still accepts the INPUT layout')
   }
 }
@@ -54,7 +63,10 @@ if (process.platform !== 'win32') {
 /* ------------------------------------- one press cannot mean several toggles */
 
 const src = readFileSync(source, 'utf8')
-check(/WM_KEYUP/.test(src) && /WM_SYSKEYUP/.test(src), 'the hook watches releases, not only presses')
+check(
+  /WM_KEYUP/.test(src) && /WM_SYSKEYUP/.test(src),
+  'the hook watches releases, not only presses'
+)
 check(
   (src.match(/Console\.WriteLine\("TOGGLE"\)/g) ?? []).length === 1,
   'TOGGLE is reported from exactly one place'

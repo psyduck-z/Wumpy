@@ -80,7 +80,9 @@ const rows = []
 for (const words of [0, 400, 1000, 2000]) {
   const r = await run(words)
   rows.push(r)
-  console.log(`${String(r.prompt).padStart(8)} ${String(r.gen).padStart(10)} ${String(r.prefill).padStart(8)}`)
+  console.log(
+    `${String(r.prompt).padStart(8)} ${String(r.gen).padStart(10)} ${String(r.prefill).padStart(8)}`
+  )
 }
 const first = rows[0].gen
 const last = rows[rows.length - 1].gen

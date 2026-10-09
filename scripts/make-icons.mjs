@@ -73,11 +73,20 @@ function decodePNG(buf) {
       const b = prev[i]
       const c = i >= channels ? prev[i - channels] : 0
       switch (filter) {
-        case 1: line[i] = (line[i] + a) & 0xff; break
-        case 2: line[i] = (line[i] + b) & 0xff; break
-        case 3: line[i] = (line[i] + ((a + b) >> 1)) & 0xff; break
-        case 4: line[i] = (line[i] + paeth(a, b, c)) & 0xff; break
-        default: break // 0 = none
+        case 1:
+          line[i] = (line[i] + a) & 0xff
+          break
+        case 2:
+          line[i] = (line[i] + b) & 0xff
+          break
+        case 3:
+          line[i] = (line[i] + ((a + b) >> 1)) & 0xff
+          break
+        case 4:
+          line[i] = (line[i] + paeth(a, b, c)) & 0xff
+          break
+        default:
+          break // 0 = none
       }
     }
 
@@ -110,7 +119,11 @@ function resize(src, size) {
       const x0 = Math.floor(x * scaleX)
       const x1 = Math.max(x0 + 1, Math.floor((x + 1) * scaleX))
 
-      let r = 0, g = 0, b = 0, a = 0, n = 0
+      let r = 0,
+        g = 0,
+        b = 0,
+        a = 0,
+        n = 0
       for (let sy = y0; sy < y1; sy++) {
         for (let sx = x0; sx < x1; sx++) {
           const i = (sy * src.width + sx) * 4

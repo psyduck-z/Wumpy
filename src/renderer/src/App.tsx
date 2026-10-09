@@ -4,23 +4,19 @@ import type {
   ContextUsage,
   Dock,
   HotkeyState,
-  Mode,
-  OllamaStatus,
-  TierId,
+  AssistantStatus,
   ApprovalMode,
   ShellKind,
   ShellResult,
-  OllamaModel,
   LinkResult,
   WriteResult,
   SearchResult,
-  TierStatus,
   KeyStatus,
   WumpySettings
 } from '@shared/types'
 import { isTall } from '@shared/types'
 import { looksLikeUrl, SEARCH_ENGINES, type LinkApproval } from '@shared/links'
-import { TIERS, TIER_ORDER, defaultTierFor } from '@shared/tiers'
+import { CONTEXT_TOKENS, DEFAULT_MODEL } from '@shared/assistant'
 import { CLOUD_MODELS, PROVIDERS } from '@shared/cloud'
 import { useChat, nextId, type ChatStats } from './hooks/useChat'
 import { allCommands, parseCommand, helpText, SHORTCUT_FOR, type CommandAction } from './commands'
@@ -33,7 +29,6 @@ import { Message } from './components/Message'
 import { Composer } from './components/Composer'
 import { StatusBar } from './components/StatusBar'
 import logo from './assets/logo.png'
-import { TierBar } from './components/TierBar'
 import { Picker, type PickerProps } from './components/Picker'
 
 /** Mirrors the main process's accelerator formatting for display. */
@@ -46,11 +41,9 @@ export default function App(): React.JSX.Element {
   const { messages, streaming, streamingId, stats } = chat
 
   const [settings, setSettings] = useState<WumpySettings | null>(null)
-  const [tierStatuses, setTierStatuses] = useState<TierStatus[]>([])
+  const [assistant, setAssistant] = useState<AssistantStatus | null>(null)
   /** Which providers have a key. Never the keys themselves. */
   const [keyStatus, setKeyStatus] = useState<KeyStatus | null>(null)
-  const [models, setModels] = useState<OllamaModel[]>([])
-  const [status, setStatus] = useState<OllamaStatus | null>(null)
   const [hotkey, setHotkey] = useState<HotkeyState>({
     active: null,
     failed: [],
@@ -78,7 +71,7 @@ export default function App(): React.JSX.Element {
   // Saved chats
   /** Which picker is open, if any. One list UI serves them all. */
   const [picker, setPicker] = useState<
-    null | 'command' | 'resume' | 'delete' | 'tier' | 'model' | 'dock' | 'engine'
+    null | 'command' | 'resume' | 'delete' | 'model' | 'dock' | 'engine'
   >(null)
   const [savedChats, setSavedChats] = useState<ChatSummary[]>([])
   const [chatId, setChatId] = useState<string>(() => nextId())
@@ -92,8 +85,7 @@ export default function App(): React.JSX.Element {
   /** Mirrors it for the "jump to latest" button, which needs a re-render. */
   const [atBottom, setAtBottom] = useState(true)
 
-  const mode: Mode = settings?.mode ?? 'quick'
-  const tier: TierId = settings?.tier ?? 'fast'
+  const model: string = settings?.model ?? DEFAULT_MODEL
   const dock: Dock = settings?.dock ?? 'right'
 
   /* ------------------------------------------------------------- bootstrap */
@@ -101,13 +93,13 @@ export default function App(): React.JSX.Element {
   useEffect(() => {
     void window.wumpy.settings.get().then(setSettings)
     void window.wumpy.hotkey.get().then(setHotkey)
-    void window.wumpy.tiers.status().then(setTierStatuses)
+    void window.wumpy.assistant.status().then(setAssistant)
     void window.wumpy.keys.status().then(setKeyStatus)
     void window.wumpy.chats.list().then(setSavedChats)
     return window.wumpy.hotkey.onChange(setHotkey)
   }, [])
 
-  useEffect(() => window.wumpy.tiers.onStatus(setTierStatuses), [])
+  useEffect(() => window.wumpy.assistant.onStatus(setAssistant), [])
 
   // The tray menu can change approval mode and the rest from outside the panel.
   useEffect(() => window.wumpy.settings.onChange(setSettings), [])
@@ -116,22 +108,6 @@ export default function App(): React.JSX.Element {
       window.wumpy.panel.onDock((d) => setSettings((prev) => (prev ? { ...prev, dock: d } : prev))),
     []
   )
-
-  // Poll Ollama so the status dot reflects the server coming up or going away.
-  useEffect(() => {
-    let cancelled = false
-    const refresh = async (): Promise<void> => {
-      const next = await window.wumpy.ollama.status()
-      if (!cancelled) setStatus(next)
-    }
-    void refresh()
-    // Ollama coming or going is not urgent news; polling it often is pure cost.
-    const timer = setInterval(() => void refresh(), 30_000)
-    return () => {
-      cancelled = true
-      clearInterval(timer)
-    }
-  }, [])
 
   // Trigger the slide-in on mount and on every hotkey press.
   useEffect(() => {
@@ -254,14 +230,13 @@ export default function App(): React.JSX.Element {
             id: chatId,
             title: next,
             messages: chat.messages,
-            tier,
             titleLocked: true
           })
         }
         void refreshChats()
       })()
     },
-    [chat, chatId, tier, refreshChats]
+    [chat, chatId, refreshChats]
   )
 
   const openChat = useCallback(
@@ -287,41 +262,10 @@ export default function App(): React.JSX.Element {
     [chat]
   )
 
-  const setTier = useCallback(
-    async (id: TierId) => {
-      const from = TIERS[tier]
-      const to = TIERS[id]
-
-      // Picking a tier follows its mode, so the theme always matches the tier.
-      await patch({ tier: id, mode: to.mode })
-      void window.wumpy.tiers.warm(id).then(setTierStatuses)
-
-      // Tell the model its powers changed. Without this it carries on under the
-      // old assumption and contradicts itself when asked the same thing twice
-      // across a switch.
-      if (chat.messages.length > 0 && from.tools !== to.tools) {
-        chat.notice(
-          to.tools
-            ? `You are now in ${to.label} (Developer mode) and CAN propose commands to run on this machine. ` +
-                'Anything you previously said you could not check, you can now check.'
-            : `You are now in ${to.label} (Quick mode) and can NO LONGER run commands. ` +
-                'Do not claim to check anything on this machine; say it needs Developer mode.'
-        )
-      }
-    },
-    [chat, patch, tier]
-  )
-
-  const toggleMode = useCallback(async () => {
-    const next: Mode = mode === 'quick' ? 'dev' : 'quick'
-    await patch({ mode: next, tier: defaultTierFor(next) })
-    void window.wumpy.tiers.warm(defaultTierFor(next)).then(setTierStatuses)
-  }, [mode, patch])
-
   /* -------------------------------------------------------------- commands */
 
-  /** Whether the active tier may propose commands at all. */
-  const canRunCommands = TIERS[tier].tools !== 'none' && (settings?.shellEnabled ?? true)
+  /** Whether Wumpy may propose commands at all. */
+  const canRunCommands = settings?.shellEnabled ?? true
 
   /**
    * The latest chat state, for callbacks that must not change identity.
@@ -339,22 +283,19 @@ export default function App(): React.JSX.Element {
   retitleRef.current = retitle
 
   /** The user picked one of the model's options: lock the card and reply with it. */
-  const onAnswerQuestion = useCallback(
-    (messageId: string, option: string) => {
-      const live = chatRef.current
-      live.recordAnswer(messageId, option)
-      const asked = live.messages.find((m) => m.id === messageId)?.localAsk
-      if (asked?.kind === 'rename') {
-        // Wumpy asked this one itself, so act on it rather than replying.
-        retitleRef.current(option)
-        return
-      }
-      live.send(option, tier)
-    },
-    [tier]
-  )
+  const onAnswerQuestion = useCallback((messageId: string, option: string) => {
+    const live = chatRef.current
+    live.recordAnswer(messageId, option)
+    const asked = live.messages.find((m) => m.id === messageId)?.localAsk
+    if (asked?.kind === 'rename') {
+      // Wumpy asked this one itself, so act on it rather than replying.
+      retitleRef.current(option)
+      return
+    }
+    live.send(option)
+  }, [])
 
-  const canSearch = TIERS[tier].tools !== 'none' && (settings?.searchEnabled ?? true)
+  const canSearch = settings?.searchEnabled ?? true
 
   const runSearch = useCallback((query: string) => window.wumpy.search.run(query), [])
 
@@ -374,11 +315,10 @@ export default function App(): React.JSX.Element {
           '',
           'Answer the original question from these. Cite the sources you used.'
         ].join('\n'),
-        tier,
         `Searched: ${query}`
       )
     },
-    [tier]
+    []
   )
 
   /* ------------------------------------------------------------- file writes */
@@ -406,7 +346,7 @@ export default function App(): React.JSX.Element {
 
   /* ----------------------------------------------------------------- browser */
 
-  const canOpenLinks = TIERS[tier].tools !== 'none' && (settings?.browserEnabled ?? true)
+  const canOpenLinks = settings?.browserEnabled ?? true
 
   /**
    * How much a proposed link may do on its own.
@@ -496,8 +436,8 @@ export default function App(): React.JSX.Element {
 
   const runShellCommand = useCallback(
     (command: string, shellKind: ShellKind) =>
-      window.wumpy.shell.run({ command, shell: shellKind, tier }),
-    [tier]
+      window.wumpy.shell.run({ command, shell: shellKind }),
+    []
   )
 
   /**
@@ -507,86 +447,83 @@ export default function App(): React.JSX.Element {
    * outweigh the whole conversation, and on a 2-8k context window that would
    * push the actual question out of scope.
    */
-  const onCommandResult = useCallback(
-    (result: ShellResult, unattended: boolean) => {
-      // Only runs that happened without a click spend the budget; approving one
-      // by hand is the person being present, which is what the budget protects.
-      // An unattended run already spent its budget when it claimed the slot.
-      // A click does not spend budget, but the command still counts as run, so
-      // the model cannot have it repeated automatically afterwards.
-      if (!unattended) ranCommandsRef.current.push(result.command.trim())
-      const body = [result.stdout, result.stderr].filter(Boolean).join('\n').trim()
-      const clipped = body.length > 3000 ? `${body.slice(0, 3000)}\n…truncated…` : body
+  const onCommandResult = useCallback((result: ShellResult, unattended: boolean) => {
+    // Only runs that happened without a click spend the budget; approving one
+    // by hand is the person being present, which is what the budget protects.
+    // An unattended run already spent its budget when it claimed the slot.
+    // A click does not spend budget, but the command still counts as run, so
+    // the model cannot have it repeated automatically afterwards.
+    if (!unattended) ranCommandsRef.current.push(result.command.trim())
+    const body = [result.stdout, result.stderr].filter(Boolean).join('\n').trim()
+    const clipped = body.length > 3000 ? `${body.slice(0, 3000)}\n…truncated…` : body
 
-      // A change that succeeded and printed nothing has nothing to interpret.
-      // Deleting a file used to cost two model turns — one to propose it, one to
-      // be told "exit code 0, no output" and answer "Done." — which on this
-      // hardware is most of a minute spent saying what the card already says.
-      // The fact still enters the history as a note, so a later turn knows.
-      //
-      // Reads are different: `Get-Command foo` printing nothing is the answer
-      // rather than the absence of one, so those always go back to the model.
-      // The quiet path is for a change that finished cleanly. A killed command
-      // has an exit code of -1 anyway, but the guard is explicit rather than
-      // relying on that, because "succeeded, no output" about something that
-      // is still running is the worst sentence in this file.
-      if (!result.readOnly && result.exitCode === 0 && !result.timedOut && !clipped) {
-        chatRef.current.notice(`Ran \`${result.command}\` — succeeded, no output.`)
-        return
-      }
+    // A change that succeeded and printed nothing has nothing to interpret.
+    // Deleting a file used to cost two model turns — one to propose it, one to
+    // be told "exit code 0, no output" and answer "Done." — which on this
+    // hardware is most of a minute spent saying what the card already says.
+    // The fact still enters the history as a note, so a later turn knows.
+    //
+    // Reads are different: `Get-Command foo` printing nothing is the answer
+    // rather than the absence of one, so those always go back to the model.
+    // The quiet path is for a change that finished cleanly. A killed command
+    // has an exit code of -1 anyway, but the guard is explicit rather than
+    // relying on that, because "succeeded, no output" about something that
+    // is still running is the worst sentence in this file.
+    if (!result.readOnly && result.exitCode === 0 && !result.timedOut && !clipped) {
+      chatRef.current.notice(`Ran \`${result.command}\` — succeeded, no output.`)
+      return
+    }
 
-      /**
-       * "That command is done" used to be said even when it was not.
-       *
-       * A command Wumpy kills on the time limit got the same closing line as
-       * one that finished, so an install cut off mid-flight was reported to
-       * the model as complete - and the model duly answered "I have
-       * successfully installed the official Spotify app". Observed: it was
-       * not in the Start menu when that was said, and was a while later.
-       *
-       * A killed command is the one case where nothing may be concluded from
-       * the output, because the output is only whatever had been printed when
-       * the axe fell.
-       */
-      const ending = result.timedOut
-        ? [
-            'Wumpy STOPPED that command before it finished — it hit the time limit.',
-            'Whatever it was doing may still be running in the background, and the',
-            'output above is only what it had printed so far.',
-            'Do NOT say it succeeded, and do not say it failed. Say it was still',
-            'going, then propose ONE command that checks the real state.'
-          ]
-        : [
-            // Without this a 3.8B model answers the report by proposing the
-            // same command again, which in an automatic mode runs it again.
-            'That command is done. Do not propose it again. Answer the original',
-            'question from this output, in words.'
-          ]
+    /**
+     * "That command is done" used to be said even when it was not.
+     *
+     * A command Wumpy kills on the time limit got the same closing line as
+     * one that finished, so an install cut off mid-flight was reported to
+     * the model as complete - and the model duly answered "I have
+     * successfully installed the official Spotify app". Observed: it was
+     * not in the Start menu when that was said, and was a while later.
+     *
+     * A killed command is the one case where nothing may be concluded from
+     * the output, because the output is only whatever had been printed when
+     * the axe fell.
+     */
+    const ending = result.timedOut
+      ? [
+          'Wumpy STOPPED that command before it finished — it hit the time limit.',
+          'Whatever it was doing may still be running in the background, and the',
+          'output above is only what it had printed so far.',
+          'Do NOT say it succeeded, and do not say it failed. Say it was still',
+          'going, then propose ONE command that checks the real state.'
+        ]
+      : [
+          // Without this a 3.8B model answers the report by proposing the
+          // same command again, which in an automatic mode runs it again.
+          'That command is done. Do not propose it again. Answer the original',
+          'question from this output, in words.'
+        ]
 
-      const report = [
-        `I ran that command. Exit code ${result.exitCode}${result.timedOut ? ' (timed out)' : ''}.`,
-        '',
-        clipped ? ['```', clipped, '```'].join('\n') : '(no output)',
-        '',
-        ...ending
-      ].join('\n')
+    const report = [
+      `I ran that command. Exit code ${result.exitCode}${result.timedOut ? ' (timed out)' : ''}.`,
+      '',
+      clipped ? ['```', clipped, '```'].join('\n') : '(no output)',
+      '',
+      ...ending
+    ].join('\n')
 
-      // Sent as a user turn because that is the role the model expects a tool
-      // result to arrive in, but shown as the short line instead of the dump.
-      const sent = chatRef.current.send(report, tier, `Ran: \`${result.command}\``)
-      // A turn was already in flight, so the output would otherwise vanish.
-      // It still reaches the model, just as a fact rather than a question.
-      if (!sent) {
-        chatRef.current.notice(`Ran \`${result.command}\`:\n${clipped || '(no output)'}`)
-      }
-    },
-    [tier]
-  )
+    // Sent as a user turn because that is the role the model expects a tool
+    // result to arrive in, but shown as the short line instead of the dump.
+    const sent = chatRef.current.send(report, `Ran: \`${result.command}\``)
+    // A turn was already in flight, so the output would otherwise vanish.
+    // It still reaches the model, just as a fact rather than a question.
+    if (!sent) {
+      chatRef.current.notice(`Ran \`${result.command}\`:\n${clipped || '(no output)'}`)
+    }
+  }, [])
 
   /* --------------------------------------------------- autosave + compaction */
 
   /**
-   * Character-based fallback, used until Ollama reports real counts.
+   * Character-based fallback, used until the provider reports real counts.
    *
    * Memoised because it walks every message, and the panel re-renders on every
    * token: without this, the cost of counting the conversation was paid once
@@ -599,12 +536,12 @@ export default function App(): React.JSX.Element {
   )
 
   /**
-   * What the context meter shows. Ollama's counts are exact but only arrive
-   * after a turn completes, so the estimate covers the gap — including the
-   * message being typed, which has not been sent yet.
+   * What the context meter shows. The provider's counts are exact but only
+   * arrive after a turn completes, so the estimate covers the gap — including
+   * the message being typed, which has not been sent yet.
    */
   const usage: ContextUsage = (() => {
-    const limit = TIERS[tier].options.num_ctx
+    const limit = CONTEXT_TOKENS
     const counted = stats.contextTokens
     const estimate = estimateTokens
     // After a turn lands, the counted value is authoritative. Before the first
@@ -634,7 +571,6 @@ export default function App(): React.JSX.Element {
       if (!opts.silent) chat.note('Compacting earlier turns…')
 
       const summary = await window.wumpy.chat.compact({
-        tier,
         messages: older.map((m) => ({
           role: m.summary ? 'system' : m.role,
           content: m.content
@@ -659,7 +595,7 @@ export default function App(): React.JSX.Element {
       ])
       return true
     },
-    [chat, tier]
+    [chat]
   )
 
   /* --------------------------------------------------------------- commands */
@@ -698,25 +634,6 @@ export default function App(): React.JSX.Element {
           // Both readings are plausible; one click settles it, with no model.
           chat.askLocal(action.question, action.options, 'rename')
           return
-        case 'tier': {
-          if (!action.tier) {
-            setPicker('tier')
-            return
-          }
-          const kept = chat.history().length
-          await setTier(action.tier)
-          chat.note(
-            `Switched to **${TIERS[action.tier].label}**` +
-              (kept > 0 ? ` — carrying ${kept} message${kept === 1 ? '' : 's'} of context.` : '.')
-          )
-          return
-        }
-        case 'mode': {
-          const next: Mode =
-            action.mode === 'toggle' ? (mode === 'quick' ? 'dev' : 'quick') : action.mode
-          await patch({ mode: next, tier: defaultTierFor(next) })
-          return
-        }
         case 'dock': {
           if (!action.dock) {
             setPicker('dock')
@@ -729,7 +646,6 @@ export default function App(): React.JSX.Element {
         }
         case 'model': {
           if (!action.name) {
-            setModels(await window.wumpy.ollama.models())
             setPicker('model')
             return
           }
@@ -751,15 +667,9 @@ export default function App(): React.JSX.Element {
             return
           }
 
-          await patch({ tierModels: { ...(settings?.tierModels ?? {}), [tier]: id } })
-          void window.wumpy.tiers.status().then(setTierStatuses)
-          chat.note(
-            `**${activeTier.label}** now uses \`${id}\`` +
-              (hosted ? `, over the network.` : '.') +
-              (hosted && settings?.backend !== 'api'
-                ? ' You are on **Local** — switch with `/api` to actually use it.'
-                : '')
-          )
+          await patch({ model: id })
+          void window.wumpy.assistant.status().then(setAssistant)
+          chat.note(`Now answering with \`${id}\`.`)
           return
         }
         case 'reasoning': {
@@ -793,30 +703,6 @@ export default function App(): React.JSX.Element {
         case 'engine':
           setPicker('engine')
           return
-        case 'backend': {
-          const now = settings?.backend ?? 'local'
-          const next = action.to === 'toggle' ? (now === 'local' ? 'api' : 'local') : action.to
-
-          if (next === 'api' && !(keyStatus?.configured.length ?? 0)) {
-            chat.note(
-              'No hosted key yet, so there is nothing to switch to. ' +
-                'Get a free one at https://aistudio.google.com/apikey and paste it with ' +
-                '`/key google <key>`.'
-            )
-            return
-          }
-
-          await patch({ backend: next })
-          void window.wumpy.tiers.status().then(setTierStatuses)
-          chat.note(
-            next === 'api'
-              ? '**API** — answering on a hosted model. Much faster and better at code, ' +
-                  'and it spends quota. Titles, compaction and dictation stay on this PC. ' +
-                  '`/usage` shows what today has cost.'
-              : '**Local** — answering on this PC. Free, private, and works with no network.'
-          )
-          return
-        }
         case 'usage': {
           const report = action.reset
             ? await window.wumpy.usage.reset()
@@ -826,7 +712,7 @@ export default function App(): React.JSX.Element {
             chat.note(
               action.reset
                 ? 'Usage cleared.'
-                : `Nothing used yet today. Currently on **${report.backend === 'api' ? 'API' : 'Local'}**.`
+                : `Nothing used yet today. Answering with \`${report.model}\`.`
             )
             return
           }
@@ -862,7 +748,7 @@ export default function App(): React.JSX.Element {
 
           chat.note(
             [
-              `**Today (${report.date})** — on **${report.backend === 'api' ? 'API' : 'Local'}**`,
+              `**Today (${report.date})** — answering with \`${report.model}\``,
               '',
               '| model | via | turns | tokens | speed | quota |',
               '| --- | --- | --- | --- | --- | --- |',
@@ -881,7 +767,7 @@ export default function App(): React.JSX.Element {
           if (action.clear) {
             const result = await window.wumpy.keys.clear(provider)
             setKeyStatus(await window.wumpy.keys.status())
-            void window.wumpy.tiers.status().then(setTierStatuses)
+            void window.wumpy.assistant.status().then(setAssistant)
             chat.note(result.ok ? `Forgot the ${label} key.` : result.why)
             return
           }
@@ -905,12 +791,11 @@ export default function App(): React.JSX.Element {
 
           const result = await window.wumpy.keys.set(provider, action.value)
           setKeyStatus(await window.wumpy.keys.status())
-          void window.wumpy.tiers.status().then(setTierStatuses)
+          void window.wumpy.assistant.status().then(setAssistant)
           chat.note(
             result.ok
               ? `Saved the ${label} key, encrypted for this Windows account. ` +
-                  'Point a tier at a hosted model to use it — background work ' +
-                  '(titles, compaction, dictation polish) stays on the local model.'
+                  'Pick a model from it with `/model`.'
               : result.why
           )
           return
@@ -971,12 +856,6 @@ export default function App(): React.JSX.Element {
           chat.note(APPROVAL_NOTE[next])
           return
         }
-        case 'warm': {
-          chat.note(`Preloading **${TIERS[tier].label}**…`)
-          setTierStatuses(await window.wumpy.tiers.warm(tier))
-          chat.note('Model is warm. Answers will start instantly.')
-          return
-        }
         case 'stop':
           chat.stop()
           return
@@ -987,13 +866,13 @@ export default function App(): React.JSX.Element {
           window.wumpy.panel.hide()
           return
         case 'prompt':
-          chat.send(action.text, tier, raw)
+          chat.send(action.text, raw)
           return
         case 'none':
           return
       }
     },
-    [chat, mode, newChat, openChat, patch, pinned, refreshChats, retitle, setTier, settings, tier]
+    [chat, newChat, openChat, patch, pinned, refreshChats, retitle, settings]
   )
 
   const onSend = useCallback(
@@ -1050,19 +929,19 @@ export default function App(): React.JSX.Element {
 
       // Compact before sending when the context is filling up, so the model
       // never silently loses the start of the conversation.
-      const budget = TIERS[tier].options.num_ctx * 0.65
+      const budget = CONTEXT_TOKENS * 0.65
       if ((settings?.autoCompact ?? true) && usage.used > budget) {
         void (async () => {
           const done = await compactHistory({ silent: true })
           if (done) chat.note('Compacted earlier turns to make room.')
-          chat.send(text, tier)
+          chat.send(text)
         })()
         return
       }
 
-      chat.send(text, tier)
+      chat.send(text)
     },
-    [chat, compactHistory, runCommand, settings, streaming, tier, usage.used]
+    [chat, compactHistory, runCommand, settings, streaming, usage.used]
   )
 
   /**
@@ -1121,10 +1000,10 @@ export default function App(): React.JSX.Element {
 
         setChatTitle(title)
         void window.wumpy.chats
-          .save({ id: forChat, title, messages: chat.messages, tier })
+          .save({ id: forChat, title, messages: chat.messages })
           .then(() => refreshChats())
       })
-  }, [chat.messages, chatId, refreshChats, streaming, tier, titleLocked])
+  }, [chat.messages, chatId, refreshChats, streaming, titleLocked])
 
   /**
    * Persists the conversation whenever it settles. Debounced and keyed on the
@@ -1142,7 +1021,6 @@ export default function App(): React.JSX.Element {
           id: chatId,
           title: chatTitle ?? undefined,
           messages: chat.messages,
-          tier,
           titleLocked
         })
         .then((summary) => {
@@ -1152,7 +1030,7 @@ export default function App(): React.JSX.Element {
         })
     }, 600)
     return () => clearTimeout(timer)
-  }, [chat.messages, chatId, chatTitle, refreshChats, settings, streaming, tier, titleLocked])
+  }, [chat.messages, chatId, chatTitle, refreshChats, settings, streaming, titleLocked])
 
   /* ----------------------------------------------------------------- scroll */
 
@@ -1260,19 +1138,11 @@ export default function App(): React.JSX.Element {
       }
 
       if (e.ctrlKey && !e.altKey && !e.shiftKey) {
-        // Ctrl+1..4 jump straight to a tier, switching mode when needed.
-        if (e.key >= '1' && e.key <= '4') {
-          const order: TierId[] = ['flash', 'fast', 'thinker', 'deep']
-          const picked = order[Number(e.key) - 1]
-          if (picked) {
-            e.preventDefault()
-            void setTier(picked)
-          }
-          return
-        }
-        if (e.key.toLowerCase() === 'd') {
+        // Ctrl+M opens the model picker, which is what Ctrl+1..4 and Ctrl+D
+        // used to be for when there were tiers and modes to jump between.
+        if (e.key.toLowerCase() === 'm') {
           e.preventDefault()
-          void toggleMode()
+          setPicker('model')
           return
         }
         if (e.key.toLowerCase() === 'n') {
@@ -1374,19 +1244,7 @@ export default function App(): React.JSX.Element {
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [
-    chat,
-    close,
-    newChat,
-    retitle,
-    runCommand,
-    scrollBy,
-    stepMessage,
-    setTier,
-    picker,
-    streaming,
-    toggleMode
-  ])
+  }, [chat, close, newChat, retitle, runCommand, scrollBy, stepMessage, picker, streaming])
 
   const warnedRef = useRef(false)
   useEffect(() => {
@@ -1457,48 +1315,16 @@ export default function App(): React.JSX.Element {
       }
     }
 
-    if (kind === 'tier') {
-      const byId = new Map(tierStatuses.map((t) => [t.id, t]))
-      return {
-        heading: 'Tier',
-        placeholder: 'Filter tiers…',
-        onClose: close,
-        onPick: (id) => void setTier(id as TierId),
-        items: TIER_ORDER.map((id, i) => {
-          const t = TIERS[id]
-          const st = byId.get(id)
-          return {
-            id,
-            title: t.label,
-            meta: st?.installed
-              ? `${t.blurb}  ·  ${st.resolvedModel}${st.warm ? '  · warm' : ''}`
-              : `Not installed — ollama pull ${t.model}`,
-            hint: `Ctrl+${i + 1}`,
-            disabled: !st?.installed,
-            active: id === tier
-          }
-        })
-      }
-    }
-
     if (kind === 'model') {
-      const current = tierStatus?.resolvedModel
+      const current = model
 
       /**
-       * Local models first, then hosted ones.
+       * Every hosted model, whether or not a key exists for it.
        *
-       * Hosted entries are listed whether or not a key exists, because the list
-       * is also how the user discovers that the option is there - and picking
-       * one without a key explains how to get a key, which is more use than
-       * hiding it and leaving them to guess. The row says which it would be.
+       * The list is how the user discovers the option is there, and picking
+       * one without a key explains how to get a key - which is more use than
+       * hiding it and leaving them to guess.
        */
-      const localItems = models.map((m) => ({
-        id: m.name,
-        title: m.name,
-        meta: `${m.parameterSize || m.family}  ·  ${(m.size / 1e9).toFixed(1)} GB  ·  on this PC`,
-        active: m.name === current
-      }))
-
       const cloudItems = CLOUD_MODELS.map((m) => {
         const ready = keyStatus?.configured.includes(m.provider) ?? false
         return {
@@ -1510,9 +1336,9 @@ export default function App(): React.JSX.Element {
       })
 
       return {
-        heading: `Model for ${activeTier.label}`,
+        heading: 'Model',
         placeholder: 'Filter models…',
-        emptyText: 'No models installed. Pull one with `ollama pull`.',
+        emptyText: 'No models. Add a key with `/key`.',
         onClose: close,
         onPick: (name) => {
           const hosted = CLOUD_MODELS.find((m) => m.id === name)
@@ -1528,17 +1354,16 @@ export default function App(): React.JSX.Element {
             close()
             return
           }
-          void patch({ tierModels: { ...(settings?.tierModels ?? {}), [tier]: name } })
-          void window.wumpy.tiers.status().then(setTierStatuses)
+          void patch({ model: name })
+          void window.wumpy.assistant.status().then(setAssistant)
           chat.note(
             hosted
-              ? `**${activeTier.label}** now uses **${hosted.label}**, over the network. ` +
-                  'Titles, compaction and dictation stay on the local model.'
-              : `**${activeTier.label}** now uses \`${name}\`.`
+              ? `Now answering with **${hosted.label}**. ${hosted.blurb}`
+              : `Now answering with \`${name}\`.`
           )
           close()
         },
-        items: [...localItems, ...cloudItems]
+        items: cloudItems
       }
     }
 
@@ -1596,7 +1421,7 @@ export default function App(): React.JSX.Element {
       items: savedChats.map((c) => ({
         id: c.id,
         title: c.title,
-        meta: `${TIERS[c.tier]?.label ?? c.tier}  ·  ${c.messageCount} msg  ·  ${when(c.updatedAt)}`,
+        meta: `${c.messageCount} msg  ·  ${when(c.updatedAt)}`,
         active: c.id === chatId
       }))
     }
@@ -1617,21 +1442,17 @@ export default function App(): React.JSX.Element {
 
   const liveKey = hotkey.intercepted ?? hotkey.active
   const hotkeyLabel = liveKey ? prettify(liveKey) : 'tray only'
-  const activeTier = TIERS[tier]
-  const tierStatus = tierStatuses.find((t) => t.id === tier)
   const compact = !isTall(dock)
 
   return (
     <div
-      className={`panel mode-${mode} dock-${dock} ${compact ? 'is-compact' : 'is-tall'} ${
+      className={`panel dock-${dock} ${compact ? 'is-compact' : 'is-tall'} ${
         visible ? 'panel-in' : ''
       }`}
-      data-theme={mode === 'dev' ? 'dark' : 'light'}
+      data-theme="dark"
     >
       <Header
-        mode={mode}
-        onToggleMode={() => void toggleMode()}
-        status={status}
+        status={assistant}
         dock={dock}
         onCycleDock={(d) => {
           window.wumpy.panel.setDock(d)
@@ -1650,8 +1471,6 @@ export default function App(): React.JSX.Element {
         title={chatTitle}
       />
 
-      <TierBar mode={mode} tier={tier} statuses={tierStatuses} onPick={(id) => void setTier(id)} />
-
       {picker ? (
         <Picker {...pickerProps(picker)} />
       ) : (
@@ -1659,10 +1478,8 @@ export default function App(): React.JSX.Element {
           {messages.length === 0 ? (
             <Empty
               hotkeyLabel={hotkeyLabel}
-              online={status?.reachable ?? false}
-              tierLabel={activeTier.label}
-              model={tierStatus?.resolvedModel ?? activeTier.model}
-              installed={tierStatus?.installed ?? true}
+              online={assistant?.ready ?? false}
+              model={model}
               compact={compact}
             />
           ) : (
@@ -1676,7 +1493,6 @@ export default function App(): React.JSX.Element {
                   streaming={m.id === streamingId}
                   showReasoning={settings?.showReasoning ?? false}
                   smoothText={settings?.smoothText ?? false}
-                  tier={tier}
                   canAutoRun={fresh ? claimAutoRun : undefined}
                   onGrow={pinToBottom}
                   onRunCommand={canRunCommands ? runShellCommand : undefined}
@@ -1745,15 +1561,13 @@ export default function App(): React.JSX.Element {
       )}
 
       <StatusBar
-        tierLabel={activeTier.label}
-        model={tierStatus?.resolvedModel ?? 'no model'}
+        model={model}
+        ready={assistant?.ready ?? false}
         streaming={streaming}
         stats={stats}
         usage={usage}
         compact={compact}
         approvalMode={settings?.approvalMode ?? 'manual'}
-        backend={settings?.backend ?? 'local'}
-        onToggleBackend={() => void runCommand({ kind: 'backend', to: 'toggle' }, '/backend')}
         onCycleApproval={() => void runCommand({ kind: 'approve', mode: 'cycle' }, '/approve')}
         onCompact={() => void compactHistory()}
       />
@@ -1769,7 +1583,7 @@ export default function App(): React.JSX.Element {
           setPrefill(queued ?? '')
           setQueued(null)
         }}
-        placeholder={mode === 'quick' ? 'Ask Wumpy…' : `Ask ${activeTier.label}… (slower, deeper)`}
+        placeholder="Ask Wumpy…"
       />
     </div>
   )
@@ -1778,16 +1592,12 @@ export default function App(): React.JSX.Element {
 function Empty({
   hotkeyLabel,
   online,
-  tierLabel,
   model,
-  installed,
   compact
 }: {
   hotkeyLabel: string
   online: boolean
-  tierLabel: string
   model: string
-  installed: boolean
   compact: boolean
 }): React.JSX.Element {
   return (
@@ -1796,17 +1606,13 @@ function Empty({
       {!compact && <h1>Wumpy</h1>}
       {!online ? (
         <p>
-          Can&rsquo;t reach Ollama. Start it with <code>ollama serve</code> and this panel will
-          connect on its own.
-        </p>
-      ) : !installed ? (
-        <p>
-          No model installed for {tierLabel}. Run <code>ollama pull {model}</code>, then reopen.
+          No key yet for <code>{model}</code>. Add one with <code>/key</code> — Codestral is free
+          and needs no card.
         </p>
       ) : (
         <p>
-          <strong>{tierLabel}</strong> on <code>{model}</code>. Press <kbd>{hotkeyLabel}</kbd>{' '}
-          anywhere to summon this, <kbd>Ctrl+K</kbd> for everything it can do.
+          <code>{model}</code>. Press <kbd>{hotkeyLabel}</kbd> anywhere to summon this,{' '}
+          <kbd>Ctrl+K</kbd> for everything it can do.
         </p>
       )}
     </div>

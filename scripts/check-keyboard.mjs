@@ -12,7 +12,7 @@
 import { build } from 'esbuild'
 import { pathToFileURL } from 'node:url'
 import { join } from 'node:path'
-import { readFileSync } from 'node:fs'
+import { readFileSync, existsSync } from 'node:fs'
 
 const out = join(process.cwd(), '.kb-check.mjs')
 await build({
@@ -96,9 +96,13 @@ for (const card of ['CommandCard', 'WriteCard', 'LinkCard']) {
   check(`${card} can be approved by keyboard`, src.includes('registerPending('), true)
   check(`${card} arrows between its buttons`, src.includes('arrowNavigate('), true)
 }
+// The tier bar was the other radiogroup and it is gone with the tiers. The
+// model picker is what replaced it, reached with Ctrl+M where Ctrl+1..4 and
+// Ctrl+D used to jump between tiers and modes.
+check('the tier bar is gone', existsSync('src/renderer/src/components/TierBar.tsx'), false)
 check(
-  'the tier bar moves with arrows',
-  read('src/renderer/src/components/TierBar.tsx').includes('arrowNavigate('),
+  'Ctrl+M opens the model picker instead',
+  /'m'[\s\S]{0,80}setPicker\('model'\)/.test(app),
   true
 )
 check(

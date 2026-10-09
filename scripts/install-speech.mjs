@@ -30,7 +30,9 @@ function run(cmd, args, label) {
   const res = spawnSync(cmd, args, { encoding: 'utf8', windowsHide: true })
   if (res.status !== 0) {
     console.log('failed')
-    console.error((res.stderr || res.stdout || res.error?.message || '').trim().split('\n').slice(-8).join('\n'))
+    console.error(
+      (res.stderr || res.stdout || res.error?.message || '').trim().split('\n').slice(-8).join('\n')
+    )
     process.exit(1)
   }
   console.log('done')
@@ -38,9 +40,16 @@ function run(cmd, args, label) {
 }
 
 function findPython() {
-  for (const candidate of [['py', ['-3', '-c', 'import sys; print(sys.executable)']], ['python', ['-c', 'import sys; print(sys.executable)']], ['python3', ['-c', 'import sys; print(sys.executable)']]]) {
+  for (const candidate of [
+    ['py', ['-3', '-c', 'import sys; print(sys.executable)']],
+    ['python', ['-c', 'import sys; print(sys.executable)']],
+    ['python3', ['-c', 'import sys; print(sys.executable)']]
+  ]) {
     try {
-      const out = execFileSync(candidate[0], candidate[1], { encoding: 'utf8', windowsHide: true }).trim()
+      const out = execFileSync(candidate[0], candidate[1], {
+        encoding: 'utf8',
+        windowsHide: true
+      }).trim()
       if (out) return out
     } catch {
       /* try the next one */

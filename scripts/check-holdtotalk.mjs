@@ -72,7 +72,10 @@ const snap = (value = 'hello', caret = 5) => ({ value, caret })
   const listen = h.tick(HOLD_MS)
   check('exactly the delay listens', listen.kind, 'listen')
   check('the key is swallowed from here on', listen.swallow, true)
-  check('the text goes back to before the space', listen.restore, { value: 'type this ', caret: 10 })
+  check('the text goes back to before the space', listen.restore, {
+    value: 'type this ',
+    caret: 10
+  })
   check('state is listening', h.state, 'listening')
 
   const send = h.up()
@@ -183,7 +186,11 @@ check('and a letter is a letter', isPlainSpace(key({ key: 'a' })), false)
 const composer = readFileSync('src/renderer/src/components/Composer.tsx', 'utf8')
 check('the composer uses the machine', /new HoldToTalk\(\)/.test(composer), true)
 // The gate itself: with voice off, a space never even reaches the machine.
-check('and only when voice input is on', /dictation\.enabled && isPlainSpace\(e\)/.test(composer), true)
+check(
+  'and only when voice input is on',
+  /dictation\.enabled && isPlainSpace\(e\)/.test(composer),
+  true
+)
 check('the timer is cleared, not left running', /clearTimeout/.test(composer), true)
 check('losing focus aborts', /onBlur/.test(composer), true)
 check('a swallowed key is prevented', /action\.swallow/.test(composer), true)

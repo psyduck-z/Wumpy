@@ -73,8 +73,26 @@ const MINOR = new Set(['a', 'an', 'the', 'of', 'in', 'on', 'to', 'for', 'and', '
 
 /** Written in capitals even when the user typed them in lower case. */
 const ACRONYMS = new Set([
-  'ai', 'api', 'cli', 'cpu', 'css', 'gpu', 'html', 'http', 'ide', 'json', 'os',
-  'pc', 'ram', 'sdk', 'sql', 'ssd', 'ui', 'url', 'usb', 'xml'
+  'ai',
+  'api',
+  'cli',
+  'cpu',
+  'css',
+  'gpu',
+  'html',
+  'http',
+  'ide',
+  'json',
+  'os',
+  'pc',
+  'ram',
+  'sdk',
+  'sql',
+  'ssd',
+  'ui',
+  'url',
+  'usb',
+  'xml'
 ])
 
 function titleCase(text: string): string {
