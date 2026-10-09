@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { registerPending } from '../pending'
+import { claimOnce, wasClaimed } from '../once'
 import type { ShellKind, ShellResult } from '@shared/types'
 import { arrowNavigate } from '../keyboard'
 
@@ -134,10 +135,29 @@ export function CommandCard({
   const wouldRun = auto && complete && Boolean(command) && Boolean(canAutoRun)
   const unattended = wouldRun && !refused
 
+  /**
+   * Whether this command has already run, remembered outside React.
+   *
+   * It used to be a ref, and a ref dies with the component instance. Anything
+   * that remounts the card - and appending the "Ran:" message to the
+   * transcript does - handed it a fresh one, so a command that had already
+   * run came back as an idle card offering Skip and Run. On accept-all that
+   * is the mode visibly lying: the user asked for nothing to be asked, and
+   * was asked anyway, about something already done.
+   *
+   * The command did not actually run twice, because the app's unattended slot
+   * survives the remount. Only the card's memory of it was lost. This is the
+   * same guard the link, write and search cards already use, keyed the same
+   * way, and the comment in once.ts claiming CommandCard did not need it was
+   * wrong for exactly this reason.
+   */
+  const ranKey = `run:${messageId}:${command}`
+  const [alreadyRan] = useState(() => wasClaimed(ranKey))
+
   const ranOnce = useRef(false)
   useEffect(() => {
     if (!wouldRun || refused || allowed !== true) return
-    if (state !== 'idle' || ranOnce.current) return
+    if (state !== 'idle' || ranOnce.current || alreadyRan) return
     // Claimed synchronously: whatever else happens, nothing else may take this
     // slot, and this card may not take another.
     if (!canAutoRun!(command, messageId)) {
@@ -149,7 +169,13 @@ export function CommandCard({
   }, [wouldRun, refused, allowed, state])
 
   const waiting =
-    state === 'idle' && judged && allowed === true && complete && Boolean(command) && !unattended
+    state === 'idle' &&
+    judged &&
+    allowed === true &&
+    complete &&
+    Boolean(command) &&
+    !unattended &&
+    !alreadyRan
 
   // Only while it is actually waiting, so Ctrl+Enter always means the card the
   // user is looking at.
@@ -163,6 +189,8 @@ export function CommandCard({
   }, [waiting, command, messageId])
 
   const run = async (byItself = false): Promise<void> => {
+    // Claimed before the command leaves, so a remount mid-run also knows.
+    claimOnce(ranKey)
     setState('running')
     const res = await onRun(command, shell)
     if (!res) {
@@ -218,8 +246,9 @@ export function CommandCard({
             </button>
           </>
         )}
+        {state === 'idle' && alreadyRan && <span className="cmd-status">already run</span>}
         {state === 'idle' && judged && allowed === false && complete && command && (
-          <span className="cmd-status">needs Developer mode</span>
+          <span className="cmd-status">commands are off — /shell on</span>
         )}
         {state === 'running' && <span className="cmd-status">running…</span>}
         {state === 'cancelled' && <span className="cmd-status">skipped</span>}

@@ -330,12 +330,68 @@ check(
   T.OPEN_PROMPT.includes('OPENING AN APP IS NOT THE SAME'),
   true
 )
-check('it names a check for Store apps', T.OPEN_PROMPT.includes('Get-AppxPackage'), true)
+/**
+ * The installed-check, after it got Spotify wrong on this machine.
+ *
+ * It led with Get-AppxPackage, which only sees Store packages. Measured here,
+ * against a Spotify that is installed and sitting in the Start menu:
+ *
+ *   Get-AppxPackage *Spotify*   empty
+ *   Get-StartApps               found
+ *   HKCU uninstall              found
+ *   HKLM uninstall              empty
+ *   all three hives             found
+ *
+ * So the first thing the model was told to run finds nothing for a normal
+ * desktop install, and HKLM alone finds nothing either. Both are now fixed in
+ * the prompt, and asserted here so the ordering does not drift back.
+ */
+check('it leads with Get-StartApps', T.OPEN_PROMPT.includes('Get-StartApps'), true)
+check(
+  'and says not to lead with Get-AppxPackage',
+  T.OPEN_PROMPT.includes('Do NOT lead with Get-AppxPackage'),
+  true
+)
+check(
+  'because that misses a desktop install',
+  T.OPEN_PROMPT.includes('returns nothing while Spotify is installed'),
+  true
+)
 check('and for desktop installs', T.OPEN_PROMPT.includes('Uninstall'), true)
+// HKLM alone came back empty for Spotify, so all three hives are named.
+check('it searches HKCU too', T.OPEN_PROMPT.includes('HKCU:'), true)
+check('and the WOW6432Node hive', T.OPEN_PROMPT.includes('WOW6432Node'), true)
+check(
+  'and tolerates keys it cannot read',
+  T.OPEN_PROMPT.includes('-ErrorAction SilentlyContinue'),
+  true
+)
 check('part of a word is called out as not a match', T.OPEN_PROMPT.includes('is not a match'), true)
+
+/**
+ * The inference that produced the wrong answer, forbidden by name.
+ *
+ * The model proposed a check, the check errored, and it reported "This means
+ * that Spotify is not installed on this machine" - then answered "I am
+ * certain" when asked. A command that did not run says nothing about the
+ * question, and that is now stated as its own rule rather than left implicit
+ * in "an empty result, a non-zero exit and an error are three different
+ * things", which was already there and did not hold.
+ */
 check(
   'empty output means absent, not failed',
-  T.OPEN_PROMPT.includes('does not mean the command failed'),
+  T.OPEN_PROMPT.includes('Empty output and a failed command are NOT the same answer'),
+  true
+)
+check(
+  'and a failed check is never a negative result',
+  T.VOICE_PROMPT.includes('A BROKEN COMMAND IS NOT A NEGATIVE RESULT'),
+  true
+)
+check('the worst inference is named as such', /single worst inference/.test(T.VOICE_PROMPT), true)
+check(
+  '"are you sure" means re-read, not re-assert',
+  T.VOICE_PROMPT.includes('Never answer "I am certain" from memory'),
   true
 )
 check('installed means launch it', T.OPEN_PROMPT.includes('Start-Process'), true)
