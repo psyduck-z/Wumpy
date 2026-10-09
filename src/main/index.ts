@@ -825,6 +825,7 @@ ${command}`
   })
 
   ipcMain.on(IPC.chatAbort, (_e, requestId: string) => cloud.abort(requestId))
+  ipcMain.on(IPC.panelRefocus, () => panel.forceFocus())
   ipcMain.on(IPC.panelHide, () => panel.hide())
   ipcMain.on(IPC.panelPin, (_e, pinned: boolean) => panel.setPinned(pinned))
   ipcMain.on(IPC.panelDock, (_e, dock: Dock) => panel.setDock(dock))

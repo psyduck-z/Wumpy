@@ -575,6 +575,32 @@ check(
  * msiexec /x, winget uninstall and Remove-AppxPackage as destructive, which
  * is what makes "go ahead and propose it" safe to say.
  */
+/**
+ * Installing, after it sent the user to an empty Microsoft Store page.
+ *
+ * Asked to install Spotify, Wumpy ran
+ * Start-Process "ms-windows-store://pdp/?ProductId=XPDC2ZKXXB3VXS" with a
+ * ProductId it had invented. The Store opened on "The thing you're looking
+ * for isn't here", the follow-up check found nothing, and it reported that
+ * Spotify could not be installed - which reads as the app being unavailable
+ * rather than the id being wrong.
+ *
+ * There was no install guidance in the prompt at all, only a rule about not
+ * declaring one finished early, so it improvised. winget is on this machine
+ * and knows the real ids: measured, `winget search Spotify` returns
+ * Spotify.Spotify.
+ */
+check('installing uses winget', /INSTALLING: USE WINGET/.test(open), true)
+check('with the full command', /winget install --id <Id> -e/.test(open), true)
+check('agreements accepted so it does not hang', /--accept-package-agreements/.test(open), true)
+// The id has to come from a search, not from memory.
+check('the id is looked up first', /winget search <name>/.test(open), true)
+check('with a real example', /Spotify\.Spotify/.test(open), true)
+check('found rather than guessed', /found by searching, not/.test(open), true)
+// The specific thing that went wrong.
+check('a guessed Store id is forbidden', /NEVER open a ms-windows-store/.test(open), true)
+check('and what it looks like when you do', /is not here/.test(open), true)
+
 check(
   'asked to uninstall, it uninstalls',
   /Asked to UNINSTALL something, uninstall it/.test(open),

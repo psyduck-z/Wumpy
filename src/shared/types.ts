@@ -348,6 +348,16 @@ export const IPC = {
   panelPin: 'panel:pin',
   panelDock: 'panel:dock',
   panelShown: 'panel:shown',
+  /**
+   * The renderer reporting that it still does not hold the keyboard.
+   *
+   * Sent only when the page has given up trying: document.hasFocus() is the
+   * only place the truth lives, and the main process cannot see it.
+   * win.isFocused() is a proxy and can say true while Windows has not
+   * actually handed the foreground over, which is why the first fix guarded
+   * on it and did nothing.
+   */
+  panelRefocus: 'panel:refocus',
   hotkeyState: 'hotkey:state',
   historyGet: 'history:get',
   historyAdd: 'history:add',

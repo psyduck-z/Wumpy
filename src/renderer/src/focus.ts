@@ -74,7 +74,17 @@ export function shouldKeepTrying(s: AttemptState): boolean {
  */
 export function insistFocus(
   getElement: () => HTMLElement | null | undefined,
-  isYielded: () => boolean = () => false
+  isYielded: () => boolean = () => false,
+  /**
+   * Called once if the deadline passes and the window still does not hold
+   * the keyboard, so the main process can take the foreground by force.
+   *
+   * The page is the only place that knows. document.hasFocus() is the truth
+   * and the main process cannot read it; win.isFocused() is a proxy that can
+   * say true while Windows has handed over nothing, which is how an earlier
+   * version of this guard came to do nothing at all.
+   */
+  onGaveUp: () => void = () => {}
 ): () => void {
   const startedAt = Date.now()
   let timer: ReturnType<typeof setTimeout> | null = null
@@ -89,7 +99,13 @@ export function insistFocus(
       elapsedMs: Date.now() - startedAt,
       yielded: isYielded()
     }
-    if (!shouldKeepTrying(state)) return
+    if (!shouldKeepTrying(state)) {
+      // Out of time without the keyboard, and nobody else wanted it. Ask for
+      // the forceful route. Once only - it is called from a loop, and the
+      // flicker it causes is not something to repeat.
+      if (!state.hasFocus && !state.yielded) onGaveUp()
+      return
+    }
 
     // Focus even while the window does not have it: the element then becomes
     // the one Windows lands on when the foreground does arrive, so the very

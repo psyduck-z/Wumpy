@@ -477,6 +477,9 @@ check('and says why not', panelSrc.includes('WS_EX_TOOLWINDOW'), true)
 check('it still stays off the taskbar', panelSrc.includes('skipTaskbar: true'), true)
 // The ordinary route first, so the usual case pays nothing.
 check('app.focus is still tried first', /app\.focus\(\{ steal: true \}\)/.test(panelSrc), true)
+// Immediately, inside show(). Measured: the same calls made ~600ms later
+// through an IPC round trip do not work, because whatever right to change
+// the foreground the process has, it has it then and not after.
 check(
   'with a restore fallback when it fails',
   /if \(!win\.isFocused\(\)\)[\s\S]{0,120}win\.minimize\(\)[\s\S]{0,60}win\.restore\(\)/.test(
@@ -490,6 +493,31 @@ check(
   /win\.minimize\(\)/.test(panelSrc) && /!win\.isFocused\(\)/.test(panelSrc),
   true
 )
+
+/**
+ * And a last resort driven by the page, because only the page knows.
+ *
+ * document.hasFocus() is the truth and the main process cannot read it;
+ * win.isFocused() is a proxy that can say true while Windows has handed
+ * nothing over. So when the renderer runs out of patience without the
+ * keyboard, it says so and the main process tries once more.
+ *
+ * It works far less often than show()'s own attempt - measured, the delay is
+ * what costs it - so it is a salvage path, not the mechanism.
+ */
+check('the renderer can report losing the keyboard', panelSrc.includes('forceFocus()'), true)
+check(
+  'on its own channel',
+  read('src/shared/types.ts').includes("panelRefocus: 'panel:refocus'"),
+  true
+)
+check('exposed to the page', read('src/preload/index.ts').includes('requestFocus:'), true)
+check(
+  'and only when it gave up without focus',
+  focusSrc.includes('!state.hasFocus && !state.yielded'),
+  true
+)
+check('the composer asks for it', composer.includes('panel.requestFocus()'), true)
 
 check('the composer uses it', composer.includes('insistFocus('), true)
 check(

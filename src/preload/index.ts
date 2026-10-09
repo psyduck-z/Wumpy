@@ -104,6 +104,8 @@ const api = {
     setPinned: (pinned: boolean): void => ipcRenderer.send(IPC.panelPin, pinned),
     setDock: (dock: Dock): void => ipcRenderer.send(IPC.panelDock, dock),
     onShown: (cb: () => void) => on(IPC.panelShown, cb),
+    /** "I am visible and the keyboard is still somewhere else." */
+    requestFocus: (): void => ipcRenderer.send(IPC.panelRefocus),
     onDock: (cb: (d: Dock) => void) => on(IPC.panelDock, cb)
   },
   hotkey: {

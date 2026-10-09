@@ -231,11 +231,50 @@ export class Panel {
      */
     app.focus({ steal: true })
     win.focus()
+    /**
+     * Immediately, not later, when the polite route has already lost.
+     *
+     * Whatever right to change the foreground this process has, it has it
+     * now - measured, the same minimize/restore run about 600ms later
+     * through an IPC round trip does not work, while run here it does.
+     * isFocused() is only a proxy for the truth, but it is the only one
+     * available synchronously, and acting on it costs nothing when it is
+     * wrong in the harmless direction.
+     */
     if (!win.isFocused()) {
       win.minimize()
       win.restore()
       win.focus()
     }
+    win.webContents.focus()
+    win.webContents.send(IPC.panelShown)
+  }
+
+  /**
+   * Take the foreground by force, because the polite route lost.
+   *
+   * The last resort, after show() has already tried everything it can do
+   * synchronously.
+   *
+   * Called when the renderer reports that it still does not hold the
+   * keyboard after half a second of trying. That report is the only
+   * trustworthy signal there is: document.hasFocus() is the truth, it lives
+   * in the page, and the main process cannot read it - win.isFocused() is a
+   * proxy that can say true while Windows has handed over nothing.
+   *
+   * Measured: this works far less often than the same calls made inside
+   * show(), because by now the brief right to change the foreground is
+   * gone. It is here for the case where show()'s own attempt lost and
+   * something can still be salvaged, not as the main mechanism.
+   */
+  forceFocus(): void {
+    const win = this.window
+    if (!win || !win.isVisible()) return
+    win.minimize()
+    win.restore()
+    win.setAlwaysOnTop(true, 'screen-saver')
+    app.focus({ steal: true })
+    win.focus()
     win.webContents.focus()
     win.webContents.send(IPC.panelShown)
   }

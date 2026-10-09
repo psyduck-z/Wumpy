@@ -194,7 +194,10 @@ export function Composer({
     // should leave the user in the list they were choosing from.
     return insistFocus(
       () => ref.current,
-      () => Boolean(document.querySelector('.picker'))
+      () => Boolean(document.querySelector('.picker')),
+      // Half a second of trying and the window still has not been given the
+      // keyboard. Only the main process can take it by force from here.
+      () => window.wumpy.panel.requestFocus()
     )
   }, [focusToken])
 
