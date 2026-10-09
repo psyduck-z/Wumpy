@@ -403,6 +403,7 @@ const example = T.OPEN_PROMPT.split(String.fromCharCode(10)).filter((l) =>
   l.includes('Get-StartApps |')
 )
 check('one command to ask, one to act', example.length, 2)
+const ASK_LINE = example.find((l) => !l.includes('Start-Process')) ?? ''
 // The example is run for real by scripts/check-openapp.mjs. Here we only
 // assert it is one line, because that is what broke it twice.
 check('and is a single line', (example[0] ?? '').includes(String.fromCharCode(10)), false)
@@ -412,7 +413,14 @@ check(
   1
 )
 // No multi-line registry walk left to get wrong.
-check('the fragile registry block is gone', T.OPEN_PROMPT.includes('WOW6432Node'), false)
+// The registry is back, but only for uninstalling, and only as one line. It
+// is gone from the installed-check, which is what kept breaking: that is
+// Get-StartApps now, and nothing in it touches a hive.
+check('the install check does not use the registry', /HKLM|HKCU/.test(ASK_LINE), false)
+const UNINST_LINE =
+  T.OPEN_PROMPT.split(String.fromCharCode(10)).find((l) => l.includes('UninstallString')) ?? ''
+check('the uninstall lookup does', /HKCU:/.test(UNINST_LINE), true)
+check('and is a single line', UNINST_LINE.includes(String.fromCharCode(10)), false)
 check('part of a word is called out as not a match', T.OPEN_PROMPT.includes('is not a match'), true)
 
 /**
@@ -504,11 +512,57 @@ check('nor put in a command', T.OPEN_PROMPT.includes('never'), true)
  * swapping one for the other is deciding for them. Offer it and wait.
  */
 const open = T.OPEN_PROMPT.replace(/\s+/g, ' ')
-check('not installed means say so and stop', /NOT INSTALLED -> say so and STOP/.test(open), true)
-check('not open the website instead', /Do not open the website instead/.test(open), true)
+check('not installed does not open the website', /do NOT open the website/.test(open), true)
 check('the substitution is named as one', /a web page is a different thing/.test(open), true)
-check('it is offered rather than done', /Want me to open minecraft.net\?/.test(open), true)
-check('and opened once they say yes', /If they say yes/.test(open), true)
+
+/**
+ * Offering has to be clickable, not prose.
+ *
+ * Told "Minecraft is not installed", then "open it", Wumpy opened
+ * minecraft.net. The rule said to offer and wait; it offered nothing and did
+ * it. The user asked for the thing Wumpy already has and was not using: a
+ * wumpy-ask block, which renders as options you click.
+ *
+ * "Offer it in a line and wait" was the wrong instruction anyway. A sentence
+ * ending in a question mark is indistinguishable, to a model mid-flow, from
+ * narration of what it is about to do. A block is not.
+ */
+check('it asks with a block', /use the block, so answering is one click/.test(open), true)
+check('and the block is shown', /```wumpy-ask/.test(T.OPEN_PROMPT), true)
+check('with the real question in it', /Open minecraft.net instead\?/.test(open), true)
+check('and two options to click', /- Open the website/.test(open) && /- No thanks/.test(open), true)
+check('prose offers are ruled out', /Offering in prose does not count/.test(open), true)
+check('the page opens only once picked', /only once they have picked it/.test(open), true)
+
+/**
+ * Uninstalling, and the hive that is empty for a per-user install.
+ *
+ * Asked to uninstall Spotify it searched HKLM only, got nothing, and said
+ * "Spotify is not installed" - four messages after establishing that it is.
+ * Measured: Spotify has no HKLM entry at all and lives in HKCU. The same
+ * split I measured for the installed-check and did not carry over.
+ */
+check(
+  'uninstalling has its own guidance',
+  /UNINSTALLING, AND ANY OTHER REGISTRY LOOKUP/.test(open),
+  true
+)
+check('a per-user install is called out', /Spotify has no HKLM entry at all/.test(open), true)
+// The inference that produced the wrong answer, forbidden directly.
+check(
+  'an empty registry result blames the query',
+  /means YOUR QUERY found nothing/.test(open),
+  true
+)
+check('not the app', /It does not mean the app is absent/.test(open), true)
+check(
+  'and an established fact outranks it',
+  /proof the query is wrong, not that you were wrong before/.test(open),
+  true
+)
+// Uninstalling is not reversible by the thing proposing it.
+check('uninstalling is left to the user', /let the user decide/.test(open), true)
+check('and never chained', /never chain the lookup/.test(open), true)
 
 // "it" is the thing most recently discussed, not the last thing acted on.
 check(

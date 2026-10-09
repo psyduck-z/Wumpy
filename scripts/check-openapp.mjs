@@ -173,6 +173,37 @@ if (!TEMPLATE) {
   check('resolving through shell:AppsFolder', store.stdout.includes('AppsFolder'), true)
   check('with the package id', store.stdout.includes('!App'), true)
 
+  /**
+   * The uninstall lookup, run verbatim from the prompt.
+   *
+   * Asked to uninstall Spotify, Wumpy searched HKLM and HKLM\WOW6432Node,
+   * got nothing, and said "Spotify is not installed" - four messages after
+   * establishing that it is, and while it was. I had measured this same hive
+   * split for the installed-check and never carried it into this path:
+   * Spotify is a per-user install and has no HKLM entry at all.
+   */
+  const uninstLine = T.OPEN_PROMPT.split(String.fromCharCode(10)).find((l) =>
+    l.includes('UninstallString')
+  )
+  check('the prompt gives an uninstall lookup', Boolean(uninstLine), true)
+  const UNINST = (uninstLine ?? '').trim()
+  check('on one line', UNINST.includes(String.fromCharCode(10)), false)
+  // All three, because the per-user one is the one that was missing.
+  check('it searches HKCU', UNINST.includes('HKCU:'), true)
+  check('and both HKLM hives', (UNINST.match(/HKLM:/g) ?? []).length, 2)
+  check('tolerating keys it cannot read', UNINST.includes('-ErrorAction SilentlyContinue'), true)
+  // It must only look. Chaining the lookup to the uninstall would make a
+  // question about uninstalling into an uninstall.
+  check('and cannot uninstall anything', /Start-Process|msiexec|Invoke-|&\s/.test(UNINST), false)
+
+  const perUser = await runRaw(UNINST.split('*name*').join('*Spotify*'))
+  check('a per-user install is found', perUser.stdout.includes('Spotify'), true)
+  check('with its uninstall string', perUser.stdout.toLowerCase().includes('uninstall.exe'), true)
+  const machine = await runRaw(UNINST.split('*name*').join('*7-Zip*'))
+  check('and a machine-wide one too', machine.stdout.includes('7-Zip'), true)
+  const neither = await runRaw(UNINST.split('*name*').join('*ThisIsNotInstalledXYZ*'))
+  check('and nothing for an app that is absent', neither.stdout, '')
+
   const absent = await run('ThisAppIsNotInstalledAnywhere')
   check('an absent app runs cleanly', absent.code, 0)
   check('and says NOT INSTALLED', absent.stdout, 'NOT INSTALLED')
