@@ -36,6 +36,16 @@ await build({
 })
 const F = await import(pathToFileURL(focusOut).href)
 
+const cmdOut = join(process.cwd(), '.kb-cmds.mjs')
+await build({
+  entryPoints: ['src/renderer/src/commands.ts'],
+  bundle: true,
+  platform: 'node',
+  format: 'esm',
+  outfile: cmdOut,
+  logLevel: 'error'
+})
+
 // Both bundles are read by now; leaving them in the repo root is litter.
 rmSync(out, { force: true })
 rmSync(focusOut, { force: true })
@@ -244,6 +254,56 @@ check(
   read('src/renderer/src/components/Picker.tsx').includes('className="picker"'),
   true
 )
+
+/* ----------------------------------------- no two things on one chord */
+
+/**
+ * Ctrl+M was bound twice, and one of them never ran.
+ *
+ * Dictation had it first, on a window listener in the CAPTURE phase. I added
+ * the model picker to the same chord without checking, so pressing it started
+ * recording and the picker never opened - a shortcut that was documented in
+ * /help and in the Ctrl+K list while doing nothing at all.
+ *
+ * Collisions are invisible from either side: each handler looks correct on
+ * its own. So the chords are collected from where they are declared and
+ * compared.
+ */
+// The two authoritative lists: the per-command shortcuts and the key-only
+// rows. Scraping /help as well double-counts every chord, since the table
+// restates them.
+const cmds = await import(pathToFileURL(cmdOut).href)
+rmSync(cmdOut, { force: true })
+const declared = [
+  ...Object.values(cmds.SHORTCUT_FOR).filter(Boolean),
+  ...cmds.KEY_ONLY.map((k) => k.keys)
+]
+const norm = (c) => c.replace(/\s/g, '').toLowerCase()
+/**
+ * Esc is the one chord that is deliberately layered: it stops a running
+ * answer, else steps out of a card, else hides the panel. Each layer only
+ * fires when the one before it does not apply, which is the opposite of the
+ * Ctrl+M problem - there, two handlers both wanted the same key at the same
+ * time and the loser was invisible.
+ */
+const LAYERED = new Set(['esc'])
+const seen = declared.map(norm).filter((c) => !LAYERED.has(c))
+check(
+  'no chord is listed for two things',
+  [...new Set(seen.filter((c, i) => seen.indexOf(c) !== i))],
+  []
+)
+
+// The specific pair that broke, asserted by name so it cannot come back.
+check('dictation keeps Ctrl+M', composer.includes("e.key.toLowerCase() === 'm'"), true)
+check(
+  'the model picker is on Ctrl+Shift+M',
+  /e\.ctrlKey && e\.shiftKey && !e\.altKey && e\.key\.toLowerCase\(\) === 'm'/.test(app),
+  true
+)
+// Plain Ctrl+M must fall through to dictation rather than being handled here.
+check('and plain Ctrl+M is left alone', /=== 'm'\) return/.test(app), true)
+check('the help table agrees', cmds.SHORTCUT_FOR.model, 'Ctrl+Shift+M')
 
 /* ------------------------------ the caret actually landing in the box */
 

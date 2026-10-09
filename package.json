@@ -35,6 +35,7 @@
     "check:writefile": "node scripts/check-writefile.mjs",
     "speech:install": "node scripts/install-speech.mjs",
     "bench:cloud": "node scripts/bench-cloud.mjs",
+    "bench:selfreport": "node scripts/bench-selfreport.mjs",
     "check:cloud": "node scripts/check-cloud.mjs",
     "check:usage": "node scripts/check-usage.mjs",
     "check:keyboard": "node scripts/check-keyboard.mjs",

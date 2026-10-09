@@ -94,11 +94,26 @@ export function actionFacts(): string[] {
     parts.push(`${n} ${n === 1 ? one : many} ${verb[kind]}`)
   }
 
-  const last = actions[actions.length - 1]
+  /**
+   * The list, not just the last one.
+   *
+   * This named only the most recent action, and the first time that mattered
+   * it hid the thing being asked about. Wumpy ran the Spotify uninstaller,
+   * then ran a check, and the user asked "then how did you uninstall it?" -
+   * by which point the only command on the list was the harmless check. The
+   * model answered "I did not uninstall it", which was consistent with
+   * everything it had been shown.
+   *
+   * Six, newest first, because the question is always about something
+   * recent and the whole block is paid for on every turn.
+   */
+  const recent = actions.slice(-6).reverse()
   return [
     `- In this chat you have already: ${parts.join(', ')}.`,
-    `- The most recent was: ${last.what}`,
-    '- These happened. If the user asks whether you did something on this list,',
-    '  the answer is yes. Do not deny it.'
+    '- Most recent first, these are the things YOU did:',
+    ...recent.map((a) => `    ${a.kind}: ${a.what}`),
+    '- Every line above happened. If the user asks whether you did one of',
+    '  them, the answer is yes, even if you do not remember it and even if',
+    '  you would not have chosen to. Never answer "I did not".'
   ]
 }

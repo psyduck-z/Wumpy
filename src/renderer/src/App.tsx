@@ -1161,13 +1161,11 @@ export default function App(): React.JSX.Element {
       }
 
       if (e.ctrlKey && !e.altKey && !e.shiftKey) {
-        // Ctrl+M opens the model picker, which is what Ctrl+1..4 and Ctrl+D
-        // used to be for when there were tiers and modes to jump between.
-        if (e.key.toLowerCase() === 'm') {
-          e.preventDefault()
-          setPicker('model')
-          return
-        }
+        // Ctrl+Shift+M, not Ctrl+M: dictation had Ctrl+M first, and the
+        // composer listens in the capture phase, so the binding I added here
+        // never fired at all - pressing it started recording instead. Two
+        // handlers on one chord, one of them silently dead.
+        if (e.key.toLowerCase() === 'm') return
         if (e.key.toLowerCase() === 'n') {
           e.preventDefault()
           newChat()
@@ -1253,6 +1251,14 @@ export default function App(): React.JSX.Element {
       }
 
       // Ctrl+Shift+Enter skips it instead.
+      // Ctrl+Shift+M opens the model picker. Not Ctrl+M, which dictation
+      // claimed first and takes in the capture phase.
+      if (e.ctrlKey && e.shiftKey && !e.altKey && e.key.toLowerCase() === 'm') {
+        e.preventDefault()
+        setPicker('model')
+        return
+      }
+
       // Ctrl+Shift+C copies the last answer. Selecting a streamed reply by
       // hand means dragging across a box that is still growing.
       if (e.ctrlKey && e.shiftKey && !e.altKey && e.key.toLowerCase() === 'c') {

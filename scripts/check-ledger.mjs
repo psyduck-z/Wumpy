@@ -61,9 +61,9 @@ L.record('command', "Get-StartApps | Where-Object Name -like '*Spotify*'")
 const one = L.actionFacts()
 check('one command is recorded', L.actionsSoFar().length, 1)
 check('and stated in the singular', one[0].includes('1 command run'), true)
-check('with the command itself named', one[1].includes('Get-StartApps'), true)
+check('with the command itself named', one.join(' ').includes('Get-StartApps'), true)
 // The sentence the model has to read before it can deny anything.
-check('and the denial closed off', one.join(' ').includes('Do not deny it'), true)
+check('and the denial closed off', one.join(' ').includes('Never answer "I did not"'), true)
 check('the answer to "did you" is given', one.join(' ').includes('the answer is yes'), true)
 
 /* ------------------------------------------------------- the Spotify case */
@@ -71,9 +71,22 @@ check('the answer to "did you" is given', one.join(' ').includes('the answer is 
 L.record('command', '$a = Get-StartApps ...; Start-Process $a; "LAUNCHED $a"')
 const two = L.actionFacts()
 check('two commands counted', two[0].includes('2 commands run'), true)
-// "Did you just open Spotify" is always about the last thing.
-check('the most recent is the one named', two[1].includes('Start-Process'), true)
-check('and not the earlier one', two[1].includes('Where-Object'), false)
+/**
+ * Both, newest first - not just the last one.
+ *
+ * Naming only the most recent action is what let the model deny the
+ * uninstall: it ran the uninstaller, then ran a check, and by the time the
+ * user asked "then how did you uninstall it?" the only command on the list
+ * was the harmless check. "I did not uninstall it" was consistent with
+ * everything it had been shown.
+ */
+const twoFlat = two.join(String.fromCharCode(10))
+check(
+  'the most recent is listed first',
+  twoFlat.indexOf('Start-Process') < twoFlat.indexOf('Where-Object'),
+  true
+)
+check('and the earlier one is still there', twoFlat.includes('Where-Object'), true)
 
 /* ------------------------------------------- several kinds at once */
 
@@ -90,9 +103,15 @@ check('and links, pluralised', mixed.includes('2 links opened'), true)
 // Every line here is paid for on every turn for the rest of the chat, so a
 // long command cannot drag the whole thing in with it.
 L.record('command', 'X'.repeat(500))
-const long = L.actionFacts()[1]
-check('a long command is clipped', long.length < 200, true)
-check('and says so', long.endsWith('…'), true)
+const longLine = L.actionFacts().find((l) => l.includes('XXXX')) ?? ''
+check('a long command is clipped', longLine.length < 200, true)
+check('and says so', longLine.includes('…'), true)
+// Six at most, so a long session cannot grow the facts block without bound.
+check(
+  'at most six are listed',
+  L.actionFacts().filter((l) => l.startsWith('    ')).length <= 6,
+  true
+)
 
 L.forgetActions()
 check('a new chat starts clean', L.actionsSoFar().length, 0)
