@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
+import { actionFacts } from '../ledger'
 import type { ChatMessage } from '@shared/types'
 
 let counter = 0
@@ -221,7 +222,11 @@ export function useChat(): ChatState {
     void window.wumpy.chat.send({
       requestId,
       messages: history,
-      context: { chatTitle: context.current.chatTitle, messageCount: history.length }
+      context: {
+        chatTitle: context.current.chatTitle,
+        messageCount: history.length,
+        actions: actionFacts()
+      }
     })
     return true
   }, [])

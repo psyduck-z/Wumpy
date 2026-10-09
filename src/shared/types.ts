@@ -278,6 +278,16 @@ export interface ChatRequest {
   context: {
     chatTitle: string | null
     messageCount: number
+    /**
+     * What Wumpy has already done in this chat, stated by the app.
+     *
+     * Not the model's recollection: the code that ran the command writes
+     * these. Asked whether it had opened Spotify, the model denied it three
+     * times - truthfully, as far as its own memory of its own intent went,
+     * because the prompt had called that command "the installed-check". The
+     * app has the receipt, so the app says.
+     */
+    actions: string[]
   }
 }
 

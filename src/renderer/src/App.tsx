@@ -30,6 +30,7 @@ import {
 } from './commands'
 import { newestPending } from './pending'
 import { forgetClaims } from './once'
+import { forgetActions, record } from './ledger'
 import { matchIntent } from './intents'
 import { AUTO_RUN_LIMIT, autoRunEligible } from './autorun'
 import { DOCK_CYCLE, Header } from './components/Header'
@@ -196,6 +197,7 @@ export default function App(): React.JSX.Element {
     // old ones. Left to grow they would also outlive every chat in the
     // session for no reason.
     forgetClaims()
+    forgetActions()
     const fresh = nextId()
     setChatId(fresh)
     setChatTitle(null)
@@ -259,6 +261,7 @@ export default function App(): React.JSX.Element {
       // they first ran. Without this it would find them all already done and
       // refuse to act on any of them.
       forgetClaims()
+      forgetActions()
       setChatId(loaded.id)
       setChatTitle(loaded.title)
       setTitleLocked(loaded.titleLocked ?? false)
@@ -310,6 +313,7 @@ export default function App(): React.JSX.Element {
   /** Hands search results back so the model can answer from them. */
   const onSearchResults = useCallback(
     (query: string, results: SearchResult[], provider: string, error?: string) => {
+      if (!error) record('search', query)
       const body = error
         ? `The search failed: ${error}`
         : results
@@ -345,6 +349,7 @@ export default function App(): React.JSX.Element {
    * to break.
    */
   const onWritten = useCallback((result: WriteResult) => {
+    if (result.written) record('write', result.path)
     chatRef.current.note(
       result.written
         ? `${result.overwrote ? 'Replaced' : 'Created'} \`${result.path}\` (${result.bytes} bytes).`
@@ -377,6 +382,7 @@ export default function App(): React.JSX.Element {
    * narrate what the page said, which it could not possibly know.
    */
   const onOpened = useCallback((result: LinkResult) => {
+    if (result.opened) record('open', result.host)
     chatRef.current.note(
       result.opened
         ? `Opened **${result.host}** in your browser.`
@@ -456,6 +462,9 @@ export default function App(): React.JSX.Element {
    * push the actual question out of scope.
    */
   const onCommandResult = useCallback((result: ShellResult, unattended: boolean) => {
+    // Recorded by the code that ran it, before anything is interpreted. The
+    // model is never asked to remember whether it acted.
+    record('command', result.command)
     // Only runs that happened without a click spend the budget; approving one
     // by hand is the person being present, which is what the budget protects.
     // An unattended run already spent its budget when it claimed the slot.

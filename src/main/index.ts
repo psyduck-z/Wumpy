@@ -146,7 +146,7 @@ async function refreshModels(): Promise<void> {
  * Deliberately no clock time and no message count. Both changed on every turn
  * and bought nothing, while making this block differ each time.
  */
-function factsFor(chatTitle: string | null): string {
+function factsFor(chatTitle: string | null, actions: string[] = []): string {
   const now = new Date()
   return [
     'Facts about right now. If the user asks about any of these, just state the answer.',
@@ -157,8 +157,14 @@ function factsFor(chatTitle: string | null): string {
       year: 'numeric'
     })}.`,
     `- This chat is titled ${chatTitle ? `"${chatTitle}"` : 'untitled so far'}.`,
-    `- The user is on Windows. Commands run from ${settings.get('shellCwd') || homedir()}.`
-  ].join('\n')
+    `- The user is on Windows. Commands run from ${settings.get('shellCwd') || homedir()}.`,
+    // Written by the code that performed them, not recalled by the model.
+    // Asked whether it had opened Spotify, the model denied it three times -
+    // the app had the receipt and was not showing it.
+    ...actions
+  ]
+    .filter(Boolean)
+    .join('\n')
 }
 
 /**
@@ -901,7 +907,7 @@ app.on('will-quit', () => {
  * nearly free and removes a whole class of confident wrong answers.
  */
 function withContext(req: ChatRequest): Array<Pick<ChatMessage, 'role' | 'content'>> {
-  const facts = factsFor(req.context.chatTitle)
+  const facts = factsFor(req.context.chatTitle, req.context.actions ?? [])
 
   const messages: Array<Pick<ChatMessage, 'role' | 'content'>> = [
     ...req.messages.map((m) => ({ role: m.role, content: m.content }))
