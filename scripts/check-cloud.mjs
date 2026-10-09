@@ -14,6 +14,9 @@ import { pathToFileURL } from 'node:url'
 import { join } from 'node:path'
 import { readFileSync } from 'node:fs'
 
+/** Source is read in several places below; declared here so all of them can. */
+const read = (f) => readFileSync(f, 'utf8')
+
 const out = join(process.cwd(), '.cloud-check.mjs')
 await build({
   entryPoints: ['src/shared/cloud.ts'],
@@ -247,28 +250,197 @@ check('Mistral is a provider', Boolean(C.PROVIDERS.mistral), true)
 check('with an OpenAI-compatible base', C.PROVIDERS.mistral.base, 'https://api.mistral.ai/v1')
 check('one request a second, with margin', C.PROVIDERS.mistral.minGapMs >= 1000, true)
 check('and 500k tokens a minute', C.PROVIDERS.mistral.tokensPerMinute, 500_000)
-// Mistral does not take reasoning_effort at all; sending one is a 400.
-check('no reasoning_effort is sent to it', C.reasoningEffortFor('mistral', false), null)
+// Most of the Mistral line does not take reasoning_effort at all, and an
+// unknown parameter there is a 400 rather than something quietly ignored. The
+// exception is Medium 3.5, which Mistral's changelog introduces with
+// "adjustable reasoning via the reasoning_effort parameter" - and which is the
+// model this app points at first, so the field has to reach it.
+check(
+  'nothing is sent to Large',
+  C.reasoningEffortFor('mistral', false, 'mistral-large-latest'),
+  null
+)
+check('nor to Codestral', C.reasoningEffortFor('mistral', false, 'codestral-latest'), null)
+check('nor to Small', C.reasoningEffortFor('mistral', false, 'mistral-small-latest'), null)
+check(
+  'but Medium 3.5 takes it',
+  C.reasoningEffortFor('mistral', false, 'mistral-medium-latest'),
+  'low'
+)
+check('under its dated id too', C.reasoningEffortFor('mistral', false, 'mistral-medium-3-5'), 'low')
+// The alias moves; the family does not. A future Medium should keep the field
+// rather than silently lose it the day the number changes.
+check('and a later Medium', C.reasoningEffortFor('mistral', false, 'mistral-medium-4'), 'low')
+// Medium 3 came before the parameter existed, so it must not be sent one.
+check('but not Medium 3', C.reasoningEffortFor('mistral', false, 'mistral-medium-3'), null)
+check(
+  'a tier that wants reasoning still omits it',
+  C.reasoningEffortFor('mistral', true, 'mistral-medium-latest'),
+  null
+)
 check('unlike Google', C.reasoningEffortFor('google', false), 'none')
 
 check('a mistral model routes there', C.providerFor('mistral-large-latest'), 'mistral')
 check('so does codestral', C.providerFor('codestral-latest'), 'mistral')
 check('and devstral', C.providerFor('devstral-small-latest'), 'mistral')
+// NVIDIA hosts mixtral under a vendor prefix, and it starts with the letters
+// "mistral". Routed by the bare-name rule it would reach api.mistral.ai, which
+// has never heard of that id.
+check(
+  'but mistralai/ belongs to NVIDIA',
+  C.providerFor('mistralai/mixtral-8x7b-instruct'),
+  'nvidia'
+)
 check(
   'it has its own rotation',
   C.siblingModel('mistral-large-latest', new Set()),
-  'codestral-latest'
+  'mistral-medium-latest'
 )
 check(
   'which stays with Mistral',
   C.providerFor(C.siblingModel('codestral-latest', new Set())),
   'mistral'
 )
+// Public preview, and no free-tier listing mentions it. It belongs in the
+// picker, where one request settles it, but not at the front of a rotation
+// that only runs because something already failed.
+check(
+  'Large 4 is last in the rotation',
+  C.siblingModel(
+    'mistral-medium-latest',
+    new Set(['mistral-large-latest', 'mistral-small-latest', 'codestral-latest'])
+  ),
+  'mistral-large-4'
+)
 check(
   'and it is offered in the picker',
   C.CLOUD_MODELS.some((m) => m.provider === 'mistral'),
   true
 )
+/* ------------------------------------------------- the one that reasons anyway */
+
+// NVIDIA hosts other people's open weights on a free developer key, and one of
+// them - GLM-5.3 at 44.8 on the Artificial Analysis index - is the highest
+// score available free anywhere. gpt-oss-120b, which this app has been using,
+// is 24 on the same index.
+//
+// Unmeasured, like Mistral: there is no key for it and the write-a-file tasks
+// have never run against it. What is checked here is that the shape is right,
+// and in particular the one place its shape differs from everybody else's.
+check('NVIDIA is a provider', Boolean(C.PROVIDERS.nvidia), true)
+check(
+  'with an OpenAI-compatible base',
+  C.PROVIDERS.nvidia.base,
+  'https://integrate.api.nvidia.com/v1'
+)
+check('paced for 40 requests a minute', C.PROVIDERS.nvidia.minGapMs * 40 >= 60_000, true)
+check('and not paced on tokens', C.PROVIDERS.nvidia.tokensPerMinute, 0)
+check('it does not need the system fold', C.PROVIDERS.nvidia.foldSystem, false)
+
+// The top-level field is reported ignored there rather than refused, so
+// sending it would be a no-op that reads like a setting.
+check(
+  'reasoning_effort is not sent to it',
+  C.reasoningEffortFor('nvidia', false, 'z-ai/glm-5.3'),
+  null
+)
+// The switch that does reach the model is inside chat_template_kwargs, where
+// it goes to the chat template rather than the server.
+check('the kwargs switch is sent instead', C.thinkingKwargsFor('nvidia', false), {
+  enable_thinking: false,
+  force_nonempty_content: true
+})
+check('and omitted when a tier wants reasoning', C.thinkingKwargsFor('nvidia', true), null)
+// An empty object is still an unknown parameter to a provider that takes none.
+for (const p of ['google', 'groq', 'mistral']) {
+  check(`nothing is sent to ${p}`, C.thinkingKwargsFor(p, false), null)
+}
+
+// GLM-5.3 keeps reasoning whatever it is told, so a cap sized for the answer
+// alone returns a sentence cut off mid-word - the exact failure measured on
+// Google before reasoning_effort was found.
+check('NVIDIA is marked as reasoning regardless', C.PROVIDERS.nvidia.alwaysReasons, true)
+for (const p of ['google', 'groq', 'mistral']) {
+  check(`${p} can be told to stop`, C.PROVIDERS[p].alwaysReasons, false)
+}
+check(
+  'so the flash cap gets room anyway',
+  C.maxTokensFor(384, false, 'nvidia'),
+  384 + C.THINKING_ALLOWANCE
+)
+check('while Google keeps the tier’s own', C.maxTokensFor(384, false, 'google'), 384)
+check('and no provider at all is unchanged', C.maxTokensFor(384, false), 384)
+
+check('its models route there', C.providerFor('z-ai/glm-5.3'), 'nvidia')
+check('including Nemotron', C.providerFor('nvidia/nemotron-3-ultra-550b-a55b'), 'nvidia')
+check('and DeepSeek', C.providerFor('deepseek-ai/deepseek-v4-pro'), 'nvidia')
+check('and MiniMax', C.providerFor('minimaxai/minimax-m2.7'), 'nvidia')
+// Both serve Kimi. Nothing in the string says which, so the catalogue decides
+// and the shape rule is only a tie-break - documented, not accidental.
+check('Kimi K3 is NVIDIA’s, by catalogue', C.providerFor('moonshotai/kimi-k3'), 'nvidia')
+check(
+  'an uncatalogued Kimi still guesses Groq',
+  C.providerFor('moonshotai/kimi-k2-instruct-0905'),
+  'groq'
+)
+check('its rotation is by score', C.siblingModel('z-ai/glm-5.3', new Set()), 'moonshotai/kimi-k3')
+check(
+  'and stays with NVIDIA',
+  C.providerFor(C.siblingModel('moonshotai/kimi-k3', new Set())),
+  'nvidia'
+)
+
+// An NVIDIA key is nvapi-prefixed, so a Groq key pasted at the wrong provider
+// is caught before it is encrypted and stored.
+check(
+  'an NVIDIA key is recognised',
+  C.looksLikeKey('nvidia', 'nvapi-1234567890abcdefghijklmnop').ok,
+  true
+)
+check(
+  'a Groq key pasted there is not',
+  C.looksLikeKey('nvidia', 'gsk_1234567890abcdefghijklmnop').ok,
+  false
+)
+
+/* ------------------------------------------- one list of providers, not six */
+
+// This was written out by hand in six places, and a provider missing from any
+// one of them would not fail to compile: the key command would accept it, the
+// store would encrypt it, and the next read would drop it as unrecognised.
+check('there are four providers', C.PROVIDER_IDS.length, 4)
+check(
+  'and every one has a table entry',
+  C.PROVIDER_IDS.every((id) => Boolean(C.PROVIDERS[id])),
+  true
+)
+check(
+  'and every entry is in the list',
+  Object.keys(C.PROVIDERS).every((id) => C.PROVIDER_IDS.includes(id)),
+  true
+)
+check('a known name is a provider', C.isProviderId('nvidia'), true)
+check('an unknown one is not', C.isProviderId('openai'), false)
+check('nor is undefined', C.isProviderId(undefined), false)
+check('nor a near miss', C.isProviderId('Google'), false)
+
+const types = read('src/shared/types.ts')
+const mirrored = (types.match(/export type ProviderName =([^\n]*)/) ?? [])[1] ?? ''
+check(
+  'the renderer’s copy names the same four',
+  C.PROVIDER_IDS.every((id) => mirrored.includes(`'${id}'`)),
+  true
+)
+for (const f of ['src/main/keys.ts', 'src/main/index.ts', 'src/renderer/src/commands.ts']) {
+  check(`${f} no longer lists them by hand`, /'google',\s*'groq'/.test(read(f)), false)
+}
+check('the key store walks the list', read('src/main/keys.ts').includes('PROVIDER_IDS'), true)
+check(
+  'and the IPC guard uses the predicate',
+  read('src/main/index.ts').includes('isProviderId('),
+  true
+)
+
 check('three turns fill a Groq minute', Math.floor(C.PROVIDERS.groq.tokensPerMinute / 2757), 2)
 check('pacing keeps Google under 10 a minute', C.PROVIDERS.google.minGapMs * 10 >= 60_000, true)
 check('and Groq under 30', C.PROVIDERS.groq.minGapMs * 30 >= 60_000, true)
@@ -360,7 +532,6 @@ check(
  * undo it: a convenience getter so a settings page can show the key, a
  * "remember what I typed" that forgets to make an exception.
  */
-const read = (f) => readFileSync(f, 'utf8')
 const preload = read('src/preload/index.ts')
 const main = read('src/main/index.ts')
 const keystore = read('src/main/keys.ts')

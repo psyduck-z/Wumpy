@@ -2,7 +2,7 @@ import { app, safeStorage } from 'electron'
 import { readFileSync, writeFileSync, mkdirSync, rmSync } from 'node:fs'
 import { join, dirname } from 'node:path'
 import type { ProviderId } from '@shared/cloud'
-import { maskKey } from '@shared/cloud'
+import { PROVIDER_IDS, maskKey } from '@shared/cloud'
 
 /**
  * API keys, encrypted at rest and never handed back out.
@@ -54,7 +54,7 @@ export class KeyStore {
       const parsed = JSON.parse(json) as Partial<Record<ProviderId, string>>
       // Only keep what we recognise, so a hand-edited file cannot inject a
       // provider name that later gets used to build a URL.
-      for (const id of ['google', 'groq', 'mistral'] as ProviderId[]) {
+      for (const id of PROVIDER_IDS) {
         const value = parsed[id]
         if (typeof value === 'string' && value.trim()) this.cache[id] = value.trim()
       }
@@ -93,7 +93,7 @@ export class KeyStore {
   /** Which providers are configured. Safe to send to the renderer. */
   configured(): ProviderId[] {
     const data = this.load()
-    return (['google', 'groq', 'mistral'] as ProviderId[]).filter((id) => Boolean(data[id]))
+    return PROVIDER_IDS.filter((id) => Boolean(data[id]))
   }
 
   set(provider: ProviderId, key: string): void {

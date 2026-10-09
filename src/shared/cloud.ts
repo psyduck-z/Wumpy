@@ -14,7 +14,23 @@
  * the live API, and three of the four fail silently.
  */
 
-export type ProviderId = 'google' | 'groq' | 'mistral'
+export type ProviderId = 'google' | 'groq' | 'mistral' | 'nvidia'
+
+/**
+ * Every provider, once, so adding one is a single edit.
+ *
+ * This list was written out by hand in six places - two in the key store, two
+ * in the IPC guards, one in the command parser, one in the renderer's types -
+ * and adding the fourth provider meant finding all six. Any that was missed
+ * would not fail to compile: it would accept the key, encrypt it, and then
+ * drop it on the next read as an unrecognised provider name.
+ */
+export const PROVIDER_IDS = ['google', 'groq', 'mistral', 'nvidia'] as const
+
+/** Whether a string off the wire or out of a settings file names a provider. */
+export function isProviderId(value: unknown): value is ProviderId {
+  return typeof value === 'string' && (PROVIDER_IDS as readonly string[]).includes(value)
+}
 
 export interface Provider {
   id: ProviderId
@@ -65,6 +81,23 @@ export interface Provider {
    * minGapMs does the work.
    */
   tokensPerMinute: number
+  /**
+   * True where reasoning cannot be switched off, so the output cap must leave
+   * room for it whether the tier asked for thinking or not.
+   *
+   * Google, Groq and Mistral all take a field that means "do less of this"
+   * and honour it. NVIDIA's endpoint does not: the top-level reasoning_effort
+   * is reported ignored rather than refused, the real switch is
+   * chat_template_kwargs.enable_thinking, and on GLM-5.3 and GLM-5.3 Flash
+   * even that is reported not to work - live requests with
+   * enable_thinking: false still came back with reasoning_content.
+   *
+   * A tier that asks for 384 tokens on a model that reasons anyway gets
+   * nothing: that exact failure was measured on Google before reasoning_effort
+   * was found, 188 tokens of thinking and eight of truncated prose. So on a
+   * provider that will not stop, the allowance is unconditional.
+   */
+  alwaysReasons: boolean
 }
 
 export const PROVIDERS: Record<ProviderId, Provider> = {
@@ -77,7 +110,8 @@ export const PROVIDERS: Record<ProviderId, Provider> = {
     cacheBlockTokens: 4096,
     // 10 requests a minute on the free tier, so 6s plus a margin.
     minGapMs: 7000,
-    tokensPerMinute: 0
+    tokensPerMinute: 0,
+    alwaysReasons: false
   },
   /**
    * The one whose free tier does not run out.
@@ -101,7 +135,40 @@ export const PROVIDERS: Record<ProviderId, Provider> = {
     // One request a second, with a little margin.
     minGapMs: 1200,
     // 500k a minute, which at Wumpy's size is 170 calls - not the binding limit.
-    tokensPerMinute: 500_000
+    tokensPerMinute: 500_000,
+    alwaysReasons: false
+  },
+  /**
+   * A hundred models on one key, including the best-scoring free one there is.
+   *
+   * NVIDIA hosts other people's open weights and lets a free developer account
+   * call them: GLM-5.3 at 44.8 on the Artificial Analysis index, Kimi K3 at
+   * 43.6, DeepSeek V4 Pro, and NVIDIA's own Nemotron 3 Ultra. For comparison
+   * the gpt-oss-120b Wumpy has been using on Groq is 24 on the same index, and
+   * Sonnet 5.5 is 56. Nothing else free is in that band.
+   *
+   * Two things to know before relying on it. The limit is about 40 requests a
+   * minute with no published daily token ceiling, which sounds generous, but
+   * NVIDIA's own staff have described it inconsistently - one reply says the
+   * old 1,000-credit grant is gone and the trial is not time-limited, while
+   * users in 2026 still report running out of credits. So it is treated here
+   * as development capacity, not a tier to depend on. And reasoning cannot be
+   * reliably switched off, which is what alwaysReasons is for.
+   *
+   * Unmeasured. Committed because the shape is known; the four write-a-file
+   * tasks have never been run against it.
+   */
+  nvidia: {
+    id: 'nvidia',
+    label: 'NVIDIA NIM',
+    base: 'https://integrate.api.nvidia.com/v1',
+    keyUrl: 'https://build.nvidia.com/settings/api-keys',
+    foldSystem: false,
+    cacheBlockTokens: 0,
+    // 40 requests a minute, so 1.5s, plus a margin.
+    minGapMs: 1700,
+    tokensPerMinute: 0,
+    alwaysReasons: true
   },
   groq: {
     id: 'groq',
@@ -122,7 +189,8 @@ export const PROVIDERS: Record<ProviderId, Provider> = {
     cacheBlockTokens: 0,
     // 30 requests a minute, but 8,000 tokens a minute is what bites first.
     minGapMs: 2100,
-    tokensPerMinute: 8000
+    tokensPerMinute: 8000,
+    alwaysReasons: false
   }
 }
 
@@ -197,29 +265,58 @@ export const CLOUD_MODELS: CloudModel[] = [
   },
 
   // --- Mistral: the free tier that does not run out ------------------------
+  /**
+   * Medium is first, and not because the names suggest it.
+   *
+   * Mistral's own changelog describes mistral-medium-3-5 as optimised for
+   * agentic and coding use and gives it adjustable reasoning through
+   * reasoning_effort. Both of those are the thing Wumpy needs: it proposes
+   * commands and write blocks, and reasoning_effort was the single largest
+   * output fix found on Google - 188 thinking tokens and a sentence cut off
+   * mid-word became 0 and a whole answer, six times cheaper.
+   *
+   * Large is bigger and scores lower on the one index that covers both:
+   * Mistral Large 4 came in at 38 on Artificial Analysis v4.3.2, below
+   * GLM-5.3's 44.8. Size is not the ordering here; what it can be told to do
+   * is.
+   */
+  {
+    id: 'mistral-medium-latest',
+    provider: 'mistral',
+    label: 'Mistral Medium 3.5',
+    blurb: 'Built for coding and agents, and takes reasoning_effort. Start here.'
+  },
   {
     id: 'mistral-large-latest',
     provider: 'mistral',
     label: 'Mistral Large',
-    blurb: 'Their most capable. Free tier is ~1B tokens a month.'
+    blurb: 'Their biggest. Free tier is ~1B tokens a month. No reasoning switch.'
+  },
+  {
+    id: 'mistral-large-4',
+    provider: 'mistral',
+    label: 'Mistral Large 4',
+    // Released 6 October 2026, three days before this was written: 1T
+    // parameters with 49B active, a 1M context, 38 on the Artificial Analysis
+    // index. Listed because one request settles it, and flagged because a
+    // public preview is exactly the kind of model a free tier excludes - no
+    // free-tier listing found mentions it.
+    blurb: 'Newest and largest, in public preview. The free tier may not cover it.'
   },
   {
     id: 'codestral-latest',
     provider: 'mistral',
     label: 'Codestral',
-    blurb: 'Built for code, which is most of what this app asks for.'
-  },
-  {
-    id: 'mistral-medium-latest',
-    provider: 'mistral',
-    label: 'Mistral Medium',
-    blurb: 'Between Large and Small.'
+    // Kept, but no longer sold as the obvious choice for this app: Codestral
+    // is a completion model built for fill-in-the-middle and code correction,
+    // and Wumpy asks for whole files and shell commands in prose.
+    blurb: 'A code-completion model. Good at code, not aimed at this shape of ask.'
   },
   {
     id: 'mistral-small-latest',
     provider: 'mistral',
-    label: 'Mistral Small',
-    blurb: 'Quick and light, for the simple tiers.'
+    label: 'Mistral Small 4',
+    blurb: 'Quick and light, for the simple tiers. 256k context.'
   },
 
   // --- Groq ----------------------------------------------------------------
@@ -240,6 +337,38 @@ export const CLOUD_MODELS: CloudModel[] = [
     provider: 'groq',
     label: 'Qwen3.8 27B',
     blurb: 'The other size on Groq. Worth trying when gpt-oss is spent.'
+  },
+
+  // --- NVIDIA: other people's open weights, on one free key ----------------
+  {
+    id: 'z-ai/glm-5.3',
+    provider: 'nvidia',
+    label: 'GLM-5.3',
+    blurb: 'The best-scoring free model there is — 44.8, against gpt-oss-120b at 24.'
+  },
+  {
+    id: 'moonshotai/kimi-k3',
+    provider: 'nvidia',
+    label: 'Kimi K3',
+    blurb: 'Within a point of GLM-5.3. Built for long agent runs.'
+  },
+  {
+    id: 'deepseek-ai/deepseek-v4-pro',
+    provider: 'nvidia',
+    label: 'DeepSeek V4 Pro',
+    blurb: 'The coding pick, and the one whose reasoning can actually be turned off.'
+  },
+  {
+    id: 'nvidia/nemotron-3-ultra-550b-a55b',
+    provider: 'nvidia',
+    label: 'Nemotron 3 Ultra',
+    blurb: "NVIDIA's own, aimed at agents. Takes enable_thinking and honours it."
+  },
+  {
+    id: 'z-ai/glm-5.3-flash',
+    provider: 'nvidia',
+    label: 'GLM-5.3 Flash',
+    blurb: 'The quick one. Reasons whatever you ask of it, so give it room.'
   }
 ]
 
@@ -259,12 +388,38 @@ export function providerFor(model: string): ProviderId | null {
   if (known) return known.provider
 
   if (name.startsWith('gemini-') || name.startsWith('models/gemini-')) return 'google'
-  if (/^(mistral|codestral|ministral|open-mistral|magistral|devstral|pixtral)/i.test(name)) {
+
+  /**
+   * The vendor-prefixed forms are decided before the bare ones, because the
+   * two overlap in a way that silently routes to the wrong endpoint:
+   * `mistralai/mixtral-8x7b-instruct` is a model NVIDIA hosts, and it starts
+   * with the letters "mistral", so a bare-name test run first sends it to
+   * api.mistral.ai, which has never heard of it.
+   */
+  if (/^(nvidia|z-ai|deepseek-ai|minimaxai|meta|microsoft|google|mistralai)\//i.test(name)) {
+    return 'nvidia'
+  }
+  if (
+    !name.includes('/') &&
+    /^(mistral|codestral|ministral|open-mistral|magistral|devstral|pixtral|voxtral)/i.test(name)
+  ) {
     return 'mistral'
   }
+  /**
+   * Where Groq and NVIDIA both serve the same vendor, Groq wins the guess.
+   *
+   * They host overlapping open weights under the same vendor-prefixed names:
+   * `moonshotai/kimi-k3` is on both, and both have something under `qwen/`.
+   * Nothing in the string says which endpoint the user meant, so the
+   * catalogue above is the only real answer and this is a tie-break. Groq
+   * because it was here first and because a key for it already exists on this
+   * machine - a wrong guess is a 404 with the provider named in it, not a
+   * silent failure, and the model can be picked from /model instead.
+   */
   if (name.startsWith('openai/') || name.startsWith('groq/') || name.startsWith('moonshotai/')) {
     return 'groq'
   }
+  if (name.startsWith('qwen/')) return 'groq'
   return null
 }
 
@@ -315,12 +470,29 @@ export function siblingModel(model: string, spent: ReadonlySet<string>): string 
         ]
       : provider === 'mistral'
         ? [
-            'mistral-large-latest',
-            'codestral-latest',
+            // Medium first for the reason the catalogue gives: it is the one
+            // built for coding and agents and the only one here that can be
+            // told to stop reasoning. Large 4 last of the Mistrals because a
+            // public preview is the most likely of them to refuse a free key.
             'mistral-medium-latest',
-            'mistral-small-latest'
+            'mistral-large-latest',
+            'mistral-small-latest',
+            'codestral-latest',
+            'mistral-large-4'
           ]
-        : ['openai/gpt-oss-120b', 'qwen/qwen3.8-27b', 'openai/gpt-oss-20b']
+        : provider === 'nvidia'
+          ? [
+              // Ordered by index score, since a sideways step only happens
+              // when the preferred one is already unusable, and NVIDIA's limit
+              // is per-minute rather than per-model - so there is no "more
+              // likely to have requests left" to weigh against capability.
+              'z-ai/glm-5.3',
+              'moonshotai/kimi-k3',
+              'deepseek-ai/deepseek-v4-pro',
+              'nvidia/nemotron-3-ultra-550b-a55b',
+              'z-ai/glm-5.3-flash'
+            ]
+          : ['openai/gpt-oss-120b', 'qwen/qwen3.8-27b', 'openai/gpt-oss-20b']
   return order.find((m) => m !== model && !spent.has(m)) ?? null
 }
 
@@ -556,6 +728,9 @@ export function looksLikeKey(provider: ProviderId, raw: string): { ok: boolean; 
   if (provider === 'groq' && !key.startsWith('gsk_')) {
     return { ok: false, why: 'A Groq key starts with gsk_.' }
   }
+  if (provider === 'nvidia' && !key.startsWith('nvapi-')) {
+    return { ok: false, why: 'An NVIDIA key starts with nvapi-.' }
+  }
   return { ok: true, why: '' }
 }
 
@@ -620,19 +795,81 @@ export const THINKING_ALLOWANCE = 1024
  * Returns null when the field should be omitted entirely, which is how a tier
  * that genuinely wants reasoning gets the provider's own default.
  */
-export function reasoningEffortFor(provider: ProviderId, thinking: boolean): 'none' | 'low' | null {
+export function reasoningEffortFor(
+  provider: ProviderId,
+  thinking: boolean,
+  model = ''
+): 'none' | 'low' | null {
   if (thinking) return null
   if (provider === 'google') return 'none'
-  // Mistral's models do not take this field at all, and an unknown parameter
-  // there is a 400 rather than something quietly ignored.
-  if (provider === 'mistral') return null
+  /**
+   * On Mistral it depends on the model, which is why this takes one.
+   *
+   * Most of the line does not take the field at all and an unknown parameter
+   * there is a 400, not something quietly ignored - so the default stays
+   * "send nothing". Medium 3.5 is the exception: Mistral's changelog
+   * introduces it with "adjustable reasoning via the reasoning_effort
+   * parameter", and it is the model this app points at first, so refusing to
+   * send the field would throw away the largest saving found all session.
+   *
+   * Matched on the family rather than the exact id because the alias moves:
+   * mistral-medium-latest, mistral-medium-3-5 and a future dated snapshot are
+   * all the same model.
+   */
+  if (provider === 'mistral') {
+    return /^mistral-medium(-latest|-3[-.]5|-3[-.][6-9]|-[4-9])/i.test(model) ? 'low' : null
+  }
+  /**
+   * NVIDIA ignores this field rather than refusing it, so sending it would be
+   * a comforting no-op. The switch that works there is
+   * chat_template_kwargs.enable_thinking - see thinkingKwargsFor - and on the
+   * GLM models not even that is reported to work, which is what the
+   * provider's alwaysReasons flag exists to cover.
+   */
+  if (provider === 'nvidia') return null
   return 'low'
 }
 
-/** The output cap to send, given the tier's and whether reasoning is on. */
-export function maxTokensFor(numPredict: number, thinking: boolean): number {
+/**
+ * The non-standard reasoning switch, for the endpoint that has no standard one.
+ *
+ * NVIDIA's OpenAI-compatible layer puts this inside chat_template_kwargs,
+ * where it reaches the model's chat template rather than the server. Nemotron
+ * is documented to take enable_thinking and NVIDIA's own samples send it;
+ * DeepSeek V4 honours it; GLM-5.3 is reported to keep reasoning regardless.
+ *
+ * Sent anyway on all of them, because on the two that honour it the saving is
+ * the same one measured on Google, and on the ones that do not an extra key
+ * in chat_template_kwargs is ignored by the template that has no use for it.
+ * Returns null where there is nothing to send, so the field is omitted rather
+ * than sent empty - an empty object is still an unknown parameter to a
+ * provider that does not take one.
+ */
+export function thinkingKwargsFor(
+  provider: ProviderId,
+  thinking: boolean
+): Record<string, boolean> | null {
+  if (provider !== 'nvidia') return null
+  if (thinking) return null
+  // force_nonempty_content because a model that reasons and then says nothing
+  // visible has produced an empty answer as far as Wumpy is concerned, and an
+  // empty answer is indistinguishable from a failure in the panel.
+  return { enable_thinking: false, force_nonempty_content: true }
+}
+
+/**
+ * The output cap to send, given the tier's and whether reasoning is on.
+ *
+ * The provider is optional and defaults to leaving the old behaviour alone,
+ * because one of them reasons whether or not it was asked to. On that one the
+ * allowance is unconditional: a 384-token cap on a model that spends its first
+ * 200 tokens thinking returns a sentence cut off mid-word, which is the exact
+ * failure measured on Google before reasoning_effort was found.
+ */
+export function maxTokensFor(numPredict: number, thinking: boolean, provider?: ProviderId): number {
   const asked = numPredict > 0 ? numPredict : 1024
-  return thinking ? asked + THINKING_ALLOWANCE : asked
+  const reasons = thinking || (provider ? PROVIDERS[provider].alwaysReasons : false)
+  return reasons ? asked + THINKING_ALLOWANCE : asked
 }
 
 /* --------------------------------------------------------------- the key itself */

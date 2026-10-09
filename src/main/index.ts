@@ -52,6 +52,7 @@ import {
   FALLBACK_CLOUD_MODEL,
   PROVIDERS,
   isCloudModel,
+  isProviderId,
   looksLikeKey,
   providerFor,
   siblingModel
@@ -954,7 +955,7 @@ ${command}`
 
   ipcMain.handle(IPC.keySet, (_e, req: { provider: ProviderId; key: string }) => {
     const provider = req?.provider
-    if (provider !== 'google' && provider !== 'groq' && provider !== 'mistral') {
+    if (!isProviderId(provider)) {
       return { ok: false, why: 'Unknown provider.' }
     }
     if (!keys.available()) {
@@ -971,7 +972,7 @@ ${command}`
   })
 
   ipcMain.handle(IPC.keyClear, (_e, req: { provider: ProviderId }) => {
-    if (req?.provider !== 'google' && req?.provider !== 'groq' && req?.provider !== 'mistral') {
+    if (!isProviderId(req?.provider)) {
       return { ok: false, why: 'Unknown provider.' }
     }
     keys.clear(req.provider)

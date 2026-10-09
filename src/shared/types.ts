@@ -471,8 +471,14 @@ export interface KeyStatus {
   canStore: boolean
 }
 
-/** Mirrors ProviderId in @shared/cloud, kept here so types.ts stays leaf-level. */
-export type ProviderName = 'google' | 'groq' | 'mistral'
+/**
+ * Mirrors ProviderId in @shared/cloud, kept here so types.ts stays leaf-level.
+ *
+ * check-cloud asserts the two are the same set, because nothing here would
+ * fail to compile if they drifted - a provider missing from this copy would be
+ * accepted by the key command and rejected by the IPC handler.
+ */
+export type ProviderName = 'google' | 'groq' | 'mistral' | 'nvidia'
 
 /* --------------------------------------------------------------------- voice */
 

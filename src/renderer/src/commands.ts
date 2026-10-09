@@ -1,4 +1,5 @@
-import type { Dock, Mode, TierId } from '@shared/types'
+import type { Dock, Mode, ProviderName, TierId } from '@shared/types'
+import { PROVIDER_IDS, isProviderId } from '@shared/cloud'
 
 /**
  * What a command asks the app to do. Commands are parsed in the renderer and
@@ -24,7 +25,7 @@ export type CommandAction =
   | { kind: 'voice'; setting: 'on' | 'polish' | 'autostop'; on: boolean | 'toggle' }
   | { kind: 'open'; what: string }
   | { kind: 'engine' }
-  | { kind: 'key'; provider: 'google' | 'groq' | 'mistral' | null; value: string; clear: boolean }
+  | { kind: 'key'; provider: ProviderName | null; value: string; clear: boolean }
   | { kind: 'backend'; to: 'local' | 'api' | 'toggle' }
   | { kind: 'usage'; reset: boolean }
   | { kind: 'approve'; mode: 'manual' | 'auto' | 'all' | 'cycle' }
@@ -274,7 +275,7 @@ export const COMMANDS: CommandSpec[] = [
     name: 'key',
     aliases: ['apikey'],
     hint: 'Add or remove a hosted-model API key',
-    arg: 'google|groq|mistral <key>',
+    arg: 'google|groq|mistral|nvidia <key>',
     /**
      * Parsed here rather than in a dialog because a key is pasted, and the
      * composer is where pasting happens. The value is handed straight to the
@@ -284,12 +285,13 @@ export const COMMANDS: CommandSpec[] = [
     run: (arg) => {
       const parts = arg.trim().split(/\s+/).filter(Boolean)
       const provider = parts[0]?.toLowerCase()
-      if (provider !== 'google' && provider !== 'groq' && provider !== 'mistral') {
+      if (!isProviderId(provider)) {
         return {
           kind: 'error',
           message:
-            'Say which one: `/key google <key>`, `/key groq <key>` or ' +
-            '`/key mistral <key>`. Use `/key google clear` to remove it.'
+            'Say which one: ' +
+            PROVIDER_IDS.map((id) => `\`/key ${id} <key>\``).join(', ') +
+            '. Use `/key google clear` to remove it.'
         }
       }
       const rest = parts.slice(1).join(' ')

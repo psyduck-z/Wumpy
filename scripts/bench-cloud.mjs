@@ -95,6 +95,39 @@ const PROVIDERS = {
      * Any adapter for this provider has to do the same or the prompt vanishes.
      */
     alwaysFoldSystem: true
+  },
+  /**
+   * The free tier that does not run out, and the one that has never been run.
+   *
+   * Added before a key exists on purpose. Twice now a provider's own
+   * documentation has turned out to be wrong here - Groq's prefix caching does
+   * not happen at this size, and Gemini Pro was reachable after being written
+   * off as paid-only - so Mistral's billion tokens a month is a claim and not
+   * a measurement until this says otherwise.
+   */
+  mistral: {
+    base: 'https://api.mistral.ai/v1',
+    key: () => process.env.MISTRAL_API_KEY,
+    envName: 'MISTRAL_API_KEY'
+  },
+  /**
+   * NVIDIA, which hosts the highest-scoring free model there is.
+   *
+   * Two things here will need measuring rather than reading. Reasoning is
+   * switched through chat_template_kwargs rather than reasoning_effort, and on
+   * the GLM models it is reported not to switch at all - so max_tokens is
+   * generous below and the thinking column is the one to watch. And the free
+   * terms are described inconsistently by NVIDIA's own staff: a credit grant
+   * in one reply, rate limits with no time limit in another.
+   */
+  nvidia: {
+    base: 'https://integrate.api.nvidia.com/v1',
+    key: () => process.env.NVIDIA_API_KEY ?? process.env.NIM_API_KEY,
+    envName: 'NVIDIA_API_KEY',
+    // The switch that reaches the model there. Sent on every call so the
+    // thinking column means the same thing it does on the other three; the
+    // models that ignore it will show it in that column.
+    extraBody: { chat_template_kwargs: { enable_thinking: false, force_nonempty_content: true } }
   }
 }
 
@@ -208,7 +241,7 @@ const quirks = {
  * Both halves are what a provider adapter needs too, so the shape is the point
  * and not just a benchmark convenience.
  */
-const MIN_GAP_MS = { google: 7000, groq: 2100 }
+const MIN_GAP_MS = { google: 7000, groq: 2100, mistral: 1200, nvidia: 1700 }
 let lastRequestAt = 0
 
 async function pace(provider) {
@@ -267,7 +300,8 @@ async function chat(provider, model, messages) {
     stream: true,
     ...(quirks.noStreamOptions.has(provider) ? {} : { stream_options: { include_usage: true } }),
     temperature: 0.2,
-    max_tokens: 2000
+    max_tokens: 2000,
+    ...(p.extraBody ?? {})
   })
 
   await pace(provider)
@@ -503,7 +537,15 @@ for (const spec of listing ? [] : args) {
     const caps =
       provider === 'groq'
         ? { tpd: 200_000, tpm: 8_000, rpm: 30, label: '200k tok/day, 8k tok/min, 30 rpm' }
-        : { tpd: 0, tpm: 250_000, rpm: 10, label: '250k tok/min, 10 rpm, request-capped' }
+        : provider === 'mistral'
+          ? // A billion a month is ~33M a day, which is the figure to compare
+            // against Groq's 200k. Stated by Mistral, not measured here.
+            { tpd: 33_000_000, tpm: 500_000, rpm: 60, label: '~1B tok/month, 500k tok/min, 1 rps' }
+          : provider === 'nvidia'
+            ? // No published daily token cap, so the rate limit is the whole
+              // story - unless the credit grant some accounts still have is.
+              { tpd: 0, tpm: 0, rpm: 40, label: 'no published daily cap, 40 rpm' }
+            : { tpd: 0, tpm: 250_000, rpm: 10, label: '250k tok/min, 10 rpm, request-capped' }
     const perQuestion = billed * 2.5
     const byTokens = caps.tpd ? Math.floor(caps.tpd / perQuestion) : Infinity
     const byRate = Math.floor((caps.rpm * 60) / 2.5)

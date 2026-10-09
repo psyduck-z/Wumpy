@@ -7,6 +7,7 @@ import {
   maxTokensFor,
   providerFor,
   reasoningEffortFor,
+  thinkingKwargsFor,
   wireMessagesFor
 } from '@shared/cloud'
 import type { ChatOptions, StreamFailure, StreamHandlers, StreamStats } from './ollama'
@@ -171,7 +172,8 @@ export class CloudClient {
         ...messages.map((m) => ({ role: m.role as WireMessage['role'], content: m.content }))
       ])
 
-      const effort = reasoningEffortFor(provider, opts.thinking)
+      const effort = reasoningEffortFor(provider, opts.thinking, model)
+      const kwargs = thinkingKwargsFor(provider, opts.thinking)
       const body = {
         model,
         messages: wire,
@@ -183,8 +185,9 @@ export class CloudClient {
         top_p: opts.options.top_p,
         // Reasoning is spent out of this before any visible word, so a cap
         // sized for the answer alone truncates the answer to nothing.
-        max_tokens: maxTokensFor(opts.options.num_predict, opts.thinking),
-        ...(effort ? { reasoning_effort: effort } : {})
+        max_tokens: maxTokensFor(opts.options.num_predict, opts.thinking, provider),
+        ...(effort ? { reasoning_effort: effort } : {}),
+        ...(kwargs ? { chat_template_kwargs: kwargs } : {})
       }
 
       // Timed from here rather than inside drain(), which only begins once the
