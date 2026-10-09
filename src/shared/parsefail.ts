@@ -47,3 +47,34 @@ export const NEVER_RAN_ENDING = [
   'again as ONE line.',
   'Do not answer the original question from this output.'
 ]
+
+/**
+ * What to tell the model about a command that ran and failed.
+ *
+ * Asked to open Spotify, the model proposed Start-Process "Spotify", which
+ * fails because the app is not on PATH - and then concluded "Spotify is not
+ * installed", two messages after it had correctly established that Spotify
+ * IS installed. One failed command overturned a fact it had already proved.
+ *
+ * The ordinary ending was pushing that, the same way it pushed the parse-error
+ * mistake: "Do not propose it again. Answer the original question from this
+ * output." For a command that failed, the second sentence asks for a
+ * conclusion the output cannot support, and the first reads as "stop", when
+ * the right move is to try a different way of doing the same thing.
+ *
+ * So this says both halves out loud: not the same command again, but do not
+ * give up either, and do not contradict yourself. Bounded by the unattended
+ * run cap, which is what stops "try again" becoming a loop.
+ */
+export const FAILED_ENDING = [
+  'That command ran and FAILED. It did not do what was asked.',
+  'Do not send the SAME command again — but do not give up either. If there',
+  'is another way to do what the user actually wanted, propose it now, as',
+  'ONE command.',
+  'A failure here is about this command, not about the world: it does not',
+  'prove the thing is missing, absent or impossible. Never contradict',
+  'something you already established earlier in this conversation because a',
+  'command failed.',
+  'Only say it cannot be done once you have actually tried another way, and',
+  'then say plainly what you tried and what it said.'
+]

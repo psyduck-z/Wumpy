@@ -367,15 +367,26 @@ check(
 )
 // The thing that actually broke it, twice.
 check('it insists on one line', T.OPEN_PROMPT.includes('on ONE line'), true)
+check('and says why a wrapped one fails', T.OPEN_PROMPT.includes('a bare line break ENDS a'), true)
+check('and names the error it produces', T.OPEN_PROMPT.includes('missing an'), true)
+// Start-Process "Spotify" fails: the app is not on PATH and the name is not
+// something Windows can resolve. Get-StartApps hands back the AppID that
+// works, so the command that answers "is it installed" also answers "how do
+// I start it" - one command instead of two turns and a failure in between.
 check(
-  'and says why a wrapped one fails',
-  T.OPEN_PROMPT.includes('A line break ENDS a statement'),
+  'it forbids launching by bare name',
+  T.OPEN_PROMPT.includes('Never launch by bare name'),
   true
 )
-check('and names the error it produces', T.OPEN_PROMPT.includes('missing an'), true)
+check('and says that shape fails', T.OPEN_PROMPT.includes('Start-Process "Spotify" FAILS'), true)
+check('it uses the AppID instead', T.OPEN_PROMPT.includes('-ExpandProperty AppID'), true)
+// A Store app's AppID contains "!" and has to go through shell:AppsFolder; a
+// desktop install's is a plain path. One if covers both.
+check('and handles the Store-app form', T.OPEN_PROMPT.includes('shell:AppsFolder'), true)
+check('branching on the ! that marks it', T.OPEN_PROMPT.includes("-match '!'"), true)
 check(
-  'and says that is the first thing to suspect',
-  T.OPEN_PROMPT.includes('got wrapped onto'),
+  'the one command both checks and launches',
+  T.OPEN_PROMPT.includes('LAUNCHED') && T.OPEN_PROMPT.includes('NOT INSTALLED'),
   true
 )
 // The example in the prompt must itself be one line, which is the part I got
@@ -384,11 +395,12 @@ const example = T.OPEN_PROMPT.split(String.fromCharCode(10)).filter((l) =>
   l.includes('Get-StartApps |')
 )
 check('the example appears once', example.length, 1)
+// The example is run for real by scripts/check-openapp.mjs. Here we only
+// assert it is one line, because that is what broke it twice.
+check('and is a single line', (example[0] ?? '').includes(String.fromCharCode(10)), false)
 check(
-  'and is a whole command on its own line',
-  /^\s*Get-StartApps \| Where-Object Name -like '\*name\*' \| Select-Object -ExpandProperty Name\s*$/.test(
-    example[0] ?? ''
-  ),
+  'that resolves the AppID and launches it',
+  /Get-StartApps[\s\S]*AppID[\s\S]*Start-Process/.test(example[0] ?? ''),
   true
 )
 // No multi-line registry walk left to get wrong.
@@ -407,7 +419,12 @@ check('part of a word is called out as not a match', T.OPEN_PROMPT.includes('is 
  */
 check(
   'empty output means absent, not failed',
-  T.OPEN_PROMPT.includes('Empty output and a failed command are NOT the same answer'),
+  T.OPEN_PROMPT.includes('An error is NOT "not installed"'),
+  true
+)
+check(
+  'and a failure cannot overturn what was already proved',
+  T.OPEN_PROMPT.includes('never contradict something you established earlier'),
   true
 )
 check(
@@ -467,14 +484,10 @@ check(
 check('nor put in a command', T.OPEN_PROMPT.includes('never'), true)
 check(
   'not installed means the website',
-  T.OPEN_PROMPT.includes('Not installed -> open the website'),
+  T.OPEN_PROMPT.includes('NOT INSTALLED -> open the website'),
   true
 )
-check(
-  'and the user is told which happened',
-  T.OPEN_PROMPT.includes('say which you did and why'),
-  true
-)
+check('and the user is told which happened', T.OPEN_PROMPT.includes('what you did and why'), true)
 // Canonical cmdlet names, not aliases: clearer to read, and the thing the
 // read-only allowlist parses most reliably.
 check('the check avoids the Select alias', T.OPEN_PROMPT.includes('| Select '), false)

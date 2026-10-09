@@ -105,11 +105,51 @@ check('and is not a negative result', /not a negative result/.test(ending), true
 check('it asks for the command again, as one line', /again as ONE line/.test(ending), true)
 check('and forbids answering from it', /Do not answer the original question/.test(ending), true)
 
+/* ------------------------- a command that ran and failed */
+
+/**
+ * Asked to open Spotify, the model proposed Start-Process "Spotify", which
+ * fails because the app is not on PATH - and concluded "Spotify is not
+ * installed", two messages after it had correctly established that Spotify
+ * IS installed. One failed command overturned a fact it had already proved.
+ *
+ * The ordinary ending was pushing that: "Do not propose it again. Answer the
+ * original question from this output." For a failure, the second sentence
+ * asks for a conclusion the output cannot support and the first reads as
+ * stop. The user's words were "make it keep on trying, and then return
+ * failure", which is exactly the right shape.
+ */
+const failed = P.FAILED_ENDING.join(' ')
+check('it says the command failed', /ran and FAILED/.test(failed), true)
+check('not to repeat the same one', /Do not send the SAME command again/.test(failed), true)
+check('but explicitly not to give up', /do not give up/.test(failed), true)
+check(
+  'it asks for another way',
+  /another way to do what the user actually wanted/.test(failed),
+  true
+)
+// The specific error: a failed launch is not proof the app is absent.
+check(
+  'a failure is about the command, not the world',
+  /does not\s+prove the thing is missing/.test(failed),
+  true
+)
+check('and must not overturn an established fact', /Never contradict/.test(failed), true)
+// "Keep trying" has to end somewhere, and saying what was tried is the point.
+check('failure is reported only after trying', /once you have actually tried/.test(failed), true)
+check('and says what was tried', /what you tried and what it said/.test(failed), true)
+
 const app = readFileSync('src/renderer/src/App.tsx', 'utf8')
 check('the report uses it', app.includes('NEVER_RAN_ENDING'), true)
 // The header said "I ran that command" over the top of "that command did NOT
 // run", which is the app contradicting itself in the same message.
 check('and does not claim to have run it', app.includes('That command could not run.'), true)
+check('the failed ending is wired in', app.includes('FAILED_ENDING'), true)
+check(
+  'and only for a command that ran',
+  app.includes('result.exitCode !== 0 && !result.timedOut'),
+  true
+)
 check(
   'the ordinary ending still says to answer from the output',
   app.includes('Answer the original'),
