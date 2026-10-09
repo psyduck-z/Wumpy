@@ -255,6 +255,47 @@ check(
   true
 )
 
+/* --------------------------------------------- being there when you log in */
+
+/**
+ * Lives in the keyboard suite because this file is about reaching Wumpy at
+ * all, and the hotkey is no use if nothing is running to receive it.
+ *
+ * Start-at-login did nothing whatsoever when run from source. The guard was
+ * `if (!app.isPackaged) return`, written for a real reason - registering the
+ * bare Electron binary would start an empty Electron on login - and it
+ * reached the wrong conclusion. The tray menu still drew a checkbox, the
+ * setting still saved as on, and the Run key was never touched. The user
+ * turned it on, shut down, booted, and found no tray icon.
+ *
+ * Verified by running the registered command itself, not just reading it:
+ * four Electron processes, no panel, tray only.
+ */
+const startup = read('src/main/index.ts')
+check(
+  'start-at-login is not skipped in dev',
+  /function syncLaunchAtLogin[\s\S]{0,200}if \(!app\.isPackaged\) return/.test(startup),
+  false
+)
+check('it registers an explicit path', /path: process\.execPath/.test(startup), true)
+// From source, Electron needs the app directory or it opens nothing.
+check(
+  'with the app directory when unpackaged',
+  /app\.isPackaged \? \['--hidden'\] : \[app\.getAppPath\(\), '--hidden'\]/.test(startup),
+  true
+)
+// Logging in should leave it in the tray, not throw a panel over a desktop
+// that is still settling.
+check('and starts hidden', /'--hidden'/.test(startup), true)
+check('which the startup path honours', /process\.argv\.includes\('--hidden'\)/.test(startup), true)
+// Applied on boot as well as on change, or the setting saved before this fix
+// would stay unregistered forever.
+check(
+  're-applied at startup',
+  /syncLaunchAtLogin\(settings\.get\('launchAtLogin'\)\)/.test(startup),
+  true
+)
+
 /* ----------------------------------------- no two things on one chord */
 
 /**

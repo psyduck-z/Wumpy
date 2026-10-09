@@ -847,10 +847,31 @@ ${command}`
   )
 }
 
+/**
+ * Start Wumpy when Windows starts.
+ *
+ * This did nothing at all when run from source. The guard was
+ * `if (!app.isPackaged) return`, written because registering the bare
+ * Electron binary would start an empty Electron on login and not Wumpy. True,
+ * and the wrong conclusion: the tray menu still showed a checkbox, the
+ * setting still saved as on, and nothing was ever written to the Run key. The
+ * user turned it on, shut down, booted, and found no tray icon — which is
+ * exactly what a silently-skipped feature looks like from outside.
+ *
+ * The fix is to register the thing that actually works, which is the same
+ * command used to start it by hand: the Electron binary WITH the app
+ * directory as its first argument. A packaged build is its own executable and
+ * needs no such argument.
+ *
+ * --hidden keeps it in the tray on login rather than opening the panel over
+ * whatever Windows is still finishing.
+ */
 function syncLaunchAtLogin(enabled: boolean): void {
-  // Packaged builds only — in dev this would register the Electron binary itself.
-  if (!app.isPackaged) return
-  app.setLoginItemSettings({ openAtLogin: enabled, args: ['--hidden'] })
+  app.setLoginItemSettings({
+    openAtLogin: enabled,
+    path: process.execPath,
+    args: app.isPackaged ? ['--hidden'] : [app.getAppPath(), '--hidden']
+  })
 }
 
 /* ------------------------------------------------------------------ bootup */
