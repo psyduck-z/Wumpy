@@ -222,11 +222,17 @@ check(
   /came to you mid-task and want to get back to it/.test(flat),
   true
 )
+// Reworded after the model quoted the old line back as "I can see the
+// machine" - it had said "You can see their machine, but only through
+// commands they approve", and the qualifier lost to the clause in front
+// of it.
+check('it cannot see the machine', /You CANNOT see their machine/.test(flat), true)
 check(
   'the permission model is stated',
-  /you propose, they read it on a card, they click/.test(flat),
+  /propose a command, have\s*them click it, and read what comes back/.test(flat),
   true
 )
+check('and it says so outright', /Never say you can see the machine/.test(flat), true)
 check('and that nothing runs by itself', /Nothing you write runs on its own/.test(flat), true)
 
 check('answer first', /Answer first/.test(flat), true)

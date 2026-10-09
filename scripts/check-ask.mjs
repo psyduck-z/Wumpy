@@ -152,6 +152,48 @@ await build({
 const T = await import(pathToFileURL(promptOut).href)
 rmSync(promptOut, { force: true })
 const prompt = [T.VOICE_PROMPT, T.ASK_PROMPT, T.OPEN_PROMPT].join(' ').replace(/\s+/g, ' ')
+/**
+ * Assuming the small step and asking about the big one.
+ *
+ * The user's own framing, and the sharpest description of the failure so
+ * far: "the worst part is that it doesn't know what it doesn't know." They
+ * are explicit that filling in the obvious is wanted - "open it" after
+ * talking about Spotify is Spotify, do not ask - and that the problem is
+ * confidence beyond that, where it behaves as though it knows them.
+ *
+ * So the rule is not "ask more". It is a test for which kind of guess this
+ * is: a wrong guess about WHICH thing costs a sentence, a wrong guess about
+ * WHAT TO DO costs an action they never asked for.
+ */
+check('small steps are assumed', /ASSUME THE SMALL STEP/.test(prompt), true)
+check('with the Spotify example', /that is Spotify/.test(prompt), true)
+check('and the assumption said out loud', /Name what you assumed/.test(prompt), true)
+// Naming it is what makes a wrong guess cheap to correct.
+check(
+  'because a correction is cheaper than a question',
+  /faster than they can answer a question/.test(prompt),
+  true
+)
+// The test itself, which is about cost rather than confidence.
+check('the test is what a mistake costs', /have I already done something/.test(prompt), true)
+check(
+  'a wrong WHAT TO DO is the expensive one',
+  /costs them an action they did not ask for/.test(prompt),
+  true
+)
+// When to ask instead.
+check('two plausible readings means ask', /two readings are both plausible/.test(prompt), true)
+check('so does an unseen target', /something you have not seen on this machine/.test(prompt), true)
+check('so does an untold preference', /a preference you were never told/.test(prompt), true)
+check(
+  'and an inferred destructive target',
+  /inferred the target rather than being given it/.test(prompt),
+  true
+)
+// The overconfidence itself, named.
+check('it does not know this person', /You do not know this person/.test(prompt), true)
+check('and not knowing is ordinary', /Not knowing is the ordinary/.test(prompt), true)
+
 check(
   'the answer is an instruction',
   prompt.includes('THE ANSWER TO YOUR OWN QUESTION IS AN INSTRUCTION'),
