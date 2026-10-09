@@ -47,7 +47,26 @@ const RISKY: Array<{ pattern: RegExp; why: string }> = [
     pattern: /\bgit\s+(push|reset\s+--hard|clean\s+-[a-z]*f)/i,
     why: 'rewrites or publishes git state'
   },
-  { pattern: />\s*\/dev\/sd|dd\s+if=/i, why: 'writes directly to a device' }
+  { pattern: />\s*\/dev\/sd|dd\s+if=/i, why: 'writes directly to a device' },
+  /**
+   * Uninstalling, which was not here and should have been.
+   *
+   * Asked to uninstall Spotify, Wumpy found the UninstallString and stopped,
+   * because the prompt told it to hand the path over rather than act. That
+   * was the wrong protection in the wrong place: the user had asked for an
+   * uninstall and got a piece of homework.
+   *
+   * The right protection is the one the app already has for everything else
+   * destructive — the card they click, and the native dialog that fires even
+   * on accept-all. Measured before adding these: running uninstall.exe was
+   * classified "not risky", so neither would have fired. The prompt can only
+   * safely say "go ahead and propose it" once this does.
+   */
+  { pattern: /\bunins(tall)?[\w-]*\.exe\b/i, why: 'runs an uninstaller' },
+  { pattern: /\bmsiexec\b[^|]*\/(x|uninstall)\b/i, why: 'uninstalls a program' },
+  { pattern: /\bwinget\s+uninstall\b/i, why: 'uninstalls a program' },
+  { pattern: /\bRemove-Appx(Provisioned)?Package\b/i, why: 'removes an installed app' },
+  { pattern: /\bUninstall-(Package|Module|WindowsFeature)\b/i, why: 'uninstalls a program' }
 ]
 
 /**

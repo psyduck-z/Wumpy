@@ -560,9 +560,36 @@ check(
   /proof the query is wrong, not that you were wrong before/.test(open),
   true
 )
-// Uninstalling is not reversible by the thing proposing it.
-check('uninstalling is left to the user', /let the user decide/.test(open), true)
-check('and never chained', /never chain the lookup/.test(open), true)
+/**
+ * Asked to uninstall, uninstall.
+ *
+ * My previous rule said to show the UninstallString and stop, and the user's
+ * reply to that was fair: they had asked for the app removed and got a piece
+ * of homework. Refusing to act is not a safeguard - it is the over-correction
+ * the voice prompt already warns against, applied by me rather than by the
+ * model.
+ *
+ * The safeguard is the one the app already has, and it was missing: running
+ * an uninstaller was measured as "not risky", so neither the native dialog
+ * nor anything else would have fired. shell.ts now classifies uninstallers,
+ * msiexec /x, winget uninstall and Remove-AppxPackage as destructive, which
+ * is what makes "go ahead and propose it" safe to say.
+ */
+check(
+  'asked to uninstall, it uninstalls',
+  /Asked to UNINSTALL something, uninstall it/.test(open),
+  true
+)
+check('proposing the command that runs it', /propose the command that runs it/.test(open), true)
+check('handing back a path is not an answer', /not for homework/.test(open), true)
+check('the native dialog is the safeguard', /native\s*confirmation/.test(open), true)
+check(
+  'and refusing is named as not one',
+  /Refusing to propose it is not a safeguard/.test(open),
+  true
+)
+// Look it up, show it, then propose: never one command that finds and removes.
+check('still two steps, never one', /Two steps, never one command/.test(open), true)
 
 // "it" is the thing most recently discussed, not the last thing acted on.
 check(

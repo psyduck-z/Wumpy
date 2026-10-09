@@ -109,8 +109,7 @@ export const Message = memo(function Message({
     return (
       <div className="msg msg-assistant">
         <AskCard
-          question={message.localAsk.question}
-          options={message.localAsk.options}
+          groups={[{ question: message.localAsk.question, options: message.localAsk.options }]}
           answered={message.answered ?? null}
           onAnswer={(option) => onAnswer?.(message.id, option)}
         />

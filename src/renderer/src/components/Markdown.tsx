@@ -40,10 +40,48 @@ function CodeBlock({ children }: { children: ReactNode }): React.JSX.Element {
 }
 
 /**
- * Reads a `wumpy-ask` block: a question on the first line, then one option per
- * `-` line.
+ * Reads a `wumpy-ask` block: one or more questions, each followed by its
+ * options on `-` lines.
+ *
+ * It used to be a single question, because a small local model that asked two
+ * things at once usually meant one. On a capable model that limit is just a
+ * worse conversation: "not installed, want the website?" and "shall I also
+ * check for an update?" are two clicks' worth of decision and three turns'
+ * worth of round trips.
+ *
+ * A line with no leading dash starts a new question and claims every option
+ * under it. Capped at four questions, because a form longer than that is not
+ * a question any more, and at five options each.
  */
-function readAsk(children: ReactNode): { question: string; options: string[] } | null {
+export interface AskGroup {
+  question: string
+  options: string[]
+}
+
+export function readAskGroups(raw: string): AskGroup[] {
+  const groups: AskGroup[] = []
+  for (const line of raw.split(String.fromCharCode(10)).map((l) => l.trim())) {
+    if (!line) continue
+    if (line.startsWith('-')) {
+      const option = line.replace(/^-\s*/, '').trim()
+      // An option before any question belongs to nothing; dropping it is
+      // better than inventing a question to hang it on.
+      if (option && groups.length) groups[groups.length - 1].options.push(option)
+      continue
+    }
+    if (groups.length >= 4) break
+    groups.push({ question: line, options: [] })
+  }
+  // A question with fewer than two options is prose, not a choice.
+  return groups
+    .filter((g) => g.options.length >= 2)
+    .map((g) => ({
+      question: g.question,
+      options: g.options.slice(0, 5)
+    }))
+}
+
+function readAsk(children: ReactNode): AskGroup[] | null {
   if (!isValidElement(children)) return null
   const props = children.props as { className?: unknown; children?: unknown }
   if (typeof props.className !== 'string') return null
@@ -56,15 +94,8 @@ function readAsk(children: ReactNode): { question: string; options: string[] } |
         ? props.children.filter((c) => typeof c === 'string').join('')
         : ''
 
-  const lines = raw
-    .split('\n')
-    .map((l) => l.trim())
-    .filter(Boolean)
-  const question = lines.find((l) => !l.startsWith('-')) ?? ''
-  const options = lines.filter((l) => l.startsWith('-')).map((l) => l.replace(/^-\s*/, ''))
-  // A question with no options is just prose; let it render as a code block.
-  if (!question || options.length < 2) return null
-  return { question, options: options.slice(0, 5) }
+  const groups = readAskGroups(raw)
+  return groups.length ? groups : null
 }
 
 /**
@@ -315,14 +346,7 @@ export const Markdown = memo(function Markdown({
 
           const ask = onAnswer ? readAsk(children) : null
           if (ask) {
-            return (
-              <AskCard
-                question={ask.question}
-                options={ask.options}
-                answered={answered}
-                onAnswer={onAnswer!}
-              />
-            )
+            return <AskCard groups={ask} answered={answered} onAnswer={onAnswer!} />
           }
 
           const fence = onRunCommand ? readFence(children) : null

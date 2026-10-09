@@ -568,6 +568,47 @@ body {
   opacity: 1;
 }
 
+/* A block can carry up to four questions now, so they need separating from
+   one another without turning the card into a wall of boxes. A hairline and
+   some room is enough; each group is already a heading plus its buttons. */
+.ask-group + .ask-group {
+  margin-top: 11px;
+  padding-top: 11px;
+  border-top: 1px solid rgb(var(--border));
+}
+
+/* Only on a multi-question card: one question answers on the click, so a
+   Send button there would be a second step that does nothing. */
+.ask-submit-row {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 11px;
+}
+
+.ask-submit {
+  padding: 5px 13px;
+  background: rgb(var(--accent-soft));
+  border: 1px solid rgb(var(--accent) / 0.5);
+  border-radius: 7px;
+  color: rgb(var(--accent-text));
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.ask-submit:hover:not(:disabled) {
+  border-color: rgb(var(--accent) / 0.8);
+}
+
+/* Disabled says how many are left to pick, so the button is the progress
+   indicator rather than something that looks broken. */
+.ask-submit:disabled {
+  background: rgb(var(--raised));
+  border-color: rgb(var(--border));
+  color: rgb(var(--muted));
+  cursor: default;
+}
+
 .ask-hint {
   margin: 8px 0 0;
   font-size: 10.5px;

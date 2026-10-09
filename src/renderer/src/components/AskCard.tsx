@@ -1,40 +1,121 @@
+import { useEffect, useRef, useState } from 'react'
+import { arrowNavigate } from '../keyboard'
+import type { AskGroup } from './Markdown'
+
 /**
- * A question the model has put back to the user, with its options as buttons.
+ * Questions the model has put back to the user, with the options as buttons.
  *
- * Small local models guess when a request is ambiguous, and a wrong guess costs
- * a whole slow turn to discover. Letting the model ask instead — and letting
+ * Letting the model ask when a request is genuinely ambiguous — and letting
  * the answer be one click rather than a typed sentence — is cheaper than both
  * the guess and the correction.
+ *
+ * Two things changed after the user drove it.
+ *
+ * It takes several questions now. One was a limit from the local-model days,
+ * when a 3.8B asking two things at once usually meant one; on a capable model
+ * it just made the conversation longer, since "not installed, want the
+ * website?" and "shall I check for an update too?" are two clicks' worth of
+ * decision and three turns' worth of round trips.
+ *
+ * And it works from the keyboard. Wumpy opens on a hotkey and every other
+ * card can be driven without the mouse; this one could not, which made a
+ * question the one place the keyboard ran out.
  */
 export function AskCard({
-  question,
-  options,
+  groups,
   answered,
   onAnswer
 }: {
-  question: string
-  options: string[]
-  /** The option already chosen, if this question has been answered. */
+  groups: AskGroup[]
+  /** The answer already given, if this block has been answered. */
   answered: string | null
   onAnswer(option: string): void
 }): React.JSX.Element {
+  const multi = groups.length > 1
+  const [picked, setPicked] = useState<Record<number, string>>({})
+  const cardRef = useRef<HTMLDivElement>(null)
+  const done = answered !== null
+
+  /**
+   * The first option takes focus, so arrows work without a click first.
+   *
+   * Only once, and never when the block has already been answered: a
+   * reopened chat full of answered questions must not fight for the caret.
+   */
+  const grabbed = useRef(false)
+  useEffect(() => {
+    if (done || grabbed.current) return
+    grabbed.current = true
+    const first = cardRef.current?.querySelector<HTMLButtonElement>('.ask-option')
+    first?.focus({ preventScroll: true })
+  }, [done])
+
+  /** One question: picking is answering. Several: picking fills the form. */
+  const choose = (index: number, option: string): void => {
+    if (done) return
+    if (!multi) {
+      onAnswer(option)
+      return
+    }
+    setPicked((p) => ({ ...p, [index]: option }))
+  }
+
+  const ready = multi && groups.every((_, i) => picked[i])
+
+  /**
+   * Answers go back as one line per question, so the model reads them as a
+   * set rather than having to pair them up by position.
+   */
+  const submit = (): void => {
+    if (!ready || done) return
+    onAnswer(groups.map((g, i) => `${g.question} ${picked[i]}`).join(String.fromCharCode(10)))
+  }
+
   return (
-    <div className={`ask ${answered ? 'is-answered' : ''}`}>
-      <p className="ask-question">{question}</p>
-      <div className="ask-options">
-        {options.map((option) => (
-          <button
-            key={option}
-            type="button"
-            className={`ask-option ${answered === option ? 'is-chosen' : ''}`}
-            disabled={answered !== null}
-            onClick={() => onAnswer(option)}
-          >
-            {option}
+    <div
+      ref={cardRef}
+      className={`ask ${done ? 'is-answered' : ''}`}
+      onKeyDown={(e) => {
+        // Enter submits a filled-in form from anywhere in the card, so the
+        // last pick and the send are not two separate journeys.
+        if (e.key === 'Enter' && ready) {
+          e.preventDefault()
+          submit()
+          return
+        }
+        if (arrowNavigate(e, cardRef.current)) e.preventDefault()
+      }}
+    >
+      {groups.map((group, i) => (
+        <div className="ask-group" key={group.question + i}>
+          <p className="ask-question">{group.question}</p>
+          <div className="ask-options">
+            {group.options.map((option) => (
+              <button
+                key={option}
+                type="button"
+                className={`ask-option ${
+                  (multi ? picked[i] === option : answered === option) ? 'is-chosen' : ''
+                }`}
+                disabled={done}
+                onClick={() => choose(i, option)}
+              >
+                {option}
+              </button>
+            ))}
+          </div>
+        </div>
+      ))}
+
+      {multi && !done && (
+        <div className="ask-submit-row">
+          <button type="button" className="ask-submit" disabled={!ready} onClick={submit}>
+            {ready ? 'Send answers  ⏎' : `Pick ${groups.length - Object.keys(picked).length} more`}
           </button>
-        ))}
-      </div>
-      {answered === null && <p className="ask-hint">or just type your own answer</p>}
+        </div>
+      )}
+
+      {!done && <p className="ask-hint">arrow keys to move, Enter to choose, or type your own</p>}
     </div>
   )
 }

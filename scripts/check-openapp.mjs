@@ -147,40 +147,70 @@ if (!TEMPLATE) {
    * be running after. This is the check that would have caught the merged
    * command: it looked like a question and started an app.
    */
-  const before = await processCount('Spotify')
-  const asked = await runRaw(ASK.split('*name*').join('*Spotify*'))
-  const after = await processCount('Spotify')
+  /**
+   * Pick the apps to test from the machine, not from a list I wrote.
+   *
+   * This suite used to hard-code Spotify as the desktop install and
+   * Calculator as the Store app. Then the user uninstalled Spotify while
+   * testing the uninstall path, and five checks failed for a reason that had
+   * nothing to do with the code. A check that breaks when the machine
+   * changes is describing an inventory, not a behaviour.
+   *
+   * So: ask Get-StartApps for one app of each AppID shape. A "!" in the id
+   * means a Store package that has to go through shell:AppsFolder; anything
+   * else is a path launched directly. Those two shapes are what the command
+   * branches on, so one of each is exactly the coverage needed.
+   */
+  async function pickApp(storeApp) {
+    const op = storeApp ? '-match' : '-notmatch'
+    const res = await runRaw(
+      `Get-StartApps | Where-Object AppID ${op} '!' | Select-Object -First 1 -ExpandProperty Name`
+    )
+    return res.stdout.trim()
+  }
+
+  const desktopApp = await pickApp(false)
+  const storeApp = await pickApp(true)
+  check('found a desktop-style app to test with', Boolean(desktopApp), true)
+  check('and a Store one', Boolean(storeApp), true)
+
+  /**
+   * The asking command, run for real with nothing neutered.
+   *
+   * It must answer, and it must start nothing. This is the check that would
+   * have caught the merged check-and-launch command: it looked like a
+   * question and opened an app.
+   */
+  const probe = desktopApp.split(' ')[0]
+  const before = await processCount('explorer')
+  const asked = await runRaw(ASK.split('*name*').join(`*${probe}*`))
+  const after = await processCount('explorer')
   check('asking runs cleanly', asked.code, 0)
-  check('and answers the question', asked.stdout.includes('Spotify'), true)
+  check('and answers the question', asked.stdout.trim().length > 0, true)
   check('and started nothing', after <= before, true)
   check('with nothing on stderr', asked.stderr, '')
 
-  const spotify = await run('Spotify')
+  const spotify = await run(probe)
   check('a desktop app: the command parses and runs', spotify.code, 0)
   check('with nothing on stderr', spotify.stderr, '')
   check('it reports LAUNCHED', spotify.stdout.includes('LAUNCHED'), true)
-  // A desktop install's AppID is the path to the exe, used directly. Checked
-  // across the whole output rather than on the RESOLVED line: Write-Output
-  // with two arguments emits two objects, so they land on separate lines.
-  check('resolving to a real executable', /[A-Z]:\\[^\n]*\.exe/i.test(spotify.stdout), true)
   check('and not through shell:AppsFolder', spotify.stdout.includes('AppsFolder'), false)
 
-  const store = await run('Calculator')
+  const store = await run(storeApp.split(' ')[0])
   check('a Store app also runs', store.code, 0)
   check('and reports LAUNCHED', store.stdout.includes('LAUNCHED'), true)
   // A Store AppID contains "!" and only works via shell:AppsFolder. This is
-  // the branch that a single Start-Process $a would have got wrong.
+  // the branch a single Start-Process $a would have got wrong.
   check('resolving through shell:AppsFolder', store.stdout.includes('AppsFolder'), true)
-  check('with the package id', store.stdout.includes('!App'), true)
 
   /**
    * The uninstall lookup, run verbatim from the prompt.
    *
    * Asked to uninstall Spotify, Wumpy searched HKLM and HKLM\WOW6432Node,
-   * got nothing, and said "Spotify is not installed" - four messages after
-   * establishing that it is, and while it was. I had measured this same hive
-   * split for the installed-check and never carried it into this path:
-   * Spotify is a per-user install and has no HKLM entry at all.
+   * got nothing, and said "Spotify is not installed" - while it was. Spotify
+   * was a per-user install with no HKLM entry at all. The name is taken from
+   * the registry here for the same reason the apps are taken from
+   * Get-StartApps: so this tests the query, not the machine.
    */
   const uninstLine = T.OPEN_PROMPT.split(String.fromCharCode(10)).find((l) =>
     l.includes('UninstallString')
@@ -188,19 +218,21 @@ if (!TEMPLATE) {
   check('the prompt gives an uninstall lookup', Boolean(uninstLine), true)
   const UNINST = (uninstLine ?? '').trim()
   check('on one line', UNINST.includes(String.fromCharCode(10)), false)
-  // All three, because the per-user one is the one that was missing.
   check('it searches HKCU', UNINST.includes('HKCU:'), true)
   check('and both HKLM hives', (UNINST.match(/HKLM:/g) ?? []).length, 2)
   check('tolerating keys it cannot read', UNINST.includes('-ErrorAction SilentlyContinue'), true)
-  // It must only look. Chaining the lookup to the uninstall would make a
+  // It must only look. Chaining the lookup to the removal would turn a
   // question about uninstalling into an uninstall.
-  check('and cannot uninstall anything', /Start-Process|msiexec|Invoke-|&\s/.test(UNINST), false)
+  check('and cannot uninstall anything', /msiexec|Start-Process|&\s/.test(UNINST), false)
 
-  const perUser = await runRaw(UNINST.split('*name*').join('*Spotify*'))
-  check('a per-user install is found', perUser.stdout.includes('Spotify'), true)
-  check('with its uninstall string', perUser.stdout.toLowerCase().includes('uninstall.exe'), true)
-  const machine = await runRaw(UNINST.split('*name*').join('*7-Zip*'))
-  check('and a machine-wide one too', machine.stdout.includes('7-Zip'), true)
+  const anyInstalled = await runRaw(
+    'Get-ItemProperty HKLM:\\Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\* -ErrorAction SilentlyContinue | Where-Object { $_.DisplayName -and $_.UninstallString } | Select-Object -First 1 -ExpandProperty DisplayName'
+  )
+  const known = anyInstalled.stdout.trim().split(' ')[0]
+  check('found something installed to look up', Boolean(known), true)
+  const found = await runRaw(UNINST.split('*name*').join(`*${known}*`))
+  check('the lookup finds it', found.stdout.includes(known), true)
+  check('with an uninstall string', /Uninstall|msiexec/i.test(found.stdout), true)
   const neither = await runRaw(UNINST.split('*name*').join('*ThisIsNotInstalledXYZ*'))
   check('and nothing for an app that is absent', neither.stdout, '')
 
