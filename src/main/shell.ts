@@ -229,6 +229,26 @@ const WRITE_MARKERS =
  * Used to decide what may run unattended: a read can run itself on the `auto`
  * approval mode, and anything that changes state waits for a click.
  */
+/**
+ * Whether a cmdlet reports rather than changes.
+ *
+ * The allowlist named Get-* cmdlets one by one, with a comment saying "Get-*
+ * is reporting by convention" directly above the enumeration - so every
+ * cmdlet nobody had thought of was a gap, and each one shows up as a
+ * harmless command refusing to auto-run. bench-ceiling turned up Get-Volume
+ * and Get-WmiObject within ten questions, which is enough to stop adding
+ * them individually.
+ *
+ * Get is Microsoft's own verb for "read and return", and PowerShell's verb
+ * guidance is explicit that it must not change state. Trusting the verb
+ * closes the whole class. The named list stays for everything that does not
+ * follow the convention - test-, measure-, select- and the external tools.
+ */
+function isReadingCmdlet(name: string): boolean {
+  const lower = name.toLowerCase()
+  return lower.startsWith('get-') || READ_ONLY.has(lower)
+}
+
 export function isReadOnly(command: string): boolean {
   const trimmed = command.trim()
   if (!trimmed) return false
@@ -236,13 +256,48 @@ export function isReadOnly(command: string): boolean {
   // Redirection, piping into a mutating cmdlet, or any write-shaped verb.
   if (WRITE_MARKERS.test(trimmed)) return false
 
+  /**
+   * Every Verb-Noun anywhere in the command has to be read-only.
+   *
+   * Checking only the head of each pipeline segment missed everything
+   * inside parentheses, in both directions. It refused `(Get-Process).Count`
+   * - the head token being `(get-process).count`, which is in no allowlist -
+   * so a harmless count would not auto-run on the `auto` approval mode. And
+   * it would have waved through a write hidden in a sub-expression, because
+   * nothing ever looked there.
+   *
+   * Found by bench-ceiling, which set out to measure the model and turned up
+   * three of these instead: (Get-Process).Count, (Get-PSDrive C).Used, and a
+   * parenthesised Get-CimInstance. The model was right every time and the
+   * gate was wrong.
+   *
+   * Only at a command position - start, or after ( | ; & - because matching
+   * every hyphenated word blocked `dotnet --list-sdks` on the strength of
+   * "list-sdks", and would block a wildcard like '*Visual-Studio*' too.
+   */
+  const CMDLET_AT_START = /(?:^|[(|;&])\s*([A-Za-z][\w]*-[A-Za-z][\w]*)/g
+  for (const [, cmdlet] of trimmed.matchAll(CMDLET_AT_START)) {
+    if (!isReadingCmdlet(cmdlet)) return false
+  }
+
   // Every segment of a pipeline has to be read-only on its own.
   const segments = trimmed.split(/\||;|&&/)
   for (const segment of segments) {
     const tokens = segment.trim().split(/\s+/).filter(Boolean)
     if (tokens.length === 0) continue
-    const head = tokens[0].toLowerCase().replace(/\.exe$/, '')
-    if (!READ_ONLY.has(head)) return false
+    // Strip what wraps a call rather than names it: a leading paren, and a
+    // trailing property access or closing paren.
+    const head = tokens[0]
+      .toLowerCase()
+      .replace(/^[($@]+/, '')
+      .replace(/[)\].,].*$/, '')
+      .replace(/\.exe$/, '')
+    if (!head) continue
+    // A pure expression segment - arithmetic, a variable, a number - has no
+    // command to allowlist, and the Verb-Noun sweep above has already
+    // vetted anything that was a call.
+    if (!/^[a-z]/.test(head)) continue
+    if (!isReadingCmdlet(head)) return false
 
     // `find` searches harmlessly until told to act on what it finds.
     if (head === 'find' && DANGEROUS_FIND_FLAGS.test(segment)) return false

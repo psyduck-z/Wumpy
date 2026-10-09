@@ -89,6 +89,16 @@ console.log(
  * Every one of these was allowed by an earlier version of isReadOnly().
  */
 const MUST_BLOCK = [
+  // The other half of the same fix: a write inside parentheses was never
+  // looked at before, because only the segment head was checked.
+  '(Remove-Item C:\temp -Recurse).Count',
+  '(Stop-Process -Name foo).Id',
+  // Trusting "get-" must not leak into verbs that change things, including
+  // ones that read like a question.
+  'Set-NetFirewallProfile -Enabled True',
+  'Remove-Variable x',
+  'Clear-Content notes.txt',
+  '(Get-Process).Count; Remove-Item x',
   'node -e "require(0).rmSync()"',
   'node --eval "x"',
   'npx create-react-app x',
@@ -122,6 +132,31 @@ const MUST_BLOCK = [
 
 /** Reads that must keep working, or the auto mode is useless. */
 const MUST_ALLOW = [
+  /**
+   * Parenthesised reads, which the gate used to refuse.
+   *
+   * It took the head of each pipeline segment, so `(Get-Process).Count`
+   * arrived as the token `(get-process).count` and matched no allowlist. On
+   * the `auto` approval mode that meant a harmless count sat waiting for a
+   * click. Found by bench-ceiling while trying to measure the model: three
+   * of its "failures" were this.
+   */
+  '(Get-Process).Count',
+  '(Get-PSDrive C).Used / (Get-PSDrive C).Free',
+  '(Get-CimInstance Win32_OperatingSystem).Version',
+  '(Get-ChildItem ~/Downloads | Sort-Object Length -Descending | Select-Object -First 3).Name',
+  // A hyphenated flag is not a cmdlet, and nor is a hyphenated wildcard.
+  // Scanning every hyphenated word for a verb blocked both.
+  // Any Get- cmdlet, not an enumerated list of them: the verb is
+  // Microsoft's own for "read and return", and naming them one at a time
+  // meant every cmdlet nobody thought of was a harmless command that would
+  // not auto-run. bench-ceiling found two in ten questions.
+  'Get-Volume -DriveLetter C',
+  'Get-WmiObject Win32_LogicalDisk',
+  'Get-NetFirewallProfile',
+  'Get-ComputerInfo | Select-Object OsName',
+  'dotnet --list-sdks',
+  "Get-StartApps | Where-Object Name -like '*Visual-Studio*'",
   'node --version',
   'python --version',
   'git status',
