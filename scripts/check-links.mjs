@@ -443,7 +443,7 @@ check(
 check('the worst inference is named as such', /single worst inference/.test(T.VOICE_PROMPT), true)
 check(
   '"are you sure" means re-read, not re-assert',
-  T.VOICE_PROMPT.includes('Never answer "I am certain" from memory'),
+  /Never\s+answer "I am certain" from memory/.test(T.VOICE_PROMPT),
   true
 )
 check('installed means launch it', T.OPEN_PROMPT.includes('Start-Process'), true)

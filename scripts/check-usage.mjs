@@ -199,6 +199,63 @@ check('and uncertainty is said out loud', a.systemPrompt.includes('SAY WHAT YOU 
 // imitates their terse register as readily as their structure.
 check('the worked examples are gone', typeof T.shellExamples, 'undefined')
 
+/* --------------------------------------------- who Wumpy is, and how it talks */
+
+/**
+ * The prompt had grown by accretion - one shouted section per failure - and
+ * had become eight prohibitions with two sentences of identity in front of
+ * them. It also said several things twice: "say what the command did" and
+ * "if you did something unasked, say so" each appeared in two sections, in
+ * nearly the same words.
+ *
+ * Rewritten as one piece. The duplication paid for the half that was missing:
+ * who Wumpy is and how it should sound. That half is not decoration - almost
+ * everything about the voice follows from one fact, which is that the panel
+ * opens over the top of something the user was already doing.
+ */
+const flat = T.VOICE_PROMPT.replace(/\s+/g, ' ')
+
+check('it says where it lives', /Windows system tray on this person/.test(flat), true)
+// The reason for every brevity rule below it.
+check(
+  'and why that shapes the answers',
+  /came to you mid-task and want to get back to it/.test(flat),
+  true
+)
+check(
+  'the permission model is stated',
+  /you propose, they read it on a card, they click/.test(flat),
+  true
+)
+check('and that nothing runs by itself', /Nothing you write runs on its own/.test(flat), true)
+
+check('answer first', /Answer first/.test(flat), true)
+check('no preamble', /No preamble/.test(flat), true)
+// The specific filler a model reaches for when it has nothing to add yet.
+check('no Certainly', /no "Certainly"/.test(flat), true)
+check('no repeating the question', /no repeating the question back/.test(flat), true)
+check('specific beats generic', /Be specific about THEIR machine/.test(flat), true)
+check('because generic is available anywhere', /they can get that anywhere/.test(flat), true)
+// It apologised three times in one exchange while repeating the same denial.
+check('apologise once at most', /Apologise at most once/.test(flat), true)
+check('and only when actually wrong', /only for something you actually got wrong/.test(flat), true)
+check('no lecturing', /do not lecture/i.test(flat), true)
+check('no unasked-for warnings', /do not warn about things nobody asked about/.test(flat), true)
+// The command is on screen before it runs, so it is read by a person.
+check('the command is part of the answer', /part of your answer/.test(flat), true)
+
+// Said once each now, not twice.
+check(
+  '"say what the command DID" appears once',
+  (flat.match(/Say what the command DID/g) ?? []).length,
+  1
+)
+check(
+  'and the unasked-action rule once',
+  (flat.match(/say so plainly and briefly/g) ?? []).length,
+  1
+)
+
 /* ------------------------------------- doing only what was asked */
 
 /**
@@ -217,7 +274,10 @@ check('the worked examples are gone', typeof T.shellExamples, 'undefined')
  * The commands are separated again, asserted in check-openapp by running the
  * asking one and counting processes. This is the general rule behind it.
  */
-const voice = T.VOICE_PROMPT
+// Flattened: these are prose rules, and where a line wraps is not part
+// of what they say. Matching the raw text made a reflow look like a
+// deleted rule.
+const voice = T.VOICE_PROMPT.replace(/\s+/g, ' ')
 check('a question is not an instruction', /A QUESTION IS NOT AN INSTRUCTION/.test(voice), true)
 check('and the question words are named', /"Is X installed", "do I have X"/.test(voice), true)
 check(
@@ -242,10 +302,14 @@ check(
   /Say what the command DID, not what you meant it to do/.test(voice),
   true
 )
-check('reading LAUNCHED as having launched', /If the output says/.test(voice), true)
+check(
+  'reading LAUNCHED as having launched',
+  /if the output says LAUNCHED, something was launched/i.test(voice),
+  true
+)
 check(
   'denial is called out as the worse failure',
-  /worse than the original\s*mistake|worse than the original/.test(voice),
+  /Denying it is worse than the thing itself/.test(voice),
   true
 )
 check('and owning it is required', /say so plainly and briefly/.test(voice), true)
@@ -255,7 +319,7 @@ check('and owning it is required', /say so plainly and briefly/.test(voice), tru
 // The point of this prompt is a model that checks instead of asserting. A
 // confident wrong answer about the user's own machine is the worst thing it
 // can produce here, because it is indistinguishable from a right one.
-const apiPrompt = T.VOICE_PROMPT
+const apiPrompt = T.VOICE_PROMPT.replace(/\s+/g, ' ')
 check('it is told to check rather than guess', /CHECK, DO NOT GUESS/.test(apiPrompt), true)
 check(
   'and reminded it can see command output',
