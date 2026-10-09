@@ -590,6 +590,50 @@ check(
  * and knows the real ids: measured, `winget search Spotify` returns
  * Spotify.Spotify.
  */
+/**
+ * An app and a command-line tool are different questions.
+ *
+ * Asked "do I have claude", then "do I have claude in my terminal", Wumpy
+ * said "Claude is not installed" both times - from Get-StartApps, which only
+ * sees Start-menu entries. It was running inside Claude at the time.
+ * Measured: Get-Command claude returns C:\Users\zecha\.local\bin\claude.exe.
+ *
+ * The second answer is the worse half. "In my terminal" is a qualifier that
+ * changes what is being asked, and it got the previous answer recycled.
+ */
+check('CLI tools get their own check', /command-line tool/i.test(open), true)
+check('with Get-Command', /Get-Command <name>/.test(open), true)
+check('and the words that signal one', /in my terminal/.test(open), true)
+check('the measured example is kept', /Get-StartApps finds no "claude"/.test(open), true)
+// Re-asking with a qualifier must re-check, not recycle.
+check(
+  'a re-ask is a different question',
+  /that is a DIFFERENT question, not the same one/.test(open),
+  true
+)
+check('and is re-run', /Never reuse the previous answer/.test(open), true)
+
+/**
+ * An install that returned is not an install that finished.
+ *
+ * winget returned, Wumpy said it was done, the app was not there yet, and
+ * the next question got "Spotify is not installed" about an install that was
+ * still running. Two mistakes: announcing from the return, and then reading
+ * the empty check as failure rather than as not-yet.
+ */
+check('an install is two commands', /An install is TWO commands/.test(open), true)
+check('never announced from the return', /never from the fact that it returned/.test(open), true)
+check('the check is a separate block after', /as a separate block, after/.test(open), true)
+check(
+  'and reported from the check',
+  /Say what the check found, not what the installer printed/.test(open),
+  true
+)
+// The half that tripped the user up: empty right after an install means
+// still going, not failed.
+check('empty right after means still installing', /STILL INSTALLING/.test(open), true)
+check('with the observed case kept', /winget returned/.test(open), true)
+
 check('installing uses winget', /INSTALLING: USE WINGET/.test(open), true)
 check('with the full command', /winget install --id <Id> -e/.test(open), true)
 check('agreements accepted so it does not hang', /--accept-package-agreements/.test(open), true)

@@ -212,6 +212,40 @@ if (!TEMPLATE) {
    * the registry here for the same reason the apps are taken from
    * Get-StartApps: so this tests the query, not the machine.
    */
+  /**
+   * The command-line check, which did not exist and should have.
+   *
+   * Asked "do I have claude", then "do I have claude in my terminal", Wumpy
+   * answered "Claude is not installed" both times - from Get-StartApps,
+   * which only sees Start-menu entries. Measured on this machine:
+   *
+   *   Get-StartApps  *Claude*   nothing
+   *   Get-Command    claude     C:\Users\zecha\.local\bin\claude.exe
+   *
+   * It was running inside Claude at the time. The second answer was not even
+   * re-checked; the qualifier "in my terminal" is a different question and
+   * got the previous answer back.
+   */
+  const cliLine = T.OPEN_PROMPT.split(String.fromCharCode(10)).find((l) =>
+    l.includes('Get-Command <name>')
+  )
+  check('the prompt has a command-line check', Boolean(cliLine), true)
+  const CLI = (cliLine ?? '').trim()
+  check('on one line', CLI.includes(String.fromCharCode(10)), false)
+  check('it only reads', /Start-Process|Remove-|Set-/.test(CLI), false)
+
+  // Run it against tools that are and are not on PATH here.
+  for (const tool of ['winget', 'node']) {
+    const r = await runRaw(CLI.split('<name>').join(tool))
+    check(`it finds ${tool}`, r.stdout.trim().length > 0, true)
+    check(`and gives ${tool} a path`, /^[A-Za-z]:/m.test(r.stdout.trim()), true)
+  }
+  const missing = await runRaw(CLI.split('<name>').join('definitelyNotAToolXYZ'))
+  check('and nothing for a tool that is absent', missing.stdout.trim(), '')
+  // Absent must be a clean empty result, not an error the model then has to
+  // interpret - that distinction is what -ErrorAction SilentlyContinue buys.
+  check('without an error to misread', missing.stderr, '')
+
   const uninstLine = T.OPEN_PROMPT.split(String.fromCharCode(10)).find((l) =>
     l.includes('UninstallString')
   )
