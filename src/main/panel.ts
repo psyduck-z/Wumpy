@@ -39,8 +39,23 @@ export class Panel {
       skipTaskbar: true,
       hasShadow: false,
       backgroundColor: '#00000000',
-      // Keeps the panel out of Alt+Tab so it reads as an overlay, not a window.
-      type: 'toolbar',
+      /**
+       * NOT type: 'toolbar'.
+       *
+       * That maps to WS_EX_TOOLWINDOW on Windows, which keeps the panel out
+       * of Alt+Tab - the reason it was set - and also makes the window one
+       * Windows will not activate. Measured over the DevTools protocol with
+       * the panel open: the caret was in the composer and document.hasFocus()
+       * was false. The renderer had done its job and the keystrokes were
+       * going to whatever was underneath.
+       *
+       * Three separate attempts to fix autofocus were spent in the renderer
+       * because of that split: active element right, window focus wrong, and
+       * only one of the two is visible from inside the page.
+       *
+       * skipTaskbar alone keeps it off the taskbar and out of Alt+Tab, and
+       * leaves it activatable.
+       */
       webPreferences: {
         preload: join(__dirname, '../preload/index.js'),
         sandbox: false,
@@ -186,20 +201,41 @@ export class Panel {
     win.show()
     win.moveTop()
 
-    // Taking the keyboard needs more than show() on Windows.
-    //
-    // The foreground belongs to whatever the user was in, and Windows will not
-    // hand it to a process that is not already there - which Wumpy never is,
-    // since the hotkey arrives in a background hook. On top of that the panel
-    // is a tool window, kept out of Alt+Tab, and those are not activated by
-    // being shown. So the window appeared, looked focused, and the next
-    // keystroke went to the editor underneath.
-    //
-    // app.focus({ steal: true }) is the part that actually claims it;
-    // webContents.focus() then puts the caret inside the page rather than on
-    // the window frame.
+    /**
+     * Taking the keyboard needs more than show() on Windows, and more than
+     * app.focus() too.
+     *
+     * The foreground belongs to whatever the user was working in, and Windows
+     * refuses to hand it to a process that is not already there - which Wumpy
+     * never is, because the hotkey arrives in a background hook. show(),
+     * focus() and app.focus({ steal: true }) all return happily and none of
+     * them wins the foreground.
+     *
+     * Measured over the DevTools protocol, with another app made foreground
+     * first and the panel then shown the way the hotkey shows it:
+     *
+     *   document.activeElement  the composer textarea   (right)
+     *   document.hasFocus()     false                   (wrong)
+     *
+     * The caret was in the box and the keystrokes were going elsewhere. Three
+     * attempts at this were spent in the renderer, because from inside the
+     * page the first line looks like success.
+     *
+     * minimize() then restore() is what actually works. Restoring a minimized
+     * window is a path Windows does grant activation to, where showing a
+     * hidden one is not. It is a hack and it is worth it: the alternative is
+     * a panel that opens on a keystroke and then ignores the keyboard.
+     *
+     * Only when the ordinary route failed, so the usual case pays nothing and
+     * there is no flicker unless there would otherwise have been a bug.
+     */
     app.focus({ steal: true })
     win.focus()
+    if (!win.isFocused()) {
+      win.minimize()
+      win.restore()
+      win.focus()
+    }
     win.webContents.focus()
     win.webContents.send(IPC.panelShown)
   }

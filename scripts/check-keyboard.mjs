@@ -440,6 +440,57 @@ check(
   true
 )
 
+/**
+ * The half of autofocus that was never in the renderer.
+ *
+ * Three attempts at this were spent in the composer, because from inside the
+ * page a half-working focus looks like success. Measured over the DevTools
+ * protocol with the panel open:
+ *
+ *   document.activeElement  the composer textarea   (right)
+ *   document.hasFocus()     false                   (wrong)
+ *
+ * The caret was in the box; the keystrokes were going to whatever was
+ * underneath. Two separate causes, both in the main process.
+ *
+ * type: 'toolbar' is WS_EX_TOOLWINDOW, which keeps a window out of Alt+Tab
+ * and also makes it one Windows will not activate. Dropping it fixed the
+ * launch case and not the real one.
+ *
+ * The real one is the foreground lock: Windows will not hand the foreground
+ * to a process that is not already there, which Wumpy never is, because the
+ * hotkey arrives in a background hook. show(), focus() and
+ * app.focus({ steal: true }) all return happily and none of them wins it.
+ * Restoring a minimized window is a path Windows does grant, so that is the
+ * fallback - measured with another app made foreground first, hasFocus()
+ * went false -> true.
+ */
+const panelSrc = read('src/main/panel.ts')
+// The property, not the comment above it explaining its absence. The same
+// shape of false positive as the rAF check further down.
+check(
+  'the panel is not a tool window',
+  panelSrc.split(String.fromCharCode(10)).some((l) => /^\s*type: 'toolbar'/.test(l)),
+  false
+)
+check('and says why not', panelSrc.includes('WS_EX_TOOLWINDOW'), true)
+check('it still stays off the taskbar', panelSrc.includes('skipTaskbar: true'), true)
+// The ordinary route first, so the usual case pays nothing.
+check('app.focus is still tried first', /app\.focus\(\{ steal: true \}\)/.test(panelSrc), true)
+check(
+  'with a restore fallback when it fails',
+  /if \(!win\.isFocused\(\)\)[\s\S]{0,120}win\.minimize\(\)[\s\S]{0,60}win\.restore\(\)/.test(
+    panelSrc
+  ),
+  true
+)
+// Unconditional minimize/restore would flicker on every single open.
+check(
+  'and only when it failed',
+  /win\.minimize\(\)/.test(panelSrc) && /!win\.isFocused\(\)/.test(panelSrc),
+  true
+)
+
 check('the composer uses it', composer.includes('insistFocus('), true)
 check(
   'and yields to an open picker',
