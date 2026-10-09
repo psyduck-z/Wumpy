@@ -48,8 +48,17 @@
  * Both Groq and Google expose OpenAI-compatible endpoints, so one adapter
  * covers both - which is the point of the exercise.
  *
+ * Measured with --limits: Groq reports its meter in headers and Google reports
+ * nothing at all. Groq's own headers give 1000 requests and 8000 tokens a
+ * minute, which is the first confirmation of those numbers from the provider
+ * rather than from a page about the provider. Google sends no ratelimit header
+ * of any kind, which is why its cap had to be found by running into it, and why
+ * /usage records the request count at the moment of a refusal: on that provider
+ * there is no meter to read, so the only measurement available is the crash.
+ *
  * Run with:
  *   node scripts/bench-cloud.mjs --list
+ *   node scripts/bench-cloud.mjs --limits groq:openai/gpt-oss-120b
  *   node scripts/bench-cloud.mjs groq:openai/gpt-oss-120b google:gemini-3-flash
  */
 import { spawnSync } from 'node:child_process'
@@ -202,6 +211,64 @@ async function listModels(name) {
   if (!res.ok) return { name, error: `${res.status} ${(await res.text()).slice(0, 200)}` }
   const body = await res.json()
   return { name, ids: (body.data ?? []).map((m) => m.id).sort() }
+}
+
+/**
+ * What the provider says is left, from its own headers, for one request.
+ *
+ * "How long will this last" has been answered two ways here so far and both
+ * were bad. Reading the documentation gave a number that was wrong twice -
+ * Groq's caching, Google's quota. Running until it refused gave a real answer
+ * but spent the whole allowance to get it, and on a request-capped tier that
+ * is the measurement destroying the thing being measured: finding Google's cap
+ * cost eighteen of the eighteen requests.
+ *
+ * Most OpenAI-compatible endpoints already count it for you and return the
+ * running total in headers. One two-token request reads the meter. Anything
+ * matching ratelimit, quota, credit or usage is printed verbatim rather than
+ * parsed into a tidy shape, because the shape differs per provider and the
+ * point is to find out what this one actually sends - a provider that sends
+ * nothing is itself the finding, and says that the only way left is to hit the
+ * limit and let /usage record it, which is what it already does.
+ */
+async function readLimits(provider, model) {
+  const p = PROVIDERS[provider]
+  let res
+  try {
+    res = await fetch(`${p.base}/chat/completions`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${p.key()}` },
+      body: JSON.stringify({
+        model,
+        messages: [{ role: 'user', content: 'Say ok.' }],
+        max_tokens: 2048,
+        ...(p.extraBody ?? {})
+      })
+    })
+  } catch (err) {
+    return { error: `could not reach it: ${err.message}` }
+  }
+
+  const headers = [...res.headers.entries()]
+    .filter(([k]) => /ratelimit|rate-limit|quota|credit|usage|remaining|reset|retry/i.test(k))
+    .sort(([a], [b]) => a.localeCompare(b))
+
+  const body = await res.json().catch(() => null)
+  if (!res.ok) {
+    const detail = JSON.stringify(body ?? {}).slice(0, 300)
+    return { error: `${res.status} ${detail}`, headers }
+  }
+
+  // What one real Wumpy question costs, against whatever the headers just said
+  // is left. A question averages about 2.5 calls: ask, feed the output back,
+  // and often one more.
+  const used = body?.usage?.total_tokens ?? 0
+  const spend = used
+    ? `one 2-token call billed ${used} total tokens ` +
+      `(${body?.usage?.prompt_tokens ?? '?'} in, ${body?.usage?.completion_tokens ?? '?'} out` +
+      `${used > (body?.usage?.prompt_tokens ?? 0) + (body?.usage?.completion_tokens ?? 0) ? ', rest is thinking' : ''})`
+    : ''
+  return { headers, spend }
 }
 
 /**
@@ -437,7 +504,8 @@ const args = process.argv.slice(2)
  * down while fetch's keep-alive socket is still open and trips an assertion on
  * Windows - after the output, so it looked like a crash that had printed fine.
  */
-const listing = args.includes('--list') || args.length === 0
+const limiting = args.includes('--limits')
+const listing = !limiting && (args.includes('--list') || args.length === 0)
 
 if (listing) {
   for (const name of Object.keys(PROVIDERS)) {
@@ -448,9 +516,36 @@ if (listing) {
   }
 }
 
+if (limiting) {
+  for (const spec of args.filter((a) => a !== '--limits')) {
+    const [provider, ...rest] = spec.split(':')
+    const model = rest.join(':')
+    console.log(`\n=== ${spec} ===`)
+    if (!PROVIDERS[provider]) {
+      console.log(`  unknown provider "${provider}"`)
+      continue
+    }
+    if (!PROVIDERS[provider].key()) {
+      console.log(`  ${PROVIDERS[provider].envName} is not set`)
+      continue
+    }
+    const r = await readLimits(provider, model)
+    if (r.error) console.log(`  ${r.error}`)
+    if (!r.headers?.length) {
+      console.log('  this provider reports no limit headers — the only way to')
+      console.log('  learn its cap is to hit it, which /usage records when it happens')
+    }
+    for (const [k, v] of r.headers ?? []) console.log(`  ${k.padEnd(38)} ${v}`)
+    if (r.spend) console.log(`\n  ${r.spend}`)
+  }
+}
+
 const ROUNDS = Number(process.env.BENCH_ROUNDS ?? 2)
 
-for (const spec of listing ? [] : args) {
+// --limits is a reading, not a run: it must not fall through into the measuring
+// loop, which would take the flag itself for a provider spec and then spend the
+// allowance the reading exists to avoid spending.
+for (const spec of listing || limiting ? [] : args) {
   const [provider, ...rest] = spec.split(':')
   const model = rest.join(':')
   if (!PROVIDERS[provider]) {
