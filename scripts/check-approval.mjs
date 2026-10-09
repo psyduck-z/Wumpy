@@ -93,6 +93,10 @@ const MUST_BLOCK = [
   // looked at before, because only the segment head was checked.
   '(Remove-Item C:\temp -Recurse).Count',
   '(Stop-Process -Name foo).Id',
+  // A script block is a command position too. Allowing ForEach-Object
+  // without looking inside its braces would have been a way through.
+  'Get-ChildItem | ForEach-Object { Remove-Item $_ }',
+  'Get-Process | Where-Object { Stop-Process $_ }',
   // Trusting "get-" must not leak into verbs that change things, including
   // ones that read like a question.
   'Set-NetFirewallProfile -Enabled True',
@@ -155,6 +159,11 @@ const MUST_ALLOW = [
   'Get-WmiObject Win32_LogicalDisk',
   'Get-NetFirewallProfile',
   'Get-ComputerInfo | Select-Object OsName',
+  // ForEach-Object transforms what it is handed and changes nothing itself.
+  // Its absence refused the one correct percentage command bench-ceiling
+  // ever produced, which is a whole capability lost to a missing name.
+  'Get-PSDrive C | ForEach-Object { "{0:N2}" -f ($_.Used / ($_.Used + $_.Free) * 100) }',
+  'Get-Process | Group-Object Name | Sort-Object Count',
   'dotnet --list-sdks',
   "Get-StartApps | Where-Object Name -like '*Visual-Studio*'",
   'node --version',

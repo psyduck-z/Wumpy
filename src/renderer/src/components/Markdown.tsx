@@ -180,6 +180,43 @@ function openFenceBody(text: string): string | null {
     .trim()
 }
 
+/**
+ * Only the first runnable block in a reply stays runnable.
+ *
+ * The contract has always been one command per turn - the prompt says
+ * "propose ONE command" - but nothing enforced it, and the model does not
+ * always comply. Measured: asked "my firewall is off, turn it back on", it
+ * produced two blocks, a Get-NetFirewallProfile check AND a
+ * Set-NetFirewallProfile that turns it on. Both rendered as cards, so the
+ * user was handed a live button to change a security setting beside the
+ * button that would have told them whether it needed changing.
+ *
+ * Asking the model again was not the fix. The later blocks are retagged so
+ * they render as ordinary code: still visible, still readable, no longer
+ * one click from running. The model gets its plan across and the user gets
+ * one decision at a time.
+ *
+ * Pure, and separate from the component, so the rule can be tested without
+ * rendering anything.
+ */
+export function keepFirstRunnable(text: string): string {
+  const FENCE = /^(\s*```)(wumpy-run(?:-cmd|-bash)?)(\s*)$/
+  let seen = false
+  return text
+    .split(String.fromCharCode(10))
+    .map((line) => {
+      const m = FENCE.exec(line)
+      if (!m) return line
+      if (!seen) {
+        seen = true
+        return line
+      }
+      // A tag the fence reader does not recognise, so it renders as code.
+      return `${m[1]}powershell${m[3]}`
+    })
+    .join(String.fromCharCode(10))
+}
+
 /** Maps a fence tag to the shell it should run in, or null for ordinary code. */
 function runnableShell(className: unknown): ShellKind | null {
   if (typeof className !== 'string') return null
@@ -373,7 +410,7 @@ export const Markdown = memo(function Markdown({
         )
       }}
     >
-      {text}
+      {onRunCommand ? keepFirstRunnable(text) : text}
     </ReactMarkdown>
   )
 })

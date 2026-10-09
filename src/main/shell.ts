@@ -112,7 +112,11 @@ const READ_ONLY = new Set([
   'select-object',
   'where-object',
   'sort-object',
-  'compare-object',
+  // Found by bench-ceiling: the correct percentage command was refused for
+  // want of this one name. It transforms what it is handed and changes
+  // nothing itself - what matters is the script block it is given, and the
+  // sweep below now looks inside those.
+  'foreach-object',
   'format-table',
   'format-list',
   'resolve-path',
@@ -271,11 +275,11 @@ export function isReadOnly(command: string): boolean {
    * parenthesised Get-CimInstance. The model was right every time and the
    * gate was wrong.
    *
-   * Only at a command position - start, or after ( | ; & - because matching
+   * Only at a command position - start, or after ( | ; & { - because matching
    * every hyphenated word blocked `dotnet --list-sdks` on the strength of
    * "list-sdks", and would block a wildcard like '*Visual-Studio*' too.
    */
-  const CMDLET_AT_START = /(?:^|[(|;&])\s*([A-Za-z][\w]*-[A-Za-z][\w]*)/g
+  const CMDLET_AT_START = /(?:^|[(|;&{])\s*([A-Za-z][\w]*-[A-Za-z][\w]*)/g
   for (const [, cmdlet] of trimmed.matchAll(CMDLET_AT_START)) {
     if (!isReadingCmdlet(cmdlet)) return false
   }

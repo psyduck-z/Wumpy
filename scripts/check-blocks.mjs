@@ -178,8 +178,79 @@ const readyEarly = !midStream.includes('still writing') && proposed(midStream) =
 if (!readyEarly) failed++
 console.log(`${readyEarly ? 'ok  ' : 'FAIL'} a closed block is ready while the answer continues`)
 
+/* ------------------------------------------- only one live button per turn */
+
+const NL = String.fromCharCode(10)
+
+/**
+ * Asked "my firewall is off, turn it back on", the model proposed the check
+ * AND the change: a Get-NetFirewallProfile block and a Set-NetFirewallProfile
+ * block, both rendered as cards. The user was handed a live button to alter a
+ * security setting next to the button that would have told them whether it
+ * needed altering.
+ *
+ * The prompt already said to propose one command. Nothing enforced it, so
+ * this does: later blocks stay visible as code and lose the button.
+ */
+const TWO_BLOCKS = [
+  'First check which profiles are off:',
+  '',
+  '```wumpy-run',
+  'Get-NetFirewallProfile | Select-Object Name, Enabled',
+  '```',
+  '',
+  'Then turn them on:',
+  '',
+  '```wumpy-run',
+  'Set-NetFirewallProfile -All -Enabled True',
+  '```'
+].join(NL)
+
+const twoHtml = render(TWO_BLOCKS)
+const cardCount = (twoHtml.match(/class="cmd /g) ?? []).length
+const oneCard = cardCount === 1
+if (!oneCard) failed++
+console.log(`${oneCard ? 'ok  ' : 'FAIL'} two proposed commands render ${cardCount} card`)
+
+// And it is the first one that kept the button, not the destructive second.
+const keptFirst = proposed(twoHtml) === 'Get-NetFirewallProfile | Select-Object Name, Enabled'
+if (!keptFirst) failed++
+console.log(`${keptFirst ? 'ok  ' : 'FAIL'} the runnable one is the first block`)
+
+// The second is still readable, just inert.
+const stillShown = twoHtml.includes('Set-NetFirewallProfile')
+if (!stillShown) failed++
+console.log(`${stillShown ? 'ok  ' : 'FAIL'} the second is still shown, as code`)
+
+// Mixed tags count too - a cmd or bash block after a powershell one.
+const MIXED = ['```wumpy-run', 'Get-Date', '```', '', '```wumpy-run-cmd', 'del x', '```'].join(NL)
+const mixedCards = (render(MIXED).match(/class="cmd /g) ?? []).length
+const mixedOk = mixedCards === 1
+if (!mixedOk) failed++
+console.log(`${mixedOk ? 'ok  ' : 'FAIL'} a later cmd block is inert too (${mixedCards} card)`)
+
+/**
+ * A question and a command are different decisions, so an ask block is
+ * untouched: the rule is one thing to RUN, not one card.
+ */
+const ASK_THEN_RUN = [
+  '```wumpy-ask',
+  'Which folder?',
+  '- Downloads',
+  '- Documents',
+  '```',
+  '',
+  '```wumpy-run',
+  'Get-Date',
+  '```'
+].join(NL)
+const askHtml = render(ASK_THEN_RUN)
+const bothKept = askHtml.includes('class="ask') && proposed(askHtml) === 'Get-Date'
+if (!bothKept) failed++
+console.log(`${bothKept ? 'ok  ' : 'FAIL'} an ask block does not consume the one command`)
+
 rmSync(out, { force: true })
 
-const total = CASES.length + 3
+const total = CASES.length + 8
 console.log(`\n${total - failed}/${total} block checks correct`)
 process.exit(failed === 0 ? 0 : 1)

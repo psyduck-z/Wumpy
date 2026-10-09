@@ -214,6 +214,27 @@ check(
 )
 
 /**
+ * It asked the right question and filled it with answers it had invented -
+ * first full paths, then bare filenames guessed from the word "old". Two
+ * phrasings of the prohibition changed nothing; the worked example below it
+ * took five samples out of five to a one-line question and no block.
+ */
+check(
+  'options must be things it has seen',
+  prompt.includes('EVERY OPTION MUST BE SOMETHING YOU HAVE SEEN'),
+  true
+)
+check('never an unlisted path', prompt.includes('Never a path you have not listed'), true)
+check('nothing real means no block', prompt.includes('DO NOT USE A BLOCK'), true)
+check('ask in prose instead', prompt.includes('Which file do you mean?'), true)
+check(
+  'and the invented list is shown as wrong',
+  prompt.includes('NOT a block offering old.txt'),
+  true
+)
+check('because guessed options are still guessing', /still guessing/.test(prompt), true)
+
+/**
  * Running an uninstaller was classified "not risky", so the native
  * confirmation never fired for it. That had to be true before the prompt
  * could be told to go ahead and propose one.
