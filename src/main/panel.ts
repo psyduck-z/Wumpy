@@ -46,7 +46,19 @@ export class Panel {
         sandbox: false,
         contextIsolation: true,
         nodeIntegration: false,
-        spellcheck: false
+        spellcheck: false,
+        /**
+         * The panel spends most of its life hidden, and has to work the
+         * instant it is not.
+         *
+         * Chromium throttles hidden windows: requestAnimationFrame stops and
+         * timers are held back. That is right for a background tab and wrong
+         * for this, because everything that has to happen the moment the
+         * panel appears - putting the caret in the box above all - runs in
+         * exactly the window where the throttle is still on. The focus retry
+         * loop was driven by rAF and simply never got a second attempt.
+         */
+        backgroundThrottling: false
       }
     })
 

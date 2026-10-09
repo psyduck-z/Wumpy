@@ -318,6 +318,27 @@ check(
   false
 )
 
+/**
+ * The retry must survive a hidden window, which is the only window it ever
+ * runs in.
+ *
+ * Chromium throttles hidden windows: requestAnimationFrame stops. The loop
+ * was driven from a frame callback, so it died after its first attempt - and
+ * the first attempt is precisely the one that happens before Windows has
+ * handed the foreground over, which is the one that never works. It looked
+ * like a retry loop and behaved like a single try.
+ */
+// A call, not the comment explaining why there is no call.
+check('the loop is not driven by rAF', /requestAnimationFrame\(/.test(focusSrc), false)
+check('it uses a timer instead', /timer = setTimeout\(attempt/.test(focusSrc), true)
+check('and says why', focusSrc.includes('Chromium stops rAF for a'), true)
+const panel = read('src/main/panel.ts')
+check(
+  'the window is not throttled when hidden',
+  panel.includes('backgroundThrottling: false'),
+  true
+)
+
 check('the composer uses it', composer.includes('insistFocus('), true)
 check(
   'and yields to an open picker',

@@ -78,7 +78,6 @@ export function insistFocus(
 ): () => void {
   const startedAt = Date.now()
   let timer: ReturnType<typeof setTimeout> | null = null
-  let frame = 0
   let cancelled = false
 
   const attempt = (): void => {
@@ -97,9 +96,17 @@ export function insistFocus(
     // first keystroke is caught rather than the second.
     if (el) el.focus({ preventScroll: true })
 
-    frame = requestAnimationFrame(() => {
-      timer = setTimeout(attempt, FOCUS_RETRY_MS)
-    })
+    /**
+     * setTimeout, deliberately, and never requestAnimationFrame.
+     *
+     * The panel is hidden until the hotkey, and Chromium stops rAF for a
+     * hidden window. Driving the retry from a frame callback meant the loop
+     * died after its first attempt - the one that happens before Windows has
+     * handed the foreground over, which is the attempt that never works. The
+     * window also sets backgroundThrottling: false so these timers are not
+     * held back either.
+     */
+    timer = setTimeout(attempt, FOCUS_RETRY_MS)
   }
 
   attempt()
@@ -107,6 +114,5 @@ export function insistFocus(
   return () => {
     cancelled = true
     if (timer) clearTimeout(timer)
-    if (frame) cancelAnimationFrame(frame)
   }
 }

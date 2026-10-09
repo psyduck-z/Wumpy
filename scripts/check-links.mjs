@@ -490,12 +490,38 @@ check(
   true
 )
 check('nor put in a command', T.OPEN_PROMPT.includes('never'), true)
+/**
+ * Not installed means say so, not open something else instead.
+ *
+ * Asked "is minecraft installed" and told no, the user said "open it" - and
+ * Wumpy opened open.spotify.com. Two faults in one line. The pronoun went to
+ * the last app it had launched rather than the last app discussed, and the
+ * not-installed branch had been told to open the website, which it did for
+ * the wrong app without saying which.
+ *
+ * The website substitution was my design and it was wrong on the user's own
+ * standing rule: they asked to open an app, a page is a different thing, and
+ * swapping one for the other is deciding for them. Offer it and wait.
+ */
+const open = T.OPEN_PROMPT.replace(/\s+/g, ' ')
+check('not installed means say so and stop', /NOT INSTALLED -> say so and STOP/.test(open), true)
+check('not open the website instead', /Do not open the website instead/.test(open), true)
+check('the substitution is named as one', /a web page is a different thing/.test(open), true)
+check('it is offered rather than done', /Want me to open minecraft.net\?/.test(open), true)
+check('and opened once they say yes', /If they say yes/.test(open), true)
+
+// "it" is the thing most recently discussed, not the last thing acted on.
 check(
-  'not installed means the website',
-  T.OPEN_PROMPT.includes('NOT INSTALLED -> open the website'),
+  'pronouns resolve to the last subject',
+  /"it" means the thing most recently talked about/.test(open),
   true
 )
-check('and the user is told which happened', T.OPEN_PROMPT.includes('say what you'), true)
+check('and the Minecraft case is named', /an "open it" is about MINECRAFT/.test(open), true)
+// Naming the app makes a wrong guess visible in the reply rather than only
+// in what happens afterwards.
+check('the app is named in the reply', /Name the app in your reply/.test(open), true)
+check('and ambiguity is asked about', /ask which rather than pick/.test(open), true)
+check('and the user is told which happened', /say it is open, in one line/.test(open), true)
 // Canonical cmdlet names, not aliases: clearer to read, and the thing the
 // read-only allowlist parses most reliably.
 check('the check avoids the Select alias', T.OPEN_PROMPT.includes('| Select '), false)
