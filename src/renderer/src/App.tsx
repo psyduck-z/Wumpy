@@ -16,6 +16,7 @@ import type {
 } from '@shared/types'
 import { isTall } from '@shared/types'
 import { looksLikeUrl, SEARCH_ENGINES, type LinkApproval } from '@shared/links'
+import { NEVER_RAN_ENDING, neverRan } from '@shared/parsefail'
 import { CONTEXT_TOKENS, DEFAULT_MODEL } from '@shared/assistant'
 import { CLOUD_MODELS, PROVIDERS } from '@shared/cloud'
 import { useChat, nextId, type ChatStats } from './hooks/useChat'
@@ -487,23 +488,27 @@ export default function App(): React.JSX.Element {
      * the output, because the output is only whatever had been printed when
      * the axe fell.
      */
-    const ending = result.timedOut
-      ? [
-          'Wumpy STOPPED that command before it finished — it hit the time limit.',
-          'Whatever it was doing may still be running in the background, and the',
-          'output above is only what it had printed so far.',
-          'Do NOT say it succeeded, and do not say it failed. Say it was still',
-          'going, then propose ONE command that checks the real state.'
-        ]
-      : [
-          // Without this a 3.8B model answers the report by proposing the
-          // same command again, which in an automatic mode runs it again.
-          'That command is done. Do not propose it again. Answer the original',
-          'question from this output, in words.'
-        ]
+    const ending = neverRan(result)
+      ? NEVER_RAN_ENDING
+      : result.timedOut
+        ? [
+            'Wumpy STOPPED that command before it finished — it hit the time limit.',
+            'Whatever it was doing may still be running in the background, and the',
+            'output above is only what it had printed so far.',
+            'Do NOT say it succeeded, and do not say it failed. Say it was still',
+            'going, then propose ONE command that checks the real state.'
+          ]
+        : [
+            // Without this a 3.8B model answers the report by proposing the
+            // same command again, which in an automatic mode runs it again.
+            'That command is done. Do not propose it again. Answer the original',
+            'question from this output, in words.'
+          ]
 
     const report = [
-      `I ran that command. Exit code ${result.exitCode}${result.timedOut ? ' (timed out)' : ''}.`,
+      neverRan(result)
+        ? `That command could not run. Exit code ${result.exitCode}.`
+        : `I ran that command. Exit code ${result.exitCode}${result.timedOut ? ' (timed out)' : ''}.`,
       '',
       clipped ? ['```', clipped, '```'].join('\n') : '(no output)',
       '',

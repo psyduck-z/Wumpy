@@ -331,25 +331,33 @@ check(
   true
 )
 /**
- * The installed-check, after it got Spotify wrong on this machine.
+ * The installed-check, after it got Spotify wrong twice.
  *
- * It led with Get-AppxPackage, which only sees Store packages. Measured here,
- * against a Spotify that is installed and sitting in the Start menu:
+ * It first led with Get-AppxPackage, which only sees Store packages.
+ * Measured against a Spotify that is installed and in the Start menu:
  *
  *   Get-AppxPackage *Spotify*   empty
  *   Get-StartApps               found
  *   HKCU uninstall              found
  *   HKLM uninstall              empty
- *   all three hives             found
  *
- * So the first thing the model was told to run finds nothing for a normal
- * desktop install, and HKLM alone finds nothing either. Both are now fixed in
- * the prompt, and asserted here so the ordering does not drift back.
+ * The replacement searched all three hives, and failed too - the model put a
+ * line break after `-ErrorAction SilentlyContinue`, and so, three lines above
+ * the rule forbidding exactly that, did I. A bare line break ends a statement
+ * in PowerShell, so the thing ran as fragments and reported "missing an
+ * argument", which says nothing about the app.
+ *
+ * Two failures of the same multi-line shape is enough. The check is now one
+ * line of 88 characters with nothing to continue, and it is the right
+ * question anyway: Get-StartApps asks whether this can be launched as an app,
+ * which is exactly the open-the-app-or-the-website decision. Measured, it
+ * found Spotify, git, node, python and Notepad, and correctly found nothing
+ * for Discord and for a name that does not exist.
  */
-check('it leads with Get-StartApps', T.OPEN_PROMPT.includes('Get-StartApps'), true)
+check('it uses Get-StartApps', T.OPEN_PROMPT.includes('Get-StartApps'), true)
 check(
-  'and says not to lead with Get-AppxPackage',
-  T.OPEN_PROMPT.includes('Do NOT lead with Get-AppxPackage'),
+  'and says not to use Get-AppxPackage',
+  T.OPEN_PROMPT.includes('Do NOT use Get-AppxPackage'),
   true
 )
 check(
@@ -357,15 +365,34 @@ check(
   T.OPEN_PROMPT.includes('returns nothing while Spotify is installed'),
   true
 )
-check('and for desktop installs', T.OPEN_PROMPT.includes('Uninstall'), true)
-// HKLM alone came back empty for Spotify, so all three hives are named.
-check('it searches HKCU too', T.OPEN_PROMPT.includes('HKCU:'), true)
-check('and the WOW6432Node hive', T.OPEN_PROMPT.includes('WOW6432Node'), true)
+// The thing that actually broke it, twice.
+check('it insists on one line', T.OPEN_PROMPT.includes('on ONE line'), true)
 check(
-  'and tolerates keys it cannot read',
-  T.OPEN_PROMPT.includes('-ErrorAction SilentlyContinue'),
+  'and says why a wrapped one fails',
+  T.OPEN_PROMPT.includes('A line break ENDS a statement'),
   true
 )
+check('and names the error it produces', T.OPEN_PROMPT.includes('missing an'), true)
+check(
+  'and says that is the first thing to suspect',
+  T.OPEN_PROMPT.includes('got wrapped onto'),
+  true
+)
+// The example in the prompt must itself be one line, which is the part I got
+// wrong: the rule was right and the example above it was not.
+const example = T.OPEN_PROMPT.split(String.fromCharCode(10)).filter((l) =>
+  l.includes('Get-StartApps |')
+)
+check('the example appears once', example.length, 1)
+check(
+  'and is a whole command on its own line',
+  /^\s*Get-StartApps \| Where-Object Name -like '\*name\*' \| Select-Object -ExpandProperty Name\s*$/.test(
+    example[0] ?? ''
+  ),
+  true
+)
+// No multi-line registry walk left to get wrong.
+check('the fragile registry block is gone', T.OPEN_PROMPT.includes('WOW6432Node'), false)
 check('part of a word is called out as not a match', T.OPEN_PROMPT.includes('is not a match'), true)
 
 /**
