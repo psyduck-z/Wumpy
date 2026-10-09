@@ -322,11 +322,35 @@ export const SHORTCUT_FOR: Record<string, string | undefined> = {
   new: 'Ctrl+N',
   resume: 'Ctrl+R',
   model: 'Ctrl+M',
+  dock: 'Ctrl+D',
+  pin: 'Ctrl+P',
   approve: 'Shift+Tab',
   stop: 'Esc',
   quit: 'Esc',
   help: 'Ctrl+K'
 }
+
+/**
+ * Keys that are not a command, listed so Ctrl+K can show them anyway.
+ *
+ * The palette was built from the command list, so anything with no slash
+ * command behind it — approving a proposal, stepping through the transcript,
+ * copying the last answer — was undiscoverable unless you already knew it.
+ * That is most of the navigation.
+ */
+export const KEY_ONLY: Array<{ keys: string; what: string }> = [
+  { keys: 'Ctrl+Enter', what: 'Run the newest proposal' },
+  { keys: 'Ctrl+Shift+Enter', what: 'Skip the newest proposal' },
+  { keys: 'Ctrl+↓ / Ctrl+↑', what: 'Step into the newest / first proposal' },
+  { keys: '← →', what: 'Move between a proposal’s buttons' },
+  { keys: 'Alt+↑ / Alt+↓', what: 'Step through messages' },
+  { keys: 'PgUp / PgDn', what: 'Scroll the transcript' },
+  { keys: 'Ctrl+Home / Ctrl+End', what: 'Jump to the top / bottom' },
+  { keys: 'Ctrl+Shift+C', what: 'Copy the last answer' },
+  { keys: 'Ctrl+C', what: 'Stop generating (with nothing selected)' },
+  { keys: 'Esc', what: 'Back to the box, then close the panel' },
+  { keys: '↑ ↓', what: 'Recall what you typed before, in an empty box' }
+]
 
 /** Every command, for the menu. */
 export function allCommands(): CommandSpec[] {
@@ -397,12 +421,16 @@ export function helpText(): string {
     '| Ctrl+K | Every command, searchable |',
     '| ↑ / ↓ | Step back through what you have typed before |',
     '| Enter / Shift+Enter | Send / start a new line |',
-    '| Ctrl+1–4 | Jump straight to a tier |',
-    '| Ctrl+D | Quick or Developer mode |',
+    '| Ctrl+M | Change the model |',
     '| Ctrl+N | New chat |',
     '| Ctrl+R | Reopen a saved chat |',
+    '| Ctrl+D | Move the panel to the next corner |',
+    '| Ctrl+P | Pin or unpin |',
+    '| Ctrl+Shift+C | Copy the last answer |',
     '| Ctrl+Enter | Run the command being asked about |',
     '| Ctrl+Shift+Enter | Skip it |',
+    '| Ctrl+Down / Ctrl+Up | Step into the newest / first proposal |',
+    '| ← / → | Move between a proposal’s buttons |',
     '| Ctrl+C | Stop the answer (copies instead if text is selected) |',
     '| Alt+Up / Alt+Down | Step through the conversation a message at a time |',
     '| Shift+Tab | Cycle approval mode |',

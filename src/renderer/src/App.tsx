@@ -20,12 +20,19 @@ import { FAILED_ENDING, NEVER_RAN_ENDING, neverRan } from '@shared/parsefail'
 import { CONTEXT_TOKENS, DEFAULT_MODEL } from '@shared/assistant'
 import { CLOUD_MODELS, PROVIDERS } from '@shared/cloud'
 import { useChat, nextId, type ChatStats } from './hooks/useChat'
-import { allCommands, parseCommand, helpText, SHORTCUT_FOR, type CommandAction } from './commands'
+import {
+  allCommands,
+  parseCommand,
+  helpText,
+  KEY_ONLY,
+  SHORTCUT_FOR,
+  type CommandAction
+} from './commands'
 import { newestPending } from './pending'
 import { forgetClaims } from './once'
 import { matchIntent } from './intents'
 import { AUTO_RUN_LIMIT, autoRunEligible } from './autorun'
-import { Header } from './components/Header'
+import { DOCK_CYCLE, Header } from './components/Header'
 import { Message } from './components/Message'
 import { Composer } from './components/Composer'
 import { StatusBar } from './components/StatusBar'
@@ -1163,6 +1170,25 @@ export default function App(): React.JSX.Element {
           setPicker('resume')
           return
         }
+        // Ctrl+D cycles the dock. Free since Quick/Developer mode went, and
+        // moving the panel was otherwise a mouse click or a typed command -
+        // the one piece of the window you could not drive from the keyboard.
+        if (e.key.toLowerCase() === 'd') {
+          e.preventDefault()
+          const order = DOCK_CYCLE
+          const next = order[(order.indexOf(dock) + 1) % order.length]
+          window.wumpy.panel.setDock(next)
+          setSettings((prev) => (prev ? { ...prev, dock: next } : prev))
+          return
+        }
+        // Ctrl+P pins and unpins. Pinning decides whether the panel survives
+        // you clicking away, which is the thing most worth changing without
+        // clicking away to do it.
+        if (e.key.toLowerCase() === 'p') {
+          e.preventDefault()
+          togglePin()
+          return
+        }
         // Ctrl+K opens everything Wumpy can do, searchable.
         if (e.key.toLowerCase() === 'k') {
           e.preventDefault()
@@ -1218,6 +1244,17 @@ export default function App(): React.JSX.Element {
       }
 
       // Ctrl+Shift+Enter skips it instead.
+      // Ctrl+Shift+C copies the last answer. Selecting a streamed reply by
+      // hand means dragging across a box that is still growing.
+      if (e.ctrlKey && e.shiftKey && !e.altKey && e.key.toLowerCase() === 'c') {
+        const last = [...messages].reverse().find((m) => m.role === 'assistant' && !m.local)
+        if (!last?.content.trim()) return
+        e.preventDefault()
+        void navigator.clipboard.writeText(last.content.trim())
+        chat.note('Copied the last answer.')
+        return
+      }
+
       if (e.ctrlKey && e.shiftKey && !e.altKey && e.key === 'Enter') {
         const pending = newestPending()
         if (!pending) return
@@ -1300,6 +1337,10 @@ export default function App(): React.JSX.Element {
         onClose: close,
         onPick: (name) => {
           close()
+          // A key-only row is a reminder, not something to run. Picking one
+          // does nothing rather than erroring, because the row is there to
+          // be read.
+          if (name.startsWith('key:')) return
           const spec = allCommands().find((c) => c.name === name)
           if (!spec) return
           // Run it and see. Several commands take an argument but do something
@@ -1313,12 +1354,23 @@ export default function App(): React.JSX.Element {
           }
           void runCommand(action, `/${spec.name}`)
         },
-        items: allCommands().map((c) => ({
-          id: c.name,
-          title: `/${c.name}${c.arg ? ` <${c.arg}>` : ''}`,
-          meta: c.hint,
-          hint: SHORTCUT_FOR[c.name]
-        }))
+        items: [
+          ...allCommands().map((c) => ({
+            id: c.name,
+            title: `/${c.name}${c.arg ? ` <${c.arg}>` : ''}`,
+            meta: c.hint,
+            hint: SHORTCUT_FOR[c.name]
+          })),
+          // Most of the navigation has no slash command behind it, so until
+          // now the only way to find Ctrl+Enter or Alt+Up was to be told.
+          // They are listed here, filterable with everything else.
+          ...KEY_ONLY.map((k) => ({
+            id: `key:${k.keys}`,
+            title: k.what,
+            meta: 'keyboard',
+            hint: k.keys
+          }))
+        ]
       }
     }
 

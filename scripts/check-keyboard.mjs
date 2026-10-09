@@ -12,7 +12,7 @@
 import { build } from 'esbuild'
 import { pathToFileURL } from 'node:url'
 import { join } from 'node:path'
-import { readFileSync, existsSync } from 'node:fs'
+import { readFileSync, existsSync, rmSync } from 'node:fs'
 
 const out = join(process.cwd(), '.kb-check.mjs')
 await build({
@@ -24,6 +24,21 @@ await build({
   logLevel: 'error'
 })
 const K = await import(pathToFileURL(out).href)
+
+const focusOut = join(process.cwd(), '.kb-focus.mjs')
+await build({
+  entryPoints: ['src/renderer/src/focus.ts'],
+  bundle: true,
+  platform: 'node',
+  format: 'esm',
+  outfile: focusOut,
+  logLevel: 'error'
+})
+const F = await import(pathToFileURL(focusOut).href)
+
+// Both bundles are read by now; leaving them in the repo root is litter.
+rmSync(out, { force: true })
+rmSync(focusOut, { force: true })
 
 let failures = 0
 function check(label, actual, expected) {
@@ -197,16 +212,15 @@ const composer = read('src/renderer/src/components/Composer.tsx')
 
 check('showing the panel focuses the box', composer.includes('[focusToken]'), true)
 // The hotkey arrives in a background hook, so Windows hands the foreground
-// over asynchronously and a focus() made before that lands is dropped.
-check(
-  'and tries again on the next frame',
-  /requestAnimationFrame\([\s\S]{0,140}preventScroll/.test(composer),
-  true
-)
+// over asynchronously and a focus() made before that lands is dropped. The
+// retrying now lives in focus.ts, and is checked above by its rules rather
+// than by the shape of a call here.
+check('and keeps trying until it sticks', composer.includes('insistFocus('), true)
 // The composer sits at the bottom; focusing it the ordinary way yanks a long
 // transcript down to the end, which is not what reopening should do to what
 // you were reading.
-check('without dragging the transcript to the end', composer.includes('preventScroll: true'), true)
+const focusSrc = read('src/renderer/src/focus.ts')
+check('without dragging the transcript to the end', focusSrc.includes('preventScroll: true'), true)
 
 check(
   'coming back to the window focuses it too',
@@ -229,6 +243,92 @@ check(
   '.picker is a class that exists',
   read('src/renderer/src/components/Picker.tsx').includes('className="picker"'),
   true
+)
+
+/* ------------------------------ the caret actually landing in the box */
+
+/**
+ * This has been "fixed" twice and stayed broken, which is why it is now
+ * tested rather than reasoned about.
+ *
+ * Wumpy opens on a global hotkey, so the foreground belongs to whatever the
+ * user was in and Windows hands it over asynchronously. A focus() made before
+ * the window holds it is silently dropped and the keystroke goes to the
+ * editor underneath. The previous fix retried once on the next animation
+ * frame - about 16ms, against a handover that routinely takes 50-250ms - so
+ * the retry landed in the same gap as the first attempt.
+ *
+ * The rule is now: keep trying until document.hasFocus() is true AND the
+ * caret is here, with a deadline so it cannot fight the user for the
+ * keyboard afterwards.
+ */
+const attempt = (o) => ({ hasFocus: true, isActive: true, elapsedMs: 0, yielded: false, ...o })
+
+check(
+  'keep trying while the window has no focus yet',
+  F.shouldKeepTrying(attempt({ hasFocus: false, isActive: true })),
+  true
+)
+check(
+  'and while the caret is somewhere else',
+  F.shouldKeepTrying(attempt({ isActive: false })),
+  true
+)
+// The success condition is BOTH, which is the thing the old fix got wrong:
+// focusing an element in a window that does not hold the keyboard changes
+// which element WOULD receive keys, not where the keys are going.
+check(
+  'stop once both are true',
+  F.shouldKeepTrying(attempt({ hasFocus: true, isActive: true })),
+  false
+)
+check(
+  'focused element alone is not enough',
+  F.shouldKeepTrying(attempt({ hasFocus: false, isActive: true })),
+  true
+)
+
+// Long enough to outlast a slow foreground handover. 16ms was not.
+check('the deadline outlasts a real handover', F.FOCUS_DEADLINE_MS >= 250, true)
+check('and is not so long it fights the user', F.FOCUS_DEADLINE_MS <= 1500, true)
+check('retries are frequent enough to catch it', F.FOCUS_RETRY_MS <= 50, true)
+check(
+  'give up at the deadline',
+  F.shouldKeepTrying(attempt({ hasFocus: false, isActive: false, elapsedMs: F.FOCUS_DEADLINE_MS })),
+  false
+)
+check(
+  'and just before it, keep going',
+  F.shouldKeepTrying(
+    attempt({ hasFocus: false, isActive: false, elapsedMs: F.FOCUS_DEADLINE_MS - 1 })
+  ),
+  true
+)
+
+// A picker focuses its own filter. Stealing that back would be worse than
+// never having had focus at all.
+check(
+  'yield to something that wants the keyboard',
+  F.shouldKeepTrying(attempt({ hasFocus: false, isActive: false, yielded: true })),
+  false
+)
+check(
+  'even when everything else says keep going',
+  F.shouldKeepTrying(attempt({ hasFocus: true, isActive: false, yielded: true })),
+  false
+)
+
+check('the composer uses it', composer.includes('insistFocus('), true)
+check(
+  'and yields to an open picker',
+  /insistFocus\([\s\S]{0,160}querySelector\('\.picker'\)/.test(composer),
+  true
+)
+// The old one-frame retry must not come back alongside it.
+check(
+  'the single-frame retry is gone',
+  /requestAnimationFrame\([\s\S]{0,120}focus\(\{ preventScroll/.test(composer),
+  false
 )
 
 /* ------------------- a reopened chat must not do it all again */

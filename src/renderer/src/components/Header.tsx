@@ -1,7 +1,15 @@
 import type { AssistantStatus, Dock } from '@shared/types'
 import logo from '../assets/logo.png'
 
-const DOCK_CYCLE: Dock[] = ['right', 'bottom-right', 'bottom-left', 'left', 'top-left', 'top-right']
+/** The order the dock button and Ctrl+D both step through. */
+export const DOCK_CYCLE: Dock[] = [
+  'right',
+  'bottom-right',
+  'bottom-left',
+  'left',
+  'top-left',
+  'top-right'
+]
 
 /** Small glyph showing where on the screen the panel currently sits. */
 function DockGlyph({ dock }: { dock: Dock }): React.JSX.Element {

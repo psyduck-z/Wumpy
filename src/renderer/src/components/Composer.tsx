@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { allCommands, completions, type CommandSpec } from '../commands'
 import { CommandPalette } from './CommandPalette'
 import { useInputHistory } from '../hooks/useInputHistory'
+import { insistFocus } from '../focus'
 import { useDictation } from '../hooks/useDictation'
 import { HOLD_MS, HoldToTalk, isPlainSpace, type HoldAction } from '../holdtotalk'
 import { Mic } from './Mic'
@@ -176,28 +177,25 @@ export function Composer({
   /**
    * Put the caret in the box whenever the panel is shown.
    *
-   * Once is not enough. The hotkey arrives in a background hook, so Windows
-   * hands the foreground over asynchronously and the show message can reach
-   * the page a frame before the window actually has it - and a focus() made
-   * in that gap is quietly dropped. Trying again on the next frame costs
-   * nothing and covers it.
+   * Once is not enough, and twice was not either.
    *
-   * preventScroll because the composer sits at the bottom: focusing it the
-   * ordinary way yanks a long transcript down to the end, which is not what
-   * reopening the panel should do to what you were reading.
+   * The hotkey arrives in a background hook, so Windows hands the foreground
+   * over asynchronously and the show message can reach the page before the
+   * window actually holds it - a focus() made in that gap is silently
+   * dropped. That was known, and the fix was one retry on the next animation
+   * frame. One frame is 16ms against a handover that routinely takes 50-250ms,
+   * so the retry landed in the same gap and the bug survived its own fix.
+   *
+   * insistFocus keeps going until document.hasFocus() is true and the caret
+   * is actually here, or until it runs out of patience. See focus.ts.
    */
   useEffect(() => {
-    const el = ref.current
-    if (!el) return
     // A picker focuses its own filter, and reopening the panel over one
     // should leave the user in the list they were choosing from.
-    if (document.querySelector('.picker')) return
-    el.focus({ preventScroll: true })
-    const again = requestAnimationFrame(() => {
-      if (document.querySelector('.picker')) return
-      el.focus({ preventScroll: true })
-    })
-    return () => cancelAnimationFrame(again)
+    return insistFocus(
+      () => ref.current,
+      () => Boolean(document.querySelector('.picker'))
+    )
   }, [focusToken])
 
   useEffect(() => {
