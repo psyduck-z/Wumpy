@@ -187,7 +187,10 @@ export const PROVIDERS: Record<ProviderId, Provider> = {
     base: 'https://integrate.api.nvidia.com/v1',
     keyUrl: 'https://build.nvidia.com/settings/api-keys',
     foldSystem: false,
-    cacheBlockTokens: 0,
+    // Observed, same as Mistral: 2051in/2048cached on the benchmark preamble.
+    // Which makes two of four providers where the prefix is worth keeping
+    // identical, after a session of assuming none were.
+    cacheBlockTokens: 2048,
     // 40 requests a minute, so 1.5s, plus a margin.
     minGapMs: 1700,
     tokensPerMinute: 0,

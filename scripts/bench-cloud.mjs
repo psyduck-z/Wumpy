@@ -415,6 +415,17 @@ async function chat(provider, model, messages) {
   let text = ''
   let usage = null
   let buffer = ''
+  /**
+   * Why the model stopped, which "no block" on its own cannot tell you.
+   *
+   * GLM-5.3 scored 1/8 here and the eight lines all read the same. They were
+   * not the same failure: it averages 1,978 output tokens against a 2,000 cap,
+   * so the reasoning ate the budget and the answer was cut off before the
+   * block. That is a budget defect, fixable by giving it room. A model that
+   * finishes cleanly and still writes no block has a capability defect, which
+   * is not fixable at all. Reporting both as "no block" hid the difference.
+   */
+  let finish = ''
   for await (const chunk of res.body) {
     buffer += Buffer.from(chunk).toString('utf8')
     const lines = buffer.split('\n')
@@ -430,6 +441,7 @@ async function chat(provider, model, messages) {
         continue
       }
       if (obj.usage) usage = obj.usage
+      if (obj.choices?.[0]?.finish_reason) finish = obj.choices[0].finish_reason
       const delta = obj.choices?.[0]?.delta?.content
       if (delta) {
         if (!firstToken) firstToken = Date.now()
@@ -451,6 +463,7 @@ async function chat(provider, model, messages) {
   const total = usage?.total_tokens ?? prompt + out
   return {
     text,
+    finish,
     seconds: (Date.now() - started) / 1000,
     ttft: firstToken ? (firstToken - started) / 1000 : 0,
     promptTokens: prompt,
@@ -558,7 +571,7 @@ for (const spec of listing || limiting ? [] : args) {
   }
 
   console.log(`\n=== ${spec} ===`)
-  const tally = { block: 0, compiles: 0, onTask: 0, pathOk: 0, n: 0 }
+  const tally = { block: 0, compiles: 0, onTask: 0, pathOk: 0, truncated: 0, n: 0 }
   const rates = []
   const ttfts = []
   let promptTotal = 0
@@ -589,7 +602,11 @@ for (const spec of listing || limiting ? [] : args) {
       const s = score(task, got.text)
       tally.n++
       if (!s.usedBlock) {
-        console.log(`  r${round} no block  ${task.ask.slice(0, 40)}...`)
+        // "truncated" means it never got to the block, not that it cannot
+        // write one - a different defect with a different fix.
+        const why = got.finish === 'length' ? 'truncated' : 'no block '
+        tally.truncated += got.finish === 'length' ? 1 : 0
+        console.log(`  r${round} ${why} ${task.ask.slice(0, 40)}...`)
         continue
       }
       tally.block++
@@ -613,7 +630,11 @@ for (const spec of listing || limiting ? [] : args) {
   console.log(
     `\n  correctness  ${tally.block}/${tally.n} block, ${tally.compiles}/${tally.n} compile, ` +
       `${tally.onTask}/${tally.n} on task, ${tally.pathOk}/${tally.n} legal path` +
-      (failed ? `, ${failed} request errors` : '')
+      (failed ? `, ${failed} request errors` : '') +
+      // Separated because they are different problems. Truncated means the
+      // output cap was too small for how much the model reasons, which is a
+      // setting. A plain miss means it will not write the block, which is not.
+      (tally.truncated ? `  (${tally.truncated} of the misses were truncation, not format)` : '')
   )
   console.log(
     `  speed        ${median(ttfts).toFixed(2)}s to first token, ${median(rates).toFixed(0)} tok/s`
