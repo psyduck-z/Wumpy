@@ -38,7 +38,7 @@ import { LowLevelHook } from './lowlevelhook'
 import { runCommand, assessRisk, isReadOnly } from './shell'
 import { PriorityManager } from './priority'
 import { webSearch } from './search'
-import { cleanTitle } from './titles'
+import { cleanTitle, titleBrief, titleSource } from '@shared/titles'
 import { Speech } from './speech'
 import { openLink, openSearch } from './browser'
 import { inspectWriteTarget, writeProposedFile } from './writefile'
@@ -483,37 +483,47 @@ function registerIpc(): void {
   )
 
   /**
-   * Names a conversation from its opening exchange. Caps output hard, because
+   * Names a conversation from the questions in it. Caps output hard, because
    * this happens in the background right after an answer lands.
+   *
+   * Called more than once per chat - see shouldRetitle - so it is written to
+   * work as well on the twentieth question as on the first.
    */
   ipcMain.handle(
     IPC.chatTitle,
     async (_e, req: { messages: Array<{ role: string; content: string }> }) => {
       const model = backgroundModel()
-      const question = req.messages.find((m) => m.role === 'user')?.content.trim()
-      if (!model || !question) return null
+      const questions = req.messages
+        .filter((m) => m.role === 'user')
+        .map((m) => m.content.trim())
+        .filter(Boolean)
+      if (!model || questions.length === 0) return null
 
-      // Title from the question alone, never the answer.
+      // Title from the questions alone, never the answers.
       //
       // Feeding the assistant's reply in made the model title the reply: asking
       // "what is speculative fiction" came back as "Exploring the Realm of
       // Speculative". Measured on llama3.2:3b, the question alone is both
-      // accurate and about twice as fast.
+      // accurate and about twice as fast. That holds however many there are,
+      // so a retitle sees every question and none of the replies.
+      const source = titleSource(questions)
+
       const raw = await cloud.complete(
         model,
         [
           {
             role: 'system',
-            content:
-              'Name the topic of the user’s question in 2 to 5 words, as a noun phrase. ' +
-              'Reply with the name only. No quotes, no punctuation at the end, no preamble.'
+            content: titleBrief(questions.length)
           },
-          { role: 'user', content: `User asked: ${question.slice(0, 500)}` }
+          { role: 'user', content: source }
         ],
         { numPredict: 20 }
       )
 
-      return raw ? cleanTitle(raw, question) : null
+      // cleanTitle repairs a split word against the text it came from, so it
+      // gets every question - a word from turn six is just as real as one
+      // from turn one.
+      return raw ? cleanTitle(raw, source) : null
     }
   )
 

@@ -18,6 +18,7 @@ import { isTall } from '@shared/types'
 import { looksLikeUrl, SEARCH_ENGINES, type LinkApproval } from '@shared/links'
 import { FAILED_ENDING, NEVER_RAN_ENDING, neverRan } from '@shared/parsefail'
 import { CONTEXT_TOKENS, DEFAULT_MODEL } from '@shared/assistant'
+import { shouldRetitle } from '@shared/titles'
 import { CLOUD_MODELS, PROVIDERS } from '@shared/cloud'
 import { useChat, nextId, type ChatStats } from './hooks/useChat'
 import {
@@ -265,8 +266,13 @@ export default function App(): React.JSX.Element {
       setChatId(loaded.id)
       setChatTitle(loaded.title)
       setTitleLocked(loaded.titleLocked ?? false)
-      // Already named, so do not re-title it on the next turn.
-      titledFor.current = loaded.id
+      // Already named, at however many turns it holds - so it is next renamed
+      // at the threshold above that, not on the very next message. Counted
+      // the same way the titling effect counts, or the two disagree.
+      titledFor.current = {
+        chat: loaded.id,
+        turns: loaded.messages.filter((m) => !m.local && !m.error && m.role === 'user').length
+      }
       setPicker(null)
       setFocusToken((n) => n + 1)
     },
@@ -990,7 +996,7 @@ export default function App(): React.JSX.Element {
    * blank, and this upgrades it to something the model wrote. A rename locks
    * the title and stops this from running.
    */
-  const titledFor = useRef<string | null>(null)
+  const titledFor = useRef<{ chat: string; turns: number } | null>(null)
   /**
    * Mirrors `titleLocked` for the async callback below. The effect's own copy is
    * captured when the request goes out, but a rename can land during the three
@@ -998,18 +1004,25 @@ export default function App(): React.JSX.Element {
    */
   const titleLockedRef = useRef(titleLocked)
   titleLockedRef.current = titleLocked
+  /** Same reason: comparing against the title as it is when the answer lands. */
+  const chatTitleRef = useRef(chatTitle)
+  chatTitleRef.current = chatTitle
 
   useEffect(() => {
     if (streaming || titleLocked) return
-    if (titledFor.current === chatId) return
 
     const real = chat.messages.filter((m) => !m.local && !m.error)
     const answered = real.some((m) => m.role === 'assistant' && m.content.trim())
     if (!answered) return
 
-    // Mark first: this must run at most once per chat even if the effect
-    // re-fires while the request is in flight.
-    titledFor.current = chatId
+    const turns = real.filter((m) => m.role === 'user').length
+    const titledAt = titledFor.current?.chat === chatId ? titledFor.current.turns : 0
+    if (!shouldRetitle(turns, titledAt)) return
+
+    // Mark first, with the turn count this request covers: the effect re-fires
+    // on every message, and without this the same threshold would be asked
+    // for twice while the first answer was still in flight.
+    titledFor.current = { chat: chatId, turns }
     const forChat = chatId
 
     void window.wumpy.chat
@@ -1020,6 +1033,9 @@ export default function App(): React.JSX.Element {
         // chat entirely, while this was in flight.
         if (titleLockedRef.current) return
         if (forChat !== chatId) return
+        // An unchanged name is not worth a write or a sidebar repaint, and
+        // most retitles on a steady topic come back identical.
+        if (title === chatTitleRef.current) return
 
         setChatTitle(title)
         void window.wumpy.chats
