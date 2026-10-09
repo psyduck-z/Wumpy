@@ -236,6 +236,27 @@ check('so a 1080-token preamble caches nothing', 1080 >= C.PROVIDERS.google.cach
 // entirely. Zero here records what was seen, not what was promised.
 check('Groq caching is not planned around', C.PROVIDERS.groq.cacheBlockTokens, 0)
 
+/**
+ * Mistral is the one where caching finally turned up.
+ *
+ * Same benchmark, same preamble, a real key: five of eight calls reported
+ * 2101in/2048cached, and the run averaged 1,024 cached tokens a call - 1,277
+ * billed against 2,301 uncached. That is the first time prompt caching has
+ * been observed on any provider here, after Groq promised it and showed 0 and
+ * Google turned out to need a whole 4,096-token block.
+ *
+ * The number that matters is that it is BELOW the preamble, which is what
+ * decides whether keeping the prefix byte-identical is worth anything. On
+ * Google it is above and the discipline buys nothing.
+ */
+check('Mistral caches at 2048', C.PROVIDERS.mistral.cacheBlockTokens, 2048)
+check(
+  'which is below the preamble, so the prefix matters there',
+  2106 >= C.PROVIDERS.mistral.cacheBlockTokens,
+  true
+)
+check('unlike Google, where it is above it', 2106 >= C.PROVIDERS.google.cacheBlockTokens, false)
+
 // 8,000 tokens a minute is the ceiling that actually bites on Groq: a turn
 // at Wumpy's preamble size is most of three thousand, so three fill a minute.
 check('Groq is paced on tokens', C.PROVIDERS.groq.tokensPerMinute, 8000)

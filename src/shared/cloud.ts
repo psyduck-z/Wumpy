@@ -114,12 +114,17 @@ export const PROVIDERS: Record<ProviderId, Provider> = {
     alwaysReasons: false
   },
   /**
-   * The one whose free tier does not run out.
+   * The free tier that lasts, on the models it actually covers.
    *
-   * A billion tokens a month, against Groq's 200,000 a day and Google's
-   * eighteen requests. At Wumpy's measured 2,858 tokens a call that is about
-   * 350,000 calls a month - a number no person types. The binding limit is
-   * one request a second, which for a window you talk to is no limit at all.
+   * A billion tokens a month against Groq's 200,000 a day, and measured here
+   * at 10,337 questions a day on Codestral - which is not a number anyone
+   * types. But the plan is per model, and it does not include the premier
+   * line: Medium, Small, Large and Magistral all answer 429 with
+   * x-ratelimit-limit-req-minute of 0, and mistral-large-* is not in /models
+   * on a free key at all. What it does cover is Codestral at 125 requests a
+   * minute and the Ministral sizes, and both of the ones benchmarked scored
+   * 8/8 on block, compile, on-task and path - the same as the best of Google
+   * and Groq.
    *
    * The cost is the same one Google's free tier carries: the Experiment tier
    * trains on what it is sent. So it gets the same treatment - fine for a
@@ -131,7 +136,25 @@ export const PROVIDERS: Record<ProviderId, Provider> = {
     base: 'https://api.mistral.ai/v1',
     keyUrl: 'https://console.mistral.ai/api-keys',
     foldSystem: false,
-    cacheBlockTokens: 0,
+    /**
+     * The only provider where prefix caching has ever actually appeared.
+     *
+     * Groq's documentation promised it and it never showed: eight calls on a
+     * shared 2,118-token prefix reported 0 cached, and a deliberate 6,578-
+     * token repeat came back with prompt_tokens_details absent entirely.
+     * Google needs a whole 4,096-token block and Wumpy's preamble is half of
+     * one. Here, on the same benchmark and the same preamble, five of eight
+     * calls came back 2101in/2048cached, and the run averaged 1,024 cached
+     * tokens a call - billed 1,277 against 2,301 uncached, a 45% saving on
+     * input for doing nothing.
+     *
+     * 2048 is what was observed rather than a documented block size; it could
+     * be two blocks of 1024. Either way it is below the preamble, which is
+     * what makes it the first provider where keeping the prefix byte-identical
+     * is worth anything. It was intermittent - three of eight missed - so it
+     * is a discount, not a budget.
+     */
+    cacheBlockTokens: 2048,
     // One request a second, with a little margin.
     minGapMs: 1200,
     // 500k a minute, which at Wumpy's size is 170 calls - not the binding limit.
