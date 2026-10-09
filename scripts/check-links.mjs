@@ -395,6 +395,49 @@ check(
   true
 )
 check('installed means launch it', T.OPEN_PROMPT.includes('Start-Process'), true)
+
+/**
+ * Trying is allowed. Typing a password is not.
+ *
+ * Wumpy refused to sign in to Spotify, and that refusal was one step too
+ * early: "sign me in" almost always means "open it, I am already signed in",
+ * and the session lives in the browser rather than in anything the model has
+ * to supply. Refusing the whole request to avoid a credential prompt it had
+ * not reached yet is the restriction being wrong in the direction nobody
+ * notices - the user just gets less help.
+ *
+ * The line is where it always was, only now it is drawn in the right place:
+ * open the thing, and stop at the screen that wants a username, a password, a
+ * code or a card.
+ */
+check('it is told to try rather than refuse', T.OPEN_PROMPT.includes('TRY IT'), true)
+check(
+  'and to take "my credentials are saved" at face value',
+  T.OPEN_PROMPT.includes('take them at their word and try'),
+  true
+)
+check('not to lecture about it', T.OPEN_PROMPT.includes('do not lecture'), true)
+check(
+  'there is exactly one place to stop',
+  T.OPEN_PROMPT.includes('exactly one place to stop'),
+  true
+)
+check('and it is named precisely', T.OPEN_PROMPT.includes('one-time code or a card'), true)
+check(
+  'it may never invent a credential',
+  T.OPEN_PROMPT.includes('never type, guess or invent'),
+  true
+)
+// Stopping is an answer, not a failure - the previous refusal read as one.
+check('stopping reads as a finished answer', T.OPEN_PROMPT.includes('finished answer'), true)
+// The transcript is saved to disk and commands are logged, so a password the
+// user types at it must not be echoed into either.
+check(
+  'a password the user supplies is not echoed back',
+  T.OPEN_PROMPT.includes('do not repeat it back'),
+  true
+)
+check('nor put in a command', T.OPEN_PROMPT.includes('never'), true)
 check(
   'not installed means the website',
   T.OPEN_PROMPT.includes('Not installed -> open the website'),
