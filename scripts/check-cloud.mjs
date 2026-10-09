@@ -293,24 +293,58 @@ check(
 )
 check(
   'it has its own rotation',
-  C.siblingModel('mistral-large-latest', new Set()),
-  'mistral-medium-latest'
+  C.siblingModel('codestral-latest', new Set()),
+  'ministral-14b-latest'
 )
 check(
   'which stays with Mistral',
   C.providerFor(C.siblingModel('codestral-latest', new Set())),
   'mistral'
 )
-// Public preview, and no free-tier listing mentions it. It belongs in the
-// picker, where one request settles it, but not at the front of a rotation
-// that only runs because something already failed.
+
+/**
+ * Every Mistral offered must be one a free key can actually call.
+ *
+ * Probed with a real free key: the premier models answer 429 with
+ * x-ratelimit-limit-req-minute of 0, which is the plan refusing rather than
+ * congestion, and mistral-large-* is not in /models on that key at all. Three
+ * of the five shipped here were unreachable - the same mistake as the three
+ * Gemini models that sat in the rotation answering 400 and 404, visible in
+ * /usage as rows with one turn and no tokens.
+ *
+ * Medium is the deliberate exception: a paid key reaches it, it is the best
+ * Mistral for this app when one does, and its blurb says so.
+ */
+const FREE_MISTRAL = [
+  'codestral-latest',
+  'mistral-code-latest',
+  'ministral-3b-latest',
+  'ministral-8b-latest',
+  'ministral-14b-latest'
+]
+const PAID_ONLY = ['mistral-large-latest', 'mistral-large-4', 'mistral-small-latest']
+for (const id of PAID_ONLY) {
+  check(
+    `${id} is gone from the catalogue`,
+    C.CLOUD_MODELS.some((m) => m.id === id),
+    false
+  )
+  check(`and out of the rotation`, C.siblingModel('codestral-latest', new Set([id])) !== id, true)
+}
+const rotation = []
+for (let m = C.siblingModel('codestral-latest', new Set()); m;) {
+  rotation.push(m)
+  m = C.siblingModel('codestral-latest', new Set(rotation))
+}
 check(
-  'Large 4 is last in the rotation',
-  C.siblingModel(
-    'mistral-medium-latest',
-    new Set(['mistral-large-latest', 'mistral-small-latest', 'codestral-latest'])
-  ),
-  'mistral-large-4'
+  'the rotation is free models, then Medium last',
+  rotation.filter((m) => !FREE_MISTRAL.includes(m)),
+  ['mistral-medium-latest']
+)
+check(
+  'and Medium says it needs a paid plan',
+  /paid plan only/i.test(C.CLOUD_MODELS.find((m) => m.id === 'mistral-medium-latest').blurb),
+  true
 )
 check(
   'and it is offered in the picker',
@@ -373,7 +407,30 @@ check('and no provider at all is unchanged', C.maxTokensFor(384, false), 384)
 
 check('its models route there', C.providerFor('z-ai/glm-5.3'), 'nvidia')
 check('including Nemotron', C.providerFor('nvidia/nemotron-3-ultra-550b-a55b'), 'nvidia')
-check('and DeepSeek', C.providerFor('deepseek-ai/deepseek-v4-pro'), 'nvidia')
+check('and DeepSeek', C.providerFor('deepseek-ai/deepseek-v4.1-flash'), 'nvidia')
+// Routing still works for the retired id, which is the point: a model typed in
+// by hand reaches the right endpoint and gets that endpoint's own 410, rather
+// than failing here as an unknown name.
+check('including the retired one', C.providerFor('deepseek-ai/deepseek-v4-pro'), 'nvidia')
+check(
+  'but it is not offered',
+  C.CLOUD_MODELS.some((m) => m.id.endsWith('v4-pro')),
+  false
+)
+// Every model offered for NVIDIA has been called once against a real key.
+const NV_PROBED = [
+  'z-ai/glm-5.3',
+  'z-ai/glm-5.3-flash',
+  'moonshotai/kimi-k3',
+  'nvidia/nemotron-3-ultra-550b-a55b',
+  'nvidia/nemotron-3-super-120b-a12b',
+  'deepseek-ai/deepseek-v4.1-flash'
+]
+check(
+  'nothing unprobed is offered',
+  C.CLOUD_MODELS.filter((m) => m.provider === 'nvidia').every((m) => NV_PROBED.includes(m.id)),
+  true
+)
 check('and MiniMax', C.providerFor('minimaxai/minimax-m2.7'), 'nvidia')
 // Both serve Kimi. Nothing in the string says which, so the catalogue decides
 // and the shape rule is only a tie-break - documented, not accidental.

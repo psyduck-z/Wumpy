@@ -264,59 +264,67 @@ export const CLOUD_MODELS: CloudModel[] = [
     blurb: 'Whatever Google currently points "latest" at. Moves without warning.'
   },
 
-  // --- Mistral: the free tier that does not run out ------------------------
-  /**
-   * Medium is first, and not because the names suggest it.
+  /* --- Mistral: a free plan, and not the one I described ------------------
    *
-   * Mistral's own changelog describes mistral-medium-3-5 as optimised for
-   * agentic and coding use and gives it adjustable reasoning through
-   * reasoning_effort. Both of those are the thing Wumpy needs: it proposes
-   * commands and write blocks, and reasoning_effort was the single largest
-   * output fix found on Google - 188 thinking tokens and a sentence cut off
-   * mid-word became 0 and a whole answer, six times cheaper.
+   * The free tier here is per model, and it does not include the models this
+   * list was built around. Probed with a real free key, one request each:
    *
-   * Large is bigger and scores lower on the one index that covers both:
-   * Mistral Large 4 came in at 38 on Artificial Analysis v4.3.2, below
-   * GLM-5.3's 44.8. Size is not the ordering here; what it can be told to do
-   * is.
+   *   codestral-latest        200    125 requests a minute
+   *   mistral-code-latest     200    125
+   *   ministral-3b-latest     200    750
+   *   ministral-8b-latest     200    188
+   *   ministral-14b-latest    200     30
+   *   mistral-medium-latest   429    limit/min 0
+   *   mistral-small-latest    429    limit/min 0
+   *   magistral-*-latest      429    limit/min 0
+   *   mistral-large-*         absent from /models on this key entirely
+   *
+   * A 429 reading "Rate limit exceeded" with x-ratelimit-limit-req-minute of
+   * 0 is not congestion. It is the plan: the console says "Upgrade to activate
+   * your API keys", and what that actually gates is the premier models. The
+   * open-weight ones work and work generously.
+   *
+   * So "a billion tokens a month including Mistral Large and Codestral" was
+   * wrong in the part that mattered. Codestral yes, Large no, and Medium 3.5 -
+   * the one put first here for taking reasoning_effort - no. That is the third
+   * time a provider's own documentation has been wrong in this file, after
+   * Groq's prefix caching and Gemini Pro being written off as paid-only.
+   *
+   * What is left is genuinely useful but it is not a flagship: Codestral at
+   * 125 requests a minute, and a 14B at 30. Ordered by what answered.
    */
-  {
-    id: 'mistral-medium-latest',
-    provider: 'mistral',
-    label: 'Mistral Medium 3.5',
-    blurb: 'Built for coding and agents, and takes reasoning_effort. Start here.'
-  },
-  {
-    id: 'mistral-large-latest',
-    provider: 'mistral',
-    label: 'Mistral Large',
-    blurb: 'Their biggest. Free tier is ~1B tokens a month. No reasoning switch.'
-  },
-  {
-    id: 'mistral-large-4',
-    provider: 'mistral',
-    label: 'Mistral Large 4',
-    // Released 6 October 2026, three days before this was written: 1T
-    // parameters with 49B active, a 1M context, 38 on the Artificial Analysis
-    // index. Listed because one request settles it, and flagged because a
-    // public preview is exactly the kind of model a free tier excludes - no
-    // free-tier listing found mentions it.
-    blurb: 'Newest and largest, in public preview. The free tier may not cover it.'
-  },
   {
     id: 'codestral-latest',
     provider: 'mistral',
     label: 'Codestral',
-    // Kept, but no longer sold as the obvious choice for this app: Codestral
-    // is a completion model built for fill-in-the-middle and code correction,
-    // and Wumpy asks for whole files and shell commands in prose.
-    blurb: 'A code-completion model. Good at code, not aimed at this shape of ask.'
+    blurb: 'Free and fast — 125 requests a minute. A code model, so good at code.'
   },
   {
-    id: 'mistral-small-latest',
+    id: 'ministral-14b-latest',
     provider: 'mistral',
-    label: 'Mistral Small 4',
-    blurb: 'Quick and light, for the simple tiers. 256k context.'
+    label: 'Ministral 14B',
+    blurb: 'The largest one the free plan reaches. 30 requests a minute.'
+  },
+  {
+    id: 'mistral-code-latest',
+    provider: 'mistral',
+    label: 'Mistral Code',
+    blurb: 'Also free at 125 a minute. Aimed at code, like Codestral.'
+  },
+  {
+    id: 'ministral-8b-latest',
+    provider: 'mistral',
+    label: 'Ministral 8B',
+    blurb: 'Free at 188 a minute. Small, for the quick tiers.'
+  },
+  {
+    id: 'mistral-medium-latest',
+    provider: 'mistral',
+    label: 'Mistral Medium 3.5',
+    // Kept because a paid key reaches it and it is the best thing here when
+    // one does - built for coding and agents, and the only Mistral that takes
+    // reasoning_effort. Flagged because a free key gets limit/min 0.
+    blurb: 'Best Mistral for this app — but a paid plan only. Free keys get 0/min.'
   },
 
   // --- Groq ----------------------------------------------------------------
@@ -339,7 +347,30 @@ export const CLOUD_MODELS: CloudModel[] = [
     blurb: 'The other size on Groq. Worth trying when gpt-oss is spent.'
   },
 
-  // --- NVIDIA: other people's open weights, on one free key ----------------
+  /* --- NVIDIA: other people's open weights, on one free key ---------------
+   *
+   * Probed against a real key, one request each, because the catalogue a
+   * provider publishes and the catalogue a key can reach are not the same
+   * list. deepseek-ai/deepseek-v4-pro - which was in this list, taken from
+   * NVIDIA's own API reference - answers 410 Gone. v4.1-flash is what is
+   * actually served. That is the third time a model has been shipped here
+   * from a listing without being called once, after the three Gemini models
+   * that answered 400 and 404.
+   *
+   * The same probe measured what "Say ok." costs, which is the number that
+   * decides whether a model belongs on a small tier:
+   *
+   *   nvidia/nemotron-3-ultra    3 output tokens
+   *   moonshotai/kimi-k3         8
+   *   z-ai/glm-5.3             111   with enable_thinking false
+   *   z-ai/glm-5.3-flash       151   with enable_thinking false
+   *
+   * GLM reports reasoning_tokens of 7 and 2 on those last two, which cannot
+   * be reconciled with 111 and 151 tokens of completion for the word "Ok." -
+   * so the switch is accepted, acknowledged in the accounting, and not
+   * obeyed. Exactly what alwaysReasons exists for, now measured rather than
+   * read in a bug report.
+   */
   {
     id: 'z-ai/glm-5.3',
     provider: 'nvidia',
@@ -350,25 +381,33 @@ export const CLOUD_MODELS: CloudModel[] = [
     id: 'moonshotai/kimi-k3',
     provider: 'nvidia',
     label: 'Kimi K3',
-    blurb: 'Within a point of GLM-5.3. Built for long agent runs.'
-  },
-  {
-    id: 'deepseek-ai/deepseek-v4-pro',
-    provider: 'nvidia',
-    label: 'DeepSeek V4 Pro',
-    blurb: 'The coding pick, and the one whose reasoning can actually be turned off.'
+    blurb: 'Within a point of GLM-5.3, and it stops reasoning when told. 8 tokens for "ok".'
   },
   {
     id: 'nvidia/nemotron-3-ultra-550b-a55b',
     provider: 'nvidia',
     label: 'Nemotron 3 Ultra',
-    blurb: "NVIDIA's own, aimed at agents. Takes enable_thinking and honours it."
+    blurb: 'NVIDIA\'s own, aimed at agents. The least wasteful of them — 3 tokens for "ok".'
+  },
+  {
+    id: 'deepseek-ai/deepseek-v4.1-flash',
+    provider: 'nvidia',
+    label: 'DeepSeek V4.1 Flash',
+    // v4-pro was in this list and answers 410 Gone. This is what the key
+    // actually serves.
+    blurb: 'The coding pick. Replaces V4 Pro, which this key answers 410 for.'
+  },
+  {
+    id: 'nvidia/nemotron-3-super-120b-a12b',
+    provider: 'nvidia',
+    label: 'Nemotron 3 Super',
+    blurb: 'Smaller Nemotron, for the quick tiers.'
   },
   {
     id: 'z-ai/glm-5.3-flash',
     provider: 'nvidia',
     label: 'GLM-5.3 Flash',
-    blurb: 'The quick one. Reasons whatever you ask of it, so give it room.'
+    blurb: 'Not the quick one, despite the name — it reasons hardest of the lot.'
   }
 ]
 
@@ -470,15 +509,17 @@ export function siblingModel(model: string, spent: ReadonlySet<string>): string 
         ]
       : provider === 'mistral'
         ? [
-            // Medium first for the reason the catalogue gives: it is the one
-            // built for coding and agents and the only one here that can be
-            // told to stop reasoning. Large 4 last of the Mistrals because a
-            // public preview is the most likely of them to refuse a free key.
-            'mistral-medium-latest',
-            'mistral-large-latest',
-            'mistral-small-latest',
+            // Measured against a real free key rather than ordered by size.
+            // The premier models answer 429 with limit/min 0 on a free plan,
+            // so a rotation that steps onto one is a rotation that fails -
+            // the same mistake as the three Gemini models that were in this
+            // list while answering 400 and 404. Medium is last: a paid key
+            // reaches it and it is the best of them when one does.
             'codestral-latest',
-            'mistral-large-4'
+            'ministral-14b-latest',
+            'mistral-code-latest',
+            'ministral-8b-latest',
+            'mistral-medium-latest'
           ]
         : provider === 'nvidia'
           ? [
@@ -486,10 +527,13 @@ export function siblingModel(model: string, spent: ReadonlySet<string>): string 
               // when the preferred one is already unusable, and NVIDIA's limit
               // is per-minute rather than per-model - so there is no "more
               // likely to have requests left" to weigh against capability.
+              // Every one of these has been called once; v4-pro used to be
+              // here and answers 410.
               'z-ai/glm-5.3',
               'moonshotai/kimi-k3',
-              'deepseek-ai/deepseek-v4-pro',
               'nvidia/nemotron-3-ultra-550b-a55b',
+              'deepseek-ai/deepseek-v4.1-flash',
+              'nvidia/nemotron-3-super-120b-a12b',
               'z-ai/glm-5.3-flash'
             ]
           : ['openai/gpt-oss-120b', 'qwen/qwen3.8-27b', 'openai/gpt-oss-20b']
