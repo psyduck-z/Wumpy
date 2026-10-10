@@ -242,3 +242,85 @@ export const LEAN_NO_SHELL = [
 export const LEAN_PROMPT = [WHO, DECIDE, ASKING, ACTING, HONESTY, MACHINE, WRITING, SEARCHING].join(
   GAP
 )
+
+/**
+ * The middle prompt: lean, plus only the sections that are load-bearing.
+ *
+ * Measured, not guessed. On the bare lean prompt mistral-code-latest drops
+ * from 37 of 38 rungs to 25, and the twelve it loses are the expensive
+ * ones - dividing by zero, offering a Move-Item before showing what it
+ * would move, changing a firewall setting on an unverified premise,
+ * recursing a whole drive, deleting before listing. So the scaffolding is
+ * not padding, and "as small as possible" is the wrong target. The right
+ * one is the smallest prompt that keeps those rungs.
+ *
+ * The sections are EXTRACTED from the real prompt rather than copied into
+ * this file, so the two cannot drift apart. If a heading is reworded the
+ * extraction returns nothing and the check below fails loudly, which is
+ * the intended behaviour - a silent empty section would quietly undo the
+ * safety it was added for.
+ *
+ * Terse restatements were tried first and did not work: seven one-line
+ * rules aimed at gpt-oss-120b's seven misses moved none of them. What
+ * fixes these is the worked examples, so the worked examples are what come
+ * back.
+ */
+function section(prompt: string, heading: string): string {
+  const lines = prompt.split(LF)
+  const start = lines.findIndex((l) => l.trim().startsWith(heading))
+  if (start < 0) return ''
+  const isHeading = (t: string): boolean =>
+    t.length > 12 && t === t.toUpperCase() && /[A-Z]{4}/.test(t)
+  let end = lines.length
+  for (let i = start + 1; i < lines.length; i++) {
+    if (isHeading(lines[i].trim())) {
+      end = i
+      break
+    }
+  }
+  return lines.slice(start, end).join(LF).trimEnd()
+}
+
+/** Which heading answers which rung, so the list can be argued with. */
+export const LOAD_BEARING: Array<{
+  from: 'voice' | 'shell' | 'ask'
+  heading: string
+  rungs: string
+}> = [
+  { from: 'voice', heading: 'ARITHMETIC: GET THE PARTS', rungs: 'L8 divide by zero' },
+  { from: 'voice', heading: 'AND ANSWER IN THE UNIT', rungs: 'L21 uptime, L30 one round trip' },
+  { from: 'voice', heading: 'A REQUEST CAN CONTRADICT ITSELF', rungs: 'L23' },
+  { from: 'voice', heading: 'A PREMISE IN THE REQUEST IS NOT A FACT', rungs: 'L10, L14, L25' },
+  { from: 'shell', heading: 'NEVER FIND AND CHANGE', rungs: 'L9, L27' },
+  { from: 'shell', heading: 'A HUGE SCOPE IS A MISUNDERSTANDING', rungs: 'L17' },
+  { from: 'shell', heading: 'AND NEVER RETURN AN UNBOUNDED LIST', rungs: 'L17 companion' },
+  { from: 'shell', heading: 'A STATEMENT IS NOT A QUESTION', rungs: 'L37' },
+  /**
+   * Added on the second pass. At 3,321 tokens the eight sections above
+   * reached 32 of 38, leaving L4, L9, L14, L27 and L38 - so the load is
+   * spread wider than the obvious culprits, and cherry-picking the sections
+   * that name a rung is not enough on its own.
+   *
+   * L4's fix had been missed entirely: it lives in ASK_PROMPT under a
+   * heading whose line continues in lower case, which the all-capitals scan
+   * read as prose rather than a heading.
+   */
+  { from: 'ask', heading: 'EVERY OPTION MUST BE SOMETHING YOU HAVE SEEN', rungs: 'L4' },
+  { from: 'voice', heading: 'DO ONLY WHAT WAS ASKED', rungs: 'L9, L27' },
+  { from: 'voice', heading: 'ASSUME THE SMALL STEP', rungs: 'L4, L9' },
+  { from: 'voice', heading: 'READ WHAT CAME BACK', rungs: 'L38' },
+  { from: 'voice', heading: 'CHECK, DO NOT GUESS', rungs: 'L14' }
+]
+
+/**
+ * Builds it from the live prompt sections. Takes them as arguments rather
+ * than importing assistant.ts, because assistant.ts already imports this
+ * file's neighbours and a cycle here would be paid on every startup.
+ */
+export function middlePrompt(voice: string, shell: string, ask: string): string {
+  const sources = { voice, shell, ask }
+  const parts = LOAD_BEARING.map(({ from, heading }) => section(sources[from], heading)).filter(
+    Boolean
+  )
+  return [LEAN_PROMPT, ...parts].join(GAP)
+}

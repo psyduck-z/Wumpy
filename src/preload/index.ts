@@ -123,11 +123,18 @@ const api = {
      * there is no handler on the other side either. This boundary is one-way.
      */
     status: (): Promise<KeyStatus> => ipcRenderer.invoke(IPC.keyStatus),
+    /** Replaces every key for a provider; accepts several at once. */
     set: (
       provider: ProviderName,
       key: string
-    ): Promise<{ ok: boolean; why: string; label?: string }> =>
+    ): Promise<{ ok: boolean; why: string; label?: string; total?: number }> =>
       ipcRenderer.invoke(IPC.keySet, { provider, key }),
+    /** Adds one or more without disturbing the keys already stored. */
+    add: (
+      provider: ProviderName,
+      key: string
+    ): Promise<{ ok: boolean; why: string; label?: string; total?: number }> =>
+      ipcRenderer.invoke(IPC.keyAdd, { provider, key }),
     clear: (provider: ProviderName): Promise<{ ok: boolean; why: string }> =>
       ipcRenderer.invoke(IPC.keyClear, { provider })
   },

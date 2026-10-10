@@ -770,21 +770,34 @@ export default function App(): React.JSX.Element {
             const has = status.configured.includes(provider)
             chat.note(
               has
-                ? `A ${label} key is saved. Replace it with \`/key ${provider} <key>\`, ` +
-                    `or remove it with \`/key ${provider} clear\`.`
+                ? `${status.counts?.[provider] ?? 1} ${label} key(s) saved. Add another with ` +
+                    `\`/key ${provider} add <key>\`, replace them all with ` +
+                    `\`/key ${provider} <key…>\`, or remove them with \`/key ${provider} clear\`.`
                 : `No ${label} key yet. Get one at ${PROVIDERS[provider].keyUrl} ` +
                     `and paste it with \`/key ${provider} <key>\`.`
             )
             return
           }
 
-          const result = await window.wumpy.keys.set(provider, action.value)
+          const result = action.add
+            ? await window.wumpy.keys.add(provider, action.value)
+            : await window.wumpy.keys.set(provider, action.value)
           setKeyStatus(await window.wumpy.keys.status())
           void window.wumpy.assistant.status().then(setAssistant)
+          /**
+           * Says how many are stored, because several is the normal case.
+           * Google's free tier allows five requests a minute PER PROJECT,
+           * so keys from separate projects multiply the rate and keys from
+           * the same one do not - and the count is the only feedback that
+           * the paste landed as several rather than one.
+           */
+          const total = result.total ?? 1
           chat.note(
             result.ok
-              ? `Saved the ${label} key, encrypted for this Windows account. ` +
-                  'Pick a model from it with `/model`.'
+              ? `${action.add ? 'Added' : 'Saved'} the ${label} key${total === 1 ? '' : 's'}, ` +
+                  `encrypted for this Windows account. ${total} stored` +
+                  (total > 1 ? ', used in turn so each limit counts separately. ' : '. ') +
+                  'Pick a model with `/model`.'
               : result.why
           )
           return

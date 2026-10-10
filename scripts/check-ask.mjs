@@ -288,6 +288,43 @@ check('because guessed options are still guessing', /still guessing/.test(prompt
   check(`the lean prompt is ~${leanTokens} tokens, under Groq's 8000/min cap`, leanTokens < 3000, true)
 }
 
+/* ------------------------------ the middle prompt is really composed ----- */
+
+/**
+ * The middle prompt extracts its sections from the live prompt by heading,
+ * so the two cannot drift apart. The cost of that is a silent failure mode:
+ * reword a heading and the extraction returns an empty string, the section
+ * vanishes, and the safety it was carrying goes with it without anything
+ * complaining.
+ *
+ * So every heading must still be found, every extracted section must be
+ * substantial rather than a stub, and the result must be meaningfully
+ * larger than the lean prompt it is built from.
+ */
+{
+  const sources = { voice: T.VOICE_PROMPT, shell: T.SHELL_PROMPT, ask: T.ASK_PROMPT }
+  for (const { from, heading, rungs } of LEAN.LOAD_BEARING) {
+    const found = sources[from]
+      .split(String.fromCharCode(10))
+      .some((l) => l.trim().startsWith(heading))
+    check(`"${heading.slice(0, 34)}" still exists (${rungs})`, found, true)
+  }
+
+  const middle = LEAN.middlePrompt(T.VOICE_PROMPT, T.SHELL_PROMPT, T.ASK_PROMPT)
+  const leanTokens = Math.round(LEAN.LEAN_PROMPT.length / 4)
+  const midTokens = Math.round(middle.length / 4)
+  // Every section carried real text, not an empty extraction.
+  check(
+    `the middle prompt is ~${midTokens} tokens, up from ${leanTokens}`,
+    midTokens > leanTokens + 800,
+    true
+  )
+  // And it still fits the tightest free tier worth caring about.
+  check('and fits the 8000-token minute Groq allows, with room to talk', midTokens < 5000, true)
+  // It must contain the lean base, not replace it.
+  check('it keeps the lean base', middle.startsWith(LEAN.LEAN_PROMPT), true)
+}
+
 /* ------------------------------ what the instructions cost ---------------- */
 
 /**

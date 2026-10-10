@@ -23,7 +23,7 @@ export type CommandAction =
   | { kind: 'voice'; setting: 'on' | 'polish' | 'autostop'; on: boolean | 'toggle' }
   | { kind: 'open'; what: string }
   | { kind: 'engine' }
-  | { kind: 'key'; provider: ProviderName | null; value: string; clear: boolean }
+  | { kind: 'key'; provider: ProviderName | null; value: string; clear: boolean; add: boolean }
   | { kind: 'usage'; reset: boolean }
   | { kind: 'approve'; mode: 'manual' | 'auto' | 'all' | 'cycle' }
   | { kind: 'compact' }
@@ -216,8 +216,8 @@ export const COMMANDS: CommandSpec[] = [
   {
     name: 'key',
     aliases: ['apikey'],
-    hint: 'Add or remove a hosted-model API key',
-    arg: 'google|groq|mistral|nvidia <key>',
+    hint: 'Add or remove hosted-model API keys (several rotate)',
+    arg: 'google|groq|mistral|nvidia [add] <key…>',
     /**
      * Parsed here rather than in a dialog because a key is pasted, and the
      * composer is where pasting happens. The value is handed straight to the
@@ -236,12 +236,20 @@ export const COMMANDS: CommandSpec[] = [
             '. Use `/key google clear` to remove it.'
         }
       }
-      const rest = parts.slice(1).join(' ')
-      if (!rest) return { kind: 'key', provider, value: '', clear: false }
+      let rest = parts.slice(1).join(' ')
+      if (!rest) return { kind: 'key', provider, value: '', clear: false, add: false }
       if (/^(clear|remove|forget|off)$/i.test(rest)) {
-        return { kind: 'key', provider, value: '', clear: true }
+        return { kind: 'key', provider, value: '', clear: true, add: false }
       }
-      return { kind: 'key', provider, value: rest, clear: false }
+      /**
+       * `add` keeps what is already stored, which matters once there is
+       * more than one. Gemini's free tier is five requests a minute PER
+       * PROJECT, so several keys is the normal case rather than the odd
+       * one, and replacing four of them by pasting the fifth is a trap.
+       */
+      const adding = /^(add|more|another)\s/i.test(rest)
+      if (adding) rest = rest.replace(/^\S+\s+/, '')
+      return { kind: 'key', provider, value: rest, clear: false, add: adding }
     }
   },
   {

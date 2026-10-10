@@ -1,5 +1,6 @@
 import type { ChatMessage } from '@shared/types'
 import type { ProviderId, WireMessage } from '@shared/cloud'
+import { KeyRotation, nextPacificMidnight } from '@shared/rotation'
 import {
   PROVIDERS,
   classifyLimit,
@@ -126,10 +127,31 @@ export class CloudClient {
     return { ok: true, why: '', provider }
   }
 
-  private headers(provider: ProviderId): Record<string, string> {
+  /**
+   * One rotation per provider, kept for the life of the process.
+   *
+   * Not persisted: a cooldown is at most a day, and a restart is a
+   * reasonable moment to find out whether a key has recovered.
+   */
+  private readonly rotations = new Map<ProviderId, KeyRotation>()
+
+  private rotation(provider: ProviderId): KeyRotation {
+    const count = this.keys.count(provider)
+    let r = this.rotations.get(provider)
+    if (!r) {
+      r = new KeyRotation(count)
+      this.rotations.set(provider, r)
+    } else {
+      // Picks up a key added or cleared since the last turn.
+      r.resize(count)
+    }
+    return r
+  }
+
+  private headers(provider: ProviderId, index: number): Record<string, string> {
     return {
       'Content-Type': 'application/json',
-      Authorization: `Bearer ${this.keys.secret(provider) ?? ''}`
+      Authorization: `Bearer ${this.keys.secrets(provider)[index] ?? ''}`
     }
   }
 
@@ -231,11 +253,32 @@ export class CloudClient {
     signal: AbortSignal,
     handlers: StreamHandlers
   ): Promise<Response | null> {
-    for (let attempt = 0; attempt < 3; attempt++) {
+    /**
+     * Enough attempts to give every key a turn.
+     *
+     * Three was right when there was one key and a retry meant waiting.
+     * With five, a quota error on one of them is not a reason to wait at
+     * all - it is a reason to use the next one - so the ceiling has to be
+     * at least the number of keys, plus a couple for ordinary retries.
+     */
+    const rotation = this.rotation(provider)
+    const keyCount = Math.max(1, this.keys.count(provider))
+    for (let attempt = 0; attempt < keyCount + 2; attempt++) {
+      const index = rotation.next()
+      if (index === null) {
+        // Every key is resting. Say for how long rather than failing blank.
+        const wait = rotation.waitMs()
+        handlers.onError(
+          `All ${keyCount} ${PROVIDERS[provider].label} keys are rate limited. ` +
+            `The soonest frees up in ${Math.ceil(wait / 1000)}s.`,
+          { kind: 'limit', elsewhere: true }
+        )
+        return null
+      }
       await pace(provider)
       const res = await fetch(`${PROVIDERS[provider].base}/chat/completions`, {
         method: 'POST',
-        headers: this.headers(provider),
+        headers: this.headers(provider, index),
         body: JSON.stringify(body),
         signal
       })
@@ -265,6 +308,25 @@ export class CloudClient {
         model,
         res.headers.get('x-ratelimit-limit-req-minute')
       )
+
+      /**
+       * A rate limit rests THIS key and moves to the next one.
+       *
+       * With one key the only options were to sleep or to give up. With
+       * several, a key that is out of quota is simply not the key to use
+       * next, and the turn continues immediately on another - which is the
+       * entire reason for having them.
+       */
+      if (verdict.kind === 'exhausted' || verdict.kind === 'throttle') {
+        const daily = /PerDay/i.test(detail) || /per day/i.test(verdict.message)
+        const until = daily ? nextPacificMidnight() : Date.now() + Math.max(1000, verdict.waitMs)
+        rotation.rest(index, until, daily ? 'daily quota' : 'per-minute')
+        console.log(
+          `[wumpy] ${PROVIDERS[provider].label} key ${index + 1}/${keyCount} ` +
+            `(${this.keys.hint(provider, index)}) rested: ${daily ? 'daily quota' : 'rate limit'}`
+        )
+        if (rotation.availableCount() > 0) continue
+      }
       if (verdict.kind === 'exhausted') {
         handlers.onError(verdict.message, { kind: 'limit', elsewhere: true })
         return null
@@ -411,9 +473,17 @@ export class CloudClient {
 
     try {
       await pace(provider)
+      /**
+       * Background work rotates as well. Titles are small but frequent, and
+       * on a five-requests-a-minute tier a chat title spent out of the same
+       * key the user is typing against is a turn they have to wait for.
+       * Falls back to the first key when every one is resting, because a
+       * title is not worth refusing outright.
+       */
+      const index = this.rotation(provider).next() ?? 0
       const res = await fetch(`${PROVIDERS[provider].base}/chat/completions`, {
         method: 'POST',
-        headers: this.headers(provider),
+        headers: this.headers(provider, index),
         body: JSON.stringify({
           model,
           messages: wireMessagesFor(

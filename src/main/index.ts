@@ -48,6 +48,7 @@ import {
   isCloudModel,
   isProviderId,
   looksLikeKey,
+  PROVIDER_IDS,
   providerFor,
   siblingModel
 } from '@shared/cloud'
@@ -809,8 +810,44 @@ ${command}`
    */
   ipcMain.handle(IPC.keyStatus, () => ({
     configured: keys.configured(),
-    canStore: keys.available()
+    canStore: keys.available(),
+    counts: Object.fromEntries(PROVIDER_IDS.map((id) => [id, keys.count(id)]))
   }))
+
+  /**
+   * Checks every key in a paste, not the blob.
+   *
+   * looksLikeKey refuses anything containing a space, which is right for one
+   * key and wrong for five - and five is the point, because Gemini's free
+   * tier is five requests a minute PER PROJECT.
+   */
+  function vetKeys(provider: ProviderId, blob: string): { ok: boolean; why: string } {
+    const list = KeyStore.split(blob)
+    if (!list.length) return { ok: false, why: 'No key was given.' }
+    for (const [i, one] of list.entries()) {
+      const verdict = looksLikeKey(provider, one)
+      if (!verdict.ok) {
+        return {
+          ok: false,
+          why: list.length > 1 ? `Key ${i + 1} of ${list.length}: ${verdict.why}` : verdict.why
+        }
+      }
+    }
+    return { ok: true, why: '' }
+  }
+
+  ipcMain.handle(IPC.keyAdd, (_e, req: { provider: ProviderId; key: string }) => {
+    const provider = req?.provider
+    if (!isProviderId(provider)) return { ok: false, why: 'Unknown provider.' }
+    if (!keys.available()) {
+      return { ok: false, why: 'This PC cannot store a key securely, so Wumpy will not store one.' }
+    }
+    const verdict = vetKeys(provider, req.key ?? '')
+    if (!verdict.ok) return { ok: false, why: verdict.why }
+    const total = keys.add(provider, req.key)
+    void refreshModels()
+    return { ok: true, why: '', label: PROVIDERS[provider].label, total }
+  })
 
   ipcMain.handle(IPC.keySet, (_e, req: { provider: ProviderId; key: string }) => {
     const provider = req?.provider
@@ -822,12 +859,12 @@ ${command}`
       // encrypted and is not would change which key they were willing to paste.
       return { ok: false, why: 'This PC cannot store a key securely, so Wumpy will not store one.' }
     }
-    const verdict = looksLikeKey(provider, req.key ?? '')
+    const verdict = vetKeys(provider, req.key ?? '')
     if (!verdict.ok) return { ok: false, why: verdict.why }
 
     keys.set(provider, req.key.trim())
     void refreshModels()
-    return { ok: true, why: '', label: PROVIDERS[provider].label }
+    return { ok: true, why: '', label: PROVIDERS[provider].label, total: keys.count(provider) }
   })
 
   ipcMain.handle(IPC.keyClear, (_e, req: { provider: ProviderId }) => {

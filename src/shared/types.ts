@@ -385,6 +385,7 @@ export const IPC = {
   usageReset: 'usage:reset',
   keyStatus: 'key:status',
   keySet: 'key:set',
+  keyAdd: 'key:add',
   keyClear: 'key:clear'
 } as const
 
@@ -410,6 +411,12 @@ export interface KeyStatus {
   configured: ProviderName[]
   /** False when the OS cannot encrypt, in which case Wumpy stores nothing. */
   canStore: boolean
+  /**
+   * How many keys each provider has, because the limit is per project and
+   * several keys is the whole point. A count is not a key and is safe to
+   * send; the keys themselves still never cross this boundary.
+   */
+  counts: Partial<Record<ProviderName, number>>
 }
 
 /**
