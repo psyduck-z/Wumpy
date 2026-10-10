@@ -1,6 +1,8 @@
 import { useEffect, useRef, useState } from 'react'
 import { registerPending } from '../pending'
 import { claimOnce, wasClaimed } from '../once'
+import { liveOutput, onLive, forgetLive } from '../live'
+import { runningPhase, tailLines } from '@shared/running'
 import type { ShellKind, ShellResult } from '@shared/types'
 import { arrowNavigate } from '../keyboard'
 
@@ -15,6 +17,19 @@ function duration(ms: number): string {
   if (ms < 60_000) return `${(ms / 1000).toFixed(1)}s`
   const total = Math.round(ms / 1000)
   return `${Math.floor(total / 60)}m ${total % 60}s`
+}
+
+/**
+ * The running clock, in whole seconds.
+ *
+ * Separate from duration() above, which reports a finished command and is
+ * right to show tenths - 881ms against 1.2s is a real difference there. A
+ * clock that ticks once a second should not be showing "47.0s"; it knows
+ * the figure to the second and nothing finer.
+ */
+function clock(seconds: number): string {
+  if (seconds < 60) return `${seconds}s`
+  return `${Math.floor(seconds / 60)}m ${String(seconds % 60).padStart(2, '0')}s`
 }
 
 /**
@@ -85,7 +100,7 @@ export function CommandCard({
   canAutoRun?: (command: string, messageId: string) => boolean
   /** Which message proposed it; one message may run at most one command. */
   messageId?: string
-  onRun(command: string, shell: ShellKind): Promise<ShellResult | null>
+  onRun(command: string, shell: ShellKind, runId?: string): Promise<ShellResult | null>
   /** `unattended` is false when a person pressed Run, which resets nothing. */
   onResult(result: ShellResult, unattended: boolean): void
 }): React.JSX.Element {
@@ -196,10 +211,9 @@ export function CommandCard({
    * only thing on screen is a word that never changes - indistinguishable
    * from frozen, and the install it was running had in fact worked.
    *
-   * Nothing here can report real progress, because the command's output
-   * arrives all at once when it exits. A clock cannot say how far along it
-   * is, but it can say the app has not died, which is the question actually
-   * being asked.
+   * A clock cannot say how far along it is. It can say the app has not
+   * died, which was the question being asked - and the live output below
+   * answers the rest of it.
    */
   const [startedAt, setStartedAt] = useState<number | null>(null)
   const [elapsed, setElapsed] = useState(0)
@@ -209,13 +223,40 @@ export function CommandCard({
     return () => clearInterval(tick)
   }, [state, startedAt])
 
+  /**
+   * What the command has printed so far.
+   *
+   * A clock says the app has not died. This says what it is doing, which is
+   * the question actually being asked - and for an installer it is genuinely
+   * worth watching, because winget narrates: found it, downloading, verified
+   * the hash, installing. Kept in a module rather than in state so that the
+   * remount halfway through does not lose it.
+   */
+  const [live, setLive] = useState('')
+  useEffect(() => {
+    if (state !== 'running') return
+    setLive(liveOutput(ranKey))
+    return onLive(ranKey, () => setLive(liveOutput(ranKey)))
+  }, [state, ranKey])
+
+  const phase = runningPhase(command, live, elapsed)
+  const lines = tailLines(live, 6)
+
+  /** Pinned to the newest line, the way a terminal is. */
+  const liveRef = useRef<HTMLPreElement>(null)
+  useEffect(() => {
+    const el = liveRef.current
+    if (el) el.scrollTop = el.scrollHeight
+  }, [live])
+
   const run = async (byItself = false): Promise<void> => {
     // Claimed before the command leaves, so a remount mid-run also knows.
     claimOnce(ranKey)
     setStartedAt(Date.now())
     setElapsed(0)
     setState('running')
-    const res = await onRun(command, shell)
+    const res = await onRun(command, shell, ranKey)
+    forgetLive(ranKey)
     if (!res) {
       // Null means the native confirmation was declined.
       setState('cancelled')
@@ -274,12 +315,18 @@ export function CommandCard({
           <span className="cmd-status">commands are off — /shell on</span>
         )}
         {state === 'running' && (
-          <span className="cmd-status">
-            running… {elapsed > 0 && `${elapsed}s`}
-            {/* Said once it has been going long enough to look stuck. An
+          <span className="cmd-status is-running" role="status">
+            {phase.verb}
+            <span className="dots" aria-hidden="true">
+              <i />
+              <i />
+              <i />
+            </span>
+            {elapsed > 0 && ` ${clock(elapsed)}`}
+            {/* Said only once the wait is long enough to need explaining. An
                 installer really does take this long, and saying so is the
                 difference between waiting and giving up. */}
-            {elapsed >= 20 && ' · installers can take a few minutes'}
+            {phase.note && ` · ${phase.note}`}
           </span>
         )}
         {state === 'cancelled' && <span className="cmd-status">skipped</span>}
@@ -298,6 +345,19 @@ export function CommandCard({
       )}
 
       <pre className="cmd-body">{command || raw.trim()}</pre>
+
+      {state === 'running' && (
+        <div className="cmd-live">
+          <pre ref={liveRef} aria-live="off">
+            {lines.join(String.fromCharCode(10))}
+            {/* A terminal caret, so an installer that has gone quiet for
+                thirty seconds still looks like a terminal waiting rather
+                than a window that has stopped. */}
+            <span className="cmd-caret">&#9608;</span>
+          </pre>
+          {lines.length === 0 && <p className="cmd-live-empty">nothing printed yet</p>}
+        </div>
+      )}
 
       {result && (
         <div className="cmd-output">

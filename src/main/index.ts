@@ -753,7 +753,10 @@ function registerIpc(): void {
    */
   ipcMain.handle(
     IPC.shellRun,
-    async (_e, req: { command: string; shell: ShellKind }): Promise<ShellResult | null> => {
+    async (
+      _e,
+      req: { command: string; shell: ShellKind; runId?: string }
+    ): Promise<ShellResult | null> => {
       const command = req.command.trim()
       if (!command) return null
 
@@ -820,7 +823,15 @@ ${command}`
       }
 
       console.log(`[wumpy] running (${req.shell}): ${command}`)
-      return runCommand(command, req.shell, settings.get('shellCwd') || undefined)
+      /*
+       * Output goes to the card as the process writes it, not only when it
+       * exits. Nothing new crosses the bridge that was not going to cross it
+       * a few minutes later anyway - it just stops being a secret until then.
+       */
+      const runId = req.runId
+      return runCommand(command, req.shell, settings.get('shellCwd') || undefined, (text) => {
+        if (runId) panel.send(IPC.shellProgress, { runId, text })
+      })
     }
   )
 

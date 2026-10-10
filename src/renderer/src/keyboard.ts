@@ -109,3 +109,58 @@ export function arrowNavigate(
   items[next]?.focus()
   return true
 }
+
+/**
+ * What to do with a keystroke that arrived while the box did not have the
+ * caret.
+ *
+ * The autofocus bug has outlived four fixes, and each one was a theory about
+ * WHY the keyboard was somewhere else: the window had not been given the
+ * foreground yet, the retry was on an animation frame a hidden window never
+ * runs, the hook was not granting foreground rights. All plausible, all in
+ * place now, and the user still reports typing into nothing.
+ *
+ * This stops theorising. Whatever the reason, the symptom is always the
+ * same - a character is pressed and does not appear - and that is fixable
+ * without knowing the cause. If the caret is nowhere useful and a printable
+ * key arrives, the box takes it. The same thing every chat window and search
+ * page on the internet does, and it closes the whole class rather than one
+ * more instance of it.
+ *
+ * Pure, so every one of these decisions is tested without a window.
+ */
+export function adoptsKeystroke(k: {
+  key: string
+  ctrlKey: boolean
+  altKey: boolean
+  metaKey: boolean
+  /** Where the keystroke actually landed. */
+  target: EventTarget | null
+  composerHasFocus: boolean
+  /** A picker owns the keyboard on purpose while it is open. */
+  pickerOpen: boolean
+}): 'insert' | 'focus' | 'ignore' {
+  // Already where it belongs: this is only for keys that would be lost.
+  if (k.composerHasFocus) return 'ignore'
+  // Something else is deliberately holding the keyboard.
+  if (k.pickerOpen) return 'ignore'
+  // A shortcut is not a character. Ctrl+C while output is selected has to
+  // keep copying, which was the first thing this got wrong.
+  if (k.ctrlKey || k.altKey || k.metaKey) return 'ignore'
+  // Another box has it - a rename field, a filter. Stealing from those is
+  // the bug this is meant to prevent, pointed the other way.
+  if (isTypingTarget(k.target)) return 'ignore'
+  // Escape, Tab, the arrows and the function keys all mean something else,
+  // and every one of them has a name longer than one character.
+  if (k.key.length !== 1) return 'ignore'
+  /**
+   * Space moves the caret and types nothing.
+   *
+   * Holding it is how dictation starts, and that machine lives on the
+   * textarea's own handler. Inserting a space here would both leak a
+   * character the user did not want at the front of an empty box and start
+   * the hold half-way through.
+   */
+  if (k.key === ' ') return 'focus'
+  return 'insert'
+}

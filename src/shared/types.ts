@@ -121,6 +121,14 @@ export interface ShellResult {
   readOnly: boolean
 }
 
+/** A chunk of output from a command that has not finished yet. */
+export interface ShellProgress {
+  /** Which run it belongs to, so a card only shows its own output. */
+  runId: string
+  /** Everything printed so far, already clipped to what is worth showing. */
+  text: string
+}
+
 export interface SearchResult {
   title: string
   url: string
@@ -379,6 +387,14 @@ export const IPC = {
   chatTitle: 'chat:title',
   shellRun: 'shell:run',
   shellRisk: 'shell:risk',
+  /**
+   * Output from a command that is still running.
+   *
+   * The result only arrives when the process exits, which for an installer
+   * is minutes of a card saying nothing. The bytes are already there as the
+   * child writes them; this is only the main process passing them on.
+   */
+  shellProgress: 'shell:progress',
   searchRun: 'search:run',
   voiceStatus: 'voice:status',
   voiceStatusChanged: 'voice:status-changed',

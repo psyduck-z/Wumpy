@@ -447,5 +447,106 @@ check(
   true
 )
 
+/* --------------------- a job that started and never said it ended -------- */
+
+/**
+ * Reported from real use, installing Claude Code: it did install, and it
+ * was verified afterwards, but in between the reply said it was done when
+ * it was not.
+ *
+ * Exit 0 means the command returned. An installer can hand off and keep
+ * going after the shell comes back, and winget says so - it narrates every
+ * phase, ending with "Successfully installed". Output that stops before
+ * that line is a job still in progress.
+ *
+ * The ordinary ending was actively pushing the wrong answer here: "That
+ * command is done. Do not propose it again. Answer the original question
+ * from this output, in words" forbids the one command that would settle it.
+ * A rule added to the prompt lost to it three runs out of three, because
+ * the report is the last thing in the context.
+ */
+const install = (stdout, over = {}) =>
+  P.commandFeedback({
+    command: 'winget install --id Anthropic.ClaudeCode -e',
+    shell: 'powershell',
+    cwd: 'C:/Users/me',
+    stdout,
+    stderr: '',
+    exitCode: 0,
+    durationMs: 184_000,
+    timedOut: false,
+    truncated: false,
+    readOnly: false,
+    ...over
+  })
+
+const STARTED = [
+  'Found Claude Code [Anthropic.ClaudeCode] Version 2.1.4',
+  'Downloading https://storage.example/claude-code-setup.exe',
+  'Successfully verified installer hash',
+  'Starting package install...'
+].join(NL)
+
+const unfinished = install(STARTED)
+check('an install that only got as far as starting is caught', unfinished.kind, 'report')
+check('it says the command returned, not that it worked', /RETURNED/.test(unfinished.text), true)
+check(
+  'it says what exit 0 actually means here',
+  /exit code 0 here means the command ended/.test(unfinished.text),
+  true
+)
+check('it forbids claiming the install', /Do NOT say it is installed/.test(unfinished.text), true)
+// And does not leave it at "it is installing", which answers nobody.
+check(
+  'it forbids stopping there too',
+  /Do NOT stop at "it is installing"/.test(unfinished.text),
+  true
+)
+check('it asks for one more command', /Send ONE short, different command/.test(unfinished.text), true)
+check(
+  'and it replaces the ending that forbade exactly that',
+  /Do not propose it again/.test(unfinished.text),
+  false
+)
+
+/* An install that DID say it finished keeps the ordinary ending. */
+const done = install(`${STARTED}${NL}Successfully installed`)
+check('a completed install is not flagged', /RETURNED/.test(done.text), false)
+check('and gets the ordinary ending', /Answer the original/.test(done.text), true)
+
+/**
+ * Narrow on purpose. A read that happens to mention the word "downloading"
+ * is text, not a job in progress - and reads are most of what Wumpy runs.
+ */
+check(
+  'a read that mentions downloading is left alone',
+  /RETURNED/.test(install('Status: Downloading updates', { readOnly: true }).text),
+  false
+)
+check(
+  'a failed install keeps the failure ending',
+  /RETURNED/.test(install(STARTED, { exitCode: 1 }).text),
+  false
+)
+check(
+  'and one that was cut off keeps the timeout ending',
+  /RETURNED/.test(install(STARTED, { timedOut: true }).text),
+  false
+)
+check('npm saying it added packages counts as finished', P.startedButUnfinished({
+  stdout: 'npm warn deprecated inflight@1.0.6' + NL + 'added 1 package in 14s',
+  stderr: '',
+  exitCode: 0,
+  timedOut: false,
+  readOnly: false
+}), false)
+check('and an uninstall that completed counts too', P.startedButUnfinished({
+  stdout: 'Uninstalling...' + NL + 'Successfully uninstalled',
+  stderr: '',
+  exitCode: 0,
+  timedOut: false,
+  readOnly: false
+}), false)
+
 console.log(failures ? `\n${failures} parse-failure checks FAILED` : '\nall parse-failure checks')
 process.exitCode = failures ? 1 : 0

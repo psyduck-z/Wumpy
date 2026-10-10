@@ -3,6 +3,7 @@ import { allCommands, completions, type CommandSpec } from '../commands'
 import { CommandPalette } from './CommandPalette'
 import { useInputHistory } from '../hooks/useInputHistory'
 import { insistFocus } from '../focus'
+import { adoptsKeystroke } from '../keyboard'
 import { useDictation } from '../hooks/useDictation'
 import { HOLD_MS, HoldToTalk, isPlainSpace, type HoldAction } from '../holdtotalk'
 import { Mic } from './Mic'
@@ -200,6 +201,77 @@ export function Composer({
       () => window.wumpy.panel.requestFocus()
     )
   }, [focusToken])
+
+  /**
+   * Two ways the caret gets back to the box without being asked.
+   *
+   * insistFocus above handles the panel being shown. Neither of these is
+   * about that moment: they are about the caret going missing later, during
+   * use, which is what "it STILL does not auto-focus" has been describing.
+   *
+   * The first is a cause. A card's Run button holds the caret, the command
+   * runs, the button unmounts - and the browser does not hand focus to
+   * anything, it drops it on document.body. Nothing in the app was watching
+   * for that, and nothing refocuses on it, because the window never lost
+   * focus so no focus event fires. Typing then goes nowhere.
+   *
+   * The second is the backstop for every cause not yet found. If a
+   * printable key arrives and the caret is nowhere useful, the box takes
+   * it - so the keystroke appears instead of vanishing, whatever went
+   * wrong upstream.
+   */
+  useEffect(() => {
+    const pickerOpen = (): boolean => Boolean(document.querySelector('.picker'))
+
+    /**
+     * Only when the element that had the caret was REMOVED.
+     *
+     * Not when the user clicks away, which is a decision they are allowed
+     * to make, and not when focus moves on to something else - relatedTarget
+     * says which. Narrow on purpose: a version that refocused on every
+     * focusout would fight anyone trying to select output text with the
+     * mouse.
+     */
+    const onFocusOut = (e: FocusEvent): void => {
+      if (e.relatedTarget) return
+      const left = e.target as Node | null
+      if (!left || document.contains(left)) return
+      if (pickerOpen()) return
+      queueMicrotask(() => {
+        if (document.activeElement && document.activeElement !== document.body) return
+        if (pickerOpen()) return
+        ref.current?.focus({ preventScroll: true })
+      })
+    }
+
+    const onKeyDown = (e: KeyboardEvent): void => {
+      const el = ref.current
+      if (!el) return
+      const what = adoptsKeystroke({
+        key: e.key,
+        ctrlKey: e.ctrlKey,
+        altKey: e.altKey,
+        metaKey: e.metaKey,
+        target: e.target,
+        composerHasFocus: document.activeElement === el,
+        pickerOpen: pickerOpen()
+      })
+      if (what === 'ignore') return
+      // The character is placed by hand rather than left to the browser:
+      // whether a focus() made during keydown catches that same keystroke
+      // is not something to depend on.
+      e.preventDefault()
+      el.focus({ preventScroll: true })
+      if (what === 'insert') setValue((v) => v + e.key)
+    }
+
+    document.addEventListener('focusout', onFocusOut)
+    document.addEventListener('keydown', onKeyDown, true)
+    return () => {
+      document.removeEventListener('focusout', onFocusOut)
+      document.removeEventListener('keydown', onKeyDown, true)
+    }
+  }, [])
 
   useEffect(() => {
     if (!prefill || prefill.token === 0) return

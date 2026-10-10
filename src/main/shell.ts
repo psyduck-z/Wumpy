@@ -677,6 +677,28 @@ function launcher(kind: ShellKind, command: string): { file: string; args: strin
   }
 }
 
+/** How often live output is passed on, at most. */
+const LIVE_INTERVAL_MS = 160
+
+/**
+ * How much live output is kept.
+ *
+ * Only the tail is ever shown, and the full text is sent again on every
+ * flush, so holding the whole of a 100,000-character build log here would
+ * mean posting it across the bridge six times a second for no gain.
+ */
+const MAX_LIVE = 8000
+
+function clipLive(stdout: string, stderr: string): string {
+  const NL = String.fromCharCode(10)
+  const joined = stderr
+    ? stdout.endsWith(NL) || !stdout
+      ? stdout + stderr
+      : stdout + NL + stderr
+    : stdout
+  return joined.length > MAX_LIVE ? joined.slice(-MAX_LIVE) : joined
+}
+
 function clip(text: string): { text: string; truncated: boolean } {
   if (text.length <= MAX_OUTPUT) return { text, truncated: false }
   return { text: `${text.slice(0, MAX_OUTPUT)}\n…output truncated…`, truncated: true }
@@ -688,7 +710,12 @@ function clip(text: string): { text: string; truncated: boolean } {
  * Never rejects: a failure to launch is reported as a result with an exit code,
  * so the caller has one shape to handle.
  */
-export function runCommand(command: string, kind: ShellKind, cwd?: string): Promise<ShellResult> {
+export function runCommand(
+  command: string,
+  kind: ShellKind,
+  cwd?: string,
+  onProgress?: (text: string) => void
+): Promise<ShellResult> {
   const started = Date.now()
   const workingDir = cwd && existsSync(cwd) ? cwd : homedir()
   const { file, args } = launcher(kind, command)
@@ -724,6 +751,28 @@ export function runCommand(command: string, kind: ShellKind, cwd?: string): Prom
     let stderr = ''
     let timedOut = false
 
+    /*
+     * Live output, sent on a timer rather than per chunk.
+     *
+     * A download progress bar redraws many times a second and each redraw is
+     * its own write; forwarding every one would put thousands of IPC messages
+     * and thousands of React renders behind a card nobody can read that fast.
+     * Six frames a second is past the point where it looks any smoother.
+     */
+    let pending = false
+    let flushTimer: NodeJS.Timeout | null = null
+    const flush = (): void => {
+      flushTimer = null
+      if (!pending) return
+      pending = false
+      onProgress?.(clipLive(stdout, stderr))
+    }
+    const nudge = (): void => {
+      if (!onProgress) return
+      pending = true
+      if (flushTimer === null) flushTimer = setTimeout(flush, LIVE_INTERVAL_MS)
+    }
+
     const timer = setTimeout(() => {
       timedOut = true
       child.kill()
@@ -731,9 +780,11 @@ export function runCommand(command: string, kind: ShellKind, cwd?: string): Prom
 
     child.stdout?.on('data', (c: Buffer) => {
       if (stdout.length < MAX_OUTPUT * 2) stdout += c.toString('utf8')
+      nudge()
     })
     child.stderr?.on('data', (c: Buffer) => {
       if (stderr.length < MAX_OUTPUT * 2) stderr += c.toString('utf8')
+      nudge()
     })
 
     child.on('error', (err) => {
@@ -742,6 +793,17 @@ export function runCommand(command: string, kind: ShellKind, cwd?: string): Prom
 
     child.on('close', (code) => {
       clearTimeout(timer)
+      /*
+       * The last flush is sent, not cancelled.
+       *
+       * Clearing the timer alone lost it: a command that finishes inside the
+       * flush interval writes everything it has to say and then exits, so the
+       * pending frame was the only frame, and `winget search` streamed
+       * nothing at all. Measured as flushes: 0 on output that was plainly
+       * there in the result.
+       */
+      if (flushTimer !== null) clearTimeout(flushTimer)
+      flush()
       const out = clip(stdout)
       const errOut = clip(stderr)
       resolve({

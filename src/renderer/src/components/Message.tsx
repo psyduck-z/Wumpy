@@ -58,7 +58,7 @@ export const Message = memo(function Message({
   /** Called as revealed text grows, so the transcript can stay pinned. */
   onGrow?: () => void
   /** Supplied only when Wumpy may propose commands. */
-  onRunCommand?: (command: string, shell: ShellKind) => Promise<ShellResult | null>
+  onRunCommand?: (command: string, shell: ShellKind, runId?: string) => Promise<ShellResult | null>
   onCommandResult?: (result: ShellResult, unattended: boolean) => void
   /** Called when the user picks an option from a question the model asked. */
   onAnswer?: (messageId: string, option: string) => void

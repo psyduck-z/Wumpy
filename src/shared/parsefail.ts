@@ -185,6 +185,58 @@ export const FAILED_ENDING = [
   'then say plainly what you tried and what it said.'
 ]
 
+/**
+ * A long job that returned without ever saying it finished.
+ *
+ * Reported from real use, installing Claude Code: it did install, and it
+ * was verified afterwards, but in between the reply said it was done when
+ * it was not. The prompt already forbids claiming success in the same
+ * message as the proposal, and that is not what happened here - the
+ * command had come back. Exit 0 only means the command returned.
+ *
+ * The ordinary ending was pushing it. "That command is done. Do not
+ * propose it again. Answer the original question from this output, in
+ * words" is exactly wrong for an installer that got as far as "Starting
+ * package install..." and stopped: it forbids the one command that would
+ * settle it and asks for a conclusion the output does not support. A rule
+ * in the prompt lost to it three times out of three, because the report is
+ * the last thing in the context.
+ */
+export const UNFINISHED_ENDING = [
+  'That command RETURNED, but nothing in its output says the work finished.',
+  'An installer can hand off and keep going after the shell comes back, so',
+  'exit code 0 here means the command ended, not that the program is on the',
+  'machine.',
+  'Do NOT say it is installed. Do NOT stop at "it is installing" either —',
+  'the user cannot see any more than you can and you are holding the shell.',
+  'Send ONE short, different command that checks: ask the tool itself for',
+  'its version, or look it up by name. Then say what it found.'
+]
+
+/** Output that says the job actually got to the end. */
+const FINISHED_MARKS =
+  /successfully installed|successfully uninstalled|installation (completed|succeeded|finished)|already installed|no applicable (upgrade|update)|no newer package|added \d+ packages?|removed \d+ packages?|up to date|changed \d+ packages?/i
+
+/** Output that says it had started, which is not the same thing. */
+const STARTED_MARKS =
+  /starting package install|\bdownloading\b|\binstalling\b|\bextracting\b|\bunpacking\b|verified installer hash|\bin progress\b/i
+
+/**
+ * Whether this looks like a job that began and never reported an end.
+ *
+ * Deliberately narrow. It only fires on a command that CHANGED something -
+ * a read that happens to mention the word "downloading" is just text - and
+ * only when the output both says it started and never says it finished.
+ * Everything else keeps the ordinary ending, which is right for the reads
+ * that are most of what Wumpy runs.
+ */
+export function startedButUnfinished(result: ShellResult): boolean {
+  if (result.readOnly || result.timedOut || result.exitCode !== 0) return false
+  const out = `${result.stdout}${result.stderr}`
+  if (!out.trim()) return false
+  return STARTED_MARKS.test(out) && !FINISHED_MARKS.test(out)
+}
+
 /** How much command output the model is shown before it is clipped. */
 export const MAX_REPORT_OUTPUT = 3000
 
@@ -246,10 +298,12 @@ export function commandFeedback(result: ShellResult): CommandFeedback {
                 'Do NOT say it succeeded, and do not say it failed. Say it was still',
                 'going, then propose ONE command that checks the real state.'
               ]
-            : [
-                'That command is done. Do not propose it again. Answer the original',
-                'question from this output, in words.'
-              ]
+            : startedButUnfinished(result)
+              ? UNFINISHED_ENDING
+              : [
+                  'That command is done. Do not propose it again. Answer the original',
+                  'question from this output, in words.'
+                ]
 
   const NL = String.fromCharCode(10)
 

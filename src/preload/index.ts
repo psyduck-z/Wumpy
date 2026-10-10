@@ -23,6 +23,7 @@ import type {
   WriteTarget,
   ShellKind,
   ShellResult,
+  ShellProgress,
   VoiceStatus,
   WumpySettings
 } from '@shared/types'
@@ -80,8 +81,20 @@ const api = {
   },
   shell: {
     /** Runs an approved command. Resolves null if the user cancelled. */
-    run: (req: { command: string; shell: ShellKind }): Promise<ShellResult | null> =>
-      ipcRenderer.invoke(IPC.shellRun, req),
+    run: (req: {
+      command: string
+      shell: ShellKind
+      /** Tags the live output below, so a card only shows its own. */
+      runId?: string
+    }): Promise<ShellResult | null> => ipcRenderer.invoke(IPC.shellRun, req),
+    /**
+     * Output from a command that is still going.
+     *
+     * One way, main to page, and only ever the text the command itself
+     * printed - the same text the finished result carries, arriving while
+     * it is still interesting rather than afterwards.
+     */
+    onProgress: (cb: (p: ShellProgress) => void) => on(IPC.shellProgress, cb),
     /**
      * Whether Wumpy may run the command, and why it looks risky if it does.
      * Drives the card: a command it may not run gets no Run button.

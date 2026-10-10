@@ -613,5 +613,99 @@ check('links and searches use it', app.includes("linkMode={fresh ? linkMode : 'm
 // card should still work.
 check('a reopened card keeps its buttons', app.includes("fresh ? linkMode : 'manual'"), true)
 
+/* ------------------------ a keystroke that landed nowhere is not lost */
+
+/**
+ * The fifth attempt at the autofocus bug, and the first that does not rest
+ * on a theory of why the caret is missing.
+ *
+ * The four before it each fixed a plausible cause - the foreground handover,
+ * the animation frame a hidden window never runs, the foreground grant in
+ * the hook, the proxy that reported focus the window did not have - and the
+ * report came back each time. So this one treats the symptom: a printable
+ * key that arrives while the caret is nowhere useful goes in the box.
+ */
+const press = (over) => ({
+  key: 'a',
+  ctrlKey: false,
+  altKey: false,
+  metaKey: false,
+  target: { tagName: 'DIV' },
+  composerHasFocus: false,
+  pickerOpen: false,
+  ...over
+})
+
+check('a letter typed into nothing goes to the box', K.adoptsKeystroke(press()), 'insert')
+check(
+  'a letter typed at a button goes to the box too',
+  K.adoptsKeystroke(press({ target: { tagName: 'BUTTON' } })),
+  'insert'
+)
+check(
+  'but never out of another box',
+  K.adoptsKeystroke(press({ target: { tagName: 'INPUT' } })),
+  'ignore'
+)
+check(
+  'nor out of something being edited in place',
+  K.adoptsKeystroke(press({ target: { tagName: 'DIV', isContentEditable: true } })),
+  'ignore'
+)
+check(
+  'nothing happens when the box already has it',
+  K.adoptsKeystroke(press({ composerHasFocus: true })),
+  'ignore'
+)
+check(
+  'a picker keeps the keyboard it asked for',
+  K.adoptsKeystroke(press({ pickerOpen: true })),
+  'ignore'
+)
+
+/* A shortcut is not a character, and Ctrl+C over selected output must copy. */
+check('Ctrl+C is left alone', K.adoptsKeystroke(press({ key: 'c', ctrlKey: true })), 'ignore')
+check('so is Alt+Up', K.adoptsKeystroke(press({ key: 'ArrowUp', altKey: true })), 'ignore')
+check('and Escape', K.adoptsKeystroke(press({ key: 'Escape' })), 'ignore')
+check('and Tab', K.adoptsKeystroke(press({ key: 'Tab' })), 'ignore')
+check('and the arrows', K.adoptsKeystroke(press({ key: 'ArrowLeft' })), 'ignore')
+check('and a function key', K.adoptsKeystroke(press({ key: 'F5' })), 'ignore')
+
+/**
+ * Space takes the caret and types nothing. Holding it is how dictation
+ * starts, and that machine lives on the textarea's own handler - a space
+ * inserted from out here would both leave a character at the front of an
+ * empty box and start the hold half way through.
+ */
+check('space moves the caret without typing', K.adoptsKeystroke(press({ key: ' ' })), 'focus')
+
+/* Punctuation and digits are characters like any other. */
+check('a slash starts a command', K.adoptsKeystroke(press({ key: '/' })), 'insert')
+check('a digit is a digit', K.adoptsKeystroke(press({ key: '7' })), 'insert')
+
+/* ---------------------- focus dropped by a button that went away */
+
+/**
+ * The one cause this round does name. A card's Run button holds the caret,
+ * the command runs, the button unmounts - and the browser drops focus on
+ * document.body rather than handing it anywhere. The window never lost
+ * focus, so no focus event fires and nothing was watching for it.
+ *
+ * Narrow deliberately: only when the element that had the caret has left
+ * the document. Refocusing on every focusout would fight anyone selecting
+ * output text with the mouse.
+ */
+check('the composer watches for focus being dropped', composer.includes('focusout'), true)
+check(
+  'and only acts when the element actually went away',
+  composer.includes('document.contains(left)'),
+  true
+)
+check(
+  'and leaves a deliberate move to something else alone',
+  composer.includes('if (e.relatedTarget) return'),
+  true
+)
+
 console.log(failures ? `\n${failures} keyboard checks FAILED` : '\nall keyboard checks')
 process.exitCode = failures ? 1 : 0

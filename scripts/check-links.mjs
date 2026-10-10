@@ -529,8 +529,24 @@ check('the substitution is named as one', /a web page is a different thing/.test
  */
 check('it asks with a block', /use the block, so answering is one click/.test(open), true)
 check('and the block is shown', /```wumpy-ask/.test(T.OPEN_PROMPT), true)
-check('with the real question in it', /Open minecraft.net instead\?/.test(open), true)
-check('and two options to click', /- Open the website/.test(open) && /- No thanks/.test(open), true)
+check('with the real question in it', /What would you like to do\?/.test(open), true)
+/**
+ * Three options, and installing is the first.
+ *
+ * This passage used to show the two-option block - "Open the website" and
+ * "No thanks" - which is exactly the answer the user reported as wrong, and
+ * a later passage in the same prompt corrected it. A worked example the
+ * model can copy beats a rule a few hundred lines further down: measured on
+ * Gemini, it copied the two-option version one run in three. The two
+ * passages say the same thing now.
+ */
+check(
+  'and installing is the first option offered',
+  /- Install it/.test(open) && open.indexOf('- Install it') < open.indexOf('- Look for it'),
+  true
+)
+check('with the website demoted to second', /- Look for it on the web/.test(open), true)
+check('and a way to decline', /- Nothing/.test(open), true)
 check('prose offers are ruled out', /Offering in prose does not count/.test(open), true)
 check('the page opens only once picked', /only once they have picked it/.test(open), true)
 

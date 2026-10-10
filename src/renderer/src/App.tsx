@@ -31,6 +31,7 @@ import {
 } from './commands'
 import { newestPending } from './pending'
 import { forgetClaims } from './once'
+import { forgetAllLive } from './live'
 import { forgetActions, record } from './ledger'
 import { matchIntent } from './intents'
 import { AUTO_RUN_LIMIT, autoRunEligible } from './autorun'
@@ -200,6 +201,7 @@ export default function App(): React.JSX.Element {
     // old ones. Left to grow they would also outlive every chat in the
     // session for no reason.
     forgetClaims()
+    forgetAllLive()
     forgetActions()
     const fresh = nextId()
     setChatId(fresh)
@@ -264,6 +266,7 @@ export default function App(): React.JSX.Element {
       // they first ran. Without this it would find them all already done and
       // refuse to act on any of them.
       forgetClaims()
+      forgetAllLive()
       forgetActions()
       setChatId(loaded.id)
       setChatTitle(loaded.title)
@@ -457,8 +460,8 @@ export default function App(): React.JSX.Element {
   }, [streamingId])
 
   const runShellCommand = useCallback(
-    (command: string, shellKind: ShellKind) =>
-      window.wumpy.shell.run({ command, shell: shellKind }),
+    (command: string, shellKind: ShellKind, runId?: string) =>
+      window.wumpy.shell.run({ command, shell: shellKind, runId }),
     []
   )
 

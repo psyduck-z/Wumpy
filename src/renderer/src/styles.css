@@ -1,4 +1,4 @@
-@import 'highlight.js/styles/github-dark.css';
+@import "highlight.js/styles/github-dark.css";
 
 /*
  * Two themes, one layout. Quick mode is light and calm; Developer mode is dark
@@ -9,8 +9,8 @@
 :root {
   --radius: 14px;
   --gutter: 12px;
-  --font: 'Segoe UI Variable Text', 'Segoe UI', system-ui, sans-serif;
-  --mono: 'Cascadia Code', 'Consolas', ui-monospace, monospace;
+  --font: "Segoe UI Variable Text", "Segoe UI", system-ui, sans-serif;
+  --mono: "Cascadia Code", "Consolas", ui-monospace, monospace;
 }
 
 /*
@@ -26,7 +26,7 @@
   of each other - so the only colour on screen is the colour that means
   something: the accent and the danger red.
 */
-[data-theme='dark'],
+[data-theme="dark"],
 :root {
   --bg: 10 10 11;
   --surface: 17 17 19;
@@ -742,6 +742,86 @@ body {
  * command invisible — the one thing on the card the user must be able to read
  * before approving it.
  */
+/*
+ * Live output, while the command is still going.
+ *
+ * The card used to show one unchanging word for up to ten minutes. This is
+ * the command's own narration instead - winget says what it found, what it
+ * is downloading, what it verified - which is both the honest answer to "is
+ * it stuck" and, it turns out, the only part of waiting that is any fun.
+ */
+.cmd-live {
+  border-top: 1px solid rgb(var(--border));
+  padding: 7px 10px 8px;
+  background: rgb(var(--raised) / 0.45);
+}
+
+.cmd-live pre {
+  margin: 0;
+  /*
+   * Tall enough for six lines and no taller, so the card does not jump about
+   * as output arrives. Six is the last six: older lines scroll away, because
+   * the newest is the only one that says what is happening now.
+   */
+  max-height: 104px;
+  overflow: hidden;
+  font-family: var(--mono);
+  font-size: 11px;
+  line-height: 1.5;
+  color: rgb(var(--muted));
+  white-space: pre-wrap;
+  word-break: break-all;
+  user-select: text;
+}
+
+.cmd-live-empty {
+  margin: 0;
+  font-size: 10.5px;
+  font-style: italic;
+  color: rgb(var(--muted) / 0.75);
+}
+
+/* The caret sits on the end of the newest line, as it would in a terminal. */
+.cmd-caret {
+  display: inline-block;
+  margin-left: 2px;
+  color: rgb(var(--accent));
+  font-size: 9px;
+  vertical-align: baseline;
+  animation: cmd-blink 1.05s steps(1, end) infinite;
+  will-change: opacity;
+}
+
+@keyframes cmd-blink {
+  0%,
+  49% {
+    opacity: 0.9;
+  }
+  50%,
+  100% {
+    opacity: 0.12;
+  }
+}
+
+/* The head's dots are the thinking indicator at the size of a status line. */
+.cmd-status.is-running {
+  display: inline-flex;
+  align-items: center;
+  gap: 1px;
+  color: rgb(var(--text));
+}
+
+.cmd-status.is-running .dots {
+  height: 11px;
+  gap: 2px;
+  margin: 0 1px 0 2px;
+}
+
+.cmd-status.is-running .dots i {
+  width: 3px;
+  height: 3px;
+}
+
 .cmd-output {
   border-top: 1px solid rgb(var(--border));
   padding: 6px 10px 8px;
@@ -795,7 +875,7 @@ body {
 
 .turn-end::before,
 .turn-end::after {
-  content: '';
+  content: "";
   flex: 1;
   height: 1px;
   background: linear-gradient(90deg, transparent, rgb(var(--text) / 0.28));
@@ -922,7 +1002,7 @@ body {
  * a second for the life of every answer.
  */
 .msg-body.is-streaming > :last-child::after {
-  content: '';
+  content: "";
   display: inline-block;
   width: 2px;
   height: 1.02em;
@@ -1002,6 +1082,11 @@ body {
   .dots i {
     animation: none;
     will-change: auto;
+  }
+  /* The caret is there to say "still alive"; at rest it still says it. */
+  .cmd-caret {
+    animation: none;
+    opacity: 0.6;
   }
   .dots i:nth-child(2) {
     opacity: 0.7;
@@ -1444,7 +1529,7 @@ body {
  */
 .write-path {
   margin: 6px 0 0;
-  font-family: var(--mono, ui-monospace, 'Cascadia Code', Consolas, monospace);
+  font-family: var(--mono, ui-monospace, "Cascadia Code", Consolas, monospace);
   font-size: 11.5px;
   color: rgb(var(--text));
   word-break: break-all;
@@ -1488,7 +1573,7 @@ body {
  * about to approve, this is the thing they are approving.
  */
 .link-host {
-  font-family: var(--mono, ui-monospace, 'Cascadia Code', Consolas, monospace);
+  font-family: var(--mono, ui-monospace, "Cascadia Code", Consolas, monospace);
   color: rgb(var(--text));
   background: rgb(var(--raised));
   border-radius: 5px;
