@@ -335,7 +335,7 @@ export const CLOUD_MODELS: CloudModel[] = [
     id: 'mistral-code-latest',
     provider: 'mistral',
     label: 'Mistral Code',
-    blurb: 'Also free at 125 a minute. Aimed at code, like Codestral.'
+    blurb: 'The default. 37 of 38 ceiling rungs, a rung ahead of Codestral.'
   },
   {
     id: 'ministral-8b-latest',

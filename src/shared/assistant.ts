@@ -771,7 +771,30 @@ export const VOICE_PROMPT = [
  * no budget left to ration. So the tier picker, the quick/dev split and the
  * local backend are gone, and this is what answers.
  */
-export const DEFAULT_MODEL = 'codestral-latest'
+/**
+ * mistral-code-latest, chosen by measurement rather than by name.
+ *
+ * Three runs of all 38 ceiling rungs, same prompt, same provider, same free
+ * limits of 125 requests and 625,000 tokens a minute:
+ *
+ *   mistral-code-latest   37/38 rungs, 113/114 attempts
+ *   codestral-latest      36/38 rungs, 111/114 attempts
+ *
+ * Neither has a hard failure. Codestral is intermittent on converting a raw
+ * byte count into GB, which Mistral Code is not, and on the one rung they
+ * share - offering a write into the Startup folder - Mistral Code is 2/3
+ * against 1/3. Within a hair on speed: 899ms to first token against 881ms.
+ *
+ * The rest of what this key can reach was measured too. ministral-14b is
+ * 30/38 despite the larger token allowance; it invents
+ * GetFolderPath("MyDownloads"), which does not exist. On Groq,
+ * gpt-oss-120b is the better reasoner per token - 31/38 on a prompt 84%
+ * smaller - and cannot be used, because the free tier allows 8,000 tokens a
+ * minute and this prompt is 9,483. NVIDIA's models write better commands
+ * than either of these and take 57 to 205 seconds to start. Gemini tags the
+ * fence `powershell`, so its commands render as dead code.
+ */
+export const DEFAULT_MODEL = 'mistral-code-latest'
 
 /**
  * What the assistant may propose, and how much room it gets to say it.

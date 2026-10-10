@@ -155,11 +155,20 @@ check('and is zero padded', U.todayKey(new Date(2026, 10, 1)), '2026-11-01')
 
 /**
  * There were four tiers in two modes on two backends, and each needed its own
- * model, output cap and voice. The measurements ended that: Codestral took
- * every column of the write-a-file benchmark at 0.51s to first token and 511
- * billed tokens a call, so there is nothing left to ration between tiers.
+ * model, output cap and voice. The measurements ended that, and the same
+ * discipline chose what replaced them.
+ *
+ * Three runs of all 38 ceiling rungs, same prompt, same provider, same free
+ * limits: mistral-code-latest 37/38 rungs and 113/114 attempts, against
+ * codestral-latest at 36/38 and 111/114. Neither has a hard failure.
+ * Codestral is intermittent on turning a raw byte count into GB and worse on
+ * the rung they share. 899ms to first token against 881ms, so the switch
+ * costs nothing.
+ *
+ * Asserted here so the default cannot drift back to a name someone
+ * remembers rather than the one that was measured.
  */
-check('there is one model, and it is the measured one', T.DEFAULT_MODEL, 'codestral-latest')
+check('there is one model, and it is the measured one', T.DEFAULT_MODEL, 'mistral-code-latest')
 check('it is a model the cloud layer can route', C.providerFor(T.DEFAULT_MODEL), 'mistral')
 check(
   'and one the picker offers',
