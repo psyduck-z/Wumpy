@@ -35,7 +35,7 @@ import { Panel } from './panel'
 import { createTray, resourcePath } from './tray'
 import { registerHotkeys, unregisterHotkeys } from './hotkey'
 import { LowLevelHook } from './lowlevelhook'
-import { runCommand, assessRisk, isReadOnly } from './shell'
+import { runCommand, assessRisk, isReadOnly, riskLevel } from './shell'
 import { PriorityManager } from './priority'
 import { webSearch } from './search'
 import { cleanTitle, titleBrief, titleSource } from '@shared/titles'
@@ -715,12 +715,26 @@ function registerIpc(): void {
     const risk = assessRisk(command)
     const mode = settings.get('approvalMode')
 
-    // Risky commands never run unprompted while confirmRisky stands, whatever
-    // the mode: the model wrote them, and a wrong path does not come back.
-    const risky = risk !== null && settings.get('confirmRisky')
+    /**
+     * Accept-all means accept all, short of something that cannot be undone.
+     *
+     * It used to stop for anything risky at all, which included uninstalling
+     * an app - and an uninstall is not data loss, because installing it
+     * again puts it back. Being interrupted by a native dialog for that is
+     * the mode failing to be the mode.
+     *
+     * So accept-all now stops only for the severe ones: deleting files,
+     * disabling Defender or the firewall, writing into Startup, reading a
+     * private key. The other modes are unchanged - there the user has not
+     * said "stop asking me", and a second look costs them nothing.
+     */
+    const level = riskLevel(command)
+    const confirm = settings.get('confirmRisky')
+    const stops = mode === 'all' ? level === 'severe' : level !== 'none'
+    const risky = stops && confirm
     const auto = allowed && !risky && (mode === 'all' || (mode === 'auto' && readOnly))
 
-    return { risk, allowed, scope, auto, readOnly }
+    return { risk, allowed, scope, auto, readOnly, level }
   }
 
   ipcMain.handle(IPC.shellRisk, (_e, req: { command: string }) => judge(req.command))
@@ -777,9 +791,14 @@ function registerIpc(): void {
         }
       }
 
-      // A risky command still raises the dialog even when the mode would have
-      // run it, unless the user has explicitly turned that off.
-      const risk = settings.get('confirmRisky') ? verdict.risk : null
+      /**
+       * The dialog follows the same rule as the verdict.
+       *
+       * Deciding it separately here was how accept-all ended up stopping
+       * for an uninstall it had already decided to allow: judge() said run
+       * it, and then this asked anyway.
+       */
+      const risk = verdict.auto || !settings.get('confirmRisky') ? null : verdict.risk
       if (risk) {
         const { response } = await dialog.showMessageBox({
           type: 'warning',

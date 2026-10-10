@@ -21,16 +21,25 @@ await build({
   outfile: out,
   logLevel: 'error'
 })
-const { isReadOnly, assessRisk } = await import(pathToFileURL(out).href)
+const { isReadOnly, assessRisk, riskLevel } = await import(pathToFileURL(out).href)
 
-/** Mirrors judge() in src/main/index.ts. */
+/**
+ * Mirrors judge() in src/main/index.ts.
+ *
+ * Accept-all stops only for the severe ones now. It used to stop for
+ * anything risky at all, which included uninstalling an app - and an
+ * uninstall is undone by installing it again, so being interrupted by a
+ * native dialog for one is the mode failing to be the mode.
+ */
 function judge(command, { tierTools, mode, confirmRisky = true }) {
   const readOnly = isReadOnly(command)
   const allowed = tierTools === 'full' || (tierTools === 'read' && readOnly)
   const risk = assessRisk(command)
-  const risky = risk !== null && confirmRisky
+  const level = riskLevel(command)
+  const stops = mode === 'all' ? level === 'severe' : level !== 'none'
+  const risky = stops && confirmRisky
   const auto = allowed && !risky && (mode === 'all' || (mode === 'auto' && readOnly))
-  return { allowed, auto, risky, readOnly }
+  return { allowed, auto, risky, readOnly, level }
 }
 
 const READ = 'ollama list'
@@ -133,6 +142,9 @@ const MUST_BLOCK = [
   // The exception for New-TimeSpan must not widen to New- in general.
   // New-Object builds COM objects, which is how a .lnk reached the Startup
   // folder with no write verb anywhere in the command.
+  // The flag-shaped exception must not widen to the whole tool.
+  'manage-bde -off C:',
+  'manage-bde -lock C:',
   'New-Object -ComObject WScript.Shell',
   'New-Item -ItemType File x.txt',
   'Get-ChildItem | ForEach-Object { ri $_ }',
@@ -289,9 +301,66 @@ for (const c of [
   }
 }
 
-/* ------------------------------------------- the destructive classifier -- */
-
+// Counted into the same tally as everything below.
 let extra = 0
+
+/* ------------------------------- accept-all means accept all ------------- */
+
+/**
+ * An uninstall is not data loss. Installing the app again puts it back,
+ * which is the test, and being stopped by a native dialog for one is
+ * accept-all failing to be accept-all. Reported from real use: the Spotify
+ * test interrupted itself.
+ *
+ * Deleting files, disabling Defender, writing into Startup and reading a
+ * private key are not undone by reinstalling anything, so no mode runs
+ * those unasked.
+ */
+{
+  const UNINSTALLS = [
+    'winget uninstall --id Spotify.Spotify',
+    'msiexec /x {GUID}',
+    'Remove-AppxPackage Microsoft.Something',
+    'Uninstall-Package Thing',
+    'C:/Program Files/Thing/unins000.exe /S'
+  ]
+  for (const c of UNINSTALLS) {
+    extra++
+    const all = judge(c, { tierTools: 'full', mode: 'all' })
+    const manual = judge(c, { tierTools: 'full', mode: 'manual' })
+    const ok = all.auto === true && manual.auto === false && riskLevel(c) === 'reversible'
+    if (!ok) failed++
+    console.log(
+      `${ok ? 'ok  ' : 'FAIL'} accept-all runs, manual still asks: ${c.slice(0, 40).padEnd(41)}` +
+        ` ${riskLevel(c)}`
+    )
+  }
+
+  // And the severe ones are unmoved by the mode.
+  const SEVERE = [
+    'Remove-Item C:/Users/me/Downloads -Recurse -Force',
+    'Remove-Item C:/Users/me/notes.txt',
+    'Set-MpPreference -DisableRealtimeMonitoring $true',
+    'Set-NetFirewallProfile -All -Enabled False',
+    'Get-Content $env:USERPROFILE/.ssh/id_rsa',
+    'Copy-Item x -Destination "$env:APPDATA/Microsoft/Windows/Start Menu/Programs/Startup"'
+  ]
+  for (const c of SEVERE) {
+    extra++
+    const all = judge(c, { tierTools: 'full', mode: 'all' })
+    const ok = all.auto === false && riskLevel(c) === 'severe'
+    if (!ok) failed++
+    console.log(`${ok ? 'ok  ' : 'FAIL'} accept-all still asks: ${c.slice(0, 46).padEnd(47)} ${riskLevel(c)}`)
+  }
+
+  // A harmless command is not dragged into either bucket.
+  extra++
+  const plain = riskLevel('Get-Date') === 'none'
+  if (!plain) failed++
+  console.log(`${plain ? 'ok  ' : 'FAIL'} an ordinary read has no level at all`)
+}
+
+/* ------------------------------------------- the destructive classifier -- */
 
 /**
  * What must raise the native dialog.
@@ -452,6 +521,13 @@ const BOUNDED_READS = [
   'New-TimeSpan -Start $a -End $b',
   '[math]::Round((New-TimeSpan -Start (Get-CimInstance Win32_OperatingSystem).LastBootUpTime -End (Get-Date)).TotalHours, 1)',
   'New-Guid',
+  /**
+   * A read verb that is spelled as a flag. The allowlist took the first
+   * NON-flag argument, so `manage-bde -status C:` was tested as "c:" and a
+   * plain BitLocker status query was refused as a write - the ladder found
+   * it while measuring a second model.
+   */
+  'manage-bde -status C:',
   // Reading an ordinary file is not reading a secret. environment.txt is
   // the negative case for the .env pattern, which must not match it.
   'Get-Content $env:USERPROFILE/Downloads/notes.txt',

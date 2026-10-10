@@ -30,7 +30,19 @@ const MAX_OUTPUT = 100_000
  * not try to decide what is safe on the user's behalf, because a pattern list
  * is trivially sidestepped and would only create false confidence.
  */
-const RISKY: Array<{ pattern: RegExp; why: string }> = [
+/**
+ * `reversible` means accept-all may run it without stopping to ask.
+ *
+ * Accept-all is meant to mean accept all. Uninstalling an app interrupted
+ * it with a native dialog, and an uninstall is not data loss - the app can
+ * be installed again, which is the test that separates the two. Deleting
+ * files, disabling Defender and writing into Startup are not undone by
+ * reinstalling anything, so those still ask however impatient the mode is.
+ *
+ * The dialog still fires for these in the manual and auto modes, where the
+ * user has not said "stop asking me".
+ */
+const RISKY: Array<{ pattern: RegExp; why: string; reversible?: boolean }> = [
   { pattern: /\brm\s+(-[a-z]*[rf][a-z]*\s+)+/i, why: 'recursive or forced delete' },
   { pattern: /\bRemove-Item\b[^|]*-Recurse/i, why: 'recursive delete' },
   { pattern: /\bdel\s+\/[sq]/i, why: 'recursive or quiet delete' },
@@ -63,11 +75,19 @@ const RISKY: Array<{ pattern: RegExp; why: string }> = [
    * classified "not risky", so neither would have fired. The prompt can only
    * safely say "go ahead and propose it" once this does.
    */
-  { pattern: /\bunins(tall)?[\w-]*\.exe\b/i, why: 'runs an uninstaller' },
-  { pattern: /\bmsiexec\b[^|]*\/(x|uninstall)\b/i, why: 'uninstalls a program' },
-  { pattern: /\bwinget\s+uninstall\b/i, why: 'uninstalls a program' },
-  { pattern: /\bRemove-Appx(Provisioned)?Package\b/i, why: 'removes an installed app' },
-  { pattern: /\bUninstall-(Package|Module|WindowsFeature)\b/i, why: 'uninstalls a program' },
+  { pattern: /\bunins(tall)?[\w-]*\.exe\b/i, why: 'runs an uninstaller', reversible: true },
+  { pattern: /\bmsiexec\b[^|]*\/(x|uninstall)\b/i, why: 'uninstalls a program', reversible: true },
+  { pattern: /\bwinget\s+uninstall\b/i, why: 'uninstalls a program', reversible: true },
+  {
+    pattern: /\bRemove-Appx(Provisioned)?Package\b/i,
+    why: 'removes an installed app',
+    reversible: true
+  },
+  {
+    pattern: /\bUninstall-(Package|Module|WindowsFeature)\b/i,
+    why: 'uninstalls a program',
+    reversible: true
+  },
   /**
    * Everything below was missing, and the gap was wider than the list.
    *
@@ -225,6 +245,9 @@ const READ_ONLY = new Set([
    */
   'new-timespan',
   'new-guid',
+  // Windows tools that only report when given their status flag; the
+  // flags themselves are vetted by READ_SUBCOMMANDS below.
+  'manage-bde',
   'foreach-object',
   'format-table',
   'format-list',
@@ -313,6 +336,22 @@ const READ_SUBCOMMANDS: Record<string, string[]> = {
   go: ['version', 'env', 'list'],
   cargo: ['tree', 'metadata'],
   dotnet: ['--list-sdks', '--list-runtimes', '--info'],
+  /**
+   * Windows tools whose reporting verb is a flag rather than a word.
+   *
+   * manage-bde -status is how you ask about BitLocker without elevation,
+   * and the gate refused it - so a question about disk encryption failed
+   * as "not read-only" rather than as the permission error it really is.
+   * Found by the ladder on a second model. -on, -off and -lock are not
+   * here and stay behind a click.
+   *
+   * `sc query` and `netsh ... show` are deliberately absent. sc is in
+   * WRITE_MARKERS and is also PowerShell's alias for Set-Content, and
+   * netsh puts its verb third - `netsh advfirewall show` - which does not
+   * fit a first-argument rule and is not worth bending one for.
+   * Get-Service and Get-NetFirewallProfile answer both questions.
+   */
+  'manage-bde': ['-status', '/status'],
   // Interpreters and editors get nothing but their version and help flags:
   // every one of them can run arbitrary code given an argument.
   node: [],
@@ -516,9 +555,16 @@ export function isReadOnly(command: string): boolean {
       const onlyFlags = args.length === 0 || args.every((a) => VERSION_FLAGS.has(a))
       if (onlyFlags) continue
 
-      // Otherwise the first argument must be one of this tool's read commands.
-      const first = args.find((a) => !a.startsWith('-')) ?? args[0]
-      if (!reads.includes(first)) return false
+      /**
+       * The read verb is the first argument, flag or not.
+       *
+       * This took the first NON-flag argument, which is right for
+       * `git status` and wrong for `manage-bde -status C:` - there it
+       * tested "c:" and refused a plain status query. Both forms are
+       * accepted now: whichever of the two is a known read verb.
+       */
+      const firstWord = args.find((a) => !a.startsWith('-')) ?? args[0]
+      if (!reads.includes(args[0]) && !reads.includes(firstWord)) return false
       // A read subcommand must not then be handed a flag that writes.
       if (
         /(^|\s)(--global|--system|-w\b|--write|--set\b|--delete\b|--force\b|-f\b)/i.test(segment)
@@ -528,6 +574,18 @@ export function isReadOnly(command: string): boolean {
     }
   }
   return true
+}
+
+/** How bad, not merely whether. Only 'severe' interrupts accept-all. */
+export type RiskLevel = 'none' | 'reversible' | 'severe'
+
+export function riskLevel(command: string): RiskLevel {
+  for (const { pattern, reversible } of RISKY) {
+    if (pattern.test(command)) return reversible ? 'reversible' : 'severe'
+  }
+  // The checks below assessRisk's loop - protected places, secret files -
+  // are all severe by nature, so anything they catch counts as severe.
+  return assessRisk(command) ? 'severe' : 'none'
 }
 
 export function assessRisk(command: string): string | null {

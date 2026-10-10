@@ -89,6 +89,15 @@ export interface CommandVerdict {
   auto: boolean
   /** True when it only reads. */
   readOnly: boolean
+  /**
+   * How bad, not merely whether.
+   *
+   * 'reversible' is an uninstall: undone by installing it again, so
+   * accept-all runs it rather than interrupting. 'severe' is deleting
+   * files, disabling Defender, writing into Startup or reading a private
+   * key - no mode runs those unasked.
+   */
+  level: 'none' | 'reversible' | 'severe'
 }
 
 export interface ShellResult {

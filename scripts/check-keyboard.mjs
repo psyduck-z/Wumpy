@@ -198,14 +198,33 @@ check(
 check('and says so rather than going quiet', searchSrc.includes('searching automatically'), true)
 check('it cannot fire twice for one commit', /searched\.current/.test(searchSrc), true)
 
-// Risky commands are the deliberate exception: the verdict refuses auto for
-// them whatever the mode, so those buttons come back on purpose.
+/**
+ * Risky commands are the deliberate exception: the verdict refuses auto for
+ * them, so those buttons come back on purpose.
+ *
+ * Narrowed since. Accept-all stops only for the SEVERE ones now - deleting
+ * files, disabling Defender, writing into Startup, reading a private key.
+ * An uninstall is undone by installing the app again, and being stopped by
+ * a native dialog for one was accept-all failing to be accept-all, which
+ * is what the Spotify test ran into.
+ *
+ * Asserted on the rule rather than on one line of it, because the previous
+ * version matched an exact string and broke the moment the rule gained a
+ * second clause - which is a check guarding its own wording instead of the
+ * behaviour.
+ */
 const mainSrc = read('src/main/index.ts')
 check(
-  'risk still overrides accept-all',
-  mainSrc.includes("const risky = risk !== null && settings.get('confirmRisky')"),
+  'severity decides, not merely riskiness',
+  /const level = riskLevel\(command\)/.test(mainSrc),
   true
 )
+check(
+  'accept-all stops only for severe',
+  /mode === 'all' \? level === 'severe' : level !== 'none'/.test(mainSrc),
+  true
+)
+check('and the dialog follows the same verdict', /verdict\.auto \|\| !settings/.test(mainSrc), true)
 check('and auto requires not-risky', mainSrc.includes('const auto = allowed && !risky'), true)
 // A link to something on this machine is what an injected link would aim at.
 check(
