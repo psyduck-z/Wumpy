@@ -150,6 +150,20 @@ await build({
   logLevel: 'error'
 })
 const T = await import(pathToFileURL(promptOut).href)
+
+// The stripped variant, loaded the same way so the checks below measure the
+// real thing rather than a copy of its wording.
+const leanOut = join(process.cwd(), '.ask-lean.mjs')
+await build({
+  entryPoints: ['src/shared/lean.ts'],
+  bundle: true,
+  platform: 'node',
+  format: 'esm',
+  outfile: leanOut,
+  logLevel: 'error'
+})
+const LEAN = await import(pathToFileURL(leanOut).href)
+rmSync(leanOut, { force: true })
 rmSync(promptOut, { force: true })
 const prompt = [T.VOICE_PROMPT, T.ASK_PROMPT, T.OPEN_PROMPT].join(' ').replace(/\s+/g, ' ')
 /**
@@ -233,6 +247,46 @@ check(
   true
 )
 check('because guessed options are still guessing', /still guessing/.test(prompt), true)
+
+/* ------------------------------ the lean variant covers the contract ----- */
+
+/**
+ * The stripped prompt must still carry the app's contract, whatever it
+ * drops of the coaching.
+ *
+ * The full prompt is 9,483 tokens, almost all of it remediation aimed at
+ * one model, and at that size Groq rejects every request outright - its
+ * free tier caps a minute at 8,000. The lean variant is 1,507 and says each
+ * rule once. What it may NOT drop is anything the app itself depends on:
+ * the four block formats, the places a write is refused, and the fact that
+ * keys cannot be read. Dropping a piece of coaching is a measurement;
+ * dropping a piece of the contract is a bug.
+ *
+ * The reduced scopes were missing from the first draft, which would have
+ * broken /shell read and /shell off the moment it was used.
+ */
+{
+  const lean = LEAN.LEAN_PROMPT
+  for (const [what, needle] of [
+    ['a run block', '```wumpy-run'],
+    ['an ask block', '```wumpy-ask'],
+    ['a write block', '```wumpy-write'],
+    ['a search block', '```wumpy-search'],
+    ['the path: line', 'path:'],
+    ['the refused write folders', 'Startup, the Start Menu, Windows, Program Files'],
+    ['that keys cannot be read', 'cannot read their API keys'],
+    ['the app’s own slash commands', '/rename, /new, /resume, /compact'],
+    ['that only the first block runs', 'FIRST runnable block'],
+    ['that a question is not an instruction', 'A QUESTION IS NOT AN INSTRUCTION']
+  ]) {
+    check(`the lean prompt keeps ${what}`, lean.includes(needle), true)
+  }
+  check('and has a read-only scope', LEAN.LEAN_READ_ONLY.length > 80, true)
+  check('and a no-shell scope', LEAN.LEAN_NO_SHELL.length > 80, true)
+  // The whole point of it.
+  const leanTokens = Math.round(lean.length / 4)
+  check(`the lean prompt is ~${leanTokens} tokens, under Groq's 8000/min cap`, leanTokens < 3000, true)
+}
 
 /* ------------------------------ what the instructions cost ---------------- */
 

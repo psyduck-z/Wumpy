@@ -150,14 +150,30 @@ const TRUTH = await (async () => {
  * whether it reaches for a search when the answer is not on the machine.
  * systemPromptFor() in src/main/index.ts is the thing being mirrored.
  */
-const SYSTEM = [
-  T.VOICE_PROMPT,
-  T.APP_PROMPT,
-  T.SHELL_PROMPT,
-  T.SEARCH_PROMPT,
-  T.OPEN_PROMPT,
-  T.ASK_PROMPT
-].join(String.fromCharCode(10, 10))
+const LEAN = await bundled('src/shared/lean.ts', 'lean')
+
+/**
+ * WUMPY_LEAN=1 swaps in the stripped prompt.
+ *
+ * The full one is 9,483 tokens, almost all of it remediation aimed at one
+ * model - worked right/wrong pairs, rules restated three ways, accounts of
+ * what went wrong. It is also why Groq rejects every request outright: its
+ * free tier caps a minute at 8,000 tokens. The lean variant is 1,507 and
+ * says each rule once, for a model that does not need to be shown.
+ *
+ * Run the same 38 rungs both ways and the difference is what the
+ * scaffolding was buying.
+ */
+const SYSTEM = process.env.WUMPY_LEAN
+  ? LEAN.LEAN_PROMPT
+  : [
+      T.VOICE_PROMPT,
+      T.APP_PROMPT,
+      T.SHELL_PROMPT,
+      T.SEARCH_PROMPT,
+      T.OPEN_PROMPT,
+      T.ASK_PROMPT
+    ].join(String.fromCharCode(10, 10))
 
 const NL = String.fromCharCode(10)
 
@@ -1110,7 +1126,28 @@ const PREAMBLE = [
   }
 ]
 
-async function ask(provider, model, turns) {
+/**
+ * Waits out a rate limit rather than scoring it as a failure.
+ *
+ * Groq's free tier allows 8,000 tokens a minute, which a benchmark firing
+ * every 1.2 seconds exhausts in well under one. Half a ladder came back as
+ * "429" and that says nothing about the model - it is the harness measuring
+ * its own impatience. The provider says exactly how long to wait, in a
+ * header or in the message, so this waits that long and tries again.
+ */
+function retryAfterMs(res, body) {
+  const header = res.headers.get('retry-after') ?? res.headers.get('x-ratelimit-reset-tokens')
+  if (header) {
+    const seconds = /^[\d.]+$/.test(header) ? Number(header) : parseFloat(header)
+    if (Number.isFinite(seconds)) return Math.min(90_000, seconds * 1000 + 500)
+  }
+  // "Please try again in 7.2s" is how Groq phrases it when there is no header.
+  const said = /try again in ([\d.]+)s/i.exec(JSON.stringify(body ?? ''))
+  if (said) return Math.min(90_000, Number(said[1]) * 1000 + 500)
+  return 20_000
+}
+
+async function ask(provider, model, turns, attempt = 0) {
   const p = PROVIDERS[provider]
   const res = await fetch(`${p.base}/chat/completions`, {
     method: 'POST',
@@ -1122,7 +1159,13 @@ async function ask(provider, model, turns) {
       max_tokens: 700
     })
   })
-  const body = await res.json()
+  const body = await res.json().catch(() => null)
+  if (res.status === 429 && attempt < 4) {
+    const wait = retryAfterMs(res, body)
+    process.stdout.write(`    (rate limited, waiting ${Math.round(wait / 1000)}s)${NL}`)
+    await new Promise((r) => setTimeout(r, wait))
+    return ask(provider, model, turns, attempt + 1)
+  }
   if (!res.ok) return { error: `${res.status} ${JSON.stringify(body).slice(0, 110)}` }
   return { text: (body.choices?.[0]?.message?.content ?? '').trim() }
 }

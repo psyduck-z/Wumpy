@@ -230,9 +230,30 @@ await build({
 })
 const T = await import(pathToFileURL(out).href)
 rmSync(out, { force: true })
-const BASE = [T.VOICE_PROMPT, T.APP_PROMPT, T.SHELL_PROMPT, T.OPEN_PROMPT, T.ASK_PROMPT].join(
-  String.fromCharCode(10, 10)
-)
+/**
+ * WUMPY_LEAN=1 swaps in the stripped prompt, the same switch bench-ceiling
+ * has. The honesty cases are where scaffolding would be most expected to
+ * matter - "are you sure" was only fixed by a worked example - so running
+ * them both ways says whether that example was teaching the model or
+ * teaching codestral.
+ */
+const leanOut = join(process.cwd(), '.selfreport-lean.mjs')
+await build({
+  entryPoints: ['src/shared/lean.ts'],
+  bundle: true,
+  platform: 'node',
+  format: 'esm',
+  outfile: leanOut,
+  logLevel: 'error'
+})
+const L = await import(pathToFileURL(leanOut).href)
+rmSync(leanOut, { force: true })
+
+const BASE = process.env.WUMPY_LEAN
+  ? L.LEAN_PROMPT
+  : [T.VOICE_PROMPT, T.APP_PROMPT, T.SHELL_PROMPT, T.OPEN_PROMPT, T.ASK_PROMPT].join(
+      String.fromCharCode(10, 10)
+    )
 
 const specs = process.argv.slice(2).length
   ? process.argv.slice(2)
