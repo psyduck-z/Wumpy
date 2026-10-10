@@ -36,6 +36,9 @@ function ContextMeter({
   usage: ContextUsage
   onCompact(): void
 }): React.JSX.Element {
+  // The tooltip said "counted by Ollama" until Ollama was removed from the
+  // app entirely, naming a backend that is no longer there. Whichever
+  // provider is configured reports these counts now.
   const pct = Math.min(100, (usage.used / usage.limit) * 100)
   const level = pct >= 90 ? 'is-critical' : pct >= 65 ? 'is-warn' : ''
 
@@ -46,7 +49,7 @@ function ContextMeter({
       onClick={onCompact}
       title={
         `Context: ${usage.used.toLocaleString()} of ${usage.limit.toLocaleString()} tokens ` +
-        `(${pct.toFixed(0)}%)${usage.estimated ? ', estimated' : ', counted by Ollama'}\n` +
+        `(${pct.toFixed(0)}%)${usage.estimated ? ', estimated' : ', counted by the provider'}\n` +
         'Click to compact older turns.'
       }
     >

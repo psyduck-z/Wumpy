@@ -38,6 +38,7 @@ const T = await import(pathToFileURL(out).href)
 rmSync(out, { force: true })
 
 const PROMPT = T.SHELL_PROMPT
+const VOICE = T.VOICE_PROMPT
 
 function run(command) {
   return new Promise((resolve) => {
@@ -204,6 +205,109 @@ for (const name of FOLDER_CALLS) {
     wrapped.stdout || wrapped.stderr.slice(0, 40)
   )
   check('and the prompt shows the parentheses', /WRAP IT IN PARENTHESES/.test(PROMPT))
+}
+
+/* --------------------------------------- the arithmetic the prompt shows */
+
+/**
+ * The uptime line, pulled out of the prompt and run.
+ *
+ * Added because the model returned LastBootUpTime and then subtracted dates
+ * in its head - answering 16, then 23, when the truth was 25.7. The prompt
+ * now shows the command that does it exactly, so the command had better do
+ * it exactly.
+ */
+{
+  const line = VOICE.split(NL).find((l) => /TotalHours/.test(l))
+  check('the prompt shows an uptime command', Boolean(line), (line ?? '').trim().slice(0, 48))
+  if (line) {
+    const r = await run(line.trim())
+    const hours = Number(r.stdout)
+    check(
+      'and it returns a plausible number of hours',
+      r.code === 0 && Number.isFinite(hours) && hours >= 0 && hours < 100000,
+      r.stdout || r.stderr.split(NL)[0]?.slice(0, 40)
+    )
+  }
+}
+
+/**
+ * And the bounded listing, which is the shape the no-unbounded-list rule
+ * tells it to use. An instruction to write a command that does not run is
+ * worse than no instruction.
+ */
+{
+  const line = PROMPT.split(NL).find((l) => /Select-Object -First 20/.test(l))
+  check('the prompt shows a bounded listing', Boolean(line), (line ?? '').trim().slice(0, 48))
+  if (line) {
+    // The rule is written across two lines, so the continuation is rejoined.
+    const lines = PROMPT.split(NL)
+    const at = lines.findIndex((l) => /Select-Object -First 20/.test(l))
+    const command = `${lines[at - 1].trim()} ${lines[at].trim()}`.replace(
+      '<folder>',
+      '"$env:USERPROFILE\Downloads"'
+    )
+    const r = await run(`${command} | Measure-Object | Select-Object -ExpandProperty Count`)
+    const n = Number(r.stdout)
+    check(
+      'and it runs and returns at most 20 rows',
+      r.code === 0 && Number.isFinite(n) && n <= 20,
+      r.stdout || r.stderr.split(NL)[0]?.slice(0, 44)
+    )
+  }
+}
+
+/* ------------------------- a command that must not be run to be checked -- */
+
+/**
+ * The login-persistence command, parsed rather than executed.
+ *
+ * Every other command in this file is run, because an instruction to use
+ * something that does not work is worse than no instruction. This one
+ * cannot be: running it would register a scheduled task on the user's
+ * machine, and the whole rule here is that capability testing changes
+ * nothing. PowerShell will tell us whether it is valid without doing it.
+ */
+{
+  // WRITE_PROMPT is composed into SHELL_PROMPT, so this is the real thing
+  // the model is sent rather than the constant read separately.
+  const WRITE = PROMPT
+  check(
+    'the write prompt names the refused folders',
+    /REFUSES a write into the Startup folder/.test(WRITE),
+    true
+  )
+  check(
+    'and says persistence is a command, not a write',
+    /Login persistence is a COMMAND, not a write/.test(WRITE),
+    true
+  )
+
+  const line = WRITE.split(NL).find((l) => /Register-ScheduledTask/.test(l))
+  check('and shows one that works', Boolean(line), (line ?? '').trim().slice(0, 44))
+  if (line) {
+    // Parsed, never invoked. $null catches the parser's error list.
+    const probe = [
+      '$errors = $null',
+      '$null = [System.Management.Automation.Language.Parser]::ParseInput(',
+      // <name> is a placeholder in the prompt, which is right there and
+      // unparseable here, so it is filled in before the parser sees it.
+      `  ${JSON.stringify(line.trim().replace('<name>', 'OpenNotepadAtLogon'))}, [ref]$null, [ref]$errors)`,
+      'if ($errors.Count -eq 0) { "parses" } else { "ERRORS: " + $errors[0].Message }'
+    ].join(NL)
+    const r = await run(probe)
+    check('and it is valid PowerShell', r.stdout.trim() === 'parses', r.stdout.slice(0, 52))
+  }
+
+  // And the cmdlets it names really exist on this machine, which is a read.
+  const r = await run(
+    'foreach ($n in "Register-ScheduledTask","New-ScheduledTaskTrigger","New-ScheduledTaskAction") { if (Get-Command $n -ErrorAction SilentlyContinue) { "ok" } else { "MISSING $n" } }'
+  )
+  check(
+    'and the cmdlets it names exist here',
+    r.stdout.trim().split(NL).every((l) => l.trim() === 'ok'),
+    r.stdout.trim().replace(/\s+/g, ' ').slice(0, 40)
+  )
 }
 
 /* ------------------------------------------- find-and-change in one breath */

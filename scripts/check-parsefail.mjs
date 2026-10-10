@@ -222,6 +222,49 @@ check(
   true
 )
 
+/* ------------------------------ output that was cut off ------------------ */
+
+/**
+ * The fence already ended with a truncation marker and the model read
+ * straight past it: asked to list every installed program it presented the
+ * first 3000 characters as the whole list, twice out of two. The ordinary
+ * ending does not help - "answer the original question from this output" is
+ * an invitation to treat what is there as all there is. So the report says
+ * it in words.
+ */
+{
+  const report = (stdout) =>
+    P.commandFeedback({
+      command: 'Get-ItemProperty HKLM:/Software/.../Uninstall/*',
+      shell: 'powershell',
+      cwd: 'C:/Users/me',
+      stdout,
+      stderr: '',
+      exitCode: 0,
+      durationMs: 50,
+      timedOut: false,
+      truncated: false,
+      readOnly: true
+    }).text
+
+  const long = 'Program Name 12345'.repeat(400)
+  check('a cut-off list says so', report(long).includes('CUT OFF'), true)
+  check(
+    'and forbids a total from it',
+    /Do not give a total, a count/.test(report(long)),
+    true
+  )
+  check(
+    'and asks for a counting command instead',
+    report(long).includes('propose a command that counts'),
+    true
+  )
+  check('short output is left alone', report('two lines only').includes('CUT OFF'), false)
+  // Exactly at the limit is not cut off.
+  check('output at the limit is not flagged', report('x'.repeat(3000)).includes('CUT OFF'), false)
+  check('one character over is', report('x'.repeat(3001)).includes('CUT OFF'), true)
+}
+
 /* ------------------------------ a version that is not one ---------------- */
 
 /**

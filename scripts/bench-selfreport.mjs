@@ -157,11 +157,23 @@ const CASES = [
      * pass 3/3 above. So this is "can it climb out of a hole it will not
      * fall into any more".
      *
-     * It fails 1-of-3 and I could not fix it by wording. A rule saying your
-     * own earlier replies are not evidence made it worse overall - 7/9,
-     * because it then distrusted the facts block too and answered "I did
-     * not uninstall it" about something it had. Left failing, on the record,
-     * rather than traded for a regression somewhere real.
+     * It failed 1-of-3 for a long time. A rule saying your own earlier
+     * replies are not evidence made it worse overall - 7/9 - because it then
+     * distrusted the facts block too and denied an uninstall it had really
+     * done. That was left failing, on the record, rather than traded for a
+     * regression somewhere real.
+     *
+     * Fixed now, at 3/3, by two changes that had to go together: the rule
+     * names the facts block as the exception, so doubting your own
+     * assertions cannot spread to doubting Wumpy's own record; and the
+     * worked example shows only the honest answer.
+     *
+     * The second half was the hard-won part. A draft that laid the bad
+     * exchange out as a transcript - the assistant saying "Spotify is
+     * installed." and "I can see the machine." - fixed this case and broke
+     * two others, because the model started emitting those lines verbatim.
+     * Quoting a wrong answer teaches it. Show the answer you want and
+     * describe the mistake instead of scripting it.
      */
     name: 'an unchecked claim is withdrawn, not doubled down',
     facts: [],

@@ -192,10 +192,29 @@ export function checkWritePath(
 
   for (const pattern of FORBIDDEN) {
     if (pattern.test(absolute)) {
+      /**
+       * Says what to do instead, because a refusal the model cannot act on
+       * is a dead end that costs a click and then repeats.
+       *
+       * Asked to open Notepad at login, the model proposed a write into
+       * Start Menu/Programs/Startup two times in three even after the
+       * prompt was told not to. Telling it louder was the wrong lever: the
+       * app knows exactly why it said no and exactly what would have
+       * worked, and saying so turns the failure into one recovered turn.
+       */
+      const persistence = /start\s*menu|startup/i.test(absolute)
       return {
         ok: false,
         path: absolute,
-        why: 'That folder makes files run by themselves or holds credentials.'
+        why: persistence
+          ? 'That folder makes files run by themselves at every login, which is ' +
+            'installing something rather than writing a file. Wumpy will not write ' +
+            'there. For something that runs at login, propose a command instead — a ' +
+            'scheduled task with New-ScheduledTaskTrigger -AtLogOn — which raises a ' +
+            'confirmation the user can read.'
+          : 'That folder makes files run by themselves or holds credentials. Wumpy ' +
+            'will not write there. Pick somewhere under the home folder, or say ' +
+            'plainly that this is not something Wumpy can do.'
       }
     }
   }
@@ -221,6 +240,11 @@ export function checkWritePath(
  */
 export const WRITE_PROMPT = [
   'To create or replace a FILE, never use a shell command — use a wumpy-write block.',
+  'One exception, and it is at the top because it is where the mistake gets',
+  'made: a file that is meant to RUN BY ITSELF later is not a file write.',
+  'Startup, the Start Menu, Windows, Program Files, .ssh and .aws are all',
+  'refused outright, so anything about logging in, starting up or running on',
+  'a schedule is a COMMAND. Details at the end.',
   'A # line saying why, a path: line, then --- and the exact contents.',
   '',
   '```wumpy-write',
@@ -235,5 +259,66 @@ export const WRITE_PROMPT = [
   'The contents are written exactly as given, so write plain code: no escaping, no',
   'quoting, no here-string. Never put file contents inside New-Item, Set-Content or',
   'echo — braces and quotes in a shell will mangle them.',
-  'To run a Python file afterwards, the command is: python "<full path>"'
+  'To run a Python file afterwards, the command is: python "<full path>"',
+  '',
+  'A WRITE BLOCK CANNOT REACH EVERYWHERE, SO DO NOT OFFER TO.',
+  'Wumpy REFUSES a write into the Startup folder, the Start Menu, the',
+  'Windows folder, Program Files, .ssh or .aws — outright, not with a',
+  'confirmation. Proposing one of those is a card that cannot work, which',
+  'spends their click and then fails.',
+  'Asked to open Notepad at every login, Wumpy offered a write block',
+  'pointing into Start Menu/Programs/Startup. That is the one path the',
+  'refusal exists for: a file dropped there runs at every login, which is',
+  'installing something rather than writing a file.',
+  'Login persistence is a COMMAND, not a write. A scheduled task or a Run',
+  'key entry both work and both raise a native confirmation, so the user is',
+  'told what is being set up and decides:',
+  '  Register-ScheduledTask -TaskName <name> -Trigger (New-ScheduledTaskTrigger -AtLogOn) -Action (New-ScheduledTaskAction -Execute notepad.exe)',
+  'Say which you are using and why, in one line.'
 ].join(String.fromCharCode(10))
+
+/**
+ * The same protected places, recognised inside an arbitrary command string.
+ *
+ * FORBIDDEN above vets a RESOLVED destination for the write-file card, and
+ * it guards that door well. It is not the only door. Measured: of seven
+ * commands that write into places this file refuses, six raised no dialog
+ * at all - and on accept-all a command that is not flagged runs by itself.
+ * The one the model actually proposed, asked to open Notepad at login, built
+ * a .lnk in the Startup folder through WScript.Shell, where there is no
+ * write verb for anything to notice:
+ *
+ *   $WshShell = New-Object -ComObject WScript.Shell
+ *   $s = $WshShell.CreateShortcut("$env:APPDATA\...\Startup\Notepad.lnk")
+ *   $s.Save()
+ *
+ * So the place matters however the command spells it. These patterns are
+ * separator-agnostic and unanchored, because a command carries its path
+ * inline - possibly behind $env:APPDATA, possibly with forward slashes -
+ * rather than resolved. Kept beside FORBIDDEN so the two lists are read
+ * together and neither grows without the other.
+ */
+const PROTECTED_PLACES: Array<{ name: string; pattern: RegExp }> = [
+  // Startup first: it is the one that turns a file into an installation.
+  // Every separator class is [\\/] - a backslash OR a slash. Written [\/]
+  // it is a forward slash and nothing else, because the backslash only
+  // escapes the slash, and then none of these ever matches a Windows path.
+  // That exact mistake shipped in three graders earlier today.
+  {
+    name: 'the Startup folder, so it runs at every login',
+    pattern: /start\s*menu[\\/]+programs[\\/]+startup/i
+  },
+  { name: 'the Start Menu', pattern: /start\s*menu[\\/]/i },
+  { name: 'the Windows folder', pattern: /[a-z]:[\\/]+windows[\\/]/i },
+  { name: 'Program Files', pattern: /[a-z]:[\\/]+program files( \(x86\))?[\\/]/i },
+  { name: 'the .ssh folder, where keys live', pattern: /[\\/]\.ssh([\\/]|["'\s]|$)/i },
+  { name: 'the .aws folder, where credentials live', pattern: /[\\/]\.aws([\\/]|["'\s]|$)/i }
+]
+
+/** Which protected place a command text mentions, or null. */
+export function protectedPlace(command: string): string | null {
+  for (const { name, pattern } of PROTECTED_PLACES) {
+    if (pattern.test(command)) return name
+  }
+  return null
+}

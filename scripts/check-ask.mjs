@@ -234,6 +234,95 @@ check(
 )
 check('because guessed options are still guessing', /still guessing/.test(prompt), true)
 
+/* ------------------------------ what the instructions cost ---------------- */
+
+/**
+ * The instructions must not eat the conversation.
+ *
+ * Everything Wumpy sends before the first word the user types is part of the
+ * context, and compaction fires at 65% of the window - so a large preamble
+ * does not just cost tokens, it shortens how much conversation fits before
+ * older turns start being summarised away. The preamble grew from roughly
+ * 3,400 tokens to 9,400 over one session of adding measured rules, which cut
+ * conversation headroom from about 17,900 tokens to about 11,900.
+ *
+ * Every one of those rules was earned by a failing measurement, so this is
+ * not a ban on growth. It is a ceiling that makes the next addition a
+ * decision rather than a surprise: a third of the window is the most the
+ * instructions may take, and tripping this means trimming something or
+ * raising it on purpose.
+ *
+ * Four characters per token is the rough rate for English prose with code
+ * fragments in it. Exactness is not the point; the trend is.
+ */
+{
+  const sections = [
+    T.VOICE_PROMPT,
+    T.APP_PROMPT,
+    T.SHELL_PROMPT,
+    T.SEARCH_PROMPT,
+    T.OPEN_PROMPT,
+    T.ASK_PROMPT
+  ]
+  const tokens = Math.round(sections.join(' ').length / 4)
+  const share = tokens / T.CONTEXT_TOKENS
+  check(
+    `the preamble is ~${tokens} tokens, ${(share * 100).toFixed(0)}% of the window`,
+    share <= 0.35,
+    true
+  )
+  // And the optional half really is optional, since /browser off is the
+  // lever a user has if they want the room back.
+  const withoutBrowser = Math.round(
+    sections.filter((x) => x !== T.OPEN_PROMPT).join(' ').length / 4
+  )
+  check(
+    `/browser off saves ~${tokens - withoutBrowser} tokens`,
+    tokens - withoutBrowser > 1000,
+    true
+  )
+}
+
+/* ------------------------------ wrong answers are not scripted ----------- */
+
+/**
+ * The prompt must never spell out a wrong answer as a line of dialogue.
+ *
+ * A worked example for "are you sure" laid the bad exchange out as a
+ * transcript, with the assistant saying "Spotify is installed." and "I can
+ * see the machine." It fixed that case and broke two others: the model
+ * started emitting both lines verbatim, because an example reads as output
+ * whichever half of it you meant. Quoting a wrong answer teaches it.
+ *
+ * Checked against the prompt the app really sends, line by line, because
+ * the danger is a short standalone line that looks like a reply - not a
+ * mention inside a sentence, which is how the lesson itself is recorded.
+ */
+{
+  const FORBIDDEN_LINES = [
+    'Spotify is installed.',
+    'I can see the machine.',
+    'I can see your machine.',
+    'Yes.',
+    'Docker is not installed.'
+  ]
+  const everything = [T.VOICE_PROMPT, T.SHELL_PROMPT, T.OPEN_PROMPT, T.ASK_PROMPT].join(
+    String.fromCharCode(10)
+  )
+  const lines = everything.split(String.fromCharCode(10)).map((l) => l.trim())
+  for (const bad of FORBIDDEN_LINES) {
+    // A line that IS the wrong answer, with or without an example indent.
+    const scripted = lines.some((l) => l === bad || l === `  ${bad}`)
+    check(`does not script "${bad}"`, scripted, false)
+  }
+  // And the lesson is written down where the next person will look.
+  check(
+    'and says why, so it is not re-added',
+    /describe the mistake, do not script it/i.test(everything),
+    true
+  )
+}
+
 /**
  * Running an uninstaller was classified "not risky", so the native
  * confirmation never fired for it. That had to be true before the prompt

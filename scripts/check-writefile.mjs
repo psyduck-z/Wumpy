@@ -189,6 +189,38 @@ check('the size ceiling is enforced', /MAX_BYTES/.test(main), true)
 // A file written as UTF-16 or with a BOM is not what a Python interpreter wants.
 check('written as plain utf-8', /'utf8'/.test(main), true)
 
+/* ------------------------------ a refusal that can be acted on ----------- */
+
+/**
+ * The Startup refusal used to say only "That folder makes files run by
+ * themselves or holds credentials" - true, and no help to anyone. Asked to
+ * open Notepad at login, the model proposed a write into
+ * Start Menu/Programs/Startup two times in three even after the prompt was
+ * told not to, so the refusal is the message that actually gets read. It
+ * now names the thing that would have worked.
+ */
+{
+  // The same env the checks above use, so the two agree about home.
+  const home = env.home
+  const startup = `${home}/AppData/Roaming/Microsoft/Windows/Start Menu/Programs/Startup/x.bat`
+  const refusal = where(startup)
+  check('a Startup write is refused', refusal.ok, false)
+  check(
+    'and the reason says it runs at login',
+    /run by themselves at every login/.test(refusal.why),
+    true
+  )
+  check('and names what would have worked', /scheduled task/i.test(refusal.why), true)
+
+  // A different protected folder gets the general message, not the
+  // login-specific one, because telling someone about scheduled tasks when
+  // they tried to write into .ssh would be nonsense.
+  const ssh = where(`${home}/.ssh/id_rsa`)
+  check('an .ssh write is refused too', ssh.ok, false)
+  check('with its own reason', /scheduled task/i.test(ssh.why), false)
+  check('that still says where to go instead', /home folder/i.test(ssh.why), true)
+}
+
 const prompt = W.WRITE_PROMPT
 check(
   'the model is told not to use a shell for this',

@@ -354,7 +354,35 @@ const MUST_CONFIRM = [
    */
   'Get-ChildItem -Recurse -File',
   'Get-ChildItem -Recurse -File | Sort-Object Length -Descending',
-  'Get-ChildItem . -Recurse'
+  'Get-ChildItem . -Recurse',
+  /**
+   * The write-file card refuses Startup, the Start Menu, the Windows folder,
+   * Program Files, .ssh and .aws. A shell command reached all of them
+   * untouched - six of seven raised no dialog, so on accept-all they ran by
+   * themselves. Asked to open Notepad at login the model built a .lnk in
+   * Startup through WScript.Shell, a write with no write verb in it for
+   * anything to notice. Both doors are guarded from one list now.
+   */
+  'New-Object -ComObject WScript.Shell; $s.CreateShortcut("$env:APPDATA/Microsoft/Windows/Start Menu/Programs/Startup/x.lnk"); $s.Save()',
+  'Copy-Item x.lnk -Destination "$env:APPDATA/Microsoft/Windows/Start Menu/Programs/Startup"',
+  'New-Item -ItemType File "C:/Program Files/x.exe"',
+  'Copy-Item id_rsa -Destination $env:USERPROFILE/.ssh/',
+  /**
+   * And the reads that must still ask, because reading is how a secret
+   * leaves. Get-Content on a private key is read-only by every other test
+   * here, so it raised no dialog - and an unflagged read runs unattended on
+   * the auto mode, which exists for exactly that. Its output then goes into
+   * the report sent to the model, which is a cloud provider. Wumpy encrypts
+   * its own keys and never hands one back; none of that is worth much while
+   * every other secret on the disk can be read out automatically.
+   */
+  'Get-Content $env:USERPROFILE/.ssh/id_rsa',
+  'Get-Content $env:USERPROFILE/.aws/credentials',
+  'Get-Content D:/Dev/Github/Wumpy/.env',
+  'Get-Content $env:APPDATA/wumpy/keys.bin',
+  'Get-Content cert.pem',
+  'cat $env:USERPROFILE/.netrc',
+  'Get-Content $env:USERPROFILE/.git-credentials'
 ]
 
 for (const c of MUST_CONFIRM) {
@@ -376,6 +404,13 @@ for (const c of MUST_CONFIRM) {
  * every command the gate calls a read must also be judged harmless. This
  * caught nothing when written, which is the point - it is what makes the
  * next widening of the list safe to attempt.
+ *
+ * Two deliberate exceptions have been added since, and both are named here
+ * so the rule stays honest rather than quietly true: a recursive scan of a
+ * drive root, which costs minutes, and a read of a file that holds a
+ * secret, which would hand it to a cloud provider unattended. Neither
+ * appears in the list below, and the cases proving each is correctly scoped
+ * sit next to this.
  */
 for (const c of MUST_ALLOW) {
   const why = assessRisk(c)
@@ -402,7 +437,15 @@ const BOUNDED_READS = [
   // A -Recurse that says where to start is ordinary work and stays
   // unattended, however deep it goes.
   'Get-ChildItem ~ -Recurse -File | Measure-Object',
-  'Get-ChildItem $env:USERPROFILE/Downloads -Recurse -Filter *.png'
+  'Get-ChildItem $env:USERPROFILE/Downloads -Recurse -Filter *.png',
+  // Reading an ordinary file is not reading a secret. environment.txt is
+  // the negative case for the .env pattern, which must not match it.
+  'Get-Content $env:USERPROFILE/Downloads/notes.txt',
+  'Get-Content package.json',
+  'Get-Content environment.txt',
+  // Looking INTO a protected place is as quiet as looking anywhere.
+  'Get-ChildItem C:/Windows/System32 -File',
+  'Get-ChildItem $env:APPDATA/Microsoft/Windows/Start Menu'
 ]
 
 /**

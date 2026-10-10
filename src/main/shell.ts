@@ -2,6 +2,7 @@ import { spawn } from 'node:child_process'
 import { homedir } from 'node:os'
 import { existsSync } from 'node:fs'
 import type { ShellKind, ShellResult } from '@shared/types'
+import { protectedPlace } from '@shared/writefile'
 
 /**
  * Hard ceiling on a single command, in ms.
@@ -522,8 +523,72 @@ export function assessRisk(command: string): string | null {
   for (const { pattern, why } of RISKY) {
     if (pattern.test(command)) return why
   }
+
+  /**
+   * The places the write-file card refuses, guarded on the shell door too.
+   *
+   * writefile vets a resolved destination and will not write into Startup,
+   * the Start Menu, the Windows folder, Program Files, .ssh or .aws. A shell
+   * command reached all of them untouched: six of seven such commands raised
+   * no dialog, and on accept-all that means they ran by themselves. Asked to
+   * open Notepad at login, the model built a .lnk in Startup through
+   * WScript.Shell - a write with no write verb in it anywhere.
+   *
+   * Only when the command is not a read, so looking inside C:/Windows stays
+   * as quiet as looking anywhere else.
+   */
+  const place = protectedPlace(command)
+  if (place && !isReadOnly(command)) return `writes into ${place}`
+
+  /**
+   * A read that must still ask, because reading is how a secret leaves.
+   *
+   * `Get-Content ~/.ssh/id_rsa` is read-only by every test in this file, so
+   * it raised no dialog - and a read that raises no dialog runs unattended
+   * on BOTH automatic modes, the `auto` one existing precisely to run reads
+   * without a click. Its output then goes into the report that is sent to
+   * the model, which is a cloud provider. So an unattended read of a
+   * private key hands that key to a third party with nobody present.
+   *
+   * Wumpy takes care that its own keys never leave: they are encrypted with
+   * DPAPI, no handler returns one, and the word never appears in preload.
+   * None of that is worth much while any other secret on the disk can be
+   * read out automatically, so these ask first.
+   */
+  const secret = SECRET_FILES.find(({ pattern }) => pattern.test(command))
+  if (secret) return secret.why
+
   return null
 }
+
+/**
+ * Files whose contents are a secret, whether the command reads or writes.
+ *
+ * Matched on the command text rather than a resolved path, because that is
+ * all there is at this point - `$env:USERPROFILE\.ssh\id_rsa` never becomes
+ * a real path until PowerShell expands it.
+ *
+ * Every separator class here is [\\/]: a backslash OR a slash. Written
+ * [\/] it matches a forward slash only and nothing on Windows ever hits it.
+ */
+const SECRET_FILES: Array<{ pattern: RegExp; why: string }> = [
+  { pattern: /[\\/]\.ssh[\\/]/i, why: 'reads from .ssh, where private keys live' },
+  { pattern: /[\\/]\.aws[\\/]/i, why: 'reads from .aws, where credentials live' },
+  {
+    pattern: /(^|[\\/\s"'])\.env(\.[a-z]+)?([\s"']|$)/i,
+    why: 'reads a .env file, which holds keys'
+  },
+  { pattern: /keys\.bin/i, why: 'reads Wumpy’s own encrypted key store' },
+  {
+    pattern: /\.(pem|ppk|p12|pfx|jks|keystore)([\s"']|$)/i,
+    why: 'reads a certificate or private key file'
+  },
+  { pattern: /[\\/]id_(rsa|ed25519|ecdsa|dsa)([\s"']|$)/i, why: 'reads an SSH private key' },
+  {
+    pattern: /[\\/]\.?(netrc|npmrc|pypirc|git-credentials|docker[\\/]config\.json)([\s"']|$)/i,
+    why: 'reads a file that stores login tokens'
+  }
+]
 
 /** Argv for each supported shell. */
 function launcher(kind: ShellKind, command: string): { file: string; args: string[] } {

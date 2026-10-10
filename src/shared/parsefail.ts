@@ -199,9 +199,19 @@ export type CommandFeedback = { kind: 'notice'; text: string } | { kind: 'report
  * measuring a conversation the app never has. The same reason titleBrief
  * lives in shared: a copy drifts, an import cannot.
  */
+/** Everything a command printed, as one trimmed string. */
+function printed(result: Pick<ShellResult, 'stdout' | 'stderr'>): string {
+  return [result.stdout, result.stderr].filter(Boolean).join(String.fromCharCode(10)).trim()
+}
+
+/** Whether the model is being shown less than the command printed. */
+export function wasClipped(result: Pick<ShellResult, 'stdout' | 'stderr'>): boolean {
+  return printed(result).length > MAX_REPORT_OUTPUT
+}
+
 /** Everything a command printed, trimmed and clipped to what is shown. */
 export function clippedOutput(result: Pick<ShellResult, 'stdout' | 'stderr'>): string {
-  const body = [result.stdout, result.stderr].filter(Boolean).join(String.fromCharCode(10)).trim()
+  const body = printed(result)
   return body.length > MAX_REPORT_OUTPUT
     ? `${body.slice(0, MAX_REPORT_OUTPUT)}${String.fromCharCode(10)}…truncated…`
     : body
@@ -253,7 +263,31 @@ export function commandFeedback(result: ShellResult): CommandFeedback {
    * prompt already forbade that; one run in two did it anyway, so the report
    * says it at the moment the figure is actually on screen.
    */
-  const notes = /(^|[^\d.])0\.0\.0\.0([^\d.]|$)/.test(clipped)
+  /**
+   * Output that was cut off, said in words rather than left as a marker.
+   *
+   * The report already ends the fence with a truncation marker, and the
+   * model read straight past it: asked to list every installed program it
+   * presented the first 3000 characters as the whole list, twice out of two.
+   * The ordinary ending does not help - "answer the original question from
+   * this output" is an invitation to treat what is there as all there is.
+   */
+  // Compared against the limit, not against the clipped string. Comparing
+  // lengths looked right and was wrong: the truncation marker makes the
+  // clipped text LONGER than a body that only just overflowed, so 3001
+  // characters of output were never flagged. A check caught it.
+  const clippedNote = wasClipped(result)
+    ? [
+        '',
+        'NOTE: that output was CUT OFF — you are seeing the first part of it,',
+        'not all of it. Do not give a total, a count, or say "all" or "these',
+        'are the" from it. Say it is the first part, and if they need the',
+        'whole thing propose a command that counts or filters instead of',
+        'one that lists.'
+      ]
+    : []
+
+  const versionNote = /(^|[^\d.])0\.0\.0\.0([^\d.]|$)/.test(clipped)
     ? [
         '',
         'NOTE: 0.0.0.0 in that output is not a version. It is what Windows',
@@ -261,6 +295,7 @@ export function commandFeedback(result: ShellResult): CommandFeedback {
         'a version — ask the tool itself, with its own --version flag.'
       ]
     : []
+  const notes = [...clippedNote, ...versionNote]
 
   return {
     kind: 'report',
