@@ -464,3 +464,9 @@ bench-results.json
 /.v-t.mjs
 /.usage-check-*.mjs
 /.bc-*.mjs
+
+# esbuild scratch bundles, written at the repo root by the check and bench
+# scripts so a relative import resolves. They are deleted on success and
+# left behind on a crash, and one was committed that way.
+/.*.mjs
+/.*.cjs
