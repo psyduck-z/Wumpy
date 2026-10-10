@@ -214,6 +214,17 @@ const READ_ONLY = new Set([
   // want of this one name. It transforms what it is handed and changes
   // nothing itself - what matters is the script block it is given, and the
   // sweep below now looks inside those.
+  /**
+   * The two New- cmdlets that create a value rather than a thing.
+   *
+   * New-TimeSpan is how date arithmetic is written, and the gate refused
+   * the correct answer to "how many hours has my machine been up" because
+   * every new- prefix was treated as a write. New-Object is NOT here and
+   * must not be: it builds COM objects, and a WScript.Shell is how a model
+   * wrote a .lnk into the Startup folder.
+   */
+  'new-timespan',
+  'new-guid',
   'foreach-object',
   'format-table',
   'format-list',
@@ -338,7 +349,7 @@ const DANGEROUS_FIND_FLAGS = /(^|\s)-(exec|execdir|delete|ok|okdir|fls|fprint|fp
 
 /** Anything here means the command writes somewhere, whatever its head says. */
 const WRITE_MARKERS =
-  /(^|\s)(>|>>|\||&&|;)\s*(set-|new-|remove-|clear-|stop-|start-|restart-|rename-|move-|copy-|out-file|tee-object)|(^|\s)(set-|new-|remove-|clear-|rename-|move-|copy-|stop-|start-|restart-)[a-z]+|(^|\s)(rm|del|rmdir|rd|mkdir|md|move|copy|xcopy|robocopy|format|diskpart|reg|sc|net|shutdown|taskkill|icacls|takeown|attrib|ri|mi|rni|clc|si|sp|spps|spsv|kill|erase)(\s|$)|>\s*\S/i
+  /(^|\s)(>|>>|\||&&|;)\s*(set-|new-(?!timespan|guid)|remove-|clear-|stop-|start-|restart-|rename-|move-|copy-|out-file|tee-object)|(^|\s)(set-|new-(?!timespan|guid)|remove-|clear-|rename-|move-|copy-|stop-|start-|restart-)[a-z]+|(^|\s)(rm|del|rmdir|rd|mkdir|md|move|copy|xcopy|robocopy|format|diskpart|reg|sc|net|shutdown|taskkill|icacls|takeown|attrib|ri|mi|rni|clc|si|sp|spps|spsv|kill|erase)(\s|$)|>\s*\S/i
 
 /**
  * Classifies a command as read-only or not.

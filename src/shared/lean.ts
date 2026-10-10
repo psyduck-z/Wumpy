@@ -208,6 +208,28 @@ export const LEAN_NO_SHELL = [
   'Everything else is an ordinary question. Answer it.'
 ].join(LF)
 
+/**
+ * A NEGATIVE RESULT, kept because it cost 239 tokens and bought nothing.
+ *
+ * On the bare lean prompt gpt-oss-120b cleared 31 of 38 rungs. Seven
+ * single-line rules were added aimed at exactly the seven it missed - "why
+ * is X" presupposes X, decide the sentence before choosing the command, a
+ * command that did not run has told you nothing, and so on. One line each,
+ * no worked examples, because the question was how little scaffolding a
+ * competent model needs.
+ *
+ * It scored 29 of 38. The three rungs the rules were written for - L25, L30
+ * and L38 - stayed broken 0/2 in both runs, which is the part that matters:
+ * not noise around the edges, but the targeted rules failing at the one job
+ * they had.
+ *
+ * So terse rules do not fix these for gpt-oss-120b either. What fixed them
+ * for codestral was worked examples, and worked examples are what took the
+ * other prompt to 9,483 tokens - which Groq's 8,000-token minute cannot
+ * carry. That is the whole finding, and it is why this block is a comment
+ * rather than a constant.
+ */
+
 export const LEAN_PROMPT = [WHO, DECIDE, ASKING, ACTING, HONESTY, MACHINE, WRITING, SEARCHING].join(
   GAP
 )

@@ -130,6 +130,11 @@ const MUST_BLOCK = [
    * was classified a read, and on the auto mode that runs by itself. The
    * cmd-shaped ones were all there; the PowerShell-native ones were not.
    */
+  // The exception for New-TimeSpan must not widen to New- in general.
+  // New-Object builds COM objects, which is how a .lnk reached the Startup
+  // folder with no write verb anywhere in the command.
+  'New-Object -ComObject WScript.Shell',
+  'New-Item -ItemType File x.txt',
   'Get-ChildItem | ForEach-Object { ri $_ }',
   'Get-ChildItem | ForEach-Object { rm -rf $_ }',
   'Get-ChildItem | % { del $_ }',
@@ -438,6 +443,15 @@ const BOUNDED_READS = [
   // unattended, however deep it goes.
   'Get-ChildItem ~ -Recurse -File | Measure-Object',
   'Get-ChildItem $env:USERPROFILE/Downloads -Recurse -Filter *.png',
+  /**
+   * New-TimeSpan builds a value and touches nothing, and it is how date
+   * arithmetic is written. The gate refused the correct answer to "how many
+   * hours has my machine been up" because every new- prefix was read as a
+   * write - found by running the ladder against a second model.
+   */
+  'New-TimeSpan -Start $a -End $b',
+  '[math]::Round((New-TimeSpan -Start (Get-CimInstance Win32_OperatingSystem).LastBootUpTime -End (Get-Date)).TotalHours, 1)',
+  'New-Guid',
   // Reading an ordinary file is not reading a secret. environment.txt is
   // the negative case for the .env pattern, which must not match it.
   'Get-Content $env:USERPROFILE/Downloads/notes.txt',
