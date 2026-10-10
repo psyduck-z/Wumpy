@@ -155,6 +155,16 @@ export interface Attachment {
   height: number
   /** Size of the encoded image, for the "too big" guard and the UI. */
   bytes: number
+  /**
+   * Where the bytes live once the chat has been saved.
+   *
+   * Set only on disk. A saved chat keeps the filename and drops the data
+   * URL, because list() parses every chat file in full to read six header
+   * fields off each one — free for a few kilobytes of text, not free for
+   * four base64 screenshots. Reading one back puts the dataUrl straight
+   * back, so nothing above ChatStore ever sees this.
+   */
+  file?: string
 }
 
 export interface SearchResult {

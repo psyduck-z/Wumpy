@@ -1,0 +1,150 @@
+/**
+ * Saved conversations, and the images that go with them.
+ *
+ * One thing is really being tested here: that attaching a screenshot does
+ * not quietly make the resume picker slow. list() reads and JSON.parses
+ * EVERY chat file in full to read six header fields off each one, which is
+ * free for a few kilobytes of text and is not free for four base64
+ * screenshots — so the bytes live beside the chat and the chat keeps a
+ * filename.
+ *
+ * ChatStore imports electron for the userData path, so the real file logic
+ * runs here against a temporary folder through a stub.
+ *
+ * Run with: npm run check:chats
+ */
+import { build } from 'esbuild'
+import { mkdtempSync, rmSync, writeFileSync, readFileSync, readdirSync, existsSync } from 'node:fs'
+import { join } from 'node:path'
+import { tmpdir } from 'node:os'
+import { pathToFileURL } from 'node:url'
+
+const NL = String.fromCharCode(10)
+const dir = mkdtempSync(join(tmpdir(), 'wumpy-chats-'))
+
+const shim = join(dir, 'electron.mjs')
+writeFileSync(shim, `export const app = { getPath: () => ${JSON.stringify(dir)} }${NL}`)
+
+const out = '.chats-check.mjs'
+await build({
+  entryPoints: ['src/main/chats.ts'],
+  bundle: true,
+  platform: 'node',
+  format: 'esm',
+  outfile: out,
+  logLevel: 'error',
+  alias: { electron: shim, '@shared': 'src/shared' }
+})
+const { ChatStore } = await import(pathToFileURL(out).href)
+rmSync(out, { force: true })
+
+let failed = 0
+let count = 0
+function check(name, got, want) {
+  const ok = JSON.stringify(got) === JSON.stringify(want)
+  if (!ok) failed++
+  count++
+  console.log(
+    `${ok ? 'ok  ' : 'FAIL'} ${name.padEnd(52)} ${JSON.stringify(got)}` +
+      (ok ? '' : `   expected ${JSON.stringify(want)}`)
+  )
+}
+
+const chats = new ChatStore()
+
+/** A real, if tiny, JPEG payload — 40KB of it, to make the size test mean something. */
+const BIG = 'A'.repeat(40_000)
+const DATA = `data:image/jpeg;base64,${BIG}`
+const shot = { dataUrl: DATA, name: 'screenshot.png', width: 800, height: 450, bytes: 30_000 }
+
+const message = (over) => ({
+  id: over.id,
+  role: over.role ?? 'user',
+  content: over.content ?? '',
+  createdAt: 1,
+  ...over
+})
+
+/* ------------------------------------------------- an ordinary chat first */
+
+chats.save({ id: 'plain1', title: 'No pictures', messages: [message({ id: 'm1', content: 'hi' })] })
+check('a chat with no images saves', chats.list().length, 1)
+check('and loads back', chats.load('plain1').messages[0].content, 'hi')
+
+/* ----------------------------------------------------- one with a picture */
+
+chats.save({
+  id: 'withpic',
+  title: 'A screenshot',
+  messages: [message({ id: 'm1', content: 'what is this', images: [shot] })]
+})
+
+const onDisk = readFileSync(join(dir, 'chats', 'withpic.json'), 'utf8')
+
+/**
+ * The whole point. A 40KB data URL in the JSON would be parsed on every
+ * single listing, for every chat, forever.
+ */
+check('the base64 is NOT in the chat file', onDisk.includes(BIG.slice(0, 200)), false)
+check('the chat file stays small', onDisk.length < 2000, true)
+check('and it keeps a filename instead', /"file":\s*"withpic-0-0\.jpg"/.test(onDisk), true)
+
+const files = readdirSync(join(dir, 'chats', 'images'))
+check('the image is a file of its own', files.length, 1)
+check('named after the chat and the message', files[0], 'withpic-0-0.jpg')
+/* An ordinary jpeg in a folder, openable without the app. */
+check('holding the decoded bytes', readFileSync(join(dir, 'chats', 'images', files[0])).length > 0, true)
+
+/* --------------------------------------------------------- and back again */
+
+const back = chats.load('withpic')
+check('loading puts the data URL back', back.messages[0].images[0].dataUrl === DATA, true)
+check('with the rest of the attachment intact', back.messages[0].images[0].name, 'screenshot.png')
+check('and the right dimensions', [back.messages[0].images[0].width, back.messages[0].images[0].height], [800, 450])
+
+/* Saving a loaded chat again must not write a second copy of the image. */
+chats.save(back)
+check('re-saving does not duplicate the file', readdirSync(join(dir, 'chats', 'images')).length, 1)
+check('and still loads', chats.load('withpic').messages[0].images[0].dataUrl === DATA, true)
+
+/* ------------------------------------------------------------ the listing */
+
+/**
+ * The listing never touches the images, which is the property that made
+ * this worth doing. If it ever reads them again, the chat file will have
+ * grown — so the test is on the file, above — but check the header is
+ * right too.
+ */
+const listed = chats.list().find((c) => c.id === 'withpic')
+check('the listing still reports the title', listed.title, 'A screenshot')
+check('and the message count', listed.messageCount, 1)
+check('and carries no messages at all', 'messages' in listed, false)
+
+/* ---------------------------------------------------------------- deleting */
+
+/** The pictures go with the conversation, or they are unreachable forever. */
+chats.delete('withpic')
+check('deleting takes the chat', existsSync(join(dir, 'chats', 'withpic.json')), false)
+check('and its images with it', readdirSync(join(dir, 'chats', 'images')).length, 0)
+check('leaving the other chat alone', chats.list().length, 1)
+
+/* ------------------------------------------------- a missing image file */
+
+/**
+ * The file can go: a user tidying the folder, a sync tool, a crash between
+ * the two writes. A message with a picture that is gone still reads
+ * correctly, and an <img> with no src is not a reason to fail the load.
+ */
+chats.save({
+  id: 'gone',
+  title: 'Lost',
+  messages: [message({ id: 'm1', content: 'look', images: [shot] })]
+})
+rmSync(join(dir, 'chats', 'images', 'gone-0-0.jpg'), { force: true })
+const lost = chats.load('gone')
+check('a chat whose image is gone still loads', lost.messages[0].content, 'look')
+check('without a broken attachment', lost.messages[0].images.length, 0)
+
+rmSync(dir, { recursive: true, force: true })
+console.log(`${NL}${count - failed}/${count} chat-store checks correct`)
+process.exit(failed === 0 ? 0 : 1)
