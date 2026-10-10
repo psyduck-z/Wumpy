@@ -236,6 +236,109 @@ for (const c of [
   }
 }
 
-const total = CASES.length + 1 + MUST_BLOCK.length + MUST_ALLOW.length + 5
+/* ------------------------------------------- the destructive classifier -- */
+
+let extra = 0
+
+/**
+ * What must raise the native dialog.
+ *
+ * This whole classifier used to be tested by one example - Remove-Item with
+ * -Recurse - so it described one shape of damage and nobody noticed it
+ * missed the rest. Measured against 24 destructive commands, 23 raised no
+ * dialog. On accept-all that is not a skipped confirmation: judge() marks a
+ * command that is not risky as `auto`, and the card runs it with no click,
+ * so this list was the only thing between the model's first guess and the
+ * user's files.
+ *
+ * Paths are written with forward slashes, which PowerShell accepts, so this
+ * table says what it means without backslash escaping in the way.
+ */
+const MUST_CONFIRM = [
+  // Files, gone or moved. Only the recursive delete was here before.
+  'Remove-Item C:/Users/me/Pictures/*.png -Force',
+  'Remove-Item C:/Users/me/notes.txt',
+  'Move-Item C:/Users/me/Pictures/* -Destination D:/x -Force',
+  'Get-ChildItem C:/Users/me/Pictures | Move-Item -Destination D:/x -Force',
+  'Rename-Item *.log -NewName x.txt',
+  'Clear-Content C:/Users/me/notes.txt',
+  'Clear-RecycleBin -Force',
+  'Set-Content -Path C:/Users/me/notes.txt -Value x',
+  'Out-File -FilePath C:/Users/me/notes.txt -InputObject x',
+  'cmd /c rmdir /s /q C:/Users/me/Downloads',
+  'vssadmin delete shadows /all',
+  // Protection switched off - the ones a user would never want to find out
+  // about afterwards.
+  'Set-NetFirewallProfile -All -Enabled False',
+  'netsh advfirewall set allprofiles state off',
+  'Set-MpPreference -DisableRealtimeMonitoring $true',
+  'Add-MpPreference -ExclusionPath C:/',
+  'Disable-NetAdapter -Name Wi-Fi -Confirm:$false',
+  'Disable-ComputerRestore -Drive C:/',
+  'Stop-Service -Name MpsSvc',
+  'Set-Service -Name MpsSvc -StartupType Disabled',
+  'Stop-Process -Name chrome -Force',
+  'bcdedit /set testsigning on',
+  // Registry writes, accounts, and anything arranging to run again later.
+  'Set-ItemProperty HKCU:/Software/x -Name y -Value z',
+  'New-ItemProperty HKCU:/Software/x -Name y -Value z',
+  'reg add HKCU/Software/x /v y /d z',
+  'New-LocalUser -Name intruder',
+  'net user intruder /add',
+  'Add-LocalGroupMember -Group Administrators -Member intruder',
+  'Register-ScheduledTask -TaskName x -Action $a',
+  'schtasks /create /tn x /tr y /sc onlogon'
+]
+
+for (const c of MUST_CONFIRM) {
+  const why = assessRisk(c)
+  const v = judge(c, { tierTools: 'full', mode: 'all' })
+  const ok = why !== null && v.auto === false
+  if (!ok) failed++
+  extra++
+  console.log(
+    `${ok ? 'ok  ' : 'FAIL'} asks first: ${c.slice(0, 44).padEnd(45)} ${why ?? 'NO DIALOG, RAN ITSELF'}`
+  )
+}
+
+/**
+ * The other direction, and the reason the patterns above are anchored.
+ *
+ * A read that raises a dialog is its own kind of broken: it breaks the
+ * `auto` mode, whose whole purpose is that reporting runs by itself. So
+ * every command the gate calls a read must also be judged harmless. This
+ * caught nothing when written, which is the point - it is what makes the
+ * next widening of the list safe to attempt.
+ */
+for (const c of MUST_ALLOW) {
+  const why = assessRisk(c)
+  const ok = why === null
+  if (!ok) failed++
+  extra++
+  if (!ok) console.log(`FAIL a read would raise a dialog (${why}): ${c.slice(0, 60)}`)
+}
+console.log(`ok   none of the ${MUST_ALLOW.length} reads raises a dialog`)
+
+/**
+ * Creating something is reversible by deleting it, so accept-all may still
+ * do it unattended. If this starts failing, the list above has stopped
+ * drawing the line at "can the user undo this by clicking again" and
+ * accept-all has quietly become the auto mode.
+ */
+const MAY_RUN_UNATTENDED = [
+  'New-Item -ItemType Directory -Path C:/Users/me/x',
+  'New-Item -ItemType File notes.txt',
+  'Compress-Archive -Path x -DestinationPath y',
+  'Add-Content -Path log.txt -Value x'
+]
+for (const c of MAY_RUN_UNATTENDED) {
+  const v = judge(c, { tierTools: 'full', mode: 'all' })
+  const ok = v.auto === true
+  if (!ok) failed++
+  extra++
+  console.log(`${ok ? 'ok  ' : 'FAIL'} accept-all still runs: ${c.slice(0, 44)}`)
+}
+
+const total = CASES.length + 1 + MUST_BLOCK.length + MUST_ALLOW.length + 5 + extra
 console.log(`\n${total - failed}/${total} approval checks correct`)
 process.exit(failed === 0 ? 0 : 1)

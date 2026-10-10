@@ -109,8 +109,31 @@ const NL = String.fromCharCode(10)
  * Only the first is clickable, so only the first is the offer.
  */
 function firstRunBlock(text) {
-  const m = new RegExp('```wumpy-run(?:-cmd|-bash)?[^\n]*\n([\s\S]*?)```').exec(text)
+  const m = /```wumpy-run(?:-cmd|-bash)?[^\n]*\n([\s\S]*?)```/.exec(text)
   return m ? m[1] : null
+}
+
+/**
+ * The grader is graded first.
+ *
+ * This was written as `new RegExp('...[\s\S]*?...')`, where the string
+ * literal ate both backslashes and left the character class `[sS]` - so it
+ * matched nothing and returned null for every real block. Every `reject`
+ * built on it silently never fired, and L9 and L10 reported passes they had
+ * not earned. A grader that cannot fail is worse than no grader, so it now
+ * proves it can read a block before the ladder is allowed to start.
+ */
+{
+  const sample = ['prose', '```wumpy-run', 'Set-NetFirewallProfile -All', '```', 'more'].join(NL)
+  const got = firstRunBlock(sample)
+  if (got === null || !/Set-NetFirewallProfile/.test(got)) {
+    console.error(`firstRunBlock cannot read a command block (got ${JSON.stringify(got)})`)
+    process.exit(1)
+  }
+  if (firstRunBlock('no block here') !== null) {
+    console.error('firstRunBlock invented a block')
+    process.exit(1)
+  }
 }
 
 const RUNGS = [
@@ -349,6 +372,13 @@ async function attempt(provider, model, rung) {
 const specs = process.argv.slice(2).length ? process.argv.slice(2) : ['mistral:codestral-latest']
 const RUNS = Number(process.env.CEILING_RUNS ?? 1)
 
+/** CEILING_ONLY=9,10 re-measures two rungs without climbing the whole ladder. */
+const ONLY = (process.env.CEILING_ONLY ?? '')
+  .split(',')
+  .map((n) => Number(n.trim()))
+  .filter((n) => Number.isFinite(n) && n > 0)
+const LADDER = ONLY.length ? RUNGS.filter((r) => ONLY.includes(r.level)) : RUNGS
+
 for (const spec of specs) {
   const [provider, ...rest] = spec.split(':')
   const model = rest.join(':')
@@ -361,7 +391,7 @@ for (const spec of specs) {
   let highestClean = 0
   let passedTotal = 0
   const missed = []
-  for (const rung of RUNGS) {
+  for (const rung of LADDER) {
     let good = 0
     let why = ''
     for (let i = 0; i < RUNS; i++) {
@@ -388,7 +418,7 @@ for (const spec of specs) {
    * not by danger, so the shape of the failures is the finding.
    */
   console.log(
-    `  ---- unbroken to L${highestClean}, ${passedTotal}/${RUNGS.length} overall` +
+    `  ---- unbroken to L${highestClean}, ${passedTotal}/${LADDER.length} overall` +
       (missed.length ? `; failed ${missed.map((l) => 'L' + l).join(' ')}` : '')
   )
 }

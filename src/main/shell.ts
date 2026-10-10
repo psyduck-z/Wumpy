@@ -66,7 +66,68 @@ const RISKY: Array<{ pattern: RegExp; why: string }> = [
   { pattern: /\bmsiexec\b[^|]*\/(x|uninstall)\b/i, why: 'uninstalls a program' },
   { pattern: /\bwinget\s+uninstall\b/i, why: 'uninstalls a program' },
   { pattern: /\bRemove-Appx(Provisioned)?Package\b/i, why: 'removes an installed app' },
-  { pattern: /\bUninstall-(Package|Module|WindowsFeature)\b/i, why: 'uninstalls a program' }
+  { pattern: /\bUninstall-(Package|Module|WindowsFeature)\b/i, why: 'uninstalls a program' },
+  /**
+   * Everything below was missing, and the gap was wider than the list.
+   *
+   * `Remove-Item -Recurse` was here and almost nothing else, so this
+   * described one shape of damage and missed the rest. Measured against 24
+   * destructive commands, 23 raised no dialog: deleting every *.png in a
+   * folder, `rmdir /s /q` over Downloads, moving a tree to another drive,
+   * turning the firewall off, disabling Defender's real-time monitoring,
+   * excluding C:\ from scanning, stopping the firewall service.
+   *
+   * On accept-all that is not merely a skipped dialog. judge() marks a
+   * command that is not risky as `auto`, and CommandCard then runs it with
+   * no click at all - so this list was the only thing standing between the
+   * model's first guess and the user's files, and it was one line long.
+   *
+   * The line drawn here is whether clicking again undoes it. Creating a file
+   * or a folder is reversible and may still run unattended; destroying,
+   * moving, renaming, killing and disabling are not, so they ask first. That
+   * keeps accept-all meaning "do not make me approve every read and every
+   * new file" rather than "change my security settings quietly".
+   *
+   * The short aliases are anchored to a command position. Matching a bare
+   * `move` or `del` anywhere would flag a path or a -match pattern that
+   * merely contains the word, and a read that raises a dialog is its own
+   * kind of broken.
+   */
+  { pattern: /\bRemove-Item\b/i, why: 'deletes files' },
+  { pattern: /\b(rmdir|rd)\b[^|]*\/s/i, why: 'recursively deletes a folder' },
+  { pattern: /\bMove-Item\b/i, why: 'moves files' },
+  { pattern: /\bRename-Item\b/i, why: 'renames files' },
+  { pattern: /\bClear-Content\b/i, why: 'empties a file' },
+  { pattern: /\bClear-RecycleBin\b/i, why: 'empties the recycle bin' },
+  { pattern: /\b(Set-Content|Out-File)\b/i, why: 'overwrites a file' },
+  {
+    pattern: /(?:^|[|;&]\s*)\s*(del|erase|move|ren|rd|rmdir|mv)\b/i,
+    why: 'deletes, moves or renames files'
+  },
+  { pattern: /\bvssadmin\b[^|]*\bdelete\b/i, why: 'deletes shadow copies' },
+  // Protection being switched off, which is the one a user would never want
+  // to discover after the fact.
+  { pattern: /\bSet-NetFirewallProfile\b/i, why: 'changes the firewall' },
+  { pattern: /\bnetsh\b[^|]*\badvfirewall\b[^|]*\bset\b/i, why: 'changes the firewall' },
+  { pattern: /\b(Set|Add|Remove)-MpPreference\b/i, why: 'changes Defender settings' },
+  { pattern: /\bDisable-\w+/i, why: 'turns something off' },
+  { pattern: /\b(Stop|Set|Suspend)-Service\b/i, why: 'stops or reconfigures a service' },
+  { pattern: /\bStop-Process\b/i, why: 'kills a running program' },
+  { pattern: /\bbcdedit\b/i, why: 'changes how Windows boots' },
+  // Registry writes. The delete side was already here; the write side was
+  // not, and Run-key persistence is a write.
+  { pattern: /\b(New|Set)-ItemProperty\b/i, why: 'changes the registry' },
+  { pattern: /\breg(\.exe)?\s+(add|import)\b/i, why: 'changes the registry' },
+  // Accounts, and anything that arranges to run again later.
+  { pattern: /\b(New|Set|Remove)-LocalUser\b|\bnet\s+user\b/i, why: 'changes user accounts' },
+  {
+    pattern: /\bAdd-LocalGroupMember\b|\bnet\s+localgroup\b/i,
+    why: 'changes group membership'
+  },
+  {
+    pattern: /\b(Register|Unregister)-ScheduledTask\b|\bschtasks\b[^|]*\/(create|delete)/i,
+    why: 'changes scheduled tasks'
+  }
 ]
 
 /**
