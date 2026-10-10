@@ -254,7 +254,8 @@ export function Composer({
         metaKey: e.metaKey,
         target: e.target,
         composerHasFocus: document.activeElement === el,
-        pickerOpen: pickerOpen()
+        pickerOpen: pickerOpen(),
+        isComposing: e.isComposing
       })
       if (what === 'ignore') return
       // The character is placed by hand rather than left to the browser:

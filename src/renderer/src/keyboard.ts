@@ -139,7 +139,12 @@ export function adoptsKeystroke(k: {
   composerHasFocus: boolean
   /** A picker owns the keyboard on purpose while it is open. */
   pickerOpen: boolean
+  /** Mid-way through an IME composition, where the keys are not characters. */
+  isComposing?: boolean
 }): 'insert' | 'focus' | 'ignore' {
+  // An input method is assembling a character out of several keystrokes.
+  // Taking one of them out of the middle produces nonsense in both places.
+  if (k.isComposing) return 'ignore'
   // Already where it belongs: this is only for keys that would be lost.
   if (k.composerHasFocus) return 'ignore'
   // Something else is deliberately holding the keyboard.

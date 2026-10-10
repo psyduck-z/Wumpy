@@ -683,6 +683,13 @@ check('space moves the caret without typing', K.adoptsKeystroke(press({ key: ' '
 check('a slash starts a command', K.adoptsKeystroke(press({ key: '/' })), 'insert')
 check('a digit is a digit', K.adoptsKeystroke(press({ key: '7' })), 'insert')
 
+/* An input method assembling one character out of several keystrokes. */
+check(
+  'a key mid-composition is left to the input method',
+  K.adoptsKeystroke(press({ key: 'n', isComposing: true })),
+  'ignore'
+)
+
 /* ---------------------- focus dropped by a button that went away */
 
 /**
