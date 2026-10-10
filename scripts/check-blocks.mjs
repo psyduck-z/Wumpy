@@ -130,10 +130,10 @@ writeFileSync(
     "import { renderToStaticMarkup } from 'react-dom/server'",
     "import { Markdown } from './src/renderer/src/components/Markdown'",
     "globalThis.window = { wumpy: { shell: { check: async () => ({ risk: null, allowed: true, scope: 'full' }) } } }",
-    'export function render(text, complete = true) {',
+    'export function render(text, complete = true, looseFences = false) {',
     '  return renderToStaticMarkup(',
     '    React.createElement(Markdown, {',
-    "      text, tier: 'thinker', complete,",
+    "      text, tier: 'thinker', complete, looseFences,",
     '      onRunCommand: async () => null, onCommandResult: () => {},',
     '      onAnswer: () => {},',
     "      onSearch: async () => ({ results: [], provider: 'none' }), onSearchResults: () => {}",
@@ -239,9 +239,81 @@ const readyEarly = !midStream.includes('still writing') && proposed(midStream) =
 if (!readyEarly) failed++
 console.log(`${readyEarly ? 'ok  ' : 'FAIL'} a closed block is ready while the answer continues`)
 
-/* ------------------------------------------- only one live button per turn */
-
 const NL = String.fromCharCode(10)
+
+/** Counted into the same tally as the table-driven cases above. */
+let extraChecks = 0
+function check(name, got, want) {
+  const ok = JSON.stringify(got) === JSON.stringify(want)
+  if (!ok) failedControl++
+  extraChecks++
+  console.log(
+    `${ok ? 'ok  ' : 'FAIL'} ${name.padEnd(48)} ${JSON.stringify(got)}` +
+      (ok ? '' : `   expected ${JSON.stringify(want)}`)
+  )
+}
+
+/* --------------------------------- a fence tag the model will not write -- */
+
+/**
+ * Gemini answers correctly and tags the fence ```powershell, where Wumpy
+ * asks for ```wumpy-run. Without that tag the command is grey text with no
+ * button, so a model easily clever enough for the whole ladder scored 1 of
+ * 38 - almost all of it this one thing, on the first call, before any quota
+ * was touched.
+ *
+ * Promoting the fence is narrow on purpose. The alternative is a Run button
+ * under every snippet anyone writes to illustrate syntax.
+ */
+{
+  const psOnly = ['Here is how:', '```powershell', 'Get-PSDrive C', '```'].join(NL)
+
+  // Off by default: a compliant model keeps the distinction it drew.
+  check('a plain fence is inert by default', classify(render(psOnly)), 'code block')
+  check('and runnable for a model that needs it', classify(render(psOnly, true, true)), 'CommandCard')
+  check(
+    'with the command intact',
+    proposed(render(psOnly, true, true)),
+    'Get-PSDrive C'
+  )
+
+  // cmd and bash too, since the app runs all three.
+  const cmdOnly = ['```cmd', 'dir', '```'].join(NL)
+  check('a cmd fence too', classify(render(cmdOnly, true, true)), 'CommandCard')
+
+  /**
+   * If the model DID write a proper block, it meant the difference, and a
+   * powershell fence beside it is an example rather than a second offer.
+   */
+  const both = [
+    '```wumpy-run',
+    'Get-Date',
+    '```',
+    'For reference, the long way is:',
+    '```powershell',
+    'Get-CimInstance Win32_OperatingSystem | Select-Object LocalDateTime',
+    '```'
+  ].join(NL)
+  const bothHtml = render(both, true, true)
+  check('a real block wins over a loose one', proposed(bothHtml), 'Get-Date')
+  check('and the example stays inert', (bothHtml.match(/class="cmd /g) ?? []).length, 1)
+
+  // An ask or write block counts as "it knows the tags", too.
+  const askThenPs = ['```wumpy-ask', 'Which?', '- a', '- b', '```', '```powershell', 'Get-Date', '```'].join(NL)
+  check(
+    'an ask block also means it knows the tags',
+    (render(askThenPs, true, true).match(/class="cmd /g) ?? []).length,
+    0
+  )
+
+  // Only the first loose fence is promoted.
+  const twoPs = ['```powershell', 'Get-Date', '```', '```powershell', 'Remove-Item x', '```'].join(NL)
+  const twoHtml = render(twoPs, true, true)
+  check('only the first loose fence is promoted', (twoHtml.match(/class="cmd /g) ?? []).length, 1)
+  check('and it is the first one', proposed(twoHtml), 'Get-Date')
+}
+
+/* ------------------------------------------- only one live button per turn */
 
 /**
  * Asked "my firewall is off, turn it back on", the model proposed the check
@@ -312,6 +384,6 @@ console.log(`${bothKept ? 'ok  ' : 'FAIL'} an ask block does not consume the one
 
 rmSync(out, { force: true })
 
-const total = CASES.length + 9
+const total = CASES.length + 9 + extraChecks
 console.log(`\n${total - failed}/${total} block checks correct`)
 process.exit(failed === 0 ? 0 : 1)

@@ -40,7 +40,8 @@ export const Message = memo(function Message({
   onWritten,
   autoWrite,
   linkMode,
-  searchEngine
+  searchEngine,
+  looseFences
 }: {
   message: ChatMessage
   streaming: boolean
@@ -71,6 +72,8 @@ export const Message = memo(function Message({
   onOpened?: (result: LinkResult, messageId: string) => void
   linkMode?: LinkApproval
   searchEngine?: string
+  /** This model writes ```powershell instead of ```wumpy-run. */
+  looseFences?: boolean
   onSearch?: (
     query: string
   ) => Promise<{ results: SearchResult[]; provider: string; error?: string }>
@@ -201,6 +204,7 @@ export const Message = memo(function Message({
             onOpened={onOpened}
             linkMode={linkMode}
             searchEngine={searchEngine}
+            looseFences={looseFences}
           />
           {waiting && !message.thinking && (
             <span className="dots" role="status" aria-label="Thinking">

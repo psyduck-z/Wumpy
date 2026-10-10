@@ -217,6 +217,55 @@ export function keepFirstRunnable(text: string): string {
     .join(String.fromCharCode(10))
 }
 
+/**
+ * Promotes a plain shell fence to a runnable one, for models that will not
+ * write Wumpy's tag.
+ *
+ * Gemini answers "how much free space is on my C drive" with a correct
+ * Get-PSDrive command inside ```powershell. Wumpy asks for ```wumpy-run,
+ * and without that tag the command is just grey text - so a model clever
+ * enough for the whole ladder scored 1 of 38, almost all of it this.
+ *
+ * Narrow on purpose, because the alternative is a Run button under every
+ * snippet anyone ever writes to illustrate syntax:
+ *
+ *   - only for models flagged looseFences in the registry
+ *   - only when the reply contains NO wumpy-run block already, so a model
+ *     that tagged one correctly and then showed an example keeps the
+ *     distinction it drew
+ *   - only the FIRST such fence, which keepFirstRunnable would have left
+ *     runnable anyway
+ *
+ * Everything downstream is unchanged: the command still has to be
+ * read-only to run itself, still raises a dialog if it is destructive, and
+ * still needs a click in every mode but accept-all.
+ */
+export function normaliseFences(text: string): string {
+  if (/```wumpy-(run|ask|write|search)/.test(text)) return text
+
+  const SHELLS: Array<[RegExp, string]> = [
+    [/^(\s*```)(powershell|pwsh|ps1|ps)(\s*)$/i, 'wumpy-run'],
+    [/^(\s*```)(cmd|bat|batch)(\s*)$/i, 'wumpy-run-cmd'],
+    [/^(\s*```)(bash|sh|shell)(\s*)$/i, 'wumpy-run-bash']
+  ]
+
+  let done = false
+  return text
+    .split(String.fromCharCode(10))
+    .map((line) => {
+      if (done) return line
+      for (const [pattern, tag] of SHELLS) {
+        const m = pattern.exec(line)
+        if (m) {
+          done = true
+          return `${m[1]}${tag}${m[3]}`
+        }
+      }
+      return line
+    })
+    .join(String.fromCharCode(10))
+}
+
 /** Maps a fence tag to the shell it should run in, or null for ordinary code. */
 function runnableShell(className: unknown): ShellKind | null {
   if (typeof className !== 'string') return null
@@ -260,9 +309,11 @@ export interface MarkdownProps {
   /** Which message this is, so one message can only run one command. */
   messageId?: string
   /** Supplied for assistant turns that may search the web. */
-  onSearch?: (
-    query: string
-  ) => Promise<{ results: SearchResult[]; provider: string; error?: string }>
+  onSearch?: (query: string) => Promise<{
+    results: SearchResult[]
+    provider: string
+    error?: string
+  }>
   onSearchResults?: (
     query: string,
     results: SearchResult[],
@@ -283,6 +334,11 @@ export interface MarkdownProps {
   /** How much may happen without a click, and where searches go. */
   linkMode?: LinkApproval
   searchEngine?: string
+  /**
+   * Whether this model writes a plain shell fence where Wumpy asks for
+   * ```wumpy-run. Declared per model in CLOUD_MODELS; see normaliseFences.
+   */
+  looseFences?: boolean
 }
 
 /**
@@ -321,7 +377,8 @@ export const Markdown = memo(function Markdown({
   onOpenSearch,
   onOpened,
   linkMode = 'manual',
-  searchEngine = 'duckduckgo'
+  searchEngine = 'duckduckgo',
+  looseFences = false
 }: MarkdownProps) {
   // The one block still being written, if any. Everything else is final, even
   // mid-answer, so a command can be offered the moment its fence closes rather
@@ -410,7 +467,10 @@ export const Markdown = memo(function Markdown({
         )
       }}
     >
-      {onRunCommand ? keepFirstRunnable(text) : text}
+      {/* Loose fences are promoted first, then the one-button rule applies
+          to whatever that produced - in that order, or a promoted fence
+          would be the second runnable block and get demoted again. */}
+      {onRunCommand ? keepFirstRunnable(looseFences ? normaliseFences(text) : text) : text}
     </ReactMarkdown>
   )
 })

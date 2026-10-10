@@ -235,6 +235,20 @@ export interface CloudModel {
   label: string
   /** What it is for, in the voice of the tier blurbs. */
   blurb: string
+  /**
+   * Writes ```powershell where Wumpy asks for ```wumpy-run.
+   *
+   * Gemini does this on the first call, before any quota is touched, and it
+   * is not a small thing: the fence tag is how a command becomes a button,
+   * so a perfectly good command renders as dead text and the model scores
+   * zero on a ladder it is easily clever enough for.
+   *
+   * Flagged per model rather than fixed for everyone, because promoting a
+   * plain powershell fence to a runnable one would also put a button under
+   * an illustrative snippet from a model that was only answering a
+   * question about syntax.
+   */
+  looseFences?: boolean
 }
 
 export const CLOUD_MODELS: CloudModel[] = [
@@ -243,32 +257,37 @@ export const CLOUD_MODELS: CloudModel[] = [
     id: 'gemini-3.5-flash',
     provider: 'google',
     label: 'Gemini 3.5 Flash',
-    blurb: 'Measured 8/8 writing files that compile. The one to start with.'
+    blurb: 'Measured 8/8 writing files that compile. The one to start with.',
+    looseFences: true
   },
   {
     id: 'gemini-3.1-flash-lite',
     provider: 'google',
     label: 'Gemini 3.1 Flash Lite',
-    blurb: 'Quickest and lightest. Also scored 4/4 here. Good for lookups.'
+    blurb: 'Quickest and lightest. Also scored 4/4 here. Good for lookups.',
+    looseFences: true
   },
   {
     id: 'gemini-3.6-flash',
     provider: 'google',
     label: 'Gemini 3.6 Flash',
-    blurb: 'Between 3.5 and 3.8. Untested here.'
+    blurb: 'Between 3.5 and 3.8. Untested here.',
+    looseFences: true
   },
   {
     id: 'gemini-3.7-flash',
     provider: 'google',
     label: 'Gemini 3.7 Flash',
-    blurb: 'Newer Flash. Untested here, and the newer ones have small quotas.'
+    blurb: 'Newer Flash. Untested here, and the newer ones have small quotas.',
+    looseFences: true
   },
   {
     id: 'gemini-3.8-flash',
     provider: 'google',
     label: 'Gemini 3.8 Flash',
     // Measured the hard way: roughly 25 requests and it asked for 18 hours.
-    blurb: 'Newest Flash — but it ran out after about 25 requests in a day.'
+    blurb: 'Newest Flash — but it ran out after about 25 requests in a day.',
+    looseFences: true
   },
   {
     id: 'gemini-3.1-pro-preview',
@@ -281,13 +300,15 @@ export const CLOUD_MODELS: CloudModel[] = [
     // two-token request, so it is reachable but the free input allowance is
     // too small to be worth routing to. Not "paid only", which is what this
     // said before measuring it.
-    blurb: 'Most capable Gemini — but its free input allowance is far too small to use.'
+    blurb: 'Most capable Gemini — but its free input allowance is far too small to use.',
+    looseFences: true
   },
   {
     id: 'gemini-flash-latest',
     provider: 'google',
     label: 'Gemini Flash (latest)',
-    blurb: 'Whatever Google currently points "latest" at. Moves without warning.'
+    blurb: 'Whatever Google currently points "latest" at. Moves without warning.',
+    looseFences: true
   },
 
   /* --- Mistral: a free plan, and not the one I described ------------------

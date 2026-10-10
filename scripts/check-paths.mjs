@@ -39,6 +39,13 @@ rmSync(out, { force: true })
 
 const PROMPT = T.SHELL_PROMPT
 const VOICE = T.VOICE_PROMPT
+const LEAN = await (async () => {
+  const o = join(process.cwd(), '.paths-lean.mjs')
+  await build({ entryPoints: ['src/shared/lean.ts'], bundle: true, platform: 'node', format: 'esm', outfile: o, logLevel: 'error' })
+  const m = await import(pathToFileURL(o).href)
+  rmSync(o, { force: true })
+  return m
+})()
 
 function run(command) {
   return new Promise((resolve) => {
@@ -255,6 +262,58 @@ for (const name of FOLDER_CALLS) {
       r.stdout || r.stderr.split(NL)[0]?.slice(0, 44)
     )
   }
+}
+
+/* ------------------------- what the shell cannot do, verified ----------- */
+
+/**
+ * The prompt tells the model which PowerShell 7 constructs are absent from
+ * the 5.1 that Wumpy actually runs. Every one of those claims is checked
+ * here, because a prompt that forbids something which in fact works is
+ * teaching the model to avoid a real tool - and one that permits something
+ * broken costs a round trip.
+ *
+ * Caught one already: `?.` was listed as a syntax error and it parses fine
+ * in 5.1. It does not null-propagate, which is a quieter problem, but it is
+ * not the problem the prompt claimed.
+ */
+{
+  const LEANP = LEAN.LEAN_PROMPT
+  check('the prompt names the shell version', /WINDOWS POWERSHELL 5\.1/.test(LEANP), true)
+
+  // Parsed as strings so this check itself runs in 5.1.
+  // The third column is what the PROMPT writes for it, which is the syntax
+  // rather than its name - searching for the word "ternary" failed while the
+  // prompt said `a ? b : c`, which is the check being wrong, not the prompt.
+  for (const [label, snippet, shownAs] of [
+    ['??', '$null ?? 1', '??'],
+    ['ternary', '$true ? 1 : 2', 'a ? b : c'],
+    ['&&', 'Get-Date && Get-Date', '&&'],
+    ['||', 'Get-Date || Get-Date', '||']
+  ]) {
+    const r = await run(
+      `$e = $null; $null = [System.Management.Automation.Language.Parser]::ParseInput(${JSON.stringify(snippet)}, [ref]$null, [ref]$e); if ($e.Count) { "error" } else { "fine" }`
+    )
+    check(`${label} really is a syntax error here`, r.stdout.trim(), 'error')
+    check(`and the prompt warns about ${label}`, LEANP.includes(shownAs), true)
+  }
+
+  for (const cmdlet of ['Join-String', 'Get-Error', 'Test-Json']) {
+    const r = await run(
+      `if (Get-Command ${cmdlet} -ErrorAction SilentlyContinue) { "exists" } else { "absent" }`
+    )
+    check(`${cmdlet} really is absent`, r.stdout.trim(), 'absent')
+    check(`and the prompt says so`, LEANP.includes(cmdlet), true)
+  }
+
+  const par = await run(
+    'if ((Get-Command ForEach-Object).Parameters.Keys -contains "Parallel") { "exists" } else { "absent" }'
+  )
+  check('-Parallel really is absent', par.stdout.trim(), 'absent')
+
+  // And the thing it tells them to use instead must work.
+  const ok = await run('$a = 1, 2, 3; ($a -join ","); if ($true) { "yes" } else { "no" }')
+  check('the suggested -join and if/else work', /1,2,3/.test(ok.stdout) && /yes/.test(ok.stdout), true)
 }
 
 /* ------------------------- a command that must not be run to be checked -- */

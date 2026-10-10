@@ -522,6 +522,13 @@ export default function App(): React.JSX.Element {
    * arrive after a turn completes, so the estimate covers the gap — including
    * the message being typed, which has not been sent yet.
    */
+  /**
+   * Whether the model in use writes ```powershell where Wumpy asks for
+   * ```wumpy-run. Declared in CLOUD_MODELS rather than guessed, so a model
+   * that complies is never second-guessed. See normaliseFences.
+   */
+  const looseFences = CLOUD_MODELS.some((m) => m.id === model && m.looseFences)
+
   const usage: ContextUsage = (() => {
     const limit = CONTEXT_TOKENS
     const counted = stats.contextTokens
@@ -1567,6 +1574,7 @@ export default function App(): React.JSX.Element {
                   onOpened={onOpened}
                   linkMode={fresh ? linkMode : 'manual'}
                   searchEngine={settings?.searchEngine ?? 'duckduckgo'}
+                  looseFences={looseFences}
                 />
               )
             })
