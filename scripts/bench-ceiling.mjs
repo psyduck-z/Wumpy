@@ -48,6 +48,8 @@ if (existsSync('.env')) {
   }
 }
 
+let googleCursor = -1
+
 const PROVIDERS = {
   mistral: { base: 'https://api.mistral.ai/v1', key: () => process.env.MISTRAL_API_KEY },
   nvidia: {
@@ -57,7 +59,24 @@ const PROVIDERS = {
   groq: { base: 'https://api.groq.com/openai/v1', key: () => process.env.GROQ_API_KEY },
   google: {
     base: 'https://generativelanguage.googleapis.com/v1beta/openai',
-    key: () => process.env.GEMINI_API_KEY ?? process.env.GOOGLE_API_KEY
+    /**
+     * Rotates across GEMINI_API_KEYS, because one key is five requests a
+     * minute and a 38-rung ladder is roughly 120 requests. On one key that
+     * is half an hour of waiting; across ten projects it is a few minutes.
+     *
+     * Round-robin for the same reason the app does it: with a per-minute
+     * cap, spreading the load multiplies the rate, while draining one key
+     * at a time just moves the wait around.
+     */
+    key: () => {
+      const pool = (process.env.GEMINI_API_KEYS ?? '')
+        .split(',')
+        .map((k) => k.trim())
+        .filter(Boolean)
+      if (!pool.length) return process.env.GEMINI_API_KEY ?? process.env.GOOGLE_API_KEY
+      googleCursor = (googleCursor + 1) % pool.length
+      return pool[googleCursor]
+    }
   }
 }
 
@@ -83,6 +102,8 @@ const T = await bundled('src/shared/assistant.ts', 'prompt')
 const SHELL = await bundled('src/main/shell.ts', 'shell', ['electron'])
 const FOLDERS = await bundled('src/main/folders.ts', 'folders', ['electron'])
 const PARSEFAIL = await bundled('src/shared/parsefail.ts', 'parsefail')
+const FENCES = await bundled('src/shared/fences.ts', 'fences')
+const CLOUD = await bundled('src/shared/cloud.ts', 'cloud')
 
 /**
  * The same facts the app sends, not a shorter version of them.
@@ -1214,7 +1235,18 @@ async function ask(provider, model, turns, attempt = 0) {
     headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${p.key()}` },
     body: JSON.stringify({
       model,
-      messages: [...PREAMBLE, ...turns],
+      /**
+       * Through the app's own wire conversion, not raw.
+       *
+       * Google's OpenAI-compatible endpoint silently DISCARDS system
+       * messages. Measured: a 9,483-token preamble arrived as
+       * prompt_tokens 124, the model fell back to function calling with no
+       * instructions, and the reply came back empty with
+       * finish_reason "MALFORMED_FUNCTION_CALL". The app has folded system
+       * into user for Google all along; the ladder did not, so it was
+       * grading a model that had never been told what Wumpy is.
+       */
+      messages: CLOUD.wireMessagesFor(provider, [...PREAMBLE, ...turns]),
       temperature: 0.2,
       max_tokens: 700
     })
@@ -1230,9 +1262,24 @@ async function ask(provider, model, turns, attempt = 0) {
   return { text: (body.choices?.[0]?.message?.content ?? '').trim() }
 }
 
+/**
+ * Models that write ```powershell where Wumpy asks for ```wumpy-run.
+ *
+ * The app promotes that fence for the providers flagged looseFences in the
+ * registry, so the ladder has to as well, or it grades raw output the app
+ * never shows anyone. Gemini scored 1 of 38 against a harness that had
+ * never heard of the fix, and almost all of that was this.
+ */
+const LOOSE_FENCES = new Set(['google'])
+
+function asTheAppSeesIt(provider, text) {
+  return LOOSE_FENCES.has(provider) ? FENCES.normaliseFences(text) : text
+}
+
 async function attempt(provider, model, rung) {
-  const r = await ask(provider, model, [{ role: 'user', content: rung.ask }])
-  if (r.error) return { ok: false, why: r.error }
+  const raw = await ask(provider, model, [{ role: 'user', content: rung.ask }])
+  if (raw.error) return { ok: false, why: raw.error }
+  const r = { ...raw, text: asTheAppSeesIt(provider, raw.text) }
 
   if (rung.reject) {
     const bad = rung.reject(r.text)
@@ -1330,7 +1377,7 @@ async function attempt(provider, model, rung) {
   ])
   if (second.error) return { ok: false, why: second.error, command }
 
-  const misread = rung.then(second.text, res.out)
+  const misread = rung.then(asTheAppSeesIt(provider, second.text), res.out)
   return misread
     ? { ok: false, why: misread, command, out: second.text.trim().slice(0, 90) }
     : { ok: true, command }
@@ -1374,6 +1421,16 @@ for (const spec of specs) {
         good++
         attemptsPassed++
       } else if (!why) why = a.why
+      /**
+       * CEILING_SHOW=1 prints the reply behind a failure. "no command
+       * proposed" covers a model answering in prose, a model using the
+       * wrong fence, and a harness that forgot to normalise the fence
+       * before looking - all three happened today, and telling them apart
+       * meant re-running the question by hand every time.
+       */
+      if (!a.ok && process.env.CEILING_SHOW && a.text) {
+        console.log(`    --- L${rung.level} replied:${NL}${a.text.slice(0, 500)}${NL}    ---`)
+      }
       await new Promise((r) => setTimeout(r, 1200))
     }
 
