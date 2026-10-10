@@ -685,9 +685,36 @@ export const GIVE_UP_AFTER_MS = 120_000
  */
 export const EXHAUSTED_AFTER_MS = 4 * 3_600_000
 
-export function classifyLimit(status: number, body: string, model: string): LimitVerdict {
+export function classifyLimit(
+  status: number,
+  body: string,
+  model: string,
+  /** The per-minute request allowance the provider reported, if it did. */
+  limitPerMinute?: string | null
+): LimitVerdict {
   if (status !== 429 && status !== 503) {
     return { kind: 'other', waitMs: 0, message: '' }
+  }
+
+  /**
+   * A limit of zero is not a throttle, it is a locked door.
+   *
+   * Mistral answers 429 "Rate limit exceeded" for a model that is not on
+   * your plan at all, which is the same status and almost the same words as
+   * being told to slow down - and the header is the only thing that tells
+   * them apart: x-ratelimit-limit-req-minute is 0 rather than 125.
+   *
+   * It matters because /model offers these. On a free key,
+   * mistral-medium-latest, mistral-small-latest and the magistral models all
+   * report 0, so picking one used to look like a passing hiccup and waiting
+   * never helped.
+   */
+  if (limitPerMinute !== undefined && limitPerMinute !== null && Number(limitPerMinute) === 0) {
+    return {
+      kind: 'exhausted',
+      waitMs: 0,
+      message: `${model} is not available on this API plan. Pick another with /model.`
+    }
   }
 
   const asked = /"retryDelay":\s*"(\d+(?:\.\d+)?)s"/.exec(body ?? '')

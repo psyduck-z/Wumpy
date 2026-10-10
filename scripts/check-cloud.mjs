@@ -759,5 +759,32 @@ check(
 )
 check('a local model has no sibling', C.siblingModel('phi4-mini:3.8b', new Set()), null)
 
+/* ------------------------- a locked model is not a throttle -------------- */
+
+/**
+ * Mistral answers 429 "Rate limit exceeded" for a model that is not on your
+ * plan at all - the same status and almost the same words as being told to
+ * slow down. The only thing that tells them apart is the header: the
+ * per-minute allowance is 0 rather than 125.
+ *
+ * It matters because /model offers these. On a free key
+ * mistral-medium-latest, mistral-small-latest and the magistral models all
+ * report 0, so choosing one looked like a passing hiccup and waiting never
+ * helped.
+ */
+{
+  const locked = C.classifyLimit(429, '{"message":"Rate limit exceeded"}', 'mistral-medium-latest', '0')
+  check('a zero allowance is permanent', locked.kind, 'exhausted')
+  check('and says which model and what to do', /not available on this API plan/.test(locked.message), true)
+  check('and does not ask anyone to wait', locked.waitMs, 0)
+
+  // A real throttle still behaves as a throttle.
+  const busy = C.classifyLimit(429, '{"message":"Rate limit exceeded"}', 'codestral-latest', '125')
+  check('a real allowance is still a throttle', busy.kind !== 'exhausted', true)
+  // And a provider that sends no such header is unaffected either way.
+  const silent = C.classifyLimit(429, '{"message":"Rate limit exceeded"}', 'codestral-latest', null)
+  check('a missing header changes nothing', silent.kind, busy.kind)
+}
+
 console.log(failures ? `\n${failures} cloud checks FAILED` : '\nall cloud checks')
 process.exitCode = failures ? 1 : 0

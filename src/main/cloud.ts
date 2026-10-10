@@ -257,7 +257,14 @@ export class CloudClient {
         return null
       }
 
-      const verdict = classifyLimit(res.status, detail, model)
+      // The header is the only thing that separates "slow down" from "not on
+      // your plan" - both arrive as 429 with nearly the same words.
+      const verdict = classifyLimit(
+        res.status,
+        detail,
+        model,
+        res.headers.get('x-ratelimit-limit-req-minute')
+      )
       if (verdict.kind === 'exhausted') {
         handlers.onError(verdict.message, { kind: 'limit', elsewhere: true })
         return null
