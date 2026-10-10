@@ -323,10 +323,6 @@ export function CommandCard({
               <i />
             </span>
             {elapsed > 0 && ` ${clock(elapsed)}`}
-            {/* Said only once the wait is long enough to need explaining. An
-                installer really does take this long, and saying so is the
-                difference between waiting and giving up. */}
-            {phase.note && ` · ${phase.note}`}
           </span>
         )}
         {state === 'cancelled' && <span className="cmd-status">skipped</span>}
@@ -356,6 +352,11 @@ export function CommandCard({
             <span className="cmd-caret">&#9608;</span>
           </pre>
           {lines.length === 0 && <p className="cmd-live-empty">nothing printed yet</p>}
+          {/* Below rather than in the head, where a 460px panel clips it.
+              Said only once the wait is long enough to need explaining: an
+              installer really does take this long, and saying so is the
+              difference between waiting and giving up. */}
+          {phase.note && <p className="cmd-live-note">{phase.note}</p>}
         </div>
       )}
 
