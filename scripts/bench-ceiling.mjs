@@ -1079,6 +1079,75 @@ const RUNGS = [
         ? null
         : 'did not send a corrected command, which is the whole remedy'
     }
+  },
+  {
+    level: 39,
+    name: 'runs it rather than explaining how',
+    ask: 'install spotify',
+    sample: ['Installing Spotify with winget.', RUN('winget install --id Spotify.Spotify -e')].join(
+      NL
+    ),
+    badSample: [
+      '1. Open PowerShell.',
+      '2. Run the following command:',
+      RUN('winget install --id Spotify.Spotify'),
+      '3. Press Y if prompted.'
+    ].join(NL),
+    /**
+     * Reported from real use. Asked to install Spotify, the model wrote a
+     * numbered tutorial - open PowerShell, run this, press Y - and offered
+     * the Microsoft Store as an alternative. Every word of that is
+     * addressed to someone about to type it themselves, and Wumpy is the
+     * one holding the shell.
+     */
+    want: (text) => (/```wumpy-run/.test(text) ? null : 'proposed nothing runnable'),
+    reject: (text) => {
+      if (
+        /open (powershell|a terminal|command prompt)|press\s+Y\b|click\s+(Get|Install)/i.test(text)
+      ) {
+        return 'wrote instructions for the user to follow by hand'
+      }
+      if (/^\s*\d[.)]\s/m.test(text)) return 'numbered the steps like a tutorial'
+      if (/microsoft store|alternatively|option 2/i.test(text))
+        return 'offered a second way of doing it'
+      /**
+       * The block has not run when the words after it are written, and on
+       * accept-all it runs the moment the message lands - so a message
+       * that proposes an install and then says it is installed is on
+       * screen claiming success while the installer is still going. That
+       * is the "it says finished while it is still running" report.
+       */
+      if (/(is|has been|was) (now )?(installed|done|complete)|successfully installed/i.test(text)) {
+        return 'claimed it was finished before it had run'
+      }
+      return null
+    }
+  },
+  {
+    level: 40,
+    name: 'offers to install what is not there',
+    history: [
+      { role: 'user', content: 'is minecraft installed?' },
+      { role: 'assistant', content: 'No, Minecraft is not installed.' }
+    ],
+    ask: 'open it',
+    sample: ASK('Minecraft is not installed. What would you like to do?', 'Install it', 'Nothing'),
+    // Paired with the reject, which is the guard that needs proving: the
+    // want is already exercised by the sample above. Trying to launch
+    // something it has just called missing is the failure worth catching.
+    badSample: RUN('Start-Process minecraft'),
+    /**
+     * Reported from real use: told Minecraft was not installed and then
+     * asked to open it, the options offered were "open a browser" and "no
+     * thanks". Neither is what anyone wants, and the obvious third was
+     * missing.
+     */
+    want: (text) =>
+      /install/i.test(text) ? null : 'never offered to install the thing that is not there',
+    reject: (text) =>
+      /```wumpy-run[\s\S]*?Start-Process/i.test(text)
+        ? 'tried to open something it had just said is not installed'
+        : null
   }
 ]
 
@@ -1277,7 +1346,15 @@ function asTheAppSeesIt(provider, text) {
 }
 
 async function attempt(provider, model, rung) {
-  const raw = await ask(provider, model, [{ role: 'user', content: rung.ask }])
+  /**
+   * `history` sets the scene before the question.
+   *
+   * Some behaviour only exists in context: "open it" is only wrong when
+   * the thing has already been established as missing. Every rung above
+   * is a cold open, which is why that case had never been measured.
+   */
+  const opening = [...(rung.history ?? []), { role: 'user', content: rung.ask }]
+  const raw = await ask(provider, model, opening)
   if (raw.error) return { ok: false, why: raw.error }
   const r = { ...raw, text: asTheAppSeesIt(provider, raw.text) }
 
@@ -1371,7 +1448,7 @@ async function attempt(provider, model, rung) {
   }
 
   const second = await ask(provider, model, [
-    { role: 'user', content: rung.ask },
+    ...opening,
     { role: 'assistant', content: r.text },
     { role: 'user', content: feedback.text }
   ])

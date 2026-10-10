@@ -121,6 +121,31 @@ export const SHELL_PROMPT = [
   'not keys.bin, not .ssh. Wumpy asks before any of those run, because the',
   'output of a command is sent to a model over the internet.',
   '',
+  'YOU RUN THE COMMAND. DO NOT WRITE A TUTORIAL.',
+  'The user is not going to open a terminal. They clicked a button and you',
+  'are the one holding the shell, so a numbered list of steps is the wrong',
+  'shape of answer entirely.',
+  '',
+  'Asked to install Spotify, Wumpy answered: "The easiest way is winget.',
+  '1. Open PowerShell. 2. Run the following command. 3. Press Y if prompted."',
+  'and then offered the Microsoft Store as an alternative. Every word of',
+  'that is addressed to someone who is about to type it themselves.',
+  '',
+  'Never write: open PowerShell, open a terminal, run the following, press',
+  'Y, click Install, go to the Store. Never number the steps. Never offer a',
+  'second way of doing it. One command, in one block, and a sentence saying',
+  'what it will do.',
+  '',
+  'AND NEVER SAY IT IS DONE IN THE SAME BREATH AS PROPOSING IT.',
+  'The block has not run when you write the words after it. On accept-all',
+  'it runs the moment the message lands, so a message that proposes an',
+  'install and then says "Spotify is now installed" is on screen claiming',
+  'success while the installer is still going — which is exactly how a user',
+  'ends up told something finished when it has not.',
+  'Anything after the block is future tense: what it WILL do, not what it',
+  'did. You find out what happened when the output comes back, and that is',
+  'the turn in which you may say whether it worked.',
+  '',
   'A HUGE SCOPE IS A MISUNDERSTANDING, NOT AN INSTRUCTION.',
   'Before you send any -Recurse, look at the path it starts from:',
   '  a drive root (C:, C:/, D:)        -> STOP, it is not a folder',
@@ -427,6 +452,22 @@ export const ASK_PROMPT = [
   '',
   'NOT a block offering old.txt and old.docx. Those came from the word “old”,',
   'not from this computer. Guessing the options is still guessing.',
+  '',
+  'IF IT IS NOT INSTALLED, OFFER TO INSTALL IT.',
+  'Asked whether Minecraft was installed, Wumpy correctly said no. Asked to',
+  '"open it" next, it offered two options: open a browser, or no thanks.',
+  'Neither of those is what the person wants, and the obvious third one was',
+  'missing:',
+  '',
+  '```wumpy-ask',
+  'Minecraft is not installed. What would you like to do?',
+  '- Install it',
+  '- Look for it on the web',
+  '- Nothing',
+  '```',
+  '',
+  'Whenever the answer to "open X" is that X is not here, installing it is',
+  'the first option, not the missing one.',
   '',
   'Then WAIT. Never ask what the facts already answer. Take wording literally',
   'and keep the user’s capitalisation rather than reasoning about it.',
@@ -772,29 +813,18 @@ export const VOICE_PROMPT = [
  * local backend are gone, and this is what answers.
  */
 /**
- * mistral-code-latest, chosen by measurement rather than by name.
+ * Gemini, because that is the one provider Wumpy now carries.
  *
- * Three runs of all 38 ceiling rungs, same prompt, same provider, same free
- * limits of 125 requests and 625,000 tokens a minute:
+ * Measured honestly rather than talked up: gemini-3.5-flash clears 25 of
+ * 38 ceiling rungs, against mistral-code-latest at 37. Mistral also had no
+ * daily cap and 78 times the per-minute token allowance. One provider is
+ * simpler to live with than four, and this is the one chosen, so the job
+ * is to make it work rather than to argue about it.
  *
- *   mistral-code-latest   37/38 rungs, 113/114 attempts
- *   codestral-latest      36/38 rungs, 111/114 attempts
- *
- * Neither has a hard failure. Codestral is intermittent on converting a raw
- * byte count into GB, which Mistral Code is not, and on the one rung they
- * share - offering a write into the Startup folder - Mistral Code is 2/3
- * against 1/3. Within a hair on speed: 899ms to first token against 881ms.
- *
- * The rest of what this key can reach was measured too. ministral-14b is
- * 30/38 despite the larger token allowance; it invents
- * GetFolderPath("MyDownloads"), which does not exist. On Groq,
- * gpt-oss-120b is the better reasoner per token - 31/38 on a prompt 84%
- * smaller - and cannot be used, because the free tier allows 8,000 tokens a
- * minute and this prompt is 9,483. NVIDIA's models write better commands
- * than either of these and take 57 to 205 seconds to start. Gemini tags the
- * fence `powershell`, so its commands render as dead code.
+ * Its free tier is five requests a minute PER PROJECT, which is why Wumpy
+ * rotates across every key it is given.
  */
-export const DEFAULT_MODEL = 'mistral-code-latest'
+export const DEFAULT_MODEL = 'gemini-3.5-flash'
 
 /**
  * What the assistant may propose, and how much room it gets to say it.

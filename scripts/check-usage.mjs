@@ -158,18 +158,19 @@ check('and is zero padded', U.todayKey(new Date(2026, 10, 1)), '2026-11-01')
  * model, output cap and voice. The measurements ended that, and the same
  * discipline chose what replaced them.
  *
- * Three runs of all 38 ceiling rungs, same prompt, same provider, same free
- * limits: mistral-code-latest 37/38 rungs and 113/114 attempts, against
- * codestral-latest at 36/38 and 111/114. Neither has a hard failure.
- * Codestral is intermittent on turning a raw byte count into GB and worse on
- * the rung they share. 899ms to first token against 881ms, so the switch
- * costs nothing.
+ * Gemini now, by choice rather than by score. Measured on the same 38
+ * rungs: gemini-3.5-flash 25, mistral-code-latest 37. Mistral also had no
+ * daily cap and 78 times the per-minute token allowance.
  *
- * Asserted here so the default cannot drift back to a name someone
- * remembers rather than the one that was measured.
+ * That trade was made deliberately - one provider is simpler to live with
+ * than four - and the number is written down here so nobody has to
+ * rediscover it. Gemini's free tier is five requests a minute per project,
+ * which is why Wumpy rotates across every key it holds.
+ *
+ * Asserted so the default cannot drift back to a name someone remembers.
  */
-check('there is one model, and it is the measured one', T.DEFAULT_MODEL, 'mistral-code-latest')
-check('it is a model the cloud layer can route', C.providerFor(T.DEFAULT_MODEL), 'mistral')
+check('there is one model, and it is the chosen one', T.DEFAULT_MODEL, 'gemini-3.5-flash')
+check('it is a model the cloud layer can route', C.providerFor(T.DEFAULT_MODEL), 'google')
 check(
   'and one the picker offers',
   C.CLOUD_MODELS.some((m) => m.id === T.DEFAULT_MODEL),

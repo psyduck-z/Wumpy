@@ -312,66 +312,56 @@ check(
   C.providerFor('mistralai/mixtral-8x7b-instruct'),
   'nvidia'
 )
-check(
-  'it has its own rotation',
-  C.siblingModel('codestral-latest', new Set()),
-  'ministral-14b-latest'
-)
-check(
-  'which stays with Mistral',
-  C.providerFor(C.siblingModel('codestral-latest', new Set())),
-  'mistral'
-)
+/**
+ * The ORDER lists still name Mistral and NVIDIA models, but the catalogue
+ * is the authority on what exists - so a model the app no longer ships has
+ * nowhere to step sideways to. That is the correct answer: falling back
+ * onto something nobody can select, and which may have no key behind it,
+ * is worse than reporting that there is no alternative.
+ */
+check('a model no longer shipped has no sibling', C.siblingModel('codestral-latest', new Set()), null)
 
 /**
- * Every Mistral offered must be one a free key can actually call.
+ * The catalogue is Gemini, and nothing else.
  *
- * Probed with a real free key: the premier models answer 429 with
- * x-ratelimit-limit-req-minute of 0, which is the plan refusing rather than
- * congestion, and mistral-large-* is not in /models on that key at all. Three
- * of the five shipped here were unreachable - the same mistake as the three
- * Gemini models that sat in the rotation answering 400 and 404, visible in
- * /usage as rows with one turn and no tokens.
+ * Mistral, Groq and NVIDIA were measured and removed. Not because they
+ * were worse - mistral-code-latest scored 37 of 38 ceiling rungs against
+ * Gemini's 25, with no daily cap and 78 times the per-minute token
+ * allowance - but because one provider is simpler to live with than four,
+ * and this is the one chosen.
  *
- * Medium is the deliberate exception: a paid key reaches it, it is the best
- * Mistral for this app when one does, and its blurb says so.
+ * The block this replaced checked which Mistral models a free key can
+ * actually reach. That knowledge is not lost: it is in the git history and
+ * in PROVIDERS, which still carries every provider so a key for one keeps
+ * working. What is gone is the choice, and these checks make sure it stays
+ * gone rather than creeping back one convenient entry at a time.
  */
-const FREE_MISTRAL = [
-  'codestral-latest',
-  'mistral-code-latest',
-  'ministral-3b-latest',
-  'ministral-8b-latest',
-  'ministral-14b-latest'
-]
-const PAID_ONLY = ['mistral-large-latest', 'mistral-large-4', 'mistral-small-latest']
-for (const id of PAID_ONLY) {
-  check(
-    `${id} is gone from the catalogue`,
-    C.CLOUD_MODELS.some((m) => m.id === id),
-    false
-  )
-  check(`and out of the rotation`, C.siblingModel('codestral-latest', new Set([id])) !== id, true)
+for (const m of C.CLOUD_MODELS) {
+  check(`${m.id} is a Gemini model`, m.provider, 'google')
 }
-const rotation = []
-for (let m = C.siblingModel('codestral-latest', new Set()); m;) {
-  rotation.push(m)
-  m = C.siblingModel('codestral-latest', new Set(rotation))
+check('the picker offers only Gemini', new Set(C.CLOUD_MODELS.map((m) => m.provider)), new Set(['google']))
+check('and offers something', C.CLOUD_MODELS.length > 0, true)
+
+/**
+ * Several variants rather than literally one, because the flash models
+ * return 503 "high demand" often enough that having somewhere to go
+ * matters more than a tidy single entry.
+ */
+check('with a fallback or two', C.CLOUD_MODELS.length >= 3, true)
+
+/**
+ * Every one of them must be flagged looseFences. Gemini writes
+ * ```powershell where Wumpy asks for ```wumpy-run, and without the flag
+ * its commands render as grey text with no button - which is how it scored
+ * 1 of 38 before anyone noticed.
+ */
+for (const m of C.CLOUD_MODELS) {
+  check(`${m.id} is flagged looseFences`, Boolean(m.looseFences), true)
 }
-check(
-  'the rotation is free models, then Medium last',
-  rotation.filter((m) => !FREE_MISTRAL.includes(m)),
-  ['mistral-medium-latest']
-)
-check(
-  'and Medium says it needs a paid plan',
-  /paid plan only/i.test(C.CLOUD_MODELS.find((m) => m.id === 'mistral-medium-latest').blurb),
-  true
-)
-check(
-  'and it is offered in the picker',
-  C.CLOUD_MODELS.some((m) => m.provider === 'mistral'),
-  true
-)
+
+// The provider plumbing stays, so a key for another one is not orphaned.
+check('the other providers are still routable', C.PROVIDER_IDS.length > 1, true)
+
 /* ------------------------------------------------- the one that reasons anyway */
 
 // NVIDIA hosts other people's open weights on a free developer key, and one of
@@ -453,19 +443,35 @@ check(
   true
 )
 check('and MiniMax', C.providerFor('minimaxai/minimax-m2.7'), 'nvidia')
-// Both serve Kimi. Nothing in the string says which, so the catalogue decides
-// and the shape rule is only a tie-break - documented, not accidental.
-check('Kimi K3 is NVIDIA’s, by catalogue', C.providerFor('moonshotai/kimi-k3'), 'nvidia')
+/**
+ * Both Groq and NVIDIA serve Kimi, and nothing in the id says which, so the
+ * catalogue used to decide and the shape rule was only a tie-break.
+ *
+ * With the catalogue reduced to Gemini there is no catalogue entry to
+ * consult, so every Kimi now falls through to the shape rule and lands on
+ * Groq. That is the documented fallback working, not a routing bug - and
+ * it is worth asserting rather than deleting, because it is exactly what
+ * would bite if a Kimi were ever added back expecting NVIDIA.
+ */
+check('an uncatalogued Kimi falls through to Groq', C.providerFor('moonshotai/kimi-k3'), 'groq')
 check(
-  'an uncatalogued Kimi still guesses Groq',
+  'as does any other',
   C.providerFor('moonshotai/kimi-k2-instruct-0905'),
   'groq'
 )
-check('its rotation is by score', C.siblingModel('z-ai/glm-5.3', new Set()), 'moonshotai/kimi-k3')
+/**
+ * The NVIDIA rotation ordered its models by score. With none of them in
+ * the catalogue there is nothing to rotate to, which is the correct answer
+ * rather than an error - a sibling is only ever offered from models the
+ * app actually ships.
+ */
+check('an uncatalogued model has no sibling', C.siblingModel('z-ai/glm-5.3', new Set()), null)
+check('nor does a Kimi', C.siblingModel('moonshotai/kimi-k3', new Set()), null)
+// And a model that IS shipped still finds one.
 check(
-  'and stays with NVIDIA',
-  C.providerFor(C.siblingModel('moonshotai/kimi-k3', new Set())),
-  'nvidia'
+  'a Gemini still rotates to another Gemini',
+  C.providerFor(C.siblingModel('gemini-3.5-flash', new Set()) ?? 'gemini-3.5-flash'),
+  'google'
 )
 
 // An NVIDIA key is nvapi-prefixed, so a Groq key pasted at the wrong provider
@@ -708,10 +714,12 @@ check(
   C.siblingModel('gemini-3.5-flash', new Set(['gemini-3.6-flash'])),
   'gemini-3.7-flash'
 )
+check('nor does a Groq model', C.siblingModel('openai/gpt-oss-120b', new Set()), null)
+// A shipped model still finds one, and stays with its provider.
 check(
-  'it stays with the same provider',
-  C.providerFor(C.siblingModel('openai/gpt-oss-120b', new Set())),
-  'groq'
+  'a shipped model stays with its provider',
+  C.providerFor(C.siblingModel('gemini-3.5-flash', new Set())),
+  'google'
 )
 check(
   'and gives up when every one is spent',
