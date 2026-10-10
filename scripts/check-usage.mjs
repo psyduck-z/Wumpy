@@ -28,6 +28,7 @@ async function load(entry, name) {
 }
 const U = await load('src/shared/usage.ts', 'u')
 const T = await load('src/shared/assistant.ts', 't')
+const P = await load('src/shared/parsefail.ts', 'p')
 const C = await load('src/shared/cloud.ts', 'c')
 
 let failures = 0
@@ -470,24 +471,63 @@ check('an observed cap overrides the table', U.summarise(beats)[0].exhaustedAt, 
 // "I have successfully installed the official Spotify app" while winget was
 // still working. The closing line said the command was done, whatever had
 // actually happened to it.
-const appSrc = readFileSync('src/renderer/src/App.tsx', 'utf8')
+/**
+ * Asserted against what the function produces, not against the source text
+ * of whatever file happens to hold it. These five checks were matching
+ * strings in App.tsx and broke the moment the report moved into shared -
+ * where it had to go, so bench-ceiling could grade the second turn against
+ * the real report rather than a copy of it. The behaviour never changed.
+ */
+const result = (over) => ({
+  command: 'winget install --id Spotify.Spotify -e',
+  shell: 'powershell',
+  cwd: 'C:/Users/me',
+  stdout: 'Found Spotify [Spotify.Spotify]',
+  stderr: '',
+  exitCode: 0,
+  durationMs: 600_000,
+  timedOut: false,
+  truncated: false,
+  readOnly: false,
+  ...over
+})
+
+const killed = P.commandFeedback(result({ timedOut: true, exitCode: -1 }))
 check(
   'a killed command is reported as stopped',
-  appSrc.includes('Wumpy STOPPED that command'),
+  killed.text.includes('Wumpy STOPPED that command'),
   true
 )
 check(
   'and said to be possibly still running',
-  appSrc.includes('still be running in the background'),
+  killed.text.includes('still be running in the background'),
   true
 )
 check(
   'with success and failure both forbidden',
-  /Do NOT say it succeeded, and do not say it failed/.test(appSrc),
+  /Do NOT say it succeeded, and do not say it failed/.test(killed.text),
   true
 )
-check('"that command is done" is only for one that is', /result\.timedOut\s*\?/.test(appSrc), true)
-check('the quiet path excludes a timeout', appSrc.includes('!result.timedOut && !clipped'), true)
+// The ordinary closing line belongs only to a command that really finished.
+const finished = P.commandFeedback(result({}))
+check(
+  '"that command is done" is only for one that is',
+  finished.text.includes('That command is done') && !killed.text.includes('That command is done'),
+  true
+)
+/**
+ * The quiet path - a change that succeeded silently, answered without
+ * spending a model turn - must never swallow a timeout. "Succeeded, no
+ * output" about something still running is the worst sentence available.
+ */
+const quiet = P.commandFeedback(result({ stdout: '', stderr: '' }))
+const quietTimeout = P.commandFeedback(result({ stdout: '', stderr: '', timedOut: true }))
+check('the quiet path exists for a silent change', quiet.kind, 'notice')
+check('the quiet path excludes a timeout', quietTimeout.kind, 'report')
+// And a read that printed nothing is an answer, so it always goes back.
+const quietRead = P.commandFeedback(result({ stdout: '', stderr: '', readOnly: true }))
+check('a silent read still reaches the model', quietRead.kind, 'report')
+
 // Two minutes killed real installs; nothing is blocked while one runs.
 check(
   'the ceiling allows an install to finish',

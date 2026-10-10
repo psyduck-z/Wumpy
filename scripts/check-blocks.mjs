@@ -12,9 +12,70 @@
  * Run with: npm run check:blocks
  */
 import { build } from 'esbuild'
-import { rmSync, writeFileSync } from 'node:fs'
+import { readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { pathToFileURL } from 'node:url'
+
+/** Counted before the main tally exists, and folded into it below. */
+let failedControl = 0
+
+/* --------------------------------- control characters in the source ------ */
+
+/**
+ * The bug in this file's own header, caught automatically this time.
+ *
+ * A regex here once held literal backspace characters instead of word
+ * boundaries, so it matched nothing and every proposed command rendered as
+ * inert code. It happened again while building bench-ceiling: seven of them
+ * in one file, because these scripts are edited by Python helpers and a `\b`
+ * in a Python string is chr(8), not a regex boundary. One of them sat in a
+ * grader that could therefore never pass, and reported a correct answer as a
+ * failure for three runs.
+ *
+ * Nothing in a listing shows it. grep, sed and the editor all render chr(8)
+ * as nothing at all, so the line reads exactly as intended. Only a scan
+ * finds it - and writing this check with escape sequences put three more
+ * control characters into this very file, so it is written with character
+ * codes and no escapes at all.
+ */
+function controlCharsIn(text) {
+  const found = new Set()
+  for (let i = 0; i < text.length; i++) {
+    const code = text.charCodeAt(i)
+    // Tab, newline and carriage return are the only ones source may contain.
+    if (code < 32 && code !== 9 && code !== 10 && code !== 13) found.add(code)
+    if (code === 127) found.add(code)
+  }
+  return [...found]
+}
+
+{
+  const files = []
+  const walk = (dir) => {
+    for (const entry of readdirSync(dir, { withFileTypes: true })) {
+      if (entry.name === 'node_modules' || entry.name.startsWith('.')) continue
+      const full = join(dir, entry.name)
+      if (entry.isDirectory()) walk(full)
+      else if (['.ts', '.tsx', '.mjs', '.cjs', '.js'].some((e) => entry.name.endsWith(e))) {
+        files.push(full)
+      }
+    }
+  }
+  walk('src')
+  walk('scripts')
+
+  let dirty = 0
+  for (const file of files) {
+    const codes = controlCharsIn(readFileSync(file, 'utf8'))
+    if (codes.length === 0) continue
+    dirty++
+    failedControl++
+    console.log(`FAIL control characters in ${file}: ${codes.join(', ')}`)
+  }
+  console.log(
+    `${dirty ? 'FAIL' : 'ok  '} ${files.length} source files free of stray control characters`
+  )
+}
 
 const CASES = [
   [
@@ -107,7 +168,7 @@ function classify(html) {
   return 'prose'
 }
 
-let failed = 0
+let failed = failedControl
 for (const [name, md, want] of CASES) {
   const got = classify(render(md))
   const ok = got === want
@@ -251,6 +312,6 @@ console.log(`${bothKept ? 'ok  ' : 'FAIL'} an ask block does not consume the one
 
 rmSync(out, { force: true })
 
-const total = CASES.length + 8
+const total = CASES.length + 9
 console.log(`\n${total - failed}/${total} block checks correct`)
 process.exit(failed === 0 ? 0 : 1)

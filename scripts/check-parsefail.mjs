@@ -139,20 +139,268 @@ check('and must not overturn an established fact', /Never contradict/.test(faile
 check('failure is reported only after trying', /once you have actually tried/.test(failed), true)
 check('and says what was tried', /what you tried and what it said/.test(failed), true)
 
-const app = readFileSync('src/renderer/src/App.tsx', 'utf8')
-check('the report uses it', app.includes('NEVER_RAN_ENDING'), true)
-// The header said "I ran that command" over the top of "that command did NOT
-// run", which is the app contradicting itself in the same message.
-check('and does not claim to have run it', app.includes('That command could not run.'), true)
-check('the failed ending is wired in', app.includes('FAILED_ENDING'), true)
+/* ------------------------- absent program vs mangled command ------------- */
+
+/**
+ * These two produce the same PowerShell sentence and mean opposite things.
+ *
+ * `The term 'X' is not recognized` arrives both when a command was wrapped
+ * onto two lines and left a fragment behind, and when the program simply is
+ * not installed. Treating them alike produced a loop: asked for the docker
+ * version, the model proposed `docker --version`, Wumpy answered "that
+ * command did NOT run and has told you NOTHING, send it again as one line",
+ * and the model proposed it again. The answer was in the error all along.
+ *
+ * They are told apart by whether the unrecognised term is the command's own
+ * head. Nothing else in the message distinguishes them.
+ */
+const NOT_RECOGNISED = (term) =>
+  `${term} : The term '${term}' is not recognized as the name of a cmdlet, function, script file, or operable program.`
+
 check(
-  'and only for a command that ran',
-  app.includes('result.exitCode !== 0 && !result.timedOut'),
+  'an absent program is not a parse failure',
+  P.neverRan({
+    stdout: '',
+    stderr: NOT_RECOGNISED('docker'),
+    exitCode: 1,
+    command: 'docker --version'
+  }),
+  false
+)
+check(
+  'and is recognised as not being on PATH',
+  P.notOnPath({ stderr: NOT_RECOGNISED('docker'), command: 'docker --version' }),
+  true
+)
+// The captured wrapping failure: the fragment is not the head.
+check(
+  'an orphaned parameter still is a parse failure',
+  P.neverRan({
+    stdout: '',
+    stderr: NOT_RECOGNISED('-ErrorAction'),
+    exitCode: 1,
+    command: 'Get-ChildItem C:/x'
+  }),
   true
 )
 check(
+  'and is not reported as a missing program',
+  P.notOnPath({ stderr: NOT_RECOGNISED('-ErrorAction'), command: 'Get-ChildItem C:/x' }),
+  false
+)
+// With no command to compare against, the cautious reading stands.
+check(
+  'without the command it stays a parse failure',
+  P.neverRan({ stdout: '', stderr: NOT_RECOGNISED('docker'), exitCode: 1 }),
+  true
+)
+// And the ending told to the model is the one that ends the loop.
+const absent = P.commandFeedback({
+  command: 'docker --version',
+  shell: 'powershell',
+  cwd: 'C:/Users/me',
+  stdout: '',
+  stderr: NOT_RECOGNISED('docker'),
+  exitCode: 1,
+  durationMs: 5,
+  timedOut: false,
+  truncated: false,
+  readOnly: true
+})
+check('the report says it is not installed', absent.text.includes('not installed'), true)
+check('and tells it not to try again', /Do NOT propose that command again/.test(absent.text), true)
+check(
+  'and not to read a version out of the error',
+  absent.text.includes('Do not read a version number out of an error message'),
+  true
+)
+// An app can be installed without being on PATH, which is a different
+// question - the ending must not overreach into answering it.
+check(
+  'while allowing that an app may still be installed',
+  absent.text.includes('still not be on PATH'),
+  true
+)
+
+/* ------------------------------ a version that is not one ---------------- */
+
+/**
+ * 0.0.0.0 is what Windows reports for a binary with no version resource.
+ * Get-Command prints it in the Version column, and the model read it out:
+ * "You have version 0.0.0.0 of Ollama", whose real version is 0.40.1. The
+ * prompt forbade that already and one run in two did it anyway, so the
+ * report now says it at the moment the figure is on screen.
+ *
+ * Scoped so it does not fire on an address. 10.0.0.0 and 192.168.0.0 both
+ * contain the digits and neither is a version column.
+ */
+{
+  const withOutput = (stdout) =>
+    P.commandFeedback({
+      command: 'Get-Command ollama',
+      shell: 'powershell',
+      cwd: 'C:/Users/me',
+      stdout,
+      stderr: '',
+      exitCode: 0,
+      durationMs: 1,
+      timedOut: false,
+      truncated: false,
+      readOnly: true
+    }).text.includes('is not a version')
+
+  check('a bare 0.0.0.0 is flagged', withOutput('0.0.0.0'), true)
+  check('and one in a Version column', withOutput('Version   0.0.0.0'), true)
+  check('a real version is left alone', withOutput('0.40.1'), false)
+  check('and so is an address', withOutput('10.0.0.0'), false)
+  check('including a private one', withOutput('192.168.0.0'), false)
+}
+
+/* ------------------------------ refused, not answered -------------------- */
+
+const NL = String.fromCharCode(10)
+
+/**
+ * The case that mattered most, because the wrong reading is a claim about
+ * disk encryption.
+ *
+ * Without elevation, Get-BitLockerVolume prints the denial AND a second line
+ * saying the drive "does not have an associated BitLocker volume" - which is
+ * the module reporting what it can see from behind a locked door. The model
+ * read the second line and told the user BitLocker was off.
+ */
+const DENIED = [
+  'Get-CimInstance : Access denied',
+  '    + CategoryInfo          : PermissionDenied: (root/cimv2) [Get-CimInstance], CimException',
+  'Get-Win32EncryptableVolumeInternal : C: does not have an associated BitLocker volume.'
+].join(NL)
+
+const refused = P.commandFeedback({
+  command: 'Get-BitLockerVolume -MountPoint C:',
+  shell: 'powershell',
+  cwd: 'C:/Users/me',
+  stdout: '',
+  stderr: DENIED,
+  exitCode: 1,
+  durationMs: 20,
+  timedOut: false,
+  truncated: false,
+  readOnly: true
+})
+check('a permission error is recognised', P.needsElevation({ stderr: DENIED }), true)
+check(
+  'the report says it was refused',
+  refused.text.includes('REFUSED for want of permission'),
+  true
+)
+check('and that nothing was learned', refused.text.includes('You therefore know NOTHING'), true)
+check(
+  'and that the lines after it are unsafe to read',
+  refused.text.includes('unsafe to read'),
+  true
+)
+check(
+  'and never to call a security setting off because of it',
+  /NEVER report a security setting as off/.test(refused.text),
+  true
+)
+// It must beat the ordinary failure ending, which would have invited exactly
+// the wrong reading: "answer the original question from this output".
+check(
+  'it takes precedence over the failed ending',
+  !refused.text.includes(P.FAILED_ENDING[0]),
+  true
+)
+// A denial can arrive alongside real output when only part of a query was
+// allowed, and the warning still applies.
+const partly = P.commandFeedback({
+  command: 'Get-Something',
+  shell: 'powershell',
+  cwd: 'C:/Users/me',
+  stdout: 'Name  Value',
+  stderr: 'Access is denied',
+  exitCode: 0,
+  durationMs: 20,
+  timedOut: false,
+  truncated: false,
+  readOnly: true
+})
+check(
+  'a partial success is still flagged',
+  partly.text.includes('REFUSED for want of permission'),
+  true
+)
+// And an ordinary error is not mistaken for a permission problem.
+check(
+  'an ordinary failure is left alone',
+  P.needsElevation({ stderr: 'Cannot find path C:/nope because it does not exist.' }),
+  false
+)
+
+/**
+ * The endings, asserted through the report the model is actually sent.
+ *
+ * These were string matches against App.tsx and broke when the report moved
+ * into shared - which it had to, so bench-ceiling could grade the second
+ * turn against the real thing rather than a copy. Asking the function what
+ * it produces is the better test anyway: a string match would still pass if
+ * the constant were imported and then used in the wrong branch.
+ */
+const result = (over) => ({
+  command: 'Get-Command spotify',
+  shell: 'powershell',
+  cwd: 'C:/Users/me',
+  stdout: '',
+  stderr: '',
+  exitCode: 0,
+  durationMs: 10,
+  timedOut: false,
+  truncated: false,
+  readOnly: true,
+  ...over
+})
+
+// A command PowerShell could not parse.
+const parseError = P.commandFeedback(
+  result({
+    exitCode: 1,
+    stderr: 'At line:1 char:1 + CategoryInfo : ParserError: (:) [], ParseException'
+  })
+)
+check('the report uses the never-ran ending', parseError.text.includes(P.NEVER_RAN_ENDING[0]), true)
+// The header said "I ran that command" over the top of "that command did NOT
+// run", which is the app contradicting itself in the same message.
+check(
+  'and does not claim to have run it',
+  parseError.text.includes('That command could not run.') &&
+    !parseError.text.includes('I ran that command'),
+  true
+)
+
+// A command that ran and returned non-zero.
+const ranAndFailed = P.commandFeedback(
+  result({ exitCode: 1, stderr: 'Start-Process : This command cannot be run' })
+)
+check('the failed ending is wired in', ranAndFailed.text.includes(P.FAILED_ENDING[0]), true)
+check(
+  'and only for a command that ran',
+  ranAndFailed.text.includes('I ran that command') &&
+    !ranAndFailed.text.includes(P.NEVER_RAN_ENDING[0]),
+  true
+)
+// A timeout is neither of those and must not borrow either ending.
+const stopped = P.commandFeedback(result({ exitCode: -1, timedOut: true, stdout: 'working...' }))
+check(
+  'a timeout gets neither ending',
+  !stopped.text.includes(P.FAILED_ENDING[0]) && !stopped.text.includes(P.NEVER_RAN_ENDING[0]),
+  true
+)
+
+// And an ordinary success still asks for an answer from the output.
+const fine = P.commandFeedback(result({ stdout: 'C:/Program Files/nodejs/node.exe' }))
+check(
   'the ordinary ending still says to answer from the output',
-  app.includes('Answer the original'),
+  fine.text.includes('Answer the original'),
   true
 )
 

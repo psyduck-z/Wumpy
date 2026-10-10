@@ -16,7 +16,7 @@ import type {
 } from '@shared/types'
 import { isTall } from '@shared/types'
 import { looksLikeUrl, SEARCH_ENGINES, type LinkApproval } from '@shared/links'
-import { FAILED_ENDING, NEVER_RAN_ENDING, neverRan } from '@shared/parsefail'
+import { clippedOutput, commandFeedback } from '@shared/parsefail'
 import { CONTEXT_TOKENS, DEFAULT_MODEL } from '@shared/assistant'
 import { shouldRetitle } from '@shared/titles'
 import { CLOUD_MODELS, PROVIDERS } from '@shared/cloud'
@@ -477,67 +477,18 @@ export default function App(): React.JSX.Element {
     // A click does not spend budget, but the command still counts as run, so
     // the model cannot have it repeated automatically afterwards.
     if (!unattended) ranCommandsRef.current.push(result.command.trim())
-    const body = [result.stdout, result.stderr].filter(Boolean).join('\n').trim()
-    const clipped = body.length > 3000 ? `${body.slice(0, 3000)}\n…truncated…` : body
-
-    // A change that succeeded and printed nothing has nothing to interpret.
-    // Deleting a file used to cost two model turns — one to propose it, one to
-    // be told "exit code 0, no output" and answer "Done." — which on this
-    // hardware is most of a minute spent saying what the card already says.
-    // The fact still enters the history as a note, so a later turn knows.
-    //
-    // Reads are different: `Get-Command foo` printing nothing is the answer
-    // rather than the absence of one, so those always go back to the model.
-    // The quiet path is for a change that finished cleanly. A killed command
-    // has an exit code of -1 anyway, but the guard is explicit rather than
-    // relying on that, because "succeeded, no output" about something that
-    // is still running is the worst sentence in this file.
-    if (!result.readOnly && result.exitCode === 0 && !result.timedOut && !clipped) {
-      chatRef.current.notice(`Ran \`${result.command}\` — succeeded, no output.`)
+    /**
+     * One definition of this report, in shared, because bench-ceiling now
+     * grades what the model says after reading the output - and a benchmark
+     * that writes its own version of the report measures a conversation the
+     * app never has.
+     */
+    const feedback = commandFeedback(result)
+    if (feedback.kind === 'notice') {
+      chatRef.current.notice(feedback.text)
       return
     }
-
-    /**
-     * "That command is done" used to be said even when it was not.
-     *
-     * A command Wumpy kills on the time limit got the same closing line as
-     * one that finished, so an install cut off mid-flight was reported to
-     * the model as complete - and the model duly answered "I have
-     * successfully installed the official Spotify app". Observed: it was
-     * not in the Start menu when that was said, and was a while later.
-     *
-     * A killed command is the one case where nothing may be concluded from
-     * the output, because the output is only whatever had been printed when
-     * the axe fell.
-     */
-    const ending = neverRan(result)
-      ? NEVER_RAN_ENDING
-      : result.exitCode !== 0 && !result.timedOut
-        ? FAILED_ENDING
-        : result.timedOut
-          ? [
-              'Wumpy STOPPED that command before it finished — it hit the time limit.',
-              'Whatever it was doing may still be running in the background, and the',
-              'output above is only what it had printed so far.',
-              'Do NOT say it succeeded, and do not say it failed. Say it was still',
-              'going, then propose ONE command that checks the real state.'
-            ]
-          : [
-              // Without this a 3.8B model answers the report by proposing the
-              // same command again, which in an automatic mode runs it again.
-              'That command is done. Do not propose it again. Answer the original',
-              'question from this output, in words.'
-            ]
-
-    const report = [
-      neverRan(result)
-        ? `That command could not run. Exit code ${result.exitCode}.`
-        : `I ran that command. Exit code ${result.exitCode}${result.timedOut ? ' (timed out)' : ''}.`,
-      '',
-      clipped ? ['```', clipped, '```'].join('\n') : '(no output)',
-      '',
-      ...ending
-    ].join('\n')
+    const report = feedback.text
 
     // Sent as a user turn because that is the role the model expects a tool
     // result to arrive in, but shown as the short line instead of the dump.
@@ -545,7 +496,9 @@ export default function App(): React.JSX.Element {
     // A turn was already in flight, so the output would otherwise vanish.
     // It still reaches the model, just as a fact rather than a question.
     if (!sent) {
-      chatRef.current.notice(`Ran \`${result.command}\`:\n${clipped || '(no output)'}`)
+      chatRef.current.notice(
+        `Ran \`${result.command}\`:\n${clippedOutput(result) || '(no output)'}`
+      )
     }
   }, [])
 

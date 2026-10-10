@@ -127,6 +127,42 @@ const RISKY: Array<{ pattern: RegExp; why: string }> = [
   {
     pattern: /\b(Register|Unregister)-ScheduledTask\b|\bschtasks\b[^|]*\/(create|delete)/i,
     why: 'changes scheduled tasks'
+  },
+  /**
+   * The one read in here, and it earns its place.
+   *
+   * Asked to list every file on the computer, the model proposed
+   * `Get-ChildItem -Recurse -File -Path C:\`. Nothing is destroyed, so every
+   * other rule here says let it run - and on accept-all it would start by
+   * itself and spend minutes thrashing the disk to produce more lines than
+   * any window can hold. Being told first is the whole value.
+   *
+   * Both halves must be present: a recursive walk, and a bare drive root. A
+   * recursive scan of a named folder is ordinary and stays unattended, and a
+   * drive root with no recursion is one directory listing.
+   *
+   * `dir /s` is the same request in cmd and was missed by a -Recurse-only
+   * test, which a check caught.
+   */
+  {
+    pattern:
+      /(?=[\s\S]*(?:-Recurse\b|\bdir\b[\s\S]*?\/s\b))(?=[\s\S]*(?:^|\s)[A-Za-z]:[\\/]?(?:\s|$))/i,
+    why: 'scans an entire drive, which takes minutes'
+  },
+  /**
+   * The same hazard with the path left off, which is the version the model
+   * kept writing after it had been taught not to name a drive:
+   * `Get-ChildItem -Recurse -File` walks everything below wherever commands
+   * run from, which is their whole profile.
+   *
+   * Recognised by the absence of anything path-shaped - a separator, a `~`,
+   * an $env: or an [Environment] lookup - because a -Recurse that names
+   * where to start is ordinary work and must stay unattended.
+   */
+  {
+    pattern:
+      /^(?=[\s\S]*-Recurse\b)(?![\s\S]*(?:[\\/]|~|\$env:|\$home|\[Environment\]|\$PSScriptRoot))/i,
+    why: 'scans everything below the working folder'
   }
 ]
 
@@ -279,14 +315,29 @@ const READ_SUBCOMMANDS: Record<string, string[]> = {
 }
 
 /** Always safe on any of the tools above. */
-const VERSION_FLAGS = new Set(['--version', '-v', '-V', 'version', '--help', '-h', '-?', '/?'])
+/**
+ * `-version` with one dash is what ffmpeg and java use, and omitting it
+ * refused `ffmpeg -version` while allowing `ffmpeg --version`, which is the
+ * allowlist being wrong about the world rather than careful.
+ */
+const VERSION_FLAGS = new Set([
+  '--version',
+  '-version',
+  '-v',
+  '-V',
+  'version',
+  '--help',
+  '-h',
+  '-?',
+  '/?'
+])
 
 /** Flags that make an otherwise harmless search tool act. */
 const DANGEROUS_FIND_FLAGS = /(^|\s)-(exec|execdir|delete|ok|okdir|fls|fprint|fprintf)(\s|$)/i
 
-/** Anything here means the command writes somewhere, whatever its head says. */ /** Anything here means the command writes somewhere, whatever its head says. */
+/** Anything here means the command writes somewhere, whatever its head says. */
 const WRITE_MARKERS =
-  /(^|\s)(>|>>|\||&&|;)\s*(set-|new-|remove-|clear-|stop-|start-|restart-|rename-|move-|copy-|out-file|tee-object)|(^|\s)(set-|new-|remove-|clear-|rename-|move-|copy-|stop-|start-|restart-)[a-z]+|(^|\s)(rm|del|rmdir|rd|mkdir|md|move|copy|xcopy|robocopy|format|diskpart|reg|sc|net|shutdown|taskkill|icacls|takeown|attrib)(\s|$)|>\s*\S/i
+  /(^|\s)(>|>>|\||&&|;)\s*(set-|new-|remove-|clear-|stop-|start-|restart-|rename-|move-|copy-|out-file|tee-object)|(^|\s)(set-|new-|remove-|clear-|rename-|move-|copy-|stop-|start-|restart-)[a-z]+|(^|\s)(rm|del|rmdir|rd|mkdir|md|move|copy|xcopy|robocopy|format|diskpart|reg|sc|net|shutdown|taskkill|icacls|takeown|attrib|ri|mi|rni|clc|si|sp|spps|spsv|kill|erase)(\s|$)|>\s*\S/i
 
 /**
  * Classifies a command as read-only or not.
@@ -312,6 +363,52 @@ const WRITE_MARKERS =
 function isReadingCmdlet(name: string): boolean {
   const lower = name.toLowerCase()
   return lower.startsWith('get-') || READ_ONLY.has(lower)
+}
+
+/**
+ * Splits on the pipes and statement separators that really are separators.
+ *
+ * A flat `split(/\||;|&&/)` cut inside a calculated property: the `;` in
+ * `@{n="MB";e={[math]::Round($_.WS / 1MB)}}` was taken for a statement
+ * boundary, so the gate read `e={[math` as a command name and refused a pure
+ * read - the exact shape needed to answer "which program is using the most
+ * memory, and how much". A `;` or `|` inside brackets, braces or quotes
+ * belongs to the expression, not to the pipeline.
+ */
+function topLevelSegments(command: string): string[] {
+  const out: string[] = []
+  let buf = ''
+  let depth = 0
+  let quote: string | null = null
+
+  for (let i = 0; i < command.length; i++) {
+    const c = command[i]
+    if (quote) {
+      buf += c
+      if (c === quote) quote = null
+      continue
+    }
+    if (c === '"' || c === "'") {
+      quote = c
+      buf += c
+      continue
+    }
+    if (c === '(' || c === '[' || c === '{') depth++
+    else if (c === ')' || c === ']' || c === '}') depth = Math.max(0, depth - 1)
+    else if (depth === 0 && (c === '|' || c === ';')) {
+      out.push(buf)
+      buf = ''
+      continue
+    } else if (depth === 0 && c === '&' && command[i + 1] === '&') {
+      out.push(buf)
+      buf = ''
+      i++
+      continue
+    }
+    buf += c
+  }
+  out.push(buf)
+  return out
 }
 
 export function isReadOnly(command: string): boolean {
@@ -340,15 +437,28 @@ export function isReadOnly(command: string): boolean {
    * every hyphenated word blocked `dotnet --list-sdks` on the strength of
    * "list-sdks", and would block a wildcard like '*Visual-Studio*' too.
    */
-  const CMDLET_AT_START = /(?:^|[(|;&{])\s*([A-Za-z][\w]*-[A-Za-z][\w]*)/g
+  const CMDLET_AT_START = /(?:^|[(|;&{=])\s*([A-Za-z][\w]*-[A-Za-z][\w]*)/g
   for (const [, cmdlet] of trimmed.matchAll(CMDLET_AT_START)) {
     if (!isReadingCmdlet(cmdlet)) return false
   }
 
   // Every segment of a pipeline has to be read-only on its own.
-  const segments = trimmed.split(/\||;|&&/)
+  const segments = topLevelSegments(trimmed)
   for (const segment of segments) {
-    const tokens = segment.trim().split(/\s+/).filter(Boolean)
+    /**
+     * `$folder = [Environment]::GetFolderPath("MyDocuments"); Get-ChildItem
+     * $folder` is a read, and the gate refused it: the head token `$folder`
+     * had its `$` stripped by the wrapper cleanup below, leaving `folder`,
+     * which is in no allowlist. Naming a thing before using it is the normal
+     * way to write that, and the prompt now tells the model to look folders
+     * up rather than guess them - so this shape arrives often.
+     *
+     * The right-hand side is what actually runs, so judge that. A write
+     * there is still caught, because the Verb-Noun sweep above counts `=`
+     * as a command position for exactly this reason.
+     */
+    const body = segment.trim().replace(/^\$\w+\s*=\s*/, '')
+    const tokens = body.split(/\s+/).filter(Boolean)
     if (tokens.length === 0) continue
     // Strip what wraps a call rather than names it: a leading paren, and a
     // trailing property access or closing paren.
@@ -362,6 +472,26 @@ export function isReadOnly(command: string): boolean {
     // command to allowlist, and the Verb-Noun sweep above has already
     // vetted anything that was a call.
     if (!/^[a-z]/.test(head)) continue
+
+    /**
+     * Any tool asked only for its version or its help is reporting.
+     *
+     * The allowlist named tools one at a time, so `docker --version` was
+     * refused outright - not because asking a version is dangerous, but
+     * because nobody had written docker down. bench-ceiling found it while
+     * trying to measure whether the model invents a version for something
+     * that is not installed, which it cannot be asked to do if the check
+     * never runs. The same gap covers every tool nobody has thought of,
+     * which is the whole point of not enumerating them.
+     *
+     * Only when the flags are ALL it was given: `git --version` is a read,
+     * `git push --version` is not a shape anyone writes, and a write-shaped
+     * head is already gone by here - the Verb-Noun sweep and WRITE_MARKERS
+     * both run first, so `Remove-Item --version` never reaches this.
+     */
+    const flagArgs = tokens.slice(1).map((t) => t.toLowerCase())
+    if (flagArgs.length > 0 && flagArgs.every((a) => VERSION_FLAGS.has(a))) continue
+
     if (!isReadingCmdlet(head)) return false
 
     // `find` searches harmlessly until told to act on what it finds.

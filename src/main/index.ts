@@ -39,6 +39,7 @@ import { runCommand, assessRisk, isReadOnly } from './shell'
 import { PriorityManager } from './priority'
 import { webSearch } from './search'
 import { cleanTitle, titleBrief, titleSource } from '@shared/titles'
+import { folderFacts, resolveUserFolders } from './folders'
 import { Speech } from './speech'
 import { openLink, openSearch } from './browser'
 import { inspectWriteTarget, writeProposedFile } from './writefile'
@@ -158,6 +159,12 @@ function factsFor(chatTitle: string | null, actions: string[] = []): string {
     })}.`,
     `- This chat is titled ${chatTitle ? `"${chatTitle}"` : 'untitled so far'}.`,
     `- The user is on Windows. Commands run from ${settings.get('shellCwd') || homedir()}.`,
+    // Resolved by asking Windows at startup, not guessed. Documents,
+    // Pictures and Desktop are redirected to OneDrive here, and the model
+    // guessed $env:USERPROFILE\Documents - which returned an empty stdout
+    // and an empty stderr, so the wrong folder was indistinguishable from
+    // an empty one.
+    ...folderFacts(),
     // Written by the code that performed them, not recalled by the model.
     // Asked whether it had opened Spotify, the model denied it three times -
     // the app had the receipt and was not showing it.
@@ -901,6 +908,12 @@ void app.whenReady().then(async () => {
 
   registerIpc()
   panel.create()
+
+  // One subprocess, once, and nothing waits for it: until it lands the facts
+  // use an existence-checked guess, which is already right on an ordinary
+  // machine. A folder that cannot be resolved is left out rather than stated
+  // wrongly.
+  void resolveUserFolders()
 
   const icon = nativeImage.createFromPath(resourcePath('icon.png'))
   if (!icon.isEmpty()) panel.browserWindow?.setIcon(icon)

@@ -103,6 +103,38 @@ const MUST_BLOCK = [
   'Remove-Variable x',
   'Clear-Content notes.txt',
   '(Get-Process).Count; Remove-Item x',
+  /**
+   * An assignment at the head, which the gate now looks past so that
+   * `$folder = [Environment]::GetFolderPath(...); Get-ChildItem $folder`
+   * counts as the read it is. Looking past it must not become a way around
+   * the sweep.
+   */
+  '$x = Remove-Item C:/t -Recurse',
+  '$x = 1; Remove-Item C:/t',
+  '$x = Stop-Process -Name chrome',
+  '$a = Get-Date; $b = Remove-Item C:/t',
+  '$x = ri C:/t',
+  /**
+   * A `;` inside braces is no longer a statement boundary - it was cutting
+   * `@{n="MB";e={...}}` in half and refusing a pure read - so the Verb-Noun
+   * sweep is now the only thing looking inside a script block. These prove
+   * it looks.
+   */
+  'Select-Object @{n="x";e={Remove-Item C:/t}}',
+  'Select-Object @{n="x";e={$_ | Remove-Item}}',
+  'Get-Process | ForEach-Object { Stop-Process $_ }',
+  'Get-Date -Format "a;b"; Remove-Item C:/t',
+  /**
+   * Aliases, which have no hyphen for the sweep to find and so rely entirely
+   * on WRITE_MARKERS. `ri` was missing from it: `ForEach-Object { ri $_ }`
+   * was classified a read, and on the auto mode that runs by itself. The
+   * cmd-shaped ones were all there; the PowerShell-native ones were not.
+   */
+  'Get-ChildItem | ForEach-Object { ri $_ }',
+  'Get-ChildItem | ForEach-Object { rm -rf $_ }',
+  'Get-ChildItem | % { del $_ }',
+  'Get-Process | ForEach-Object { spps $_ }',
+  'Get-ChildItem | ForEach-Object { mi $_ -Destination D:/x }',
   'node -e "require(0).rmSync()"',
   'node --eval "x"',
   'npx create-react-app x',
@@ -164,6 +196,22 @@ const MUST_ALLOW = [
   // ever produced, which is a whole capability lost to a missing name.
   'Get-PSDrive C | ForEach-Object { "{0:N2}" -f ($_.Used / ($_.Used + $_.Free) * 100) }',
   'Get-Process | Group-Object Name | Sort-Object Count',
+  /**
+   * Naming a folder before listing it, which is what the prompt now tells
+   * the model to do rather than guessing $env:USERPROFILE\Pictures. The gate
+   * refused it: the head token `$docs` lost its `$` to the wrapper cleanup
+   * and arrived as `docs`, which is in no allowlist.
+   */
+  '$docs = [Environment]::GetFolderPath("MyDocuments"); Get-ChildItem $docs -File',
+  '$t = (Get-CimInstance Win32_ComputerSystem).TotalPhysicalMemory; Get-Process | Select-Object -First 1',
+  /**
+   * A calculated property, which is how "which program is using the most
+   * memory, and how much" has to be written. The `;` between its keys was
+   * being read as a statement separator, so the gate took `e={[math` for a
+   * command name.
+   */
+  'Get-Process | Sort-Object WS -Descending | Select-Object -First 1 Name, @{n="MB";e={[math]::Round($_.WS / 1MB)}}',
+  'Get-Date -Format "yyyy;MM"',
   'dotnet --list-sdks',
   "Get-StartApps | Where-Object Name -like '*Visual-Studio*'",
   'node --version',
@@ -287,7 +335,26 @@ const MUST_CONFIRM = [
   'net user intruder /add',
   'Add-LocalGroupMember -Group Administrators -Member intruder',
   'Register-ScheduledTask -TaskName x -Action $a',
-  'schtasks /create /tn x /tr y /sc onlogon'
+  'schtasks /create /tn x /tr y /sc onlogon',
+  /**
+   * The one read that must ask. Asked to list every file on the computer the
+   * model proposed a recursive walk of C:, which destroys nothing and so
+   * passed every other rule here - and on accept-all would have started by
+   * itself and spent minutes thrashing the disk. `dir /s` is the same
+   * request in cmd and was missed by a -Recurse-only test.
+   */
+  'Get-ChildItem -Recurse -File -Path C:/',
+  'Get-ChildItem C:/ -Recurse',
+  'Get-ChildItem D: -Recurse -File | Measure-Object',
+  'dir /s C:/',
+  /**
+   * The same hazard with the path left off, which is the version the model
+   * kept writing once it had been taught not to name a drive. It walks
+   * everything below wherever commands run from, which is the profile.
+   */
+  'Get-ChildItem -Recurse -File',
+  'Get-ChildItem -Recurse -File | Sort-Object Length -Descending',
+  'Get-ChildItem . -Recurse'
 ]
 
 for (const c of MUST_CONFIRM) {
@@ -318,6 +385,75 @@ for (const c of MUST_ALLOW) {
   if (!ok) console.log(`FAIL a read would raise a dialog (${why}): ${c.slice(0, 60)}`)
 }
 console.log(`ok   none of the ${MUST_ALLOW.length} reads raises a dialog`)
+
+/**
+ * The scoping of that one exception, in both directions. It is the only
+ * read allowed to raise a dialog, so it had better be the only read that
+ * does: a recursive scan of a NAMED folder is ordinary work and must stay
+ * unattended, and a drive root with no recursion is one directory listing.
+ */
+const BOUNDED_READS = [
+  'Get-ChildItem C:/Users/me/Downloads -Recurse -File',
+  'Get-ChildItem ([Environment]::GetFolderPath("MyPictures")) -Recurse -File',
+  'Get-ChildItem $env:USERPROFILE -Recurse -File | Measure-Object',
+  'Get-ChildItem C:/',
+  'Get-PSDrive C',
+  'Get-Volume -DriveLetter C',
+  // A -Recurse that says where to start is ordinary work and stays
+  // unattended, however deep it goes.
+  'Get-ChildItem ~ -Recurse -File | Measure-Object',
+  'Get-ChildItem $env:USERPROFILE/Downloads -Recurse -Filter *.png'
+]
+
+/**
+ * Asking any tool for its version is reporting, whether or not anyone wrote
+ * that tool down. The allowlist named them one at a time, so
+ * `docker --version` was refused - found by bench-ceiling, which could not
+ * measure whether the model invents a version for something uninstalled
+ * because the check never ran. `-version` with one dash is what ffmpeg and
+ * java use and was missing too.
+ */
+const VERSION_READS = [
+  'docker --version',
+  'ffmpeg -version',
+  'ffmpeg --version',
+  'java -version',
+  'terraform --help',
+  'somescript.exe --version',
+  'kubectl version'
+]
+for (const c of VERSION_READS) {
+  const ok = isReadOnly(c)
+  if (!ok) failed++
+  extra++
+  console.log(`${ok ? 'ok  ' : 'FAIL'} a version flag is a read: ${c}`)
+}
+
+/**
+ * And the shape must not become a way through. A write-shaped head is gone
+ * before the flag is ever looked at, and a tool with no flags at all is
+ * still an unknown command.
+ */
+const NOT_VERSION_READS = [
+  'Remove-Item --version',
+  'rm --version',
+  'docker',
+  'docker ps',
+  'git push'
+]
+for (const c of NOT_VERSION_READS) {
+  const ok = !isReadOnly(c)
+  if (!ok) failed++
+  extra++
+  console.log(`${ok ? 'ok  ' : 'FAIL'} still not a read: ${c}`)
+}
+for (const c of BOUNDED_READS) {
+  const why = assessRisk(c)
+  const ok = why === null
+  if (!ok) failed++
+  extra++
+  console.log(`${ok ? 'ok  ' : 'FAIL'} stays unattended: ${c.slice(0, 46).padEnd(47)} ${why ?? ''}`)
+}
 
 /**
  * Creating something is reversible by deleting it, so accept-all may still
