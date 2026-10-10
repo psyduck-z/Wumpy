@@ -11,7 +11,7 @@ import {
   thinkingKwargsFor,
   wireMessagesFor,
   wireMessage,
-  seesImages
+  seesMedia
 } from '@shared/cloud'
 import type { ChatOptions, StreamFailure, StreamHandlers, StreamStats } from './stream'
 import type { KeyStore } from './keys'
@@ -193,7 +193,7 @@ export class CloudClient {
     try {
       const wire: WireMessage[] = wireMessagesFor(provider, [
         ...(opts.systemPrompt ? [{ role: 'system' as const, content: opts.systemPrompt }] : []),
-        ...messages.map((m) => wireMessage(m, seesImages(model)))
+        ...messages.map((m) => wireMessage(m, seesMedia(model)))
       ])
 
       const effort = reasoningEffortFor(provider, opts.thinking, model)

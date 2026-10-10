@@ -7,8 +7,13 @@ import { adoptsKeystroke } from '../keyboard'
 import { useDictation } from '../hooks/useDictation'
 import { HOLD_MS, HoldToTalk, isPlainSpace, type HoldAction } from '../holdtotalk'
 import { Mic } from './Mic'
-import { imagesIn, shrinkImage } from '../images'
+import { mediaIn, readMedia, TOKENS_PER_SECOND } from '../media'
 import type { Attachment } from '@shared/types'
+
+/** m:ss, for the length of a clip. */
+function clockOf(seconds: number): string {
+  return `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, '0')}`
+}
 
 export function Composer({
   onSend,
@@ -19,7 +24,7 @@ export function Composer({
   focusToken,
   prefill,
   placeholder,
-  canSeeImages = false,
+  canSeeMedia = false,
   onSay
 }: {
   onSend(text: string, images?: Attachment[]): void
@@ -37,13 +42,13 @@ export function Composer({
   prefill?: { text: string; token: number }
   placeholder: string
   /**
-   * Whether the model answering can look at a picture.
+   * Whether the model answering can look at a picture or a clip.
    *
    * Attaching one to a model that cannot see is not a smaller version of the
    * feature, it is a request that silently loses half of itself - so the
    * paste is refused with a reason instead.
    */
-  canSeeImages?: boolean
+  canSeeMedia?: boolean
   /** Said in a line that fades, for things that are not part of the chat. */
   onSay?(text: string): void
 }): React.JSX.Element {
@@ -68,23 +73,23 @@ export function Composer({
 
   const attach = async (files: File[]): Promise<void> => {
     if (!files.length) return
-    if (!canSeeImages) {
-      onSay?.('This model cannot read images. Switch with /model.')
+    if (!canSeeMedia) {
+      onSay?.('This model cannot read images or video. Switch with /model.')
       return
     }
     for (const file of files) {
       try {
-        const shrunk = await shrinkImage(file, file.name || undefined)
-        setImages((list) => [...list, shrunk])
+        const attachment = await readMedia(file)
+        setImages((list) => [...list, attachment])
       } catch (err) {
-        onSay?.((err as Error)?.message ?? 'Could not read that image.')
+        onSay?.((err as Error)?.message ?? 'Could not read that file.')
       }
     }
     ref.current?.focus({ preventScroll: true })
   }
 
   const drop = (e: React.DragEvent): void => {
-    const files = imagesIn(e.dataTransfer?.files)
+    const files = mediaIn(e.dataTransfer?.files)
     // Only swallow the event when there was actually an image in it; a file
     // dragged in by mistake should land wherever it would have landed.
     if (!files.length) return
@@ -485,8 +490,14 @@ export function Composer({
       {images.length > 0 && (
         <div className="attachments">
           {images.map((img, i) => (
-            <div className="attachment" key={`${img.bytes}:${i}`}>
-              <img src={img.dataUrl} alt={img.name ?? 'Pasted image'} />
+            <div className={`attachment is-${img.kind}`} key={`${img.bytes}:${i}`}>
+              {img.kind === 'video' ? (
+                // Muted, no controls: it is a thumbnail, not a player. The
+                // first frame is what tells you which clip this is.
+                <video src={img.dataUrl} muted preload="metadata" />
+              ) : (
+                <img src={img.dataUrl} alt={img.name ?? 'Pasted image'} />
+              )}
               <button
                 type="button"
                 className="attachment-x"
@@ -495,7 +506,14 @@ export function Composer({
               >
                 &#215;
               </button>
-              <span className="attachment-size">{Math.round(img.bytes / 1024)}KB</span>
+              {/* Length rather than size for a clip: seconds are what it
+                  costs. About 105 tokens each, measured, so a minute is six
+                  thousand and that is worth knowing before sending it. */}
+              <span className="attachment-size">
+                {img.kind === 'video' && img.seconds
+                  ? `${clockOf(img.seconds)} · ~${Math.round((img.seconds * TOKENS_PER_SECOND) / 100) / 10}k`
+                  : `${Math.round(img.bytes / 1024)}KB`}
+              </span>
             </div>
           ))}
         </div>
@@ -538,7 +556,7 @@ export function Composer({
           }}
           onBlur={abandonHold}
           onPaste={(e) => {
-            const files = imagesIn(e.clipboardData?.items)
+            const files = mediaIn(e.clipboardData?.items)
             // Text pasted alongside an image still pastes; only an event
             // that is nothing but images is taken over.
             if (!files.length) return
@@ -552,7 +570,7 @@ export function Composer({
         <input
           ref={fileInput}
           type="file"
-          accept="image/*"
+          accept="image/*,video/*"
           multiple
           hidden
           onChange={(e) => {
@@ -566,7 +584,9 @@ export function Composer({
           className="btn-attach"
           onClick={() => fileInput.current?.click()}
           title={
-            canSeeImages ? 'Attach an image (or just paste one)' : 'This model cannot read images'
+            canSeeMedia
+              ? 'Attach an image or a video (or just paste one)'
+              : 'This model cannot read images'
           }
         >
           <svg viewBox="0 0 24 24" width="15" height="15" aria-hidden="true">

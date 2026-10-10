@@ -486,19 +486,21 @@ export function wireText(content: string | WirePart[]): string {
 }
 
 /**
- * Whether this model can look at a picture.
+ * Whether this model can look at a picture or a clip.
  *
- * Every model Wumpy offers is a Gemini and all of them can. The other three
- * providers are still wired up - their keys keep working if you have one -
- * and the models on them are text only, so an image sent to one is a 400
- * that costs the whole turn rather than a request that works less well.
+ * Every model Wumpy offers is a Gemini and all of them can, video included:
+ * measured, a three-second mp4 sent as a data URL came back correctly
+ * through the same endpoint and the same part shape as an image. The other
+ * three providers are still wired up - their keys keep working if you have
+ * one - and the models on them are text only, so an image sent to one is a
+ * 400 that costs the whole turn rather than a request that works less well.
  *
  * This is asked before the paste is accepted, not after: refusing to attach
  * and saying why is a missing feature, while attaching and quietly dropping
  * it on the way out is a wrong answer to a question nobody knows was not
  * asked.
  */
-export function seesImages(model: string): boolean {
+export function seesMedia(model: string): boolean {
   return Boolean(model) && providerFor(model) === 'google'
 }
 
@@ -533,9 +535,15 @@ export function foldSystemMessages(messages: WireMessage[]): WireMessage[] {
  * is this", and a question asked before its picture reads as a question
  * about nothing.
  *
- * Images on a model that cannot see are DROPPED rather than sent, because
- * the alternative is a 400 that costs the whole turn. The composer refuses
- * to attach them in the first place; this is the second line.
+ * A video goes the same way as an image, in an image_url part with a
+ * data:video/mp4 URL. That looks wrong and is not: measured against the
+ * live API, a clip sent that way was read correctly, while the documented
+ * input_audio part answered 400 "Invalid audio format mp4". The endpoint
+ * takes the type from the data URL, not from the part's name.
+ *
+ * Attachments on a model that cannot see are DROPPED rather than sent,
+ * because the alternative is a 400 that costs the whole turn. The composer
+ * refuses to attach them in the first place; this is the second line.
  */
 export function wireMessage(
   m: { role: string; content: string; images?: { dataUrl: string }[] },

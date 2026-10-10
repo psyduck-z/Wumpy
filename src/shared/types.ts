@@ -147,22 +147,33 @@ export interface ShellProgress {
  * shrunk hard before it ever becomes one of these.
  */
 export interface Attachment {
-  /** `data:image/jpeg;base64,…` — ready for both an <img> and the wire. */
+  /**
+   * Which it is, because the two behave differently everywhere.
+   *
+   * An image is shrunk and costs a flat ~1,100 tokens. A video is passed
+   * through whole and costs about 105 tokens a second, so a one-minute clip
+   * is six thousand - the one number worth showing before it is sent.
+   */
+  kind: 'image' | 'video'
+  /** `data:image/jpeg;base64,…` or `data:video/mp4;base64,…`. */
   dataUrl: string
   /** The file it came from, when it came from one. Pasted images have none. */
   name?: string
   width: number
   height: number
-  /** Size of the encoded image, for the "too big" guard and the UI. */
+  /** Size of the encoded file, for the "too big" guard and the UI. */
   bytes: number
+  /** How long a video runs, rounded. Zero when the header did not say. */
+  seconds?: number
   /**
    * Where the bytes live once the chat has been saved.
    *
    * Set only on disk. A saved chat keeps the filename and drops the data
    * URL, because list() parses every chat file in full to read six header
    * fields off each one — free for a few kilobytes of text, not free for
-   * four base64 screenshots. Reading one back puts the dataUrl straight
-   * back, so nothing above ChatStore ever sees this.
+   * four base64 screenshots, and emphatically not free for a video.
+   * Reading one back puts the dataUrl straight back, so nothing above
+   * ChatStore ever sees this.
    */
   file?: string
 }

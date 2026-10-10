@@ -1,5 +1,5 @@
 /**
- * Pictures: getting them small, and getting them onto the wire.
+ * Pictures and clips: getting them small, and getting them onto the wire.
  *
  * Two halves. The arithmetic of shrinking one, which decides what a pasted
  * screenshot costs on every turn it stays in the conversation. And the shape
@@ -18,9 +18,9 @@ import { pathToFileURL } from 'node:url'
 
 const NL = String.fromCharCode(10)
 
-const imgOut = '.images-check.mjs'
+const imgOut = '.media-check.mjs'
 await build({
-  entryPoints: ['src/renderer/src/images.ts'],
+  entryPoints: ['src/renderer/src/media.ts'],
   bundle: true,
   platform: 'node',
   format: 'esm',
@@ -31,7 +31,7 @@ await build({
 const I = await import(pathToFileURL(imgOut).href)
 rmSync(imgOut, { force: true })
 
-const cloudOut = '.images-cloud.mjs'
+const cloudOut = '.media-cloud.mjs'
 await build({
   entryPoints: ['src/shared/cloud.ts'],
   bundle: true,
@@ -86,30 +86,44 @@ console.log('ok   data URL sizes are measured without decoding            6 leng
 
 /* ------------------------------------------------------------- what counts */
 
-check('a png is an image', I.isImageFile({ type: 'image/png', name: 'a.png' }), true)
-check('so is a jpeg with no type', I.isImageFile({ name: 'photo.JPG' }), true)
+check('a png is an image', I.kindOf({ type: 'image/png', name: 'a.png' }), 'image')
+check('so is a jpeg with no type', I.kindOf({ name: 'photo.JPG' }), 'image')
 /* A pasted screenshot arrives with a type and the name "image.png" or none. */
-check('and a typed blob with no name at all', I.isImageFile({ type: 'image/png' }), true)
-check('a pdf is not', I.isImageFile({ type: 'application/pdf', name: 'a.pdf' }), false)
-check('nor a text file', I.isImageFile({ name: 'notes.txt' }), false)
-check('nor nothing', I.isImageFile({}), false)
+check('and a typed blob with no name at all', I.kindOf({ type: 'image/png' }), 'image')
+check('an mp4 is a video', I.kindOf({ type: 'video/mp4', name: 'clip.mp4' }), 'video')
+check('a mov with no type is too', I.kindOf({ name: 'IMG_4201.MOV' }), 'video')
+check('and a webm', I.kindOf({ name: 'screen.webm' }), 'video')
+check('a pdf is neither', I.kindOf({ type: 'application/pdf', name: 'a.pdf' }), null)
+check('nor a text file', I.kindOf({ name: 'notes.txt' }), null)
+check('nor nothing', I.kindOf({}), null)
+
+/**
+ * A clip costs by the second, not by the pixel. Measured with countTokens
+ * against gemini-3.5-flash: 3 seconds at 320x240 came to 376 tokens and 30
+ * seconds at 640x360 to 3,165 — about 105 a second either way.
+ */
+check('the measured rate is the one in the code', I.TOKENS_PER_SECOND, 105)
+check('so a minute is about six thousand tokens', Math.round(60 * I.TOKENS_PER_SECOND), 6300)
+/* The whole request has to fit in one call, so the cap is on bytes. */
+check('and a video has a byte ceiling', I.MAX_VIDEO_BYTES <= 20_000_000, true)
 
 /* ------------------------------------------------- which models can look */
 
-check('Gemini can see', C.seesImages('gemini-3.5-flash'), true)
-check('and so can the lite one', C.seesImages('gemini-3.1-flash-lite'), true)
+check('Gemini can see', C.seesMedia('gemini-3.5-flash'), true)
+check('and so can the lite one', C.seesMedia('gemini-3.1-flash-lite'), true)
 /**
  * The other three providers are still wired up and their models are text
  * only. An image sent to one is a 400 that costs the whole turn, so the
  * paste is refused with a reason instead.
  */
-check('codestral cannot', C.seesImages('codestral-latest'), false)
-check('nor can a Groq model', C.seesImages('openai/gpt-oss-120b'), false)
-check('and nothing is not a model', C.seesImages(''), false)
+check('codestral cannot', C.seesMedia('codestral-latest'), false)
+check('nor can a Groq model', C.seesMedia('openai/gpt-oss-120b'), false)
+check('and nothing is not a model', C.seesMedia(''), false)
 
 /* ------------------------------------------------------- the shape on the wire */
 
-const PIC = { dataUrl: 'data:image/jpeg;base64,AAAA' }
+const PIC = { kind: 'image', dataUrl: 'data:image/jpeg;base64,AAAA' }
+const CLIP = { kind: 'video', dataUrl: 'data:video/mp4;base64,BBBB', seconds: 3 }
 
 /** Nearly every message is a string, and stays one. */
 check(
@@ -150,6 +164,27 @@ check(
   { role: 'assistant', content: 'ok' }
 )
 
+/**
+ * A clip goes the same way as a picture, in an image_url part with a
+ * data:video/mp4 URL. That looks wrong and is not: measured against the
+ * live API a clip sent exactly this way was read correctly - "Red / Green /
+ * Blue" for a second each of red, green and blue - while the documented
+ * input_audio part answered 400 "Invalid audio format mp4". The endpoint
+ * takes the type from the data URL, not from the name of the part.
+ */
+const withClip = C.wireMessage({ role: 'user', content: 'what happens here', images: [CLIP] }, true)
+check('a video rides in the same kind of part', withClip.content[1].type, 'image_url')
+check('carrying its own data URL', withClip.content[1].image_url.url, CLIP.dataUrl)
+check('with the question in front of it', withClip.content[0].text, 'what happens here')
+
+/* One of each, in the order they were attached. */
+const both = C.wireMessage({ role: 'user', content: 'compare', images: [PIC, CLIP] }, true)
+check('several attachments all go', both.content.length, 3)
+check('in the order they were added', [both.content[1].image_url.url, both.content[2].image_url.url], [
+  PIC.dataUrl,
+  CLIP.dataUrl
+])
+
 /* ---------------------------------------------- folding still works around them */
 
 /**
@@ -169,5 +204,5 @@ check('and the parts message survives intact', Array.isArray(folded[1].content),
 check('wireText reads a parts message', C.wireText(folded[1].content), 'hi')
 check('and a plain one', C.wireText('just text'), 'just text')
 
-console.log(`${NL}${count - failed}/${count} image checks correct`)
+console.log(`${NL}${count - failed}/${count} media checks correct`)
 process.exit(failed === 0 ? 0 : 1)

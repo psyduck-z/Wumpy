@@ -209,14 +209,23 @@ function safeId(id: string): string {
 
 /** The file extension for a data URL's type, defaulting to jpg. */
 function extFor(dataUrl: string): string {
-  const m = /^data:image\/([a-z0-9.+-]+)/i.exec(dataUrl)
-  const kind = (m?.[1] ?? 'jpeg').toLowerCase()
+  const m = /^data:(image|video)\/([a-z0-9.+-]+)/i.exec(dataUrl)
+  const kind = (m?.[2] ?? 'jpeg').toLowerCase()
   return kind === 'jpeg' ? 'jpg' : kind.replace(/[^a-z0-9]/g, '')
 }
 
-/** And back again, for reading one in. */
+/**
+ * And back again, for reading one in.
+ *
+ * The family has to come from the extension too, not be assumed: an mp4
+ * written out as `image/mp4` is a data URL no decoder will touch, and the
+ * failure is a chat that reopens with a dead player in it.
+ */
+const VIDEO_EXT = /^(mp4|m4v|mov|webm|mkv|avi|mpeg|mpg|wmv|3gp)$/
+
 function mimeFor(file: string): string {
   const ext = (/\.([a-z0-9]+)$/i.exec(file)?.[1] ?? 'jpg').toLowerCase()
+  if (VIDEO_EXT.test(ext)) return `video/${ext === 'm4v' ? 'mp4' : ext}`
   return `image/${ext === 'jpg' ? 'jpeg' : ext}`
 }
 

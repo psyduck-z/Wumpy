@@ -1528,11 +1528,18 @@ body {
   background: rgb(var(--raised));
 }
 
-.attachment img {
+.attachment img,
+.attachment video {
   width: 100%;
   height: 100%;
   object-fit: cover;
   display: block;
+  background: #000;
+}
+
+/* A clip is wider than it is tall far more often than a screenshot is. */
+.attachment.is-video {
+  width: 92px;
 }
 
 .attachment-x {
@@ -1607,12 +1614,19 @@ body {
   margin-bottom: 5px;
 }
 
-.msg-images img {
+.msg-images img,
+.msg-images video {
   max-width: 180px;
   max-height: 180px;
   border-radius: 10px;
   border: 1px solid rgb(var(--border));
   display: block;
+}
+
+/* Wider, because it has a control bar across the bottom of it. */
+.msg-images video {
+  max-width: 260px;
+  background: #000;
 }
 
 .composer {

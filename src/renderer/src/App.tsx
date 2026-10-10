@@ -20,7 +20,7 @@ import { looksLikeUrl, SEARCH_ENGINES, type LinkApproval } from '@shared/links'
 import { clippedOutput, commandFeedback } from '@shared/parsefail'
 import { CONTEXT_TOKENS, DEFAULT_MODEL } from '@shared/assistant'
 import { shouldRetitle } from '@shared/titles'
-import { CLOUD_MODELS, PROVIDERS, seesImages } from '@shared/cloud'
+import { CLOUD_MODELS, PROVIDERS, seesMedia } from '@shared/cloud'
 import { useChat, nextId, type ChatStats } from './hooks/useChat'
 import {
   allCommands,
@@ -1702,7 +1702,7 @@ export default function App(): React.JSX.Element {
         onStop={chat.stop}
         streaming={streaming}
         focusToken={focusToken}
-        canSeeImages={seesImages(model)}
+        canSeeMedia={seesMedia(model)}
         onSay={say}
         prefill={prefill}
         queued={queued}

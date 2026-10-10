@@ -154,9 +154,15 @@ export const Message = memo(function Message({
             A message can be an image and nothing else. */}
         {message.images?.length ? (
           <div className="msg-images">
-            {message.images.map((img, i) => (
-              <img key={i} src={img.dataUrl} alt={img.name ?? 'Attached image'} />
-            ))}
+            {message.images.map((img, i) =>
+              img.kind === 'video' ? (
+                // Controls, unlike the composer chip: once it is sent this
+                // is the record of what was asked, and worth replaying.
+                <video key={i} src={img.dataUrl} controls preload="metadata" />
+              ) : (
+                <img key={i} src={img.dataUrl} alt={img.name ?? 'Attached image'} />
+              )
+            )}
           </div>
         ) : null}
         {message.content ? <div className="msg-body">{message.content}</div> : null}

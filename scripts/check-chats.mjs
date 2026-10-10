@@ -55,7 +55,7 @@ const chats = new ChatStore()
 /** A real, if tiny, JPEG payload — 40KB of it, to make the size test mean something. */
 const BIG = 'A'.repeat(40_000)
 const DATA = `data:image/jpeg;base64,${BIG}`
-const shot = { dataUrl: DATA, name: 'screenshot.png', width: 800, height: 450, bytes: 30_000 }
+const shot = { kind: 'image', dataUrl: DATA, name: 'screenshot.png', width: 800, height: 450, bytes: 30_000 }
 
 const message = (over) => ({
   id: over.id,
@@ -144,6 +144,33 @@ rmSync(join(dir, 'chats', 'images', 'gone-0-0.jpg'), { force: true })
 const lost = chats.load('gone')
 check('a chat whose image is gone still loads', lost.messages[0].content, 'look')
 check('without a broken attachment', lost.messages[0].images.length, 0)
+
+/* ------------------------------------------------------------- and clips */
+
+/**
+ * A video is the same arrangement and much more of it — a thirty-second
+ * clip is a couple of hundred kilobytes before base64 — so getting the
+ * type right on the way back matters. An mp4 written out as `image/mp4` is
+ * a data URL no decoder will touch, and the failure is a chat that reopens
+ * with a dead player in it.
+ */
+const CLIPDATA = `data:video/mp4;base64,${'B'.repeat(20_000)}`
+chats.save({
+  id: 'clip',
+  title: 'A clip',
+  messages: [
+    message({ id: 'm1', content: 'what happens', images: [{ kind: 'video', dataUrl: CLIPDATA, name: 'rgb.mp4', width: 320, height: 240, seconds: 3, bytes: 15_000 }] })
+  ]
+})
+const clipFiles = readdirSync(join(dir, 'chats', 'images'))
+check('a video is written out too', clipFiles.includes('clip-0-0.mp4'), true)
+check('and not left in the chat file', readFileSync(join(dir, 'chats', 'clip.json'), 'utf8').includes('BBBBBBBBBB'), false)
+
+const clipBack = chats.load('clip')
+check('it comes back as a video data URL', clipBack.messages[0].images[0].dataUrl === CLIPDATA, true)
+check('with the right media type, not image/mp4', clipBack.messages[0].images[0].dataUrl.startsWith('data:video/mp4;'), true)
+check('and keeps its length', clipBack.messages[0].images[0].seconds, 3)
+check('and its kind', clipBack.messages[0].images[0].kind, 'video')
 
 rmSync(dir, { recursive: true, force: true })
 console.log(`${NL}${count - failed}/${count} chat-store checks correct`)

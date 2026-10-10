@@ -38,9 +38,29 @@ const KEEP_AS_IS = 120_000
 /** Hard ceiling. Past it the attachment is refused rather than sent. */
 export const MAX_BYTES = 6_000_000
 
+/**
+ * What kind of thing this is, or null if it is not one Wumpy can send.
+ *
+ * Both go up the same way. Measured against the live API: a three-second
+ * mp4 handed to the OpenAI-compatible endpoint as a data URL inside an
+ * image_url part came back "Red / Green / Blue" for a clip that is a second
+ * each of red, green and blue, at 203 prompt tokens - against 14 for the
+ * same question with nothing attached. So there is no second code path to
+ * build; there is only a wider idea of what an attachment is.
+ */
+export type MediaKind = 'image' | 'video'
+
+export function kindOf(file: { type?: string; name?: string }): MediaKind | null {
+  if (file.type?.startsWith('image/')) return 'image'
+  if (file.type?.startsWith('video/')) return 'video'
+  const name = file.name ?? ''
+  if (/\.(png|jpe?g|gif|webp|bmp|avif)$/i.test(name)) return 'image'
+  if (/\.(mp4|mov|webm|mkv|avi|m4v|mpe?g|wmv|3gp)$/i.test(name)) return 'video'
+  return null
+}
+
 export function isImageFile(file: { type?: string; name?: string }): boolean {
-  if (file.type?.startsWith('image/')) return true
-  return /\.(png|jpe?g|gif|webp|bmp|avif)$/i.test(file.name ?? '')
+  return kindOf(file) === 'image'
 }
 
 function readAsDataUrl(blob: Blob): Promise<string> {
@@ -92,6 +112,7 @@ export async function shrinkImage(blob: Blob, name?: string): Promise<Attachment
 
   if (scale === 1 && blob.size <= KEEP_AS_IS) {
     return {
+      kind: 'image',
       dataUrl: original,
       name,
       width: img.naturalWidth,
@@ -120,17 +141,84 @@ export async function shrinkImage(blob: Blob, name?: string): Promise<Attachment
   let out = canvas.toDataURL('image/jpeg', 0.82)
   if (dataUrlBytes(out) > TARGET_BYTES) out = canvas.toDataURL('image/jpeg', 0.6)
 
-  return { dataUrl: out, name, width, height, bytes: dataUrlBytes(out) }
+  return { kind: 'image', dataUrl: out, name, width, height, bytes: dataUrlBytes(out) }
 }
 
 /** Every image on a clipboard or drop event, in the order they arrive. */
-export function imagesIn(list: DataTransferItemList | FileList | null | undefined): File[] {
+export function mediaIn(list: DataTransferItemList | FileList | null | undefined): File[] {
   if (!list) return []
   const files: File[] = []
   for (let i = 0; i < list.length; i++) {
     const entry = list[i] as DataTransferItem | File
     const file = 'getAsFile' in entry ? entry.getAsFile() : entry
-    if (file && isImageFile(file)) files.push(file)
+    if (file && kindOf(file)) files.push(file)
   }
   return files
+}
+
+/**
+ * How many tokens a clip will cost, near enough to warn with.
+ *
+ * Measured by countTokens against gemini-3.5-flash: a 3-second 320x240 clip
+ * came to 376 and a 30-second 640x360 clip to 3,165, so about 105 a second
+ * and barely sensitive to the frame size. That makes a one-minute clip
+ * roughly 6,300 tokens and a five-minute one 31,500 - which is why the
+ * length is on the chip. An image, by contrast, is a flat ~1,100 however
+ * big it is.
+ */
+export const TOKENS_PER_SECOND = 105
+
+/** Videos are passed through whole: there is no canvas trick for a clip. */
+export const MAX_VIDEO_BYTES = 15_000_000
+
+/**
+ * A video, read as it is.
+ *
+ * Nothing is re-encoded. Shrinking an image is a canvas call; shrinking a
+ * video means a codec, and the tokens barely move with frame size anyway -
+ * it is the SECONDS that cost, and trimming those is a decision only the
+ * person who shot it can make. So the cap is on bytes, the length is shown,
+ * and the choice is theirs.
+ */
+export async function readVideo(file: Blob, name?: string): Promise<Attachment> {
+  if (file.size > MAX_VIDEO_BYTES) {
+    throw new Error(
+      `That video is ${Math.round(file.size / 1_000_000)}MB. ` +
+        `${Math.round(MAX_VIDEO_BYTES / 1_000_000)} is the limit — the whole request has to fit in one.`
+    )
+  }
+  const dataUrl = await readAsDataUrl(file)
+  const probe = await measureVideo(dataUrl)
+  return { kind: 'video', dataUrl, name, bytes: file.size, ...probe }
+}
+
+/** Dimensions and length, from the browser's own decoder. */
+function measureVideo(
+  dataUrl: string
+): Promise<{ width: number; height: number; seconds: number }> {
+  return new Promise((resolve) => {
+    const el = document.createElement('video')
+    el.preload = 'metadata'
+    el.muted = true
+    const done = (): void =>
+      resolve({
+        width: el.videoWidth || 0,
+        height: el.videoHeight || 0,
+        // A stream with no duration in its header reports Infinity. Zero is
+        // the honest answer there, and the chip simply says nothing.
+        seconds: Number.isFinite(el.duration) ? Math.round(el.duration) : 0
+      })
+    el.onloadedmetadata = done
+    // Still sendable if Chromium cannot read the header: the model gets the
+    // bytes either way, and all that is lost is the length on the chip.
+    el.onerror = () => resolve({ width: 0, height: 0, seconds: 0 })
+    el.src = dataUrl
+  })
+}
+
+/** Reads whichever kind it is. */
+export async function readMedia(file: File): Promise<Attachment> {
+  return kindOf(file) === 'video'
+    ? readVideo(file, file.name || undefined)
+    : shrinkImage(file, file.name || undefined)
 }
