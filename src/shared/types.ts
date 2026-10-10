@@ -33,6 +33,15 @@ export interface ChatMessage {
   /** The option picked for a `wumpy-ask` block in this message. */
   answered?: string
   /**
+   * Images the user attached, pasted or dropped onto the panel.
+   *
+   * Carried on the message rather than held separately so that reopening a
+   * saved chat shows what was actually asked. They are downscaled before
+   * they get here - see shrinkImage - so a saved chat does not become a
+   * photo album.
+   */
+  images?: Attachment[]
+  /**
    * A question Wumpy itself is asking, with the options to choose from.
    * Used where the app knows a request is ambiguous and a model would only
    * guess — or deliberate for minutes without reaching an answer.
@@ -127,6 +136,25 @@ export interface ShellProgress {
   runId: string
   /** Everything printed so far, already clipped to what is worth showing. */
   text: string
+}
+
+/**
+ * An image attached to a message.
+ *
+ * Held as a data URL, which is what both the thumbnail and the API want, so
+ * nothing has to be read back off disk or re-encoded on the way out. The
+ * cost of that is the chat file: an image lives in the transcript, so it is
+ * shrunk hard before it ever becomes one of these.
+ */
+export interface Attachment {
+  /** `data:image/jpeg;base64,…` — ready for both an <img> and the wire. */
+  dataUrl: string
+  /** The file it came from, when it came from one. Pasted images have none. */
+  name?: string
+  width: number
+  height: number
+  /** Size of the encoded image, for the "too big" guard and the UI. */
+  bytes: number
 }
 
 export interface SearchResult {
@@ -287,7 +315,7 @@ export interface WumpySettings {
 
 export interface ChatRequest {
   requestId: string
-  messages: Array<Pick<ChatMessage, 'role' | 'content'>>
+  messages: Array<Pick<ChatMessage, 'role' | 'content' | 'images'>>
   /**
    * Live facts the model has no other way to know. Without these it guesses
    * at things it could simply be told, like what the current chat is called.

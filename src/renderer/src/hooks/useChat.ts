@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { actionFacts } from '../ledger'
-import type { ChatMessage } from '@shared/types'
+import type { Attachment, ChatMessage } from '@shared/types'
 
 let counter = 0
 export const nextId = (): string => `m${Date.now().toString(36)}${(counter++).toString(36)}`
@@ -35,7 +35,7 @@ export interface ChatState {
   streamingId: string | null
   stats: ChatStats
   /** False when a turn is already in flight and the message was not sent. */
-  send(text: string, displayText?: string): boolean
+  send(text: string, displayText?: string, images?: Attachment[]): boolean
   /** Live facts handed to the model each turn; set by the app. */
   setContext(ctx: { chatTitle: string | null }): void
   /** Messages as the model would see them, for size estimates and compaction. */
@@ -169,19 +169,23 @@ export function useChat(): ChatState {
     }
   }, [patchActive])
 
-  const send = useCallback((text: string, displayText?: string): boolean => {
+  const send = useCallback(
+    (text: string, displayText?: string, images?: Attachment[]): boolean => {
     const trimmed = text.trim()
     // Refused rather than queued: the caller knows what to do with the message
     // it could not send, and silently dropping a command's output left the
     // model answering from a conversation that was missing a step.
-    if (!trimmed || activeRequest.current) return false
+    // An image on its own is a message: "what is this" is implied by having
+    // attached it, so an empty line with a picture still goes.
+    if ((!trimmed && !images?.length) || activeRequest.current) return false
 
     const userMessage: ChatMessage = {
       id: nextId(),
       role: 'user',
       // A command such as /plan sends a wrapped prompt but shows what was typed.
       content: displayText ?? trimmed,
-      createdAt: Date.now()
+      createdAt: Date.now(),
+      ...(images?.length ? { images } : {})
     }
     const assistantMessage: ChatMessage = {
       id: nextId(),
@@ -206,6 +210,13 @@ export function useChat(): ChatState {
       }
       // Notices are app facts the model must act on, not chat turns.
       if (m.notice) return { role: 'system' as const, content: m.content }
+      /**
+       * Images go with the turn they were attached to, not just the newest
+       * one, so a follow-up question about a screenshot two turns back still
+       * has the screenshot. The main process turns them into content parts;
+       * here they are only carried.
+       */
+      if (m.images?.length) return { role: m.role, content: m.content, images: m.images }
       return { role: m.role, content: m.content }
     })
 
@@ -229,7 +240,9 @@ export function useChat(): ChatState {
       }
     })
     return true
-  }, [])
+    },
+    []
+  )
 
   useEffect(() => {
     if (!streaming) return

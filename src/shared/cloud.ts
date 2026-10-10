@@ -459,9 +459,47 @@ export function isCloudModel(model: string): boolean {
 
 /* --------------------------------------------------------------- the folding */
 
+/**
+ * One piece of a multi-part message.
+ *
+ * A message is a plain string right up until it carries an image, at which
+ * point the OpenAI-compatible shape is a list of parts. Both forms stay
+ * allowed rather than normalising everything to a list, because the string
+ * form is what every provider has always accepted and what almost every
+ * message still is.
+ */
+export type WirePart =
+  { type: 'text'; text: string } | { type: 'image_url'; image_url: { url: string } }
+
 export interface WireMessage {
   role: 'system' | 'user' | 'assistant'
-  content: string
+  content: string | WirePart[]
+}
+
+/** The text of a message, whichever shape it arrived in. */
+export function wireText(content: string | WirePart[]): string {
+  if (typeof content === 'string') return content
+  return content
+    .filter((p): p is { type: 'text'; text: string } => p.type === 'text')
+    .map((p) => p.text)
+    .join(String.fromCharCode(10))
+}
+
+/**
+ * Whether this model can look at a picture.
+ *
+ * Every model Wumpy offers is a Gemini and all of them can. The other three
+ * providers are still wired up - their keys keep working if you have one -
+ * and the models on them are text only, so an image sent to one is a 400
+ * that costs the whole turn rather than a request that works less well.
+ *
+ * This is asked before the paste is accepted, not after: refusing to attach
+ * and saying why is a missing feature, while attaching and quietly dropping
+ * it on the way out is a wrong answer to a question nobody knows was not
+ * asked.
+ */
+export function seesImages(model: string): boolean {
+  return Boolean(model) && providerFor(model) === 'google'
 }
 
 /**
@@ -477,10 +515,38 @@ export interface WireMessage {
  * which is for it to be deleted without telling anyone.
  */
 export function foldSystemMessages(messages: WireMessage[]): WireMessage[] {
-  const systems = messages.filter((m) => m.role === 'system').map((m) => m.content.trim())
+  // A system message is always plain text; wireText keeps that true even if
+  // one ever is not, rather than putting "[object Object]" in the preamble.
+  const systems = messages.filter((m) => m.role === 'system').map((m) => wireText(m.content).trim())
   const rest = messages.filter((m) => m.role !== 'system')
   if (systems.length <= 1) return messages.slice()
   return [{ role: 'system', content: systems.filter(Boolean).join('\n\n') }, ...rest]
+}
+
+/**
+ * Turns one message into the shape the wire wants.
+ *
+ * Plain text stays plain text, which is what nearly every message is and
+ * what every provider has always taken. A message carrying images becomes a
+ * list of parts, text first - the order matters: an image handed over before
+ * the question reads as the subject of it, which is exactly right for "what
+ * is this", and a question asked before its picture reads as a question
+ * about nothing.
+ *
+ * Images on a model that cannot see are DROPPED rather than sent, because
+ * the alternative is a 400 that costs the whole turn. The composer refuses
+ * to attach them in the first place; this is the second line.
+ */
+export function wireMessage(
+  m: { role: string; content: string; images?: { dataUrl: string }[] },
+  vision: boolean
+): WireMessage {
+  const role = m.role as WireMessage['role']
+  if (!vision || !m.images?.length || role !== 'user') return { role, content: m.content }
+  const parts: WirePart[] = []
+  if (m.content) parts.push({ type: 'text', text: m.content })
+  for (const img of m.images) parts.push({ type: 'image_url', image_url: { url: img.dataUrl } })
+  return { role, content: parts }
 }
 
 /** Applies whatever reshaping a provider needs before the request goes out. */

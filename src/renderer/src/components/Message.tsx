@@ -150,7 +150,16 @@ export const Message = memo(function Message({
   if (isUser) {
     return (
       <div className="msg msg-user">
-        <div className="msg-body">{message.content}</div>
+        {/* Above the text, the way they were above the box when it was sent.
+            A message can be an image and nothing else. */}
+        {message.images?.length ? (
+          <div className="msg-images">
+            {message.images.map((img, i) => (
+              <img key={i} src={img.dataUrl} alt={img.name ?? 'Attached image'} />
+            ))}
+          </div>
+        ) : null}
+        {message.content ? <div className="msg-body">{message.content}</div> : null}
       </div>
     )
   }

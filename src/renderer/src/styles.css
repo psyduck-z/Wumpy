@@ -1102,6 +1102,57 @@ body {
   }
 }
 
+/*
+ * A line that appears, says one thing, and goes away.
+ *
+ * Sits above the composer rather than over the transcript, because the
+ * things it says are answers to what was just typed. pointer-events: none so
+ * it can never swallow a click meant for the box underneath it.
+ */
+.toast {
+  position: absolute;
+  left: 50%;
+  bottom: 74px;
+  transform: translateX(-50%);
+  z-index: 40;
+  max-width: calc(100% - 32px);
+  padding: 6px 12px;
+  border: 1px solid rgb(var(--border));
+  border-radius: 999px;
+  background: rgb(var(--raised));
+  box-shadow: 0 6px 20px rgb(0 0 0 / 0.28);
+  color: rgb(var(--text));
+  font-size: 11.5px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  pointer-events: none;
+  opacity: 1;
+  transition:
+    opacity 220ms ease,
+    transform 220ms ease;
+  animation: toast-in 160ms ease;
+}
+
+.toast.is-leaving {
+  opacity: 0;
+  transform: translateX(-50%) translateY(4px);
+}
+
+@keyframes toast-in {
+  from {
+    opacity: 0;
+    transform: translateX(-50%) translateY(6px);
+  }
+}
+
+/* It is a one-off that fades; at rest it simply appears and disappears. */
+@media (prefers-reduced-motion: reduce) {
+  .toast {
+    animation: none;
+  }
+}
+
 /* ------------------------------------------------------------ empty state */
 
 .empty {
@@ -1451,6 +1502,117 @@ body {
 .composer-wrap {
   position: relative;
   padding: 0;
+}
+
+/*
+ * Images waiting to be sent.
+ *
+ * A strip above the box rather than inside it: a thumbnail in a textarea
+ * means reimplementing the textarea, and this says the same thing — these
+ * go with whatever you type next.
+ */
+.attachments {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px;
+  padding: 9px 12px 0;
+}
+
+.attachment {
+  position: relative;
+  width: 62px;
+  height: 62px;
+  border: 1px solid rgb(var(--border));
+  border-radius: 9px;
+  overflow: hidden;
+  background: rgb(var(--raised));
+}
+
+.attachment img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+.attachment-x {
+  position: absolute;
+  top: 2px;
+  right: 2px;
+  width: 17px;
+  height: 17px;
+  display: grid;
+  place-items: center;
+  padding: 0;
+  border: none;
+  border-radius: 50%;
+  background: rgb(0 0 0 / 0.62);
+  color: #fff;
+  font-size: 13px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.attachment-x:hover {
+  background: rgb(var(--danger));
+}
+
+/* The size is shown because it is the one thing that is not obvious from
+   looking at it, and it is what the turn will cost. */
+.attachment-size {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  padding: 1px 0;
+  background: rgb(0 0 0 / 0.55);
+  color: #fff;
+  font-size: 8.5px;
+  text-align: center;
+  letter-spacing: 0.2px;
+}
+
+/* A file dragged over the panel, before it is let go. */
+.composer-wrap.is-dropping .composer {
+  background: rgb(var(--accent-soft));
+  outline: 2px dashed rgb(var(--accent) / 0.6);
+  outline-offset: -4px;
+}
+
+.btn-attach {
+  display: grid;
+  place-items: center;
+  height: 36px;
+  width: 30px;
+  padding: 0;
+  border: none;
+  border-radius: 10px;
+  background: none;
+  color: rgb(var(--muted));
+  cursor: pointer;
+}
+
+.btn-attach:hover {
+  color: rgb(var(--text));
+  background: rgb(var(--raised));
+}
+
+/* What was attached, shown with the message it was attached to. */
+.msg-images {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 6px;
+  max-width: 88%;
+  margin-bottom: 5px;
+}
+
+.msg-images img {
+  max-width: 180px;
+  max-height: 180px;
+  border-radius: 10px;
+  border: 1px solid rgb(var(--border));
+  display: block;
 }
 
 .composer {

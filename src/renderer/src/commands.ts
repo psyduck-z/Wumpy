@@ -41,6 +41,20 @@ export interface CommandSpec {
   hint: string
   /** `<name>` style placeholder shown after the command when it takes an argument. */
   arg?: string
+  /**
+   * Whether the bare command is useless without its argument.
+   *
+   * Most of the ones that take an argument do something worth doing without
+   * it: `/model` opens the picker, `/usage` shows the report, `/pin` toggles.
+   * Enter on those should RUN them. Reported as "you have to press enter and
+   * then enter again" — the palette treated every argument as required, so
+   * `/model` completed to `/model ` with a trailing space and waited for a
+   * name nobody wanted to type.
+   *
+   * Only `/rename`, `/open` and `/key` genuinely need one; bare, each
+   * answers with its own usage line. Those keep the old behaviour.
+   */
+  argRequired?: boolean
   run(arg: string): CommandAction
 }
 
@@ -145,6 +159,7 @@ export const COMMANDS: CommandSpec[] = [
     aliases: ['title'],
     hint: 'Retitle this chat (chats save themselves)',
     arg: 'title',
+    argRequired: true,
     run: (arg) =>
       arg.trim()
         ? { kind: 'rename', title: arg.trim() }
@@ -193,6 +208,7 @@ export const COMMANDS: CommandSpec[] = [
     aliases: ['browse', 'go', 'google'],
     hint: 'Open a page, or search the web, in your browser',
     arg: 'url or words',
+    argRequired: true,
     run: (arg) =>
       arg.trim()
         ? { kind: 'open', what: arg.trim() }
@@ -240,6 +256,7 @@ export const COMMANDS: CommandSpec[] = [
     aliases: ['apikey'],
     hint: 'Add or remove hosted-model API keys (several rotate)',
     arg: 'google|groq|mistral|nvidia [add] <key…>',
+    argRequired: true,
     /**
      * Parsed here rather than in a dialog because a key is pasted, and the
      * composer is where pasting happens. The value is handed straight to the
@@ -334,6 +351,10 @@ export const COMMANDS: CommandSpec[] = [
     name: p.name,
     hint: p.hint,
     arg: 'text',
+    // All six wrap something the user has to write. Bare they have nothing
+    // to wrap, so Enter completes them and waits, rather than running them
+    // into their own usage line.
+    argRequired: true,
     run: (arg) =>
       arg.trim()
         ? { kind: 'prompt', text: p.wrap(arg.trim()), label: p.label }

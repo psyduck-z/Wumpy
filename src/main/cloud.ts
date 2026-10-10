@@ -9,7 +9,9 @@ import {
   providerFor,
   reasoningEffortFor,
   thinkingKwargsFor,
-  wireMessagesFor
+  wireMessagesFor,
+  wireMessage,
+  seesImages
 } from '@shared/cloud'
 import type { ChatOptions, StreamFailure, StreamHandlers, StreamStats } from './stream'
 import type { KeyStore } from './keys'
@@ -165,7 +167,7 @@ export class CloudClient {
   async chat(
     requestId: string,
     model: string,
-    messages: Array<Pick<ChatMessage, 'role' | 'content'>>,
+    messages: Array<Pick<ChatMessage, 'role' | 'content' | 'images'>>,
     opts: ChatOptions,
     handlers: StreamHandlers
   ): Promise<void> {
@@ -191,7 +193,7 @@ export class CloudClient {
     try {
       const wire: WireMessage[] = wireMessagesFor(provider, [
         ...(opts.systemPrompt ? [{ role: 'system' as const, content: opts.systemPrompt }] : []),
-        ...messages.map((m) => ({ role: m.role as WireMessage['role'], content: m.content }))
+        ...messages.map((m) => wireMessage(m, seesImages(model)))
       ])
 
       const effort = reasoningEffortFor(provider, opts.thinking, model)
@@ -464,7 +466,7 @@ export class CloudClient {
    */
   async complete(
     model: string,
-    messages: Array<Pick<ChatMessage, 'role' | 'content'>>,
+    messages: Array<Pick<ChatMessage, 'role' | 'content' | 'images'>>,
     opts: { numPredict?: number }
   ): Promise<string | null> {
     const check = this.ready(model)

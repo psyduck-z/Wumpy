@@ -1034,11 +1034,11 @@ app.on('will-quit', () => {
  * around it, so without this it either guesses or refuses. Telling it is
  * nearly free and removes a whole class of confident wrong answers.
  */
-function withContext(req: ChatRequest): Array<Pick<ChatMessage, 'role' | 'content'>> {
+function withContext(req: ChatRequest): Array<Pick<ChatMessage, 'role' | 'content' | 'images'>> {
   const facts = factsFor(req.context.chatTitle, req.context.actions ?? [])
 
-  const messages: Array<Pick<ChatMessage, 'role' | 'content'>> = [
-    ...req.messages.map((m) => ({ role: m.role, content: m.content }))
+  const messages: Array<Pick<ChatMessage, 'role' | 'content' | 'images'>> = [
+    ...req.messages.map((m) => ({ role: m.role, content: m.content, images: m.images }))
   ]
   // Directly behind the latest user turn, so everything before it stays cached.
   //

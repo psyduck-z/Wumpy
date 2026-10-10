@@ -12,14 +12,15 @@ import type {
   WriteResult,
   SearchResult,
   KeyStatus,
-  WumpySettings
+  WumpySettings,
+  Attachment
 } from '@shared/types'
 import { isTall } from '@shared/types'
 import { looksLikeUrl, SEARCH_ENGINES, type LinkApproval } from '@shared/links'
 import { clippedOutput, commandFeedback } from '@shared/parsefail'
 import { CONTEXT_TOKENS, DEFAULT_MODEL } from '@shared/assistant'
 import { shouldRetitle } from '@shared/titles'
-import { CLOUD_MODELS, PROVIDERS } from '@shared/cloud'
+import { CLOUD_MODELS, PROVIDERS, seesImages } from '@shared/cloud'
 import { useChat, nextId, type ChatStats } from './hooks/useChat'
 import {
   allCommands,
@@ -32,6 +33,7 @@ import {
 import { newestPending } from './pending'
 import { forgetClaims } from './once'
 import { forgetAllLive } from './live'
+import { Toast } from './components/Toast'
 import { forgetActions, record } from './ledger'
 import { matchIntent } from './intents'
 import { AUTO_RUN_LIMIT, autoRunEligible } from './autorun'
@@ -67,6 +69,16 @@ export default function App(): React.JSX.Element {
   const pinned = !(settings?.hideOnBlur ?? false)
   const [visible, setVisible] = useState(false)
   const [focusToken, setFocusToken] = useState(0)
+
+  /**
+   * A line that appears for a moment and leaves nothing behind.
+   *
+   * For the answers that are not part of the conversation. Writing "no saved
+   * chats" into the transcript would put a sentence the model never said in
+   * a chat that then saves itself with it.
+   */
+  const [toast, setToast] = useState<{ text: string; id: number } | null>(null)
+  const say = useCallback((text: string) => setToast({ text, id: Date.now() }), [])
   /**
    * A message typed while a turn was running.
    *
@@ -191,8 +203,11 @@ export default function App(): React.JSX.Element {
     setTimeout(() => window.wumpy.panel.hide(), 140)
   }, [])
 
+  /** Returns the list as well as storing it: the caller needs it this turn. */
   const refreshChats = useCallback(async () => {
-    setSavedChats(await window.wumpy.chats.list())
+    const list = await window.wumpy.chats.list()
+    setSavedChats(list)
+    return list
   }, [])
 
   const newChat = useCallback(() => {
@@ -607,17 +622,26 @@ export default function App(): React.JSX.Element {
           newChat()
           return
 
+        /**
+         * All three open a picker over the saved chats, and an empty picker
+         * is a bad answer: a search box, a list of nothing, and no reason
+         * given. Reported as exactly that. The count comes back from the
+         * refresh rather than from state, which has not re-rendered yet.
+         */
         case 'chats':
-          await refreshChats()
-          setPicker('resume')
-          return
         case 'resume': {
-          await refreshChats()
+          if ((await refreshChats()).length === 0) {
+            say('No saved chats yet.')
+            return
+          }
           setPicker('resume')
           return
         }
         case 'delete': {
-          await refreshChats()
+          if ((await refreshChats()).length === 0) {
+            say('No saved chats to delete.')
+            return
+          }
           setPicker('delete')
           return
         }
@@ -913,7 +937,7 @@ export default function App(): React.JSX.Element {
   )
 
   const onSend = useCallback(
-    (text: string) => {
+    (text: string, images?: Attachment[]) => {
       // Typing is the person rejoining the loop, so the unattended budget and
       // the already-ran list start again — whichever path the message takes
       // from here, including the auto-compact one that used to skip the reset.
@@ -971,12 +995,12 @@ export default function App(): React.JSX.Element {
         void (async () => {
           const done = await compactHistory({ silent: true })
           if (done) chat.note('Compacted earlier turns to make room.')
-          chat.send(text)
+          chat.send(text, undefined, images)
         })()
         return
       }
 
-      chat.send(text)
+      chat.send(text, undefined, images)
     },
     [chat, compactHistory, runCommand, settings, streaming, usage.used]
   )
@@ -1671,11 +1695,15 @@ export default function App(): React.JSX.Element {
         onCompact={() => void compactHistory()}
       />
 
+      <Toast message={toast} onDone={() => setToast(null)} />
+
       <Composer
         onSend={onSend}
         onStop={chat.stop}
         streaming={streaming}
         focusToken={focusToken}
+        canSeeImages={seesImages(model)}
+        onSay={say}
         prefill={prefill}
         queued={queued}
         onUnqueue={() => {

@@ -7,6 +7,8 @@ import { adoptsKeystroke } from '../keyboard'
 import { useDictation } from '../hooks/useDictation'
 import { HOLD_MS, HoldToTalk, isPlainSpace, type HoldAction } from '../holdtotalk'
 import { Mic } from './Mic'
+import { imagesIn, shrinkImage } from '../images'
+import type { Attachment } from '@shared/types'
 
 export function Composer({
   onSend,
@@ -16,9 +18,11 @@ export function Composer({
   onUnqueue,
   focusToken,
   prefill,
-  placeholder
+  placeholder,
+  canSeeImages = false,
+  onSay
 }: {
-  onSend(text: string): void
+  onSend(text: string, images?: Attachment[]): void
   onStop(): void
   streaming: boolean
   /** Shown as a chip under the box: typed while busy, sent when the turn ends. */
@@ -32,11 +36,62 @@ export function Composer({
    */
   prefill?: { text: string; token: number }
   placeholder: string
+  /**
+   * Whether the model answering can look at a picture.
+   *
+   * Attaching one to a model that cannot see is not a smaller version of the
+   * feature, it is a request that silently loses half of itself - so the
+   * paste is refused with a reason instead.
+   */
+  canSeeImages?: boolean
+  /** Said in a line that fades, for things that are not part of the chat. */
+  onSay?(text: string): void
 }): React.JSX.Element {
   const [value, setValue] = useState('')
   const [selected, setSelected] = useState(0)
   const ref = useRef<HTMLTextAreaElement>(null)
   const history = useInputHistory()
+
+  /* ------------------------------------------------------------- images */
+
+  /**
+   * Pictures waiting to go with the next message.
+   *
+   * Pasted, dropped or picked. They are shrunk on the way in rather than on
+   * the way out - see images.ts - because the thumbnail, the wire and the
+   * saved chat all want the same bytes, and a 2560-wide screenshot is not
+   * worth keeping three versions of.
+   */
+  const [images, setImages] = useState<Attachment[]>([])
+  const [dragging, setDragging] = useState(false)
+  const fileInput = useRef<HTMLInputElement>(null)
+
+  const attach = async (files: File[]): Promise<void> => {
+    if (!files.length) return
+    if (!canSeeImages) {
+      onSay?.('This model cannot read images. Switch with /model.')
+      return
+    }
+    for (const file of files) {
+      try {
+        const shrunk = await shrinkImage(file, file.name || undefined)
+        setImages((list) => [...list, shrunk])
+      } catch (err) {
+        onSay?.((err as Error)?.message ?? 'Could not read that image.')
+      }
+    }
+    ref.current?.focus({ preventScroll: true })
+  }
+
+  const drop = (e: React.DragEvent): void => {
+    const files = imagesIn(e.dataTransfer?.files)
+    // Only swallow the event when there was actually an image in it; a file
+    // dragged in by mistake should land wherever it would have landed.
+    if (!files.length) return
+    e.preventDefault()
+    setDragging(false)
+    void attach(files)
+  }
 
   /** Puts a recalled line in the box with the caret at the end of it. */
   const recall = (text: string): void => {
@@ -295,13 +350,16 @@ export function Composer({
   }, [value])
 
   const submit = (): void => {
-    if (!value.trim()) return
+    // An image on its own is a message. "What is this?" is implied by having
+    // put it there, and making someone type a word first is a toll.
+    if (!value.trim() && images.length === 0) return
     // Sending while busy used to do nothing at all: the keystroke vanished and
     // the box kept the text, with no sign that anything had happened. The app
     // decides what to do with it - queue it, or take it as an aside.
     history.push(value)
-    onSend(value)
+    onSend(value, images.length ? images : undefined)
     setValue('')
+    setImages([])
   }
 
   const accept = (spec: CommandSpec): void => {
@@ -342,11 +400,20 @@ export function Composer({
       // Shift+Tab is left alone: it cycles approval mode, and `e.key` is 'Tab'
       // for both, so without this the palette swallowed it.
       if ((e.key === 'Tab' && !e.shiftKey) || (e.key === 'Enter' && !e.shiftKey)) {
-        // Enter accepts the highlighted command rather than sending a partial one.
         const spec = palette[selected]
         if (spec) {
           e.preventDefault()
-          if (spec.arg) {
+          /**
+           * Tab completes, Enter runs. The way a shell does it.
+           *
+           * Enter used to complete too, for anything that took an argument
+           * at all — so `/model` became `/model ` and sat there waiting for
+           * a name, and you pressed Enter a second time to get the picker
+           * you wanted the first time. Reported as exactly that. Only the
+           * three commands that are useless bare still ask for the
+           * argument first.
+           */
+          if (e.key === 'Tab' || spec.argRequired) {
             accept(spec)
           } else {
             history.push(`/${spec.name}`)
@@ -398,8 +465,41 @@ export function Composer({
   }
 
   return (
-    <div className="composer-wrap">
+    <div
+      className={`composer-wrap ${dragging ? 'is-dropping' : ''}`}
+      onDragOver={(e) => {
+        if (!Array.from(e.dataTransfer?.types ?? []).includes('Files')) return
+        e.preventDefault()
+        setDragging(true)
+      }}
+      onDragLeave={(e) => {
+        // Only when the pointer has actually left the wrapper, not when it
+        // crosses from the wrapper onto the textarea inside it.
+        if (e.currentTarget.contains(e.relatedTarget as Node)) return
+        setDragging(false)
+      }}
+      onDrop={drop}
+    >
       <CommandPalette items={palette} selected={selected} onPick={accept} />
+
+      {images.length > 0 && (
+        <div className="attachments">
+          {images.map((img, i) => (
+            <div className="attachment" key={`${img.bytes}:${i}`}>
+              <img src={img.dataUrl} alt={img.name ?? 'Pasted image'} />
+              <button
+                type="button"
+                className="attachment-x"
+                title="Remove"
+                onClick={() => setImages((list) => list.filter((_, n) => n !== i))}
+              >
+                &#215;
+              </button>
+              <span className="attachment-size">{Math.round(img.bytes / 1024)}KB</span>
+            </div>
+          ))}
+        </div>
+      )}
 
       {queued && (
         <button
@@ -437,7 +537,48 @@ export function Composer({
             applyHold(hold.current.up(), e)
           }}
           onBlur={abandonHold}
+          onPaste={(e) => {
+            const files = imagesIn(e.clipboardData?.items)
+            // Text pasted alongside an image still pastes; only an event
+            // that is nothing but images is taken over.
+            if (!files.length) return
+            if (e.clipboardData?.getData('text/plain')) return
+            e.preventDefault()
+            void attach(files)
+          }}
         />
+        {/* Paste and drop cover most of it; the button is for the times
+            the picture is a file you have to go and find. */}
+        <input
+          ref={fileInput}
+          type="file"
+          accept="image/*"
+          multiple
+          hidden
+          onChange={(e) => {
+            void attach(Array.from(e.target.files ?? []))
+            // Cleared, or picking the same file twice in a row does nothing.
+            e.target.value = ''
+          }}
+        />
+        <button
+          type="button"
+          className="btn-attach"
+          onClick={() => fileInput.current?.click()}
+          title={
+            canSeeImages ? 'Attach an image (or just paste one)' : 'This model cannot read images'
+          }
+        >
+          <svg viewBox="0 0 24 24" width="15" height="15" aria-hidden="true">
+            <path
+              d="M12 5v14M5 12h14"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2.2"
+              strokeLinecap="round"
+            />
+          </svg>
+        </button>
         <Mic dictation={dictation} />
         {streaming ? (
           <button className="btn-stop" type="button" onClick={onStop} title="Stop (Ctrl+C or Esc)">
@@ -448,7 +589,7 @@ export function Composer({
             className="btn-send"
             type="button"
             onClick={submit}
-            disabled={!value.trim()}
+            disabled={!value.trim() && images.length === 0}
             title="Send (Enter)"
           >
             <svg viewBox="0 0 24 24" width="15" height="15" aria-hidden="true">

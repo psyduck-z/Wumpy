@@ -118,6 +118,65 @@ for (const [input, want] of PARSES) {
 }
 console.log(`ok   ${PARSES.length} lines parse as expected`)
 
+/* ------------------------------------- Tab completes, Enter runs -------- */
+
+/**
+ * Reported as "you have to press enter and then enter again".
+ *
+ * The palette completed on Enter for anything that took an argument at all,
+ * so `/model` became `/model ` with a trailing space and waited for a name —
+ * and the picker it was going to open anyway needed a second Enter. Only a
+ * command that is genuinely useless bare should ask for the argument first.
+ *
+ * The test is not what the flag says; it is whether the bare command does
+ * something. Every command marked as needing one must answer bare with an
+ * error, and every command NOT marked must answer bare with something else.
+ * Add a command later whose bare form stops working and this says so.
+ */
+const BARE_IS_USELESS = [
+  'rename',
+  'open',
+  'key',
+  // The prompt wrappers: all six wrap something the user writes, and have
+  // nothing to wrap without it.
+  'plan',
+  'btw',
+  'explain',
+  'fix',
+  'review',
+  'cmd'
+]
+for (const spec of commands) {
+  if (!spec.arg) continue
+  const bare = spec.run('')
+  const useless = bare?.kind === 'error'
+  const marked = spec.argRequired === true
+  if (useless !== marked) {
+    fail(
+      `/${spec.name}: argRequired is ${marked ? 'set' : 'not set'}, but bare it ` +
+        `${useless ? 'only prints its usage' : `does something (${bare?.kind})`}`
+    )
+  }
+  if (marked && !BARE_IS_USELESS.includes(spec.name)) {
+    fail(`/${spec.name} newly needs an argument — is that right, or does bare have a job?`)
+  }
+}
+console.log(`ok   ${BARE_IS_USELESS.length} commands need their argument, the rest run bare`)
+
+/* The three named ones are exactly the three, in both directions. */
+for (const name of BARE_IS_USELESS) {
+  const spec = findCommand(name)
+  if (!spec) fail(`/${name} is gone from the table`)
+  else if (spec.argRequired !== true) fail(`/${name} no longer asks for its argument`)
+}
+
+/** The ones the report was actually about. */
+for (const name of ['model', 'usage', 'pin', 'reasoning', 'dock', 'remember']) {
+  const spec = findCommand(name)
+  if (!spec) fail(`/${name} is gone from the table`)
+  else if (spec.argRequired) fail(`/${name} would make the user press Enter twice again`)
+}
+
 rmSync(out, { force: true })
 
 console.log(failed === 0 ? '\nall command checks correct' : `\n${failed} command checks FAILED`)
