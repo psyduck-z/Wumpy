@@ -188,9 +188,32 @@ export function CommandCard({
     })
   }, [waiting, command, messageId])
 
+  /**
+   * How long the command has been going, ticking once a second.
+   *
+   * The card said "running…" and nothing else, for up to the ten-minute
+   * ceiling. A winget install takes two or three minutes, during which the
+   * only thing on screen is a word that never changes - indistinguishable
+   * from frozen, and the install it was running had in fact worked.
+   *
+   * Nothing here can report real progress, because the command's output
+   * arrives all at once when it exits. A clock cannot say how far along it
+   * is, but it can say the app has not died, which is the question actually
+   * being asked.
+   */
+  const [startedAt, setStartedAt] = useState<number | null>(null)
+  const [elapsed, setElapsed] = useState(0)
+  useEffect(() => {
+    if (state !== 'running' || startedAt === null) return
+    const tick = setInterval(() => setElapsed(Math.floor((Date.now() - startedAt) / 1000)), 1000)
+    return () => clearInterval(tick)
+  }, [state, startedAt])
+
   const run = async (byItself = false): Promise<void> => {
     // Claimed before the command leaves, so a remount mid-run also knows.
     claimOnce(ranKey)
+    setStartedAt(Date.now())
+    setElapsed(0)
     setState('running')
     const res = await onRun(command, shell)
     if (!res) {
@@ -250,7 +273,15 @@ export function CommandCard({
         {state === 'idle' && judged && allowed === false && complete && command && (
           <span className="cmd-status">commands are off — /shell on</span>
         )}
-        {state === 'running' && <span className="cmd-status">running…</span>}
+        {state === 'running' && (
+          <span className="cmd-status">
+            running… {elapsed > 0 && `${elapsed}s`}
+            {/* Said once it has been going long enough to look stuck. An
+                installer really does take this long, and saying so is the
+                difference between waiting and giving up. */}
+            {elapsed >= 20 && ' · installers can take a few minutes'}
+          </span>
+        )}
         {state === 'cancelled' && <span className="cmd-status">skipped</span>}
         {state === 'done' && result && (
           <span className={`cmd-status ${failed ? 'is-failed' : 'is-ok'}`}>
