@@ -46,6 +46,8 @@ function prettify(accelerator: string): string {
   return accelerator.replace(/Super|Meta|Cmd|CommandOrControl/g, 'Win').replace(/\+/g, ' + ')
 }
 
+const NEWLINE = String.fromCharCode(10)
+
 export default function App(): React.JSX.Element {
   const chat = useChat()
   const { messages, streaming, streamingId, stats } = chat
@@ -745,6 +747,36 @@ export default function App(): React.JSX.Element {
               '',
               ...report.lines.filter((l) => l.note).map((l) => `_${l.model}: ${l.note}_`)
             ].join(String.fromCharCode(10))
+          )
+          return
+        }
+        case 'remember': {
+          if (action.clear) {
+            const result = await window.wumpy.context.set('', false)
+            chat.note(result.ok ? 'Forgot everything in the notes.' : result.why)
+            return
+          }
+          if (!action.value) {
+            const current = await window.wumpy.context.get()
+            chat.note(
+              current.text
+                ? `Wumpy is carrying this into every chat:${NEWLINE}${NEWLINE}${current.text}` +
+                    `${NEWLINE}${NEWLINE}The file is at ${current.path}. ` +
+                    'Add with `/remember <thing>`, wipe it with `/remember clear`.' +
+                    (current.truncated ? ' It is longer than Wumpy sends — trim it.' : '')
+                : 'Nothing remembered yet. `/remember I prefer celsius` and it will ' +
+                    'be there in every chat from now on.'
+            )
+            return
+          }
+          const result = await window.wumpy.context.set(action.value, true)
+          chat.note(
+            result.ok
+              ? `Noted, and it will be there in the next chat too.` +
+                  (result.truncated
+                    ? ' The notes are now longer than Wumpy sends — trim them.'
+                    : '')
+              : result.why
           )
           return
         }

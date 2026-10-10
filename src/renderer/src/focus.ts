@@ -41,6 +41,15 @@ export interface AttemptState {
 export const FOCUS_DEADLINE_MS = 600
 
 /** How often to try, between frames. Cheap: one focus() call. */
+/** A short, readable name for whatever currently holds the caret. */
+function describe(el: Element | null): string {
+  if (!el || el === document.body) return 'nothing'
+  const tag = el.tagName.toLowerCase()
+  const cls =
+    typeof el.className === 'string' && el.className ? `.${el.className.split(/\s+/)[0]}` : ''
+  return tag + cls
+}
+
 export const FOCUS_RETRY_MS = 24
 
 /**
@@ -103,7 +112,25 @@ export function insistFocus(
       // Out of time without the keyboard, and nobody else wanted it. Ask for
       // the forceful route. Once only - it is called from a loop, and the
       // flicker it causes is not something to repeat.
-      if (!state.hasFocus && !state.yielded) onGaveUp()
+      if (!state.hasFocus && !state.yielded) {
+        /**
+         * Says so out loud, because this failure is unreproducible on
+         * demand and has come back once already.
+         *
+         * Everything in the chain is in place and its checks pass - the
+         * hook grants the foreground, the window is not a toolbar, the
+         * retry uses setTimeout rather than a frame callback - so the next
+         * time the keyboard does not arrive, the useful thing is evidence
+         * rather than another guess. This line is what turns "it did not
+         * focus again" into a measurement.
+         */
+        console.warn(
+          '[wumpy] gave up waiting for the keyboard after ' +
+            `${state.elapsedMs}ms: hasFocus=${state.hasFocus} ` +
+            `caretHere=${state.isActive} active=${describe(document.activeElement)}`
+        )
+        onGaveUp()
+      }
       return
     }
 

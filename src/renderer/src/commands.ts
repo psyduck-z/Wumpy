@@ -24,6 +24,7 @@ export type CommandAction =
   | { kind: 'open'; what: string }
   | { kind: 'engine' }
   | { kind: 'key'; provider: ProviderName | null; value: string; clear: boolean; add: boolean }
+  | { kind: 'remember'; value: string; clear: boolean }
   | { kind: 'usage'; reset: boolean }
   | { kind: 'approve'; mode: 'manual' | 'auto' | 'all' | 'cycle' }
   | { kind: 'compact' }
@@ -212,6 +213,27 @@ export const COMMANDS: CommandSpec[] = [
     hint: 'What today has cost, per model',
     arg: 'reset',
     run: (arg) => ({ kind: 'usage', reset: /^reset$|^clear$/i.test(arg.trim()) })
+  },
+  {
+    name: 'remember',
+    aliases: ['context', 'notes'],
+    hint: 'Notes Wumpy carries from one chat to the next',
+    arg: '<thing to remember> | clear',
+    /**
+     * The one thing that survives a new chat.
+     *
+     * Every conversation starts from nothing, which is why the prompt has
+     * to forbid promising to remember anything. This is the exception, and
+     * it is a plain file the user can open rather than a store they have
+     * to take on trust.
+     */
+    run: (arg: string): CommandAction => {
+      const rest = (arg ?? '').trim()
+      if (/^(clear|forget|reset|none)$/i.test(rest)) {
+        return { kind: 'remember', value: '', clear: true }
+      }
+      return { kind: 'remember', value: rest, clear: false }
+    }
   },
   {
     name: 'key',

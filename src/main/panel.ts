@@ -284,6 +284,7 @@ export class Panel {
   forceFocus(): void {
     const win = this.window
     if (!win || !win.isVisible()) return
+    console.log('[wumpy] renderer reports no keyboard; forcing the foreground')
     win.minimize()
     win.restore()
     win.setAlwaysOnTop(true, 'screen-saver')
@@ -291,6 +292,25 @@ export class Panel {
     win.focus()
     win.webContents.focus()
     win.webContents.send(IPC.panelShown)
+
+    /**
+     * Says whether it worked, which it never used to.
+     *
+     * This fired and nobody found out what happened next - the renderer
+     * asked for help, help was attempted, and the only way to know the
+     * outcome was to watch the screen. Asking the page afterwards costs
+     * one round trip on a path that has already given up half a second,
+     * and it is the difference between a bug report and a measurement.
+     */
+    setTimeout(() => {
+      if (!this.window || this.window.isDestroyed()) return
+      void this.window.webContents
+        .executeJavaScript('document.hasFocus()')
+        .then((got: boolean) => {
+          console.log(`[wumpy] forced foreground ${got ? 'worked' : 'DID NOT WORK'}`)
+        })
+        .catch(() => {})
+    }, 250)
   }
 
   hide(): void {

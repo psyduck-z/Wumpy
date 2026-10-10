@@ -392,6 +392,8 @@ export const IPC = {
   writeCheck: 'write:check',
   usageGet: 'usage:get',
   usageReset: 'usage:reset',
+  contextGet: 'context:get',
+  contextSet: 'context:set',
   keyStatus: 'key:status',
   keySet: 'key:set',
   keyAdd: 'key:add',

@@ -40,6 +40,7 @@ import { PriorityManager } from './priority'
 import { webSearch } from './search'
 import { cleanTitle, titleBrief, titleSource } from '@shared/titles'
 import { folderFacts, resolveUserFolders } from './folders'
+import { ContextStore } from './context'
 import { Speech } from './speech'
 import { openLink, openSearch } from './browser'
 import { inspectWriteTarget, writeProposedFile } from './writefile'
@@ -71,6 +72,7 @@ let chats: ChatStore
 let inputHistory: InputHistory
 let cloud: CloudClient
 let keys: KeyStore
+let notes: ContextStore
 let usage: UsageStore
 /**
  * Hosted models that have said they are out for the day.
@@ -166,6 +168,8 @@ function factsFor(chatTitle: string | null, actions: string[] = []): string {
     // and an empty stderr, so the wrong folder was indistinguishable from
     // an empty one.
     ...folderFacts(),
+    // One file the user owns, carried from chat to chat. See context.ts.
+    ...notes.forPrompt(),
     // Written by the code that performed them, not recalled by the model.
     // Asked whether it had opened Spotify, the model denied it three times -
     // the app had the receipt and was not showing it.
@@ -827,6 +831,17 @@ ${command}`
    * one. It cannot read a key back - there is no handler for that, which is
    * the point. A reply carries only whether it worked and why not.
    */
+  ipcMain.handle(IPC.contextGet, () => ({
+    text: notes.read(),
+    path: notes.path(),
+    truncated: notes.truncated()
+  }))
+
+  ipcMain.handle(IPC.contextSet, (_e, req: { text: string; append?: boolean }) => {
+    const result = req?.append ? notes.add(req.text ?? '') : notes.write(req?.text ?? '')
+    return { ok: result.ok, why: result.why, text: notes.read(), truncated: notes.truncated() }
+  })
+
   ipcMain.handle(IPC.keyStatus, () => ({
     configured: keys.configured(),
     canStore: keys.available(),
@@ -955,6 +970,7 @@ void app.whenReady().then(async () => {
   chats = new ChatStore()
   inputHistory = new InputHistory()
   keys = new KeyStore()
+  notes = new ContextStore()
   cloud = new CloudClient(keys)
   usage = new UsageStore()
   panel = new Panel(settings)

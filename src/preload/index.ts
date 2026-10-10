@@ -117,6 +117,19 @@ const api = {
     get: (): Promise<UsageReport> => ipcRenderer.invoke(IPC.usageGet),
     reset: (): Promise<UsageReport> => ipcRenderer.invoke(IPC.usageReset)
   },
+  /**
+   * The notes Wumpy carries between chats. Plain text the user owns - no
+   * secret passes through here, so unlike keys it reads back freely.
+   */
+  context: {
+    get: (): Promise<{ text: string; path: string; truncated: boolean }> =>
+      ipcRenderer.invoke(IPC.contextGet),
+    set: (
+      text: string,
+      append = false
+    ): Promise<{ ok: boolean; why: string; text: string; truncated: boolean }> =>
+      ipcRenderer.invoke(IPC.contextSet, { text, append })
+  },
   keys: {
     /**
      * Which providers have a key. Deliberately no getter for a key itself -
