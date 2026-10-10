@@ -501,7 +501,7 @@ check('app.focus is still tried first', /app\.focus\(\{ steal: true \}\)/.test(p
 // the foreground the process has, it has it then and not after.
 check(
   'with a restore fallback when it fails',
-  /if \(!win\.isFocused\(\)\)[\s\S]{0,900}win\.minimize\(\)[\s\S]{0,60}win\.restore\(\)/.test(
+  /const polite = win\.isFocused\(\)[\s\S]{0,200}if \(!polite\)[\s\S]{0,900}win\.minimize\(\)[\s\S]{0,120}win\.restore\(\)/.test(
     panelSrc
   ),
   true
@@ -509,9 +509,33 @@ check(
 // Unconditional minimize/restore would flicker on every single open.
 check(
   'and only when it failed',
-  /win\.minimize\(\)/.test(panelSrc) && /!win\.isFocused\(\)/.test(panelSrc),
+  /win\.minimize\(\)/.test(panelSrc) && /if \(!polite\)/.test(panelSrc),
   true
 )
+
+/**
+ * And the one thing about that fallback nobody had ever checked.
+ *
+ * The window is created with minimizable: false. The whole fallback rests on
+ * minimize/restore being a route Windows grants activation to - so if
+ * Electron declines the minimize, it has been doing nothing at all on every
+ * path that reached it. A measurement, not an assumption, is the only way
+ * that question gets settled.
+ */
+check('and says whether the minimize did anything', /isMinimized\(\)/.test(panelSrc), true)
+
+/**
+ * Every open says whether the keyboard actually arrived.
+ *
+ * Five fixes for this bug were shipped and not one of them could be
+ * confirmed, because the only thing that knows is document.hasFocus() in the
+ * page, and the one line that reported it went to a console that
+ * `npm run restart` throws away. A fix nobody can check is a fix nobody
+ * should believe.
+ */
+check('the panel measures its own focus', /watchKeyboard/.test(panelSrc), true)
+check('from the page, not from isFocused()', /document\.hasFocus\(\)/.test(panelSrc), true)
+check('and writes it where it can be read', /from '\.\/log'/.test(panelSrc), true)
 
 /**
  * The grant, which is what makes focus work without a trick.
@@ -534,10 +558,48 @@ check('the hook grants foreground rights', hookSrc.includes('AllowSetForegroundW
 check('to a pid it was told', hookSrc.includes('--grant-foreground='), true)
 check(
   'before the toggle, not after',
-  /AllowSetForegroundWindow\(_grantPid\);[\s\S]{0,120}WriteLine\("TOGGLE"\)/.test(hookSrc),
+  /AllowSetForegroundWindow\(_grantPid\)[\s\S]{0,400}WriteLine\(granted/.test(hookSrc),
   true
 )
 check('and only when it has one', hookSrc.includes('_grantPid != 0'), true)
+
+/**
+ * The grant is reported now, rather than assumed.
+ *
+ * Its return value was discarded, and the comment above it - and the comment
+ * in panel.ts, and two of the assertions here - all described a mechanism
+ * that nobody had ever seen succeed. `TOGGLE granted` / `TOGGLE ungranted`
+ * is the difference between a theory and a reading.
+ */
+check('the grant result is not discarded', /var granted = /.test(hookSrc), true)
+
+/**
+ * The start-menu breaker goes FIRST.
+ *
+ * It injects a keystroke, and the foreground rules are keyed on input: doing
+ * it after the grant meant the last thing Windows saw, before Wumpy asked
+ * for the keyboard, was a keystroke that belonged to whatever was
+ * underneath. Nothing is lost by moving it, since the Win key is still held
+ * either way.
+ */
+check(
+  'the start-menu breaker runs before the grant',
+  hookSrc.indexOf('SuppressStartMenu();') < hookSrc.indexOf('AllowSetForegroundWindow(_grantPid)'),
+  true
+)
+
+/**
+ * And the part that no longer depends on a grant at all.
+ *
+ * A one-shot token handed to another process has to be spent before the
+ * moment passes, and the moment is a pipe write, a Node wake-up and an
+ * Electron show away. The helper received the keystroke, so the helper does
+ * the activating - on the window Wumpy names, once it is on screen.
+ */
+check('the helper can activate a window itself', /private static void Activate/.test(hookSrc), true)
+check('on its own thread, so a wedge cannot take the hook down', /Name = "activate"/.test(hookSrc), true)
+check('joining the foreground thread input queue', /AttachThreadInput/.test(hookSrc), true)
+check('with a lever the foreground rules do not govern', /SwitchToThisWindow/.test(hookSrc), true)
 check(
   'Wumpy passes its own pid',
   read('src/main/lowlevelhook.ts').includes('--grant-foreground=${process.pid}'),

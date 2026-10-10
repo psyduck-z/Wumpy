@@ -68,9 +68,48 @@ check(
   'the hook watches releases, not only presses'
 )
 check(
-  (src.match(/Console\.WriteLine\("TOGGLE"\)/g) ?? []).length === 1,
+  (src.match(/Console\.WriteLine\([^;]*"TOGGLE/g) ?? []).length === 1,
   'TOGGLE is reported from exactly one place'
 )
+
+/* --------------------------------------- the two ends of the hook protocol */
+
+/**
+ * Both sides of a line protocol, pinned together.
+ *
+ * The toggle line gained a suffix - `TOGGLE granted` / `TOGGLE ungranted` -
+ * so that the one thing nobody had ever checked, whether the foreground
+ * grant actually succeeds, shows up in the log. An exact-match reader on the
+ * other side would have turned that into a hotkey that silently stopped
+ * working, which is a far worse bug than the one being fixed.
+ */
+const driver = readFileSync('src/main/lowlevelhook.ts', 'utf8')
+check(
+  /message\.startsWith\('TOGGLE /.test(driver),
+  'main accepts a TOGGLE line that carries a suffix'
+)
+check(/ACTIVATE \$\{/.test(driver), 'main can ask the helper to activate a window')
+check(/StartsWith\("ACTIVATE /.test(src), 'the helper listens for ACTIVATE on stdin')
+check(/startsWith\('ACTIVATE'\)/.test(driver), "and main logs the helper's answer")
+
+/**
+ * The activation has to happen after the window is visible: you cannot give
+ * the foreground to a window that is not on screen.
+ */
+const shown = readFileSync('src/main/panel.ts', 'utf8')
+const show = shown.slice(shown.indexOf('show(): void'), shown.indexOf('watchKeyboard'))
+check(
+  show.indexOf('win.show()') < show.indexOf('this.activator?.('),
+  'the panel is shown before the helper is asked to activate it'
+)
+check(
+  /readBigUInt64LE/.test(shown),
+  'the window handle is read as 64 bits, not truncated to 32'
+)
+
+/** The imports that only fail at call time, which here is the worst moment. */
+check(/SwitchToThisWindow/.test(src), 'the helper has a lever the foreground rules do not govern')
+check(/ForegroundSelfTest/.test(src), 'and the self-test proves those imports resolve')
 
 /**
  * RegisterHotKey repeats while held too, and any extra accelerator in the

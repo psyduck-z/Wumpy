@@ -57,8 +57,15 @@ export class LowLevelHook {
         for (const line of lines) {
           const message = line.trim()
           if (!message) continue
-          if (message === 'TOGGLE') {
+          if (message === 'TOGGLE' || message.startsWith('TOGGLE ')) {
+            // `TOGGLE granted` / `TOGGLE ungranted` says whether
+            // AllowSetForegroundWindow succeeded. Worth knowing: the previous
+            // fix was built on the assumption that it always does, and its
+            // return value was discarded.
+            if (message !== 'TOGGLE') console.log(`[focus] hotkey: ${message.toLowerCase()}`)
             this.onTrigger()
+          } else if (message.startsWith('ACTIVATE')) {
+            console.log(`[focus] hook ${message.toLowerCase()}`)
           } else if (message.startsWith('READY')) {
             this.ready = true
             this.restarts = 0
@@ -101,6 +108,25 @@ export class LowLevelHook {
 
   isActive(): boolean {
     return this.ready && this.child !== null
+  }
+
+  /**
+   * Ask the helper to put a window in the foreground.
+   *
+   * The helper is the process that received the keystroke, so it is the one
+   * Windows will let change the foreground. Wumpy cannot: by the time the
+   * toggle has travelled down a pipe and through Electron, the moment has
+   * passed. Handing over a hwnd and letting the helper do it removes the
+   * race rather than racing faster.
+   *
+   * Fire and forget. The answer comes back on stdout as `ACTIVATE ok` or
+   * `ACTIVATE FAILED ...` and is logged, because an autofocus fix that
+   * cannot be checked is how this bug survived five of them.
+   */
+  activate(hwnd: bigint): void {
+    const stdin = this.child?.stdin
+    if (!this.ready || !stdin?.writable) return
+    stdin.write(`ACTIVATE ${hwnd.toString()}${String.fromCharCode(10)}`)
   }
 
   stop(): void {

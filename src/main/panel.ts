@@ -1,4 +1,5 @@
 import { BrowserWindow, screen, app } from 'electron'
+import { log } from './log'
 import { openLink } from './browser'
 import { join } from 'node:path'
 import { IPC, isTall, type Dock } from '@shared/types'
@@ -19,6 +20,16 @@ export class Panel {
   private window: BrowserWindow | null = null
   /** While pinned the panel survives focus loss, so the user can work alongside it. */
   private pinned = false
+
+  /**
+   * Who to ask when this window needs the keyboard.
+   *
+   * Set by index.ts to the keyboard helper, which is the process that
+   * received the hotkey and therefore the only one Windows will let change
+   * the foreground. Null when the helper is not running, in which case the
+   * old polite route is all there is.
+   */
+  private activator: ((hwnd: bigint) => void) | null = null
 
   constructor(private readonly settings: SettingsStore) {}
 
@@ -188,6 +199,27 @@ export class Panel {
     this.window.setBounds(this.geometryFor(this.settings.get('dock')))
   }
 
+  /** Wire up whoever can take the foreground on this window's behalf. */
+  setActivator(activate: (hwnd: bigint) => void): void {
+    this.activator = activate
+  }
+
+  /**
+   * This window's Win32 handle, for the helper that will activate it.
+   *
+   * getNativeWindowHandle returns the raw pointer bytes; on x64 that is a
+   * 64-bit little-endian value. Read as anything narrower it is silently
+   * wrong on exactly the machines where the top bits are set.
+   */
+  private handle(win: BrowserWindow): bigint | null {
+    try {
+      const buf = win.getNativeWindowHandle()
+      return buf.length >= 8 ? buf.readBigUInt64LE(0) : BigInt(buf.readUInt32LE(0))
+    } catch {
+      return null
+    }
+  }
+
   setDock(dock: Dock): void {
     this.settings.patch({ dock })
     this.reposition()
@@ -241,7 +273,8 @@ export class Panel {
      * available synchronously, and acting on it costs nothing when it is
      * wrong in the harmless direction.
      */
-    if (!win.isFocused()) {
+    const polite = win.isFocused()
+    if (!polite) {
       /**
        * The fallback, and no longer the mechanism.
        *
@@ -261,7 +294,71 @@ export class Panel {
       win.focus()
     }
     win.webContents.focus()
+
+    /**
+     * And then ask the one process that can actually do it.
+     *
+     * Everything above is Wumpy asking Windows for the foreground, which
+     * Windows is entitled to refuse and does: this process did not receive
+     * the keystroke, so it has no right to take the foreground from whatever
+     * the user was working in. Five fixes were built downstream of that
+     * fact without addressing it.
+     *
+     * The helper did receive the keystroke. Now that the window is visible,
+     * it can hand it the keyboard directly. Harmless on the paths with no
+     * keystroke behind them - the tray, a second instance - where it simply
+     * reports that it could not.
+     */
+    const hwnd = this.handle(win)
+    if (hwnd !== null) this.activator?.(hwnd)
+
     win.webContents.send(IPC.panelShown)
+    this.watchKeyboard(polite ? 'focus()' : 'minimize/restore')
+  }
+
+  /**
+   * Did the keyboard actually arrive, and when?
+   *
+   * One line in the log for every time the panel opens, because "it still
+   * does not autofocus" has been reported five times and never once with a
+   * number attached. document.hasFocus() is the only honest answer and it
+   * lives in the page, so this asks the page - repeatedly, because the
+   * handover is asynchronous and the interesting part is how long it took.
+   *
+   * win.isFocused() is not a substitute: it has been observed true while
+   * Windows had handed over nothing, which is how an earlier guard came to
+   * do nothing at all.
+   */
+  private watchKeyboard(route: string): void {
+    const win = this.window
+    if (!win) return
+    const startedAt = Date.now()
+    const probe = (): void => {
+      if (!this.window || this.window.isDestroyed() || win !== this.window) return
+      if (!win.isVisible()) return // closed again before it ever mattered
+      void win.webContents
+        .executeJavaScript(
+          '({ has: document.hasFocus(), active: (document.activeElement && ' +
+            'document.activeElement.tagName || "none").toLowerCase() })'
+        )
+        .then((r: { has: boolean; active: string }) => {
+          const ms = Date.now() - startedAt
+          if (r.has) {
+            log(`[focus] keyboard arrived after ${ms}ms via ${route}, caret on ${r.active}`)
+            return
+          }
+          if (ms >= 1200) {
+            log(
+              `[focus] NO KEYBOARD after ${ms}ms via ${route}; caret on ${r.active}. ` +
+                'Keystrokes are going to whatever is underneath.'
+            )
+            return
+          }
+          setTimeout(probe, 40)
+        })
+        .catch(() => {})
+    }
+    probe()
   }
 
   /**
@@ -285,7 +382,28 @@ export class Panel {
     const win = this.window
     if (!win || !win.isVisible()) return
     console.log('[wumpy] renderer reports no keyboard; forcing the foreground')
+
+    /**
+     * Ask the helper first, because it is the one with the right.
+     *
+     * The calls below are this process asking Windows for something Windows
+     * has already refused once. The helper received the keystroke, so it is
+     * the one that can insist - and unlike minimize/restore it does not
+     * flicker.
+     */
+    const hwnd = this.handle(win)
+    if (hwnd !== null) this.activator?.(hwnd)
+
     win.minimize()
+    /**
+     * Whether that did anything at all, which has never been checked.
+     *
+     * The window is created with minimizable: false, and this fallback is
+     * built entirely on minimize/restore being the one route Windows grants
+     * activation to. If Electron is refusing the minimize, the "fallback"
+     * has been doing nothing on every path that reached it.
+     */
+    if (!win.isMinimized()) log('[focus] minimize() did nothing - the window refuses to minimise')
     win.restore()
     win.setAlwaysOnTop(true, 'screen-saver')
     app.focus({ steal: true })

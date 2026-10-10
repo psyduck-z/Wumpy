@@ -56,6 +56,16 @@ import {
 import type { ProviderId } from '@shared/cloud'
 import { checkLink, isSearchEngine } from '@shared/links'
 import { POLISH_PROMPT, polishAcceptable, tidyTranscript } from '@shared/dictation'
+import { captureConsole, logPath } from './log'
+
+/**
+ * Before anything else, so that whatever happens during startup is readable.
+ *
+ * `npm run restart` has to detach the process, which means stdio is thrown
+ * away and every console line with it. See log.ts.
+ */
+captureConsole()
+console.log(`[wumpy] started; log at ${logPath()}`)
 
 // Only one Wumpy may own the tray icon and the global hotkey.
 if (!app.requestSingleInstanceLock()) {
@@ -258,6 +268,17 @@ async function startLowLevelHook(): Promise<void> {
   if (!ok) {
     lowLevelHook = null
     console.warn('[wumpy] Win+C interception unavailable; use the tray icon')
+  } else {
+    /**
+     * The helper takes the foreground, not Wumpy.
+     *
+     * Windows grants that right to whoever received the keystroke, and that
+     * is the helper - Wumpy only hears about the press afterwards, down a
+     * pipe, by which time the right is gone. So the panel shows itself and
+     * then asks the helper to hand it the keyboard.
+     */
+    const hook = lowLevelHook
+    panel.setActivator((hwnd) => hook.activate(hwnd))
   }
   tray?.refresh()
   panel.send(IPC.hotkeyState, hotkeyState)

@@ -135,6 +135,55 @@ internal static class Program
     [return: MarshalAs(UnmanagedType.Bool)]
     private static extern bool AllowSetForegroundWindow(uint dwProcessId);
 
+    /// <summary>
+    /// Everything needed to take the foreground here rather than delegate it.
+    ///
+    /// AllowSetForegroundWindow hands Wumpy a one-shot token and hopes it is
+    /// spent in time. That hope is the whole bug: the token is issued here,
+    /// then TOGGLE goes down a pipe, Node wakes up, Electron shows a window
+    /// and only then calls focus. Anything in that gap - including the Ctrl
+    /// tap this process injects to stop the Start menu - and the panel comes
+    /// up deaf.
+    ///
+    /// So the activation happens here instead, in the process that actually
+    /// received the keystroke, on the window Wumpy names. Nothing has to
+    /// survive a round trip.
+    /// </summary>
+    [DllImport("user32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool SetForegroundWindow(IntPtr hWnd);
+
+    [DllImport("user32.dll")]
+    private static extern bool BringWindowToTop(IntPtr hWnd);
+
+    [DllImport("user32.dll")]
+    private static extern IntPtr GetForegroundWindow();
+
+    [DllImport("user32.dll")]
+    private static extern uint GetWindowThreadProcessId(IntPtr hWnd, out uint pid);
+
+    [DllImport("user32.dll")]
+    private static extern bool IsWindowVisible(IntPtr hWnd);
+
+    /// <summary>
+    /// Join another thread's input queue, inheriting its right to grant the
+    /// foreground. The documented way past the foreground rules when no
+    /// grant is available, and the reason this no longer depends on one.
+    /// </summary>
+    [DllImport("user32.dll")]
+    private static extern bool AttachThreadInput(uint idAttach, uint idAttachTo, bool fAttach);
+
+    /// <summary>
+    /// What Alt+Tab uses, and the lever that answers to nobody.
+    ///
+    /// Documented as not intended for general use and present since XP.
+    /// Unlike SetForegroundWindow it is not subject to the foreground rules,
+    /// which is exactly why it is here: measured, the attach-and-set route
+    /// returned false on the first attempt even with the input queues joined.
+    /// </summary>
+    [DllImport("user32.dll")]
+    private static extern void SwitchToThisWindow(IntPtr hWnd, bool altTab);
+
     [DllImport("kernel32.dll", SetLastError = true)]
     private static extern IntPtr GetModuleHandleW(string? lpModuleName);
 
@@ -215,12 +264,14 @@ internal static class Program
             var sent = SendInputSelfTest();
             var err = sent == 2 ? 0 : Marshal.GetLastWin32Error();
             var keysOk = KeySelfTest();
+            var fgOk = ForegroundSelfTest();
             Console.WriteLine(
                 $"hook={(hookOk ? "ok" : "FAIL")} " +
                 $"sizeof(INPUT)={Marshal.SizeOf<INPUT>()} " +
                 $"sendinput={(sent == 2 ? "ok" : $"FAIL(sent={sent}, err={err})")} " +
-                $"keys={(keysOk ? "ok" : "FAIL")}");
-            return hookOk && sent == 2 && keysOk ? 0 : 1;
+                $"keys={(keysOk ? "ok" : "FAIL")} " +
+                $"foreground={(fgOk ? "ok" : "FAIL")}");
+            return hookOk && sent == 2 && keysOk && fgOk ? 0 : 1;
         }
 
         _mainThreadId = GetCurrentThreadId();
@@ -235,14 +286,33 @@ internal static class Program
         Console.WriteLine($"READY vk=0x{_targetVk:X2}");
         Console.Out.Flush();
 
-        // Die with the parent: when Electron closes the pipe, stdin hits EOF.
+        /*
+         * Two jobs on one thread.
+         *
+         * Die with the parent: when Electron closes the pipe, stdin hits EOF.
+         * That has always been here and is what guarantees this process cannot
+         * outlive Wumpy even if Wumpy is killed outright.
+         *
+         * And take orders: `ACTIVATE <hwnd>` asks for the foreground to be
+         * given to that window, from here, because this is the process that
+         * received the keystroke. Reading lines rather than draining bytes is
+         * the only change to the lifetime guarantee - EOF still ends the loop.
+         */
         var watchdog = new Thread(() =>
         {
             try
             {
-                using var stdin = Console.OpenStandardInput();
-                var buf = new byte[1];
-                while (stdin.Read(buf, 0, 1) > 0) { }
+                using var reader = new StreamReader(Console.OpenStandardInput());
+                string? line;
+                while ((line = reader.ReadLine()) is not null)
+                {
+                    var text = line.Trim();
+                    if (text.StartsWith("ACTIVATE ", StringComparison.OrdinalIgnoreCase)
+                        && long.TryParse(text.AsSpan(9), out var raw))
+                    {
+                        Activate(new IntPtr(raw));
+                    }
+                }
             }
             catch { /* pipe torn down */ }
             PostThreadMessageW(_mainThreadId, 0x0012 /* WM_QUIT */, IntPtr.Zero, IntPtr.Zero);
@@ -329,20 +399,148 @@ internal static class Program
 
         if (act == Act.Toggle)
         {
-            // Before the toggle, not after: the grant has to be in place by
-            // the time Wumpy calls focus, and Wumpy acts on the line below.
-            if (_grantPid != 0) AllowSetForegroundWindow(_grantPid);
-
-            Console.WriteLine("TOGGLE");
-            Console.Out.Flush();
-
             // The shell opens Start when Win is released having seen no other key.
             // We swallowed the real one, so inject a harmless Ctrl tap to make the
             // Win press count as part of a combination.
+            //
+            // FIRST, where it used to be last. This injects input, and input is
+            // what the foreground rules are keyed on: doing it after the grant
+            // meant the last thing Windows saw before Wumpy asked for the
+            // keyboard was a keystroke belonging to whatever was underneath.
+            // Nothing is lost by moving it - the Win key is still held.
             SuppressStartMenu();
+
+            // Still issued, because when it works it is the cheapest route and
+            // costs nothing when it does not. No longer relied on: see
+            // Activate, which is what the panel actually waits for now.
+            var granted = _grantPid != 0 && AllowSetForegroundWindow(_grantPid);
+
+            Console.WriteLine(granted ? "TOGGLE granted" : "TOGGLE ungranted");
+            Console.Out.Flush();
         }
 
         return 1; // swallow: the shell never sees it
+    }
+
+    /// <summary>
+    /// That the activation imports resolve at all.
+    ///
+    /// A misspelled DllImport throws EntryPointNotFoundException on the first
+    /// call and not before - which for these would be the moment the hotkey
+    /// is pressed, on a background thread, with the output going to a pipe
+    /// nobody was reading. Every call here is a deliberate no-op: detaching
+    /// nothing, activating the desktop's idea of no window.
+    /// </summary>
+    private static bool ForegroundSelfTest()
+    {
+        try
+        {
+            AttachThreadInput(0, 0, false);
+            SetForegroundWindow(IntPtr.Zero);
+            BringWindowToTop(IntPtr.Zero);
+            IsWindowVisible(IntPtr.Zero);
+            GetWindowThreadProcessId(GetForegroundWindow(), out _);
+            SwitchToThisWindow(IntPtr.Zero, true);
+            AllowSetForegroundWindow(0);
+            return true;
+        }
+        catch (Exception err)
+        {
+            Console.Error.WriteLine($"  foreground FAIL: {err.GetType().Name} {err.Message}");
+            return false;
+        }
+    }
+
+    /* ----------------------------------------------------------- activation */
+
+    /// <summary>
+    /// Give a window the keyboard, from the process that received the key.
+    ///
+    /// Three attempts at autofocus were spent in the renderer and two in the
+    /// main process, all of them downstream of the real problem: by the time
+    /// Wumpy can act, the right to change the foreground has moved on. This
+    /// runs where that right still exists.
+    ///
+    /// On its own thread, deliberately. AttachThreadInput merges two input
+    /// queues, and a SetForegroundWindow made across a merged queue can block
+    /// if the other side is not pumping messages. A wedged activation must
+    /// not take the hook down with it - without the hook, the hotkey stops
+    /// working altogether, which is far worse than a panel that opens deaf.
+    /// </summary>
+    private static void Activate(IntPtr hwnd)
+    {
+        var worker = new Thread(() =>
+        {
+            var joined = false;
+            var returned = false;
+            var error = 0;
+            var attempts = 0;
+            try
+            {
+                if (hwnd == IntPtr.Zero || !IsWindowVisible(hwnd))
+                {
+                    Console.WriteLine("ACTIVATE skipped window-not-visible");
+                    Console.Out.Flush();
+                    return;
+                }
+
+                /*
+                 * Two different levers, because one is not enough.
+                 *
+                 * Attach-and-set is the documented route and it is the one
+                 * that can be refused - measured on a real show, it returned
+                 * false with the input queues successfully joined.
+                 * SwitchToThisWindow is not subject to the foreground rules
+                 * at all. Trying the polite one first means the forceful one
+                 * only runs when it is needed, and reporting which one won
+                 * means the next person to touch this does not have to guess.
+                 */
+                var after = "nothing tried";
+                for (attempts = 1; attempts <= 4; attempts++)
+                {
+                    if (GetForegroundWindow() == hwnd) break;
+
+                    var fg = GetForegroundWindow();
+                    if (attempts % 2 == 1)
+                    {
+                        var fgThread = GetWindowThreadProcessId(fg, out _);
+                        var me = GetCurrentThreadId();
+                        joined = fgThread != 0 && fgThread != me && AttachThreadInput(me, fgThread, true);
+
+                        returned = SetForegroundWindow(hwnd);
+                        error = returned ? 0 : Marshal.GetLastWin32Error();
+                        BringWindowToTop(hwnd);
+
+                        if (joined) AttachThreadInput(me, fgThread, false);
+                        after = "attach+setfg";
+                    }
+                    else
+                    {
+                        SwitchToThisWindow(hwnd, true);
+                        after = "switchtothiswindow";
+                    }
+
+                    Thread.Sleep(60);
+                }
+
+                var won = GetForegroundWindow() == hwnd;
+                // `after`, not `via`: it names the last lever pulled, which is
+                // not the same as the one that worked. Wumpy's own show() may
+                // have won the foreground before any of this ran, and a label
+                // claiming otherwise is how five fixes came to be believed.
+                Console.WriteLine(
+                    $"ACTIVATE {(won ? "ok" : "FAILED")} after={after} " +
+                    $"attempts={attempts} joined={joined} setfg={returned} err={error}");
+                Console.Out.Flush();
+            }
+            catch (Exception err)
+            {
+                Console.WriteLine($"ACTIVATE error {err.GetType().Name}");
+                Console.Out.Flush();
+            }
+        })
+        { IsBackground = true, Name = "activate" };
+        worker.Start();
     }
 
     /* ------------------------------------------------------------- self-test */
