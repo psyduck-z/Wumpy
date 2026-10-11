@@ -402,8 +402,15 @@ check(
 const example = T.OPEN_PROMPT.split(String.fromCharCode(10)).filter((l) =>
   l.includes('Get-StartApps |')
 )
-check('one command to ask, one to act', example.length, 2)
-const ASK_LINE = example.find((l) => !l.includes('Start-Process')) ?? ''
+/**
+ * Three: ask, act, and the one that splits a name into its parts.
+ *
+ * The third arrived because "open tiger.vnc" was searched as the whole
+ * string, matched nothing, and was reported as not installed.
+ */
+check('three commands: ask, act, split', example.length, 3)
+const ASK_LINE =
+  example.find((l) => !l.includes('Start-Process') && !l.includes('-match')) ?? ''
 // The example is run for real by scripts/check-openapp.mjs. Here we only
 // assert it is one line, because that is what broke it twice.
 check('and is a single line', (example[0] ?? '').includes(String.fromCharCode(10)), false)

@@ -26,7 +26,8 @@
 import { build } from 'esbuild'
 import { pathToFileURL } from 'node:url'
 import { join } from 'node:path'
-import { rmSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
 import { spawn } from 'node:child_process'
 
 const out = join(process.cwd(), '.openapp-check.mjs')
@@ -54,10 +55,23 @@ function check(label, actual, expected) {
 const lines = T.OPEN_PROMPT.split(String.fromCharCode(10)).filter((l) =>
   l.includes('Get-StartApps |')
 )
-check('two commands: one to ask, one to act', lines.length, 2)
+/**
+ * Three now: ask, act, and the one that splits a name into its parts.
+ *
+ * The third was added because "open tiger.vnc" was answered with
+ * Get-StartApps on the whole string, which matched nothing, and the model
+ * called that not installed.
+ */
+check('three Get-StartApps commands: ask, act, split', lines.length, 3)
 
-const ASK = (lines.find((l) => !l.includes('Start-Process')) ?? '').trim()
 const ACT = (lines.find((l) => l.includes('Start-Process')) ?? '').trim()
+/* NOT just '-match': the launching command tests $a -match '!' for an AppID. */
+const SPLIT = (
+  lines.find((l) => l.includes('-match') && !l.includes('Start-Process')) ?? ''
+).trim()
+const ASK = (
+  lines.find((l) => !l.includes('Start-Process') && !l.includes('-match')) ?? ''
+).trim()
 
 /**
  * The separation is the whole point of this pair.
@@ -277,6 +291,64 @@ if (!TEMPLATE) {
   // then has to interpret.
   check('without an error to misread', absent.stderr, '')
   check('and never claims to have launched', absent.stdout.includes('LAUNCHED'), false)
+}
+
+/* --------------------------- the loose .exe nobody installed ------------- */
+
+/**
+ * The case that started this: "open tiger.vnc".
+ *
+ * Get-StartApps found nothing, so the model said not installed. It was a
+ * portable vncviewer64-1.16.2.exe sitting in Downloads - no Start-menu entry,
+ * no registry entry, not on PATH - which Windows Search shows and
+ * Get-StartApps cannot. Two separate mistakes in one answer, searching the
+ * whole phrase and treating one empty source as proof, so both are pinned.
+ *
+ * The fallback command is pulled out of the prompt and RUN, against a
+ * temporary folder substituted for the real roots. Reading it would not have
+ * caught any of the three times a command in this prompt shipped broken.
+ */
+check('the name is split on its parts, not matched whole', /-match '[a-z]+[|][a-z]+'/.test(SPLIT), true)
+check('and the split search only reads', /Start-Process|Remove-|Stop-/.test(SPLIT), false)
+
+const DISK = (
+  T.OPEN_PROMPT.split(String.fromCharCode(10))
+    .map((l) => l.trim())
+    .find((l) => l.startsWith('$r = @(') && l.includes('Get-ChildItem')) ?? ''
+)
+check('there is an on-disk fallback at all', DISK.length > 0, true)
+check('which only reads', /Remove-|Start-Process|Stop-|Set-/.test(DISK), false)
+check('and is one line', DISK.includes(String.fromCharCode(10)), false)
+
+if (DISK && process.platform === 'win32') {
+  const dir = mkdtempSync(join(tmpdir(), 'wumpy-app-'))
+  mkdirSync(join(dir, 'nested', 'deeper'), { recursive: true })
+  /* Named like an executable; the command matches on the name, not content. */
+  writeFileSync(join(dir, 'nested', 'deeper', 'tigervnc-9.9.9.exe'), 'x')
+  writeFileSync(join(dir, 'nested', 'unrelated.exe'), 'x')
+
+  /* Swap the real roots for the temp folder, leaving the rest verbatim. */
+  const quoted = String.fromCharCode(34) + dir.split(String.fromCharCode(92)).join(String.fromCharCode(92, 92)) + String.fromCharCode(34)
+  const runnable = DISK.replace(/^[$]r = @\([^)]*\)[^;]*;/, `$r = @(${quoted});`)
+  check('the roots were substituted', runnable !== DISK, true)
+
+  /* Its own runner: runRaw lives inside the Windows branch above. */
+  const got = await new Promise((resolve) => {
+    const child = spawn(
+      'powershell.exe',
+      ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-Command', runnable],
+      { windowsHide: true }
+    )
+    let stdout = ''
+    let stderr = ''
+    child.stdout.on('data', (d) => (stdout += d))
+    child.stderr.on('data', (d) => (stderr += d))
+    child.on('close', () => resolve({ stdout: stdout.trim(), stderr: stderr.trim() }))
+  })
+  check('it finds a loose exe nobody installed', got.stdout.includes('tigervnc-9.9.9.exe'), true)
+  check('without an error', got.stderr, '')
+  check('and ignores one that does not match', got.stdout.includes('unrelated.exe'), false)
+  rmSync(dir, { recursive: true, force: true })
 }
 
 console.log(failures ? `\n${failures} open-app checks FAILED` : '\nall open-app checks')
