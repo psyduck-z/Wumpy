@@ -66,6 +66,8 @@ export class LowLevelHook {
             this.onTrigger()
           } else if (message.startsWith('ACTIVATE')) {
             console.log(`[focus] hook ${message.toLowerCase()}`)
+          } else if (this.settleCommand(message)) {
+            /* A reply to send(): matched and resolved there. */
           } else if (message.startsWith('READY')) {
             this.ready = true
             this.restarts = 0
@@ -123,6 +125,58 @@ export class LowLevelHook {
    * `ACTIVATE FAILED ...` and is logged, because an autofocus fix that
    * cannot be checked is how this bug survived five of them.
    */
+  /**
+   * Commands awaiting their reply, oldest first, keyed by the verb.
+   *
+   * The helper answers every command with one line starting with the verb it
+   * was given, and commands are written one at a time, so matching on the
+   * verb is enough. Keyed rather than a single slot because a plan's steps
+   * are different verbs and a slow CLICK must not be handed a TYPE's answer.
+   */
+  private pending = new Map<string, Array<(reply: string) => void>>()
+
+  private settleCommand(message: string): boolean {
+    const verb = message.split(' ')[0]
+    const queue = this.pending.get(verb)
+    if (!queue || queue.length === 0) return false
+    queue.shift()?.(message)
+    return true
+  }
+
+  /**
+   * Sends one command and waits for the helper's answer.
+   *
+   * Timed out rather than awaited forever: this is driving the user's
+   * desktop, and a step that never settles leaves the rest of a plan hanging
+   * with no way to see why. The timeout resolves with a readable failure so
+   * the card can show it.
+   */
+  send(command: string, timeoutMs = 4000): Promise<string> {
+    const stdin = this.child?.stdin
+    const verb = command.split(' ')[0]
+    if (!this.ready || !stdin?.writable) {
+      return Promise.resolve(`${verb} FAILED helper-not-running`)
+    }
+    return new Promise((resolve) => {
+      const queue = this.pending.get(verb) ?? []
+      let done = false
+      const settle = (reply: string): void => {
+        if (done) return
+        done = true
+        clearTimeout(timer)
+        resolve(reply)
+      }
+      const timer = setTimeout(() => {
+        const q = this.pending.get(verb)
+        if (q) this.pending.set(verb, q.filter((f) => f !== settle))
+        settle(`${verb} FAILED no-reply-in-${timeoutMs}ms`)
+      }, timeoutMs)
+      queue.push(settle)
+      this.pending.set(verb, queue)
+      stdin.write(command + String.fromCharCode(10))
+    })
+  }
+
   activate(hwnd: bigint): void {
     const stdin = this.child?.stdin
     if (!this.ready || !stdin?.writable) return

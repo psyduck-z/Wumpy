@@ -2046,6 +2046,39 @@ body {
  * are very different things.
  */
 /*
+  The plan a wumpy-do block is about to carry out, in sentences.
+
+  Shown before it runs and left there afterwards, each line marked with what
+  actually happened. On accept-all nobody gets to approve it, so this list is
+  the only review there is - which makes "readable after the fact" the thing
+  it has to be good at, not "scannable before".
+*/
+.steps {
+  margin: 6px 0 0;
+  padding: 0 0 0 20px;
+  color: rgb(var(--muted));
+  font-size: 12px;
+  line-height: 1.7;
+}
+
+.steps li::marker {
+  color: rgb(var(--muted) / 0.5);
+}
+
+.steps li.is-done {
+  color: rgb(var(--text) / 0.75);
+}
+
+.steps li.is-failed {
+  color: rgb(var(--danger));
+}
+
+/* The one card that moves the pointer, so its edge says so. */
+.cmd.desktop {
+  border-color: rgb(var(--accent) / 0.45);
+}
+
+/*
   What the model is doing, above the box, while it answers.
 
   Asked for so a turn heading the wrong way can be stopped early - and then,

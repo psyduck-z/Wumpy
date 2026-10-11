@@ -31,7 +31,16 @@ internal static class Program
 
     private const uint LLKHF_INJECTED = 0x10;
     private const uint INPUT_KEYBOARD = 1;
+    private const uint INPUT_MOUSE = 0;
     private const uint KEYEVENTF_KEYUP = 0x0002;
+
+    /// <summary>Types a character by its code point, whatever the keyboard layout is.</summary>
+    private const uint KEYEVENTF_UNICODE = 0x0004;
+
+    private const uint MOUSEEVENTF_LEFTDOWN = 0x0002;
+    private const uint MOUSEEVENTF_LEFTUP = 0x0004;
+    private const uint MOUSEEVENTF_RIGHTDOWN = 0x0008;
+    private const uint MOUSEEVENTF_RIGHTUP = 0x0010;
 
     /// <summary>Marks input we synthesised, so the hook ignores its own events.</summary>
     private static readonly IntPtr WumpySignature = new(0x57554D50); // 'WUMP'
@@ -193,6 +202,28 @@ internal static class Program
     [DllImport("user32.dll")]
     private static extern bool PostThreadMessageW(uint idThread, uint msg, IntPtr wParam, IntPtr lParam);
 
+    /*
+     * The pointer, in real screen pixels.
+     *
+     * SetCursorPos rather than a MOUSEEVENTF_ABSOLUTE move: absolute mouse
+     * input is 0..65535 normalised across the whole virtual desktop, which
+     * has to be derived from four GetSystemMetrics calls and comes out wrong
+     * by a rounding error on a multi-monitor desk, and by more than that when
+     * the monitors have different scaling. This takes the pixels it is given.
+     */
+    [DllImport("user32.dll", SetLastError = true)]
+    private static extern bool SetCursorPos(int x, int y);
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct POINT
+    {
+        public int x;
+        public int y;
+    }
+
+    [DllImport("user32.dll", SetLastError = true)]
+    private static extern bool GetCursorPos(out POINT lpPoint);
+
     // Held in a static field so the GC cannot collect the delegate the OS holds.
     private static readonly HookProc Callback = OnKey;
     private static IntPtr _hook = IntPtr.Zero;
@@ -265,13 +296,15 @@ internal static class Program
             var err = sent == 2 ? 0 : Marshal.GetLastWin32Error();
             var keysOk = KeySelfTest();
             var fgOk = ForegroundSelfTest();
+            var pointerOk = PointerSelfTest();
             Console.WriteLine(
                 $"hook={(hookOk ? "ok" : "FAIL")} " +
                 $"sizeof(INPUT)={Marshal.SizeOf<INPUT>()} " +
                 $"sendinput={(sent == 2 ? "ok" : $"FAIL(sent={sent}, err={err})")} " +
                 $"keys={(keysOk ? "ok" : "FAIL")} " +
-                $"foreground={(fgOk ? "ok" : "FAIL")}");
-            return hookOk && sent == 2 && keysOk && fgOk ? 0 : 1;
+                $"foreground={(fgOk ? "ok" : "FAIL")} " +
+                $"pointer={(pointerOk ? "ok" : "FAIL")}");
+            return hookOk && sent == 2 && keysOk && fgOk && pointerOk ? 0 : 1;
         }
 
         _mainThreadId = GetCurrentThreadId();
@@ -311,6 +344,10 @@ internal static class Program
                         && long.TryParse(text.AsSpan(9), out var raw))
                     {
                         Activate(new IntPtr(raw));
+                    }
+                    else
+                    {
+                        Command(text);
                     }
                 }
             }
@@ -659,8 +696,252 @@ internal static class Program
         return failed == 0;
     }
 
+    /*
+     * ------------------------------------------------------------------
+     * Acting on the screen: moving the pointer, clicking, typing.
+     *
+     * Here rather than in Electron because this is the process that already
+     * owns SendInput, with the union layout proved by --selftest and a
+     * signature on every event so the hook ignores its own input. A second
+     * implementation in a second place would be a second chance to get the
+     * 40-byte INPUT struct wrong.
+     *
+     * Everything below takes REAL SCREEN PIXELS. The translation from what
+     * the model saw in a screenshot is done in Electron, which is the only
+     * side that knows which display was photographed and how far it was
+     * scaled down.
+     * ------------------------------------------------------------------
+     */
+
+    /*
+     * One line in, one line out, always.
+     *
+     * Every branch prints exactly one reply beginning with the verb it was
+     * given, because the Electron side matches replies to requests by that
+     * first word. A command that silently did nothing would leave the caller
+     * waiting on a promise that never settles, which is worse on screen than
+     * a click that failed and said so.
+     */
+    private static void Command(string text)
+    {
+        var space = text.IndexOf(' ');
+        var verb = (space < 0 ? text : text[..space]).ToUpperInvariant();
+        var rest = space < 0 ? string.Empty : text[(space + 1)..].Trim();
+
+        switch (verb)
+        {
+            case "MOVE":
+            case "CLICK":
+            {
+                /* "<x> <y> [left|right] [times]" */
+                var bits = rest.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+                if (bits.Length < 2 || !int.TryParse(bits[0], out var x) || !int.TryParse(bits[1], out var y))
+                {
+                    Console.WriteLine($"{verb} FAILED bad-coordinates");
+                    return;
+                }
+                if (verb == "MOVE") { Move(x, y); return; }
+                var right = bits.Length > 2 && bits[2].Equals("right", StringComparison.OrdinalIgnoreCase);
+                var times = bits.Length > 3 && int.TryParse(bits[3], out var t) ? Math.Clamp(t, 1, 3) : 1;
+                Click(x, y, right, times);
+                return;
+            }
+            case "TYPE":
+            {
+                /*
+                 * Base64, because the text is arbitrary and this is a
+                 * line protocol: a newline or a stray carriage return in the
+                 * payload would end the command half way through and leave
+                 * the remainder to be read as the next one.
+                 */
+                try
+                {
+                    Type(System.Text.Encoding.UTF8.GetString(Convert.FromBase64String(rest)));
+                }
+                catch (FormatException)
+                {
+                    Console.WriteLine("TYPE FAILED not-base64");
+                }
+                return;
+            }
+            case "KEY":
+                Key(rest);
+                return;
+            case "":
+                return;
+            default:
+                Console.WriteLine($"{verb} FAILED unknown-command");
+                return;
+        }
+    }
+
+    /// <summary>Moves the pointer and reports where it actually landed.</summary>
+    private static void Move(int x, int y)
+    {
+        var moved = SetCursorPos(x, y);
+        var err = moved ? 0 : Marshal.GetLastWin32Error();
+        /* Read it back rather than trusting the return: the pointer is
+           clamped to the virtual desktop, so asking for a point off-screen
+           succeeds and lands somewhere else entirely. */
+        GetCursorPos(out var at);
+        var landed = moved && at.x == x && at.y == y;
+        Console.WriteLine(
+            $"MOVE {(landed ? "ok" : "CLAMPED")} at={at.x},{at.y} set={moved} err={err}");
+    }
+
+    private static void Click(int x, int y, bool right, int times)
+    {
+        if (!SetCursorPos(x, y))
+        {
+            Console.WriteLine($"CLICK FAILED cursor err={Marshal.GetLastWin32Error()}");
+            return;
+        }
+        GetCursorPos(out var at);
+        if (at.x != x || at.y != y)
+        {
+            /* Off-screen, so the click would land on whatever the pointer was
+               clamped to. That is how an automated click hits the wrong
+               window, so it does not happen. */
+            Console.WriteLine($"CLICK REFUSED off-screen asked={x},{y} landed={at.x},{at.y}");
+            return;
+        }
+
+        var down = right ? MOUSEEVENTF_RIGHTDOWN : MOUSEEVENTF_LEFTDOWN;
+        var up = right ? MOUSEEVENTF_RIGHTUP : MOUSEEVENTF_LEFTUP;
+        uint sent = 0;
+        for (var i = 0; i < times; i++)
+        {
+            var inputs = new INPUT[2];
+            inputs[0].type = INPUT_MOUSE;
+            inputs[0].mi = new MOUSEINPUT { dwFlags = down, dwExtraInfo = WumpySignature };
+            inputs[1].type = INPUT_MOUSE;
+            inputs[1].mi = new MOUSEINPUT { dwFlags = up, dwExtraInfo = WumpySignature };
+            sent += SendInput((uint)inputs.Length, inputs, Marshal.SizeOf<INPUT>());
+        }
+        var want = (uint)(times * 2);
+        Console.WriteLine(
+            sent == want
+                ? $"CLICK ok at={x},{y} button={(right ? "right" : "left")} times={times}"
+                : $"CLICK FAILED sent={sent}/{want} err={Marshal.GetLastWin32Error()}");
+    }
+
+    /*
+     * Typing, as Unicode code points rather than virtual keys.
+     *
+     * A virtual-key press means something different on every keyboard
+     * layout, so 'z' typed by VK on a German layout is 'y'. KEYEVENTF_UNICODE
+     * carries the character itself and is layout-independent; it is also the
+     * only way to type anything that is not on the user's keyboard at all.
+     *
+     * Surrogate pairs go as two events, which is what the API wants: each
+     * half is sent as its own UTF-16 unit and Windows recombines them.
+     */
+    private static void Type(string text)
+    {
+        var events = new List<INPUT>(text.Length * 2);
+        foreach (var unit in text)
+        {
+            foreach (var up in new[] { false, true })
+            {
+                var input = new INPUT { type = INPUT_KEYBOARD };
+                input.ki = new KEYBDINPUT
+                {
+                    wVk = 0,
+                    wScan = unit,
+                    dwFlags = KEYEVENTF_UNICODE | (up ? KEYEVENTF_KEYUP : 0),
+                    dwExtraInfo = WumpySignature
+                };
+                events.Add(input);
+            }
+        }
+        if (events.Count == 0)
+        {
+            Console.WriteLine("TYPE ok chars=0");
+            return;
+        }
+        var arr = events.ToArray();
+        var sent = SendInput((uint)arr.Length, arr, Marshal.SizeOf<INPUT>());
+        Console.WriteLine(
+            sent == arr.Length
+                ? $"TYPE ok chars={text.Length}"
+                : $"TYPE FAILED sent={sent}/{arr.Length} err={Marshal.GetLastWin32Error()}");
+    }
+
+    /// <summary>The named keys that are not characters, plus modifiers.</summary>
+    private static readonly Dictionary<string, ushort> NamedKeys = new(StringComparer.OrdinalIgnoreCase)
+    {
+        ["enter"] = 0x0D, ["return"] = 0x0D, ["tab"] = 0x09, ["escape"] = 0x1B, ["esc"] = 0x1B,
+        ["backspace"] = 0x08, ["delete"] = 0x2E, ["space"] = 0x20, ["home"] = 0x24, ["end"] = 0x23,
+        ["pageup"] = 0x21, ["pagedown"] = 0x22, ["up"] = 0x26, ["down"] = 0x28,
+        ["left"] = 0x25, ["right"] = 0x27,
+        ["ctrl"] = 0x11, ["control"] = 0x11, ["shift"] = 0x10, ["alt"] = 0x12, ["win"] = 0x5B,
+        ["f1"] = 0x70, ["f2"] = 0x71, ["f3"] = 0x72, ["f4"] = 0x73, ["f5"] = 0x74, ["f6"] = 0x75,
+        ["f11"] = 0x7A, ["f12"] = 0x7B
+    };
+
+    /// <summary>A chord: "ctrl+a", "alt+tab", "enter". Modifiers held, last key tapped.</summary>
+    private static void Key(string chord)
+    {
+        var parts = chord.Split('+', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+        var codes = new List<ushort>();
+        foreach (var part in parts)
+        {
+            if (NamedKeys.TryGetValue(part, out var vk)) codes.Add(vk);
+            else if (part.Length == 1) codes.Add(char.ToUpperInvariant(part[0]));
+            else
+            {
+                Console.WriteLine($"KEY FAILED unknown={part}");
+                return;
+            }
+        }
+        if (codes.Count == 0)
+        {
+            Console.WriteLine("KEY FAILED empty");
+            return;
+        }
+
+        /* Down in order, up in reverse, so a modifier is still held when the
+           key it modifies is pressed and released. */
+        var events = new List<INPUT>();
+        foreach (var vk in codes) events.Add(KeyEvent(vk, false));
+        for (var i = codes.Count - 1; i >= 0; i--) events.Add(KeyEvent(codes[i], true));
+
+        var arr = events.ToArray();
+        var sent = SendInput((uint)arr.Length, arr, Marshal.SizeOf<INPUT>());
+        Console.WriteLine(
+            sent == arr.Length
+                ? $"KEY ok chord={chord}"
+                : $"KEY FAILED sent={sent}/{arr.Length} err={Marshal.GetLastWin32Error()}");
+    }
+
+    private static INPUT KeyEvent(ushort vk, bool up)
+    {
+        var input = new INPUT { type = INPUT_KEYBOARD };
+        input.ki = new KEYBDINPUT
+        {
+            wVk = vk,
+            dwFlags = up ? KEYEVENTF_KEYUP : 0,
+            dwExtraInfo = WumpySignature
+        };
+        return input;
+    }
+
     /// <summary>Returns the number of events SendInput accepted; 2 means the layout is right.</summary>
     private static uint SendInputSelfTest() => SendStartMenuBreaker();
+
+    /*
+     * Proves the pointer can be moved and put back, without clicking on
+     * anything. A click self-test would have to click on something real.
+     */
+    private static bool PointerSelfTest()
+    {
+        if (!GetCursorPos(out var was)) return false;
+        var target = new POINT { x = was.x + 1, y = was.y + 1 };
+        var ok = SetCursorPos(target.x, target.y) && GetCursorPos(out var now)
+            && now.x == target.x && now.y == target.y;
+        SetCursorPos(was.x, was.y); // exactly where it was, whatever happened
+        return ok;
+    }
 
     private static void SuppressStartMenu() => SendStartMenuBreaker();
 

@@ -89,6 +89,24 @@ export type ShellKind = 'powershell' | 'cmd' | 'bash'
  */
 export type ApprovalMode = 'manual' | 'auto' | 'all'
 
+/** One step of a desktop plan, after it ran. */
+export interface DesktopStep {
+  step: string
+  ok: boolean
+  detail: string
+}
+
+/** What came back from running a plan of clicks and keystrokes. */
+export interface DesktopResult {
+  ran: DesktopStep[]
+  /** Set when nothing ran at all, with the reason. */
+  refused: string | null
+  /** Lines in the block that were not steps. */
+  problems: string[]
+  /** The screen afterwards, so the model can see what it did. */
+  after: Attachment | null
+}
+
 /** What the main process decided about one proposed command. */
 export interface CommandVerdict {
   /** Why it looks destructive, or null. */
@@ -481,7 +499,9 @@ export const IPC = {
    * channel that captures without one, and no way for the model to reach
    * this except by proposing a block the user then presses.
    */
-  screenCapture: 'screen:capture'
+  screenCapture: 'screen:capture',
+  /* Clicking and typing on the real desktop, aimed by the last screenshot. */
+  doRun: 'do:run'
 } as const
 
 /* --------------------------------------------------------------------- keys */

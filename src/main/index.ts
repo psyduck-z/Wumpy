@@ -25,7 +25,8 @@ import {
   SEARCH_PROMPT,
   OPEN_PROMPT,
   SCREEN_PROMPT,
-  CLOSE_PROMPT
+  CLOSE_PROMPT,
+  DESKTOP_PROMPT
 } from '@shared/assistant'
 import { SettingsStore } from './store'
 import { ChatStore } from './chats'
@@ -46,6 +47,8 @@ import { ContextStore } from './context'
 import { Speech } from './speech'
 import { openLink, openSearch } from './browser'
 import { inspectWriteTarget, writeProposedFile } from './writefile'
+import { runPlan } from './input'
+import { readPlan } from '@shared/steps'
 import {
   PROVIDERS,
   isCloudModel,
@@ -248,6 +251,10 @@ function systemPromptFor(assistant: Assistant, scope: 'none' | 'read' | 'full'):
     scope !== 'none' && settings.get('searchEnabled') ? SEARCH_PROMPT : '',
     scope !== 'none' && settings.get('browserEnabled') ? OPEN_PROMPT : '',
     settings.get('screenEnabled') ? SCREEN_PROMPT : '',
+    /* Both, because driving the screen without seeing it is aiming blind. */
+    settings.get('screenEnabled') && settings.get('browserEnabled') && scope === 'full'
+      ? DESKTOP_PROMPT
+      : '',
     ASK_PROMPT
   ]
     .filter(Boolean)
@@ -770,6 +777,48 @@ function registerIpc(): void {
     const shot = await captureScreen(panel.liveWindow())
     console.log(`[wumpy] screen captured: ${shot.width}x${shot.height}, ${shot.bytes} bytes`)
     return shot
+  })
+
+  /**
+   * Clicking and typing on the real desktop.
+   *
+   * The permission question was settled by the user, plainly: "My Gmail tab
+   * is literally open. I'm giving it permission to do it." The refusal they
+   * hit was honest - Wumpy could see the screen and could not touch it - so
+   * what changed is the capability, not a prompt telling the model to claim
+   * one it does not have.
+   *
+   * What is enforced here, where the model cannot reach it: it only runs
+   * while browser control is on, it needs a screenshot to aim by, and every
+   * step reports back. The rest - whether to run at all - is the approval
+   * mode, like every other proposal.
+   */
+  ipcMain.handle(IPC.doRun, async (_e, req: { body: string }) => {
+    if (!settings.get('browserEnabled')) {
+      return {
+        ran: [],
+        refused: 'Controlling the screen is turned off in settings (browserEnabled).'
+      }
+    }
+    const plan = readPlan(req.body)
+    const result = await runPlan(plan, panel.liveWindow(), (cmd, ms) =>
+      lowLevelHook
+        ? lowLevelHook.send(cmd, ms)
+        : Promise.resolve(`${cmd.split(' ')[0]} FAILED helper-not-running`)
+    )
+    /*
+     * And then look again, always.
+     *
+     * A click whose result nobody saw is a click the model has to guess
+     * about, and guessing is how the next one lands somewhere wrong. Pairing
+     * every plan with a fresh screenshot makes the loop the user described -
+     * look, act, look - the only loop there is.
+     */
+    const after =
+      result.refused === null && settings.get('screenEnabled')
+        ? await captureScreen(panel.liveWindow())
+        : null
+    return { ...result, problems: plan.problems, after }
   })
 
   ipcMain.handle(IPC.searchRun, async (_e, query: string) => {

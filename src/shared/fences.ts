@@ -41,7 +41,7 @@
  * exactly the case the guard exists to prevent. Adding `wumpy-screen` to a
  * literal would have made the same mistake a second time.
  */
-export const WUMPY_TAGS = ['run', 'ask', 'write', 'search', 'open', 'screen'] as const
+export const WUMPY_TAGS = ['run', 'ask', 'write', 'search', 'open', 'screen', 'do'] as const
 
 export function normaliseFences(text: string): string {
   const BT = String.fromCharCode(96).repeat(3)

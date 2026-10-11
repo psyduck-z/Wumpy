@@ -13,7 +13,8 @@ import type {
   SearchResult,
   KeyStatus,
   WumpySettings,
-  Attachment
+  Attachment,
+  DesktopResult
 } from '@shared/types'
 import { isTall } from '@shared/types'
 import { looksLikeUrl, SEARCH_ENGINES, type LinkApproval } from '@shared/links'
@@ -413,6 +414,41 @@ export default function App(): React.JSX.Element {
       ].join(String.fromCharCode(10)),
       'Shared my screen',
       [shot]
+    )
+  }, [])
+
+  /* ---------------------------------------------------- acting on the screen */
+
+  /** Only with browser control on; the main process enforces that too. */
+  const canDrive = settings?.browserEnabled ?? false
+
+  const runDesktop = useCallback((body: string) => window.wumpy.desktop.run(body), [])
+
+  /**
+   * Hands the result, and the screen afterwards, back as the user's turn.
+   *
+   * The same route the screenshot takes, for the same reason: the model has
+   * to see what its clicks actually did, and the user has to see the same
+   * picture the model got. A plan that half worked says exactly where it
+   * stopped, because that is the only thing the model can correct from.
+   */
+  const onDesktopDone = useCallback((result: DesktopResult, after: Attachment | null) => {
+    const lines = result.refused
+      ? [`That did not run: ${result.refused}`]
+      : result.ran.map((r) => `${r.ok ? 'did' : 'FAILED'}: ${r.step} (${r.detail})`)
+    if (!result.refused && result.ran.some((r) => !r.ok)) {
+      lines.push('Everything after the failed step was skipped.')
+    }
+    chatRef.current.send(
+      [
+        'I ran that on my screen. Here is what each step did:',
+        ...lines,
+        after ? 'The picture is my screen as it is now. Look before deciding what next.' : ''
+      ]
+        .filter(Boolean)
+        .join(String.fromCharCode(10)),
+      'Ran it on my screen',
+      after ? [after] : undefined
     )
   }, [])
 
@@ -1762,6 +1798,8 @@ export default function App(): React.JSX.Element {
                   autoWrite={fresh && (settings?.approvalMode ?? 'manual') === 'all'}
                   onCaptureScreen={canSeeScreen ? captureScreen : undefined}
                   onScreenCaptured={onScreenCaptured}
+                  onDesktop={canDrive ? runDesktop : undefined}
+                  onDesktopDone={onDesktopDone}
                   onOpenLink={canOpenLinks ? openLink : undefined}
                   onOpenSearch={openSearch}
                   onOpened={onOpened}

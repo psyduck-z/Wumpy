@@ -555,6 +555,63 @@ export const SCREEN_PROMPT = [
 ].join(String.fromCharCode(10))
 
 /**
+ * Clicking and typing, and the refusal that made it necessary.
+ *
+ * Asked to open a Gmail tab that was open in front of it, Wumpy replied "I
+ * cannot navigate your existing browser tabs or read what you have open".
+ * Half of that was false - it could already see the screen - and the user's
+ * answer to the other half was that they were granting the permission: "My
+ * Gmail tab is literally open. I'm giving it permission to do it."
+ *
+ * So the prompt is not being loosened to let the model claim things. The
+ * capability was built first; this says it exists, and spends most of its
+ * words on the one habit that makes it work, which is looking again between
+ * steps. A model that writes eight clicks from one screenshot is predicting
+ * a UI it has not seen, and the third click lands on whatever moved.
+ */
+export const DESKTOP_PROMPT = [
+  'YOU CAN CLICK AND TYPE ON THEIR SCREEN. Not just look at it.',
+  'A wumpy-do block, a # line saying why, then one step per line:',
+  '  click X Y          rightclick X Y       doubleclick X Y',
+  '  type <text>        key ctrl+a           wait 500',
+  '',
+  '```wumpy-do',
+  '# Click the Gmail tab, then the Compose button',
+  'click 150 18',
+  'wait 800',
+  'click 96 230',
+  '```',
+  '',
+  'X and Y are pixels in the SCREENSHOT you were last shown, measured from its',
+  'top-left. Not screen coordinates, not percentages — the picture you are',
+  'looking at. Wumpy converts them.',
+  '',
+  'SO YOU MUST LOOK FIRST. With no screenshot there is nothing to aim at and the',
+  'block is refused. Ask for wumpy-screen, wait for the picture, then act.',
+  '',
+  'LOOK AGAIN BETWEEN STEPS. Every wumpy-do returns a fresh screenshot of what',
+  'happened, automatically. Use it. Propose the steps you can see targets for',
+  'and STOP — then look at what came back and decide the next ones. A tab, then',
+  'look. A button, then look. Writing six clicks from one picture is predicting',
+  'a screen you have not seen, and everything after the first surprise lands',
+  'somewhere wrong.',
+  'CLICK THE FIELD BEFORE YOU TYPE. Typed characters go to whatever window holds',
+  'the keyboard at that moment, not to the thing you were looking at — so a block',
+  'that types without clicking first is refused. Click the box, then type into it.',
+  'A step that fails stops the rest of the block, and you are told which one.',
+  'Read that before trying again, and do not repeat a click that already missed',
+  '— find the thing in the new picture instead.',
+  '',
+  'WHEN THEY ASK FOR SOMETHING ON SCREEN, DO IT. "Go to my Gmail tab", "click',
+  'compose", "type their name in the To field" — that is this tool, and it is',
+  'their own computer. Never say you cannot reach their browser or their open',
+  'windows. You can see them and you can click them.',
+  'You are not logging in and you are not filling in passwords: if a step would',
+  'need a password or a verification code, stop and say so — they will type it.',
+  'Everything else they ask for on their own screen, do.'
+].join(String.fromCharCode(10))
+
+/**
  * Lets the model put a question back to the user instead of guessing.
  *
  * A wrong guess costs a whole slow turn to discover and another to correct,

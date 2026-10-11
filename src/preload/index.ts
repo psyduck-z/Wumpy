@@ -3,6 +3,7 @@ import { IPC } from '@shared/types'
 import type { LinkCheck } from '@shared/links'
 import type {
   Attachment,
+  DesktopResult,
   ChatDelta,
   ChatDone,
   ChatError,
@@ -110,6 +111,18 @@ const api = {
      * from a model reply on its own.
      */
     capture: (): Promise<Attachment> => ipcRenderer.invoke(IPC.screenCapture)
+  },
+  desktop: {
+    /**
+     * Runs an approved plan of clicks and keystrokes, and returns what each
+     * step did plus a fresh screenshot of the result.
+     *
+     * The block's text crosses as text and is parsed on the other side. The
+     * renderer parses it too, for the card, but that copy is only ever shown
+     * - main never trusts it, because a renderer is reachable from a model's
+     * output and a main process is not.
+     */
+    run: (body: string): Promise<DesktopResult> => ipcRenderer.invoke(IPC.doRun, { body })
   },
   search: {
     /** Runs an approved web search. */

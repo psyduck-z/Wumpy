@@ -1,6 +1,7 @@
 import { memo, useState, isValidElement, type ReactNode } from 'react'
 import type {
   Attachment,
+  DesktopResult,
   LinkResult,
   SearchResult,
   ShellKind,
@@ -17,6 +18,7 @@ import { CommandCard } from './CommandCard'
 import { AskCard } from './AskCard'
 import { SearchCard } from './SearchCard'
 import { ScreenCard } from './ScreenCard'
+import { DoCard } from './DoCard'
 import { LinkCard } from './LinkCard'
 import { WriteCard } from './WriteCard'
 import type { LinkApproval } from '@shared/links'
@@ -182,6 +184,11 @@ function readScreen(children: ReactNode): string | null {
   return readTagged(children, 'language-wumpy-screen') ?? ''
 }
 
+/** Pulls the steps out of a `wumpy-do` block. */
+function readDo(children: ReactNode): string | null {
+  return readTagged(children, 'language-wumpy-do')
+}
+
 /** Pulls the query out of a `wumpy-search` block. */
 function readSearch(children: ReactNode): string | null {
   return readTagged(children, 'language-wumpy-search')
@@ -336,6 +343,10 @@ export interface MarkdownProps {
   onCaptureScreen?: () => Promise<Attachment>
   /** Hands the picture to the conversation. */
   onScreenCaptured?: (shot: Attachment) => void
+  /** Runs an approved plan of clicks and keystrokes. Absent when off. */
+  onDesktop?: (body: string) => Promise<DesktopResult>
+  /** Hands the outcome, and the screen afterwards, to the conversation. */
+  onDesktopDone?: (result: DesktopResult, after: Attachment | null) => void
   onOpenLink?: (url: string) => Promise<LinkResult>
   onOpenSearch?: (query: string) => Promise<LinkResult>
   onOpened?: (result: LinkResult, messageId: string) => void
@@ -382,6 +393,8 @@ export const Markdown = memo(function Markdown({
   onWritten,
   autoWrite = false,
   onCaptureScreen,
+  onDesktop,
+  onDesktopDone,
   onScreenCaptured,
   onOpenLink,
   onOpenSearch,
@@ -445,6 +458,21 @@ export const Markdown = memo(function Markdown({
                 fallbackReason={leadIn(text)}
                 onCapture={onCaptureScreen!}
                 onCaptured={onScreenCaptured ?? (() => {})}
+              />
+            )
+          }
+
+          const plan = onDesktop ? readDo(children) : null
+          if (plan) {
+            return (
+              <DoCard
+                body={plan}
+                complete={settled(plan)}
+                mode={linkMode}
+                messageId={messageId ?? ''}
+                fallbackReason={leadIn(text)}
+                onRun={onDesktop!}
+                onDone={onDesktopDone ?? (() => {})}
               />
             )
           }

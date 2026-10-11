@@ -1,5 +1,33 @@
 import { desktopCapturer, screen, type BrowserWindow } from 'electron'
 import type { Attachment } from '@shared/types'
+import type { ShotFrame } from '@shared/steps'
+
+/**
+ * What the last screenshot was of, so a click can be put back where it
+ * belongs.
+ *
+ * The model points at a pixel in an image. That image is one display,
+ * captured at its size in device-independent pixels and then shrunk to fit
+ * 1568px, so turning the pixel back into a screen coordinate needs both the
+ * shrink factor and the display's own origin - which is not (0,0) on a
+ * second monitor, and is exactly the term whose absence sends every click to
+ * the wrong screen.
+ *
+ * Held here rather than passed through the renderer and the chat file: it is
+ * a fact about a photograph taken moments ago, not part of the conversation,
+ * and a stale copy of it arriving back from the page would be a click aimed
+ * by whatever the page last said.
+ */
+let lastFrame: ShotFrame | null = null
+
+export function lastShot(): ShotFrame | null {
+  return lastFrame
+}
+
+/** Forgotten when a chat is cleared, so a click cannot use yesterday's frame. */
+export function forgetShot(): void {
+  lastFrame = null
+}
 
 /**
  * A photograph of the screen, taken only when the user clicks.
@@ -85,6 +113,19 @@ export async function captureScreen(panel: BrowserWindow | null): Promise<Attach
         : shot
     const jpeg = scaled.toJPEG(JPEG_QUALITY)
     const out = scaled.getSize()
+    /*
+     * bounds, not size: size is the display's dimensions and bounds carries
+     * its position in the virtual desktop too. SetCursorPos takes the latter.
+     */
+    const b = display.bounds
+    lastFrame = {
+      displayX: b.x,
+      displayY: b.y,
+      displayWidth: b.width,
+      displayHeight: b.height,
+      imageWidth: out.width,
+      imageHeight: out.height
+    }
     return {
       kind: 'image',
       dataUrl: `data:image/jpeg;base64,${jpeg.toString('base64')}`,
