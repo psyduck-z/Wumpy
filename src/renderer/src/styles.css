@@ -26,21 +26,34 @@
   of each other - so the only colour on screen is the colour that means
   something: the accent and the danger red.
 */
+/*
+ * Darker, as asked for.
+ *
+ * The panel floats over whatever the user was working in, so the thing that
+ * makes it feel dark is not the text colour - it is how far the surfaces sit
+ * below the desktop behind them. Every layer has come down and the gaps
+ * between them have been kept, because flattening them to one near-black
+ * loses the sense of cards sitting on a panel.
+ *
+ * Text has come down slightly too: pure-white-ish text on a near-black panel
+ * is the combination that reads as harsh at night, and this panel is mostly
+ * used at night.
+ */
 [data-theme="dark"],
 :root {
-  --bg: 10 10 11;
-  --surface: 17 17 19;
-  --raised: 28 28 30;
-  --border: 255 255 255 / 0.08;
-  --text: 228 228 230;
-  --muted: 136 136 140;
+  --bg: 6 6 7;
+  --surface: 11 11 13;
+  --raised: 20 20 23;
+  --border: 255 255 255 / 0.06;
+  --text: 216 216 220;
+  --muted: 124 124 130;
   --accent: 139 128 255;
   --accent-soft: 139 128 255 / 0.16;
   --accent-text: 173 165 255;
   --danger: 248 113 113;
   --danger-soft: 248 113 113 / 0.12;
-  --shadow: 0 18px 48px rgb(0 0 0 / 0.7), 0 2px 8px rgb(0 0 0 / 0.5);
-  --code-bg: 13 13 14;
+  --shadow: 0 20px 56px rgb(0 0 0 / 0.82), 0 2px 10px rgb(0 0 0 / 0.6);
+  --code-bg: 9 9 10;
 }
 
 * {
@@ -2065,4 +2078,86 @@ body {
    one thing in the status bar that decides what an answer costs. */
 .status-model.is-unready {
   color: rgb(var(--danger));
+}
+
+/* ------------------------------------------------- folded bulk and queue */
+
+/*
+ * A folded code block.
+ *
+ * The <pre> stays mounted and hidden rather than unmounted, so Copy still
+ * finds the code underneath without opening it first.
+ */
+.codeblock .fold {
+  position: absolute;
+  top: 6px;
+  right: 58px;
+  padding: 2px 8px;
+  border: 1px solid rgb(var(--border));
+  border-radius: 6px;
+  background: rgb(var(--raised));
+  color: rgb(var(--muted));
+  font-size: 11px;
+  cursor: pointer;
+}
+.codeblock .fold:hover {
+  color: rgb(var(--text));
+}
+/* Folded, it is a strip with a button on it and nothing else. */
+.codeblock.is-folded {
+  min-height: 32px;
+  background: rgb(var(--code-bg));
+  border: 1px solid rgb(var(--border));
+  border-radius: 8px;
+}
+
+/* What a paste marker in the box actually contains. */
+.pastes {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  padding: 0 2px 5px;
+}
+.paste-chip {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 6px;
+  max-width: 100%;
+  padding: 3px 8px;
+  border: 1px solid rgb(var(--border));
+  border-radius: 999px;
+  background: rgb(var(--raised));
+  color: rgb(var(--muted));
+  font-size: 11px;
+  cursor: pointer;
+}
+.paste-chip:hover {
+  color: rgb(var(--text));
+}
+.paste-label {
+  color: rgb(var(--accent-text));
+  font-variant-numeric: tabular-nums;
+}
+
+/*
+ * The notice above a folded transcript.
+ *
+ * Quiet on purpose: it is the normal state of a long conversation, not a
+ * warning, and nothing has been lost - the model still has all of it.
+ */
+.earlier {
+  display: block;
+  width: 100%;
+  margin: 0 0 8px;
+  padding: 7px 10px;
+  border: 1px dashed rgb(var(--border));
+  border-radius: 8px;
+  background: transparent;
+  color: rgb(var(--muted));
+  font-size: 11.5px;
+  cursor: pointer;
+}
+.earlier:hover {
+  color: rgb(var(--text));
+  border-color: rgb(var(--text) / 0.16);
 }

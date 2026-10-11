@@ -15,6 +15,7 @@ import {
 } from '@shared/cloud'
 import type { ChatOptions, StreamFailure, StreamHandlers, StreamStats } from './stream'
 import type { KeyStore } from './keys'
+import { tokensPerSecond } from '@shared/speed'
 
 /**
  * The hosted half of the model layer.
@@ -467,8 +468,13 @@ export class CloudClient {
     // Measured over the streaming window only. Counting the round trip as slow
     // generation would make a fast model on a slow link look like a slow model.
     if (firstTokenAt && completion) {
-      const generating = Math.max(1, Date.now() - firstTokenAt)
-      stats.tokensPerSecond = (completion / generating) * 1000
+      /**
+       * No floor on the window, and no rate when it is too short to divide
+       * by. The old `max(1, ms)` turned an unmeasurably fast short answer
+       * into "8,000 tokens a second". See speed.ts.
+       */
+      const rate = tokensPerSecond(completion, Date.now() - firstTokenAt)
+      if (rate !== null) stats.tokensPerSecond = rate
       stats.loadMs = firstTokenAt - startedAt
     }
     handlers.onDone(stats)

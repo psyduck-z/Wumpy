@@ -9,6 +9,7 @@ import { HOLD_MS, HoldToTalk, isPlainSpace, type HoldAction } from '../holdtotal
 import { Mic } from './Mic'
 import { mediaIn, readMedia, TOKENS_PER_SECOND } from '../media'
 import type { Attachment } from '@shared/types'
+import { expandPastes, foldsPaste, pasteMarker, summarise } from '@shared/bulk'
 
 /** m:ss, for the length of a clip. */
 function clockOf(seconds: number): string {
@@ -19,7 +20,7 @@ export function Composer({
   onSend,
   onStop,
   streaming,
-  queued = null,
+  queued = [],
   onUnqueue,
   focusToken,
   prefill,
@@ -31,7 +32,8 @@ export function Composer({
   onStop(): void
   streaming: boolean
   /** Shown as a chip under the box: typed while busy, sent when the turn ends. */
-  queued?: string | null
+  /** Lines typed while an answer was running, oldest first. */
+  queued?: string[]
   onUnqueue?(): void
   /** Bumped whenever the panel is shown, so the caret lands in the box. */
   focusToken: number
@@ -68,6 +70,13 @@ export function Composer({
    * worth keeping three versions of.
    */
   const [images, setImages] = useState<Attachment[]>([])
+  /**
+   * Text pasted in whole, folded to a marker in the box.
+   *
+   * Parallel to `images`: the real payload lives here and the composer holds
+   * a short stand-in, which is substituted back on the way out.
+   */
+  const [pastes, setPastes] = useState<string[]>([])
   const [dragging, setDragging] = useState(false)
   const fileInput = useRef<HTMLInputElement>(null)
 
@@ -362,9 +371,16 @@ export function Composer({
     // the box kept the text, with no sign that anything had happened. The app
     // decides what to do with it - queue it, or take it as an aside.
     history.push(value)
-    onSend(value, images.length ? images : undefined)
+    /**
+     * The markers are what was edited; the model gets what was pasted.
+     *
+     * History keeps the folded form, so pressing up gives back the short
+     * line the user was looking at rather than six hundred lines of log.
+     */
+    onSend(expandPastes(value, pastes), images.length ? images : undefined)
     setValue('')
     setImages([])
+    setPastes([])
   }
 
   const accept = (spec: CommandSpec): void => {
@@ -519,15 +535,53 @@ export function Composer({
         </div>
       )}
 
-      {queued && (
+      {/*
+        What a fold actually contains, so "[pasted #1]" is not a mystery.
+        Clicking one unfolds it back into the box, for the times the paste
+        was short enough to want to edit after all.
+      */}
+      {pastes.some(Boolean) && (
+        <div className="pastes">
+          {pastes.map((body, i) =>
+            body ? (
+              <button
+                key={i}
+                type="button"
+                className="paste-chip"
+                title="Click to unfold this back into the box"
+                onClick={() => {
+                  setValue((v) => v.split(pasteMarker(i)).join(body))
+                  /**
+                   * Emptied, NOT removed.
+                   *
+                   * A marker is its index, so dropping one out of the middle
+                   * would renumber the rest and `[pasted #2]` would expand
+                   * into the wrong text. Blanking the slot keeps every other
+                   * marker pointing where it always did, and expanding a
+                   * marker that is no longer in the box is a no-op.
+                   */
+                  setPastes((prev) => prev.map((b, k) => (k === i ? '' : b)))
+                }}
+              >
+                <span className="paste-label">{pasteMarker(i)}</span>
+                <span className="paste-size">{summarise(body)}</span>
+              </button>
+            ) : null
+          )}
+        </div>
+      )}
+
+      {queued.length > 0 && (
         <button
           type="button"
           className="queued"
           onClick={onUnqueue}
-          title="Waiting for the current answer to finish. Click to take it back."
+          title="Waiting for the current answer to finish. Click to take the first one back."
         >
-          <span className="queued-label">Queued</span>
-          <span className="queued-text">{queued}</span>
+          <span className="queued-label">
+            {queued.length > 1 ? `Queued ${queued.length}` : 'Queued'}
+          </span>
+          <span className="queued-text">{queued[0]}</span>
         </button>
       )}
 
@@ -559,10 +613,35 @@ export function Composer({
             const files = mediaIn(e.clipboardData?.items)
             // Text pasted alongside an image still pastes; only an event
             // that is nothing but images is taken over.
-            if (!files.length) return
-            if (e.clipboardData?.getData('text/plain')) return
+            const pasted = e.clipboardData?.getData('text/plain') ?? ''
+            if (files.length && !pasted) {
+              e.preventDefault()
+              void attach(files)
+              return
+            }
+            /**
+             * A pasted log goes in whole and shows as one line.
+             *
+             * Dropping six hundred lines into the box makes it most of the
+             * panel and every keystroke after it repaint the lot. The text is
+             * kept exactly as pasted and put back at send; only what is on
+             * screen is folded. See bulk.ts.
+             */
+            if (!foldsPaste(pasted)) return
             e.preventDefault()
-            void attach(files)
+            const el = ref.current
+            const at = el ? el.selectionStart : value.length
+            const to = el ? el.selectionEnd : value.length
+            setPastes((prev) => {
+              const marker = pasteMarker(prev.length)
+              setValue(value.slice(0, at) + marker + value.slice(to))
+              // The caret goes after the marker, as it would after a paste.
+              requestAnimationFrame(() => {
+                const pos = at + marker.length
+                el?.setSelectionRange(pos, pos)
+              })
+              return [...prev, pasted]
+            })
           }}
         />
         {/* Paste and drop cover most of it; the button is for the times

@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { actionFacts } from '../ledger'
 import type { Attachment, ChatMessage } from '@shared/types'
+import { BAIL_WINDOW_MS, hasBlock, returnsThePrompt } from '../abort'
 
 let counter = 0
 export const nextId = (): string => `m${Date.now().toString(36)}${(counter++).toString(36)}`
@@ -56,7 +57,11 @@ export interface ChatState {
   recordAnswer(messageId: string, option: string): void
   /** Asks the user something without involving a model. */
   askLocal(question: string, options: string[], kind: 'rename'): void
-  stop(): void
+  /**
+   * Stops the answer. Returns the question to put back in the box when the
+   * user bailed out before anything had happened, or null.
+   */
+  stop(): string | null
   clear(): void
   replace(messages: ChatMessage[]): void
 }
@@ -320,17 +325,47 @@ export function useChat(): ChatState {
     ])
   }, [])
 
-  const stop = useCallback(() => {
-    if (!activeRequest.current) return
+  /**
+   * Stop, and say whether the question is worth handing back.
+   *
+   * Returns the text the user typed when they bailed out early enough that
+   * nothing had happened yet - the caller puts it back in the box. In that
+   * case the dead exchange is removed as well: a question that was withdrawn
+   * a second after being asked is not part of the conversation, and leaving
+   * it in means the model reads it again on the next turn and the user has
+   * the same line twice on screen.
+   */
+  const stop = useCallback((): string | null => {
+    if (!activeRequest.current) return null
     window.wumpy.chat.abort(activeRequest.current)
     activeRequest.current = null
 
-    dropIfEmpty(activeMessage.current)
+    const answerId = activeMessage.current
+    const answer = messagesRef.current.find((m) => m.id === answerId)
+    const early = returnsThePrompt({
+      elapsedMs: startedAt.current ? Date.now() - startedAt.current : BAIL_WINDOW_MS,
+      outputChars: (answer?.content ?? '').trim().length,
+      startedBlock: hasBlock(answer?.content ?? '')
+    })
+
+    /* The question that produced it: the user turn immediately before. */
+    const at = messagesRef.current.findIndex((m) => m.id === answerId)
+    const asked = at > 0 ? messagesRef.current[at - 1] : null
+    const giveBack = early && asked?.role === 'user' && !asked.images?.length ? asked.content : null
+
+    if (giveBack !== null) {
+      const askedId = asked!.id
+      setMessages((prev) => prev.filter((m) => m.id !== askedId && m.id !== answerId))
+    } else {
+      dropIfEmpty(answerId)
+    }
+
     activeMessage.current = null
     startedAt.current = null
     setStats((s) => ({ ...s, liveTokens: 0, elapsedMs: null }))
     setStreamingId(null)
     setStreaming(false)
+    return giveBack
   }, [])
 
   const clear = useCallback(() => {

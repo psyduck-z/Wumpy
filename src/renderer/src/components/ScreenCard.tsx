@@ -2,6 +2,8 @@ import { useEffect, useRef, useState } from 'react'
 import type { Attachment } from '@shared/types'
 import { arrowNavigate } from '../keyboard'
 import { registerPending } from '../pending'
+import { claimOnce } from '../once'
+import type { LinkApproval } from '@shared/links'
 
 /**
  * The model asking to look at the screen, and the button that lets it.
@@ -11,21 +13,24 @@ import { registerPending } from '../pending'
  * button is pressed. The picture then appears in the transcript as an
  * attachment on the user's own turn, so what was sent is never in doubt.
  *
- * THIS CARD ALWAYS ASKS, including on accept-all.
+ * On accept-all it captures by itself, like everything else.
  *
- * That is a deliberate exception and the only one of its kind here. Every
- * other proposal can be read before it runs: a command is text, a search is
- * a query, a file write names its path. A screenshot is the one proposal
- * whose CONTENTS are unknown until after it has happened - whatever is on
- * the screen at that instant, which could be a password manager, a private
- * message or someone else's data. Accept-all is the user saying yes to
- * things they can see; it cannot be consent to something nobody has looked
- * at yet. The app already has precedent for this: a severely destructive
- * command raises a dialog whatever the mode.
+ * This card used to be an exception, on the reasoning that a screenshot is
+ * the one proposal whose CONTENTS are unknown until after the fact - whatever
+ * happens to be on screen, which could be a password manager or someone
+ * else's data - so accept-all could not really be consent to it.
+ *
+ * The user's answer was that accept-all means accept everything, screen
+ * included, and that is their call to make: it is their screen, they turned
+ * the mode on deliberately, and a tool that keeps asking after being told
+ * not to is just a worse tool. The reasoning is kept here rather than
+ * deleted, because it is the argument for turning the mode off, not an
+ * argument for overriding it.
  */
 export function ScreenCard({
   body,
   complete = true,
+  mode = 'manual',
   messageId = '',
   fallbackReason,
   onCapture,
@@ -35,6 +40,8 @@ export function ScreenCard({
   body: string
   /** False while the message is still arriving. */
   complete?: boolean
+  /** Only 'all' captures unasked. 'auto' is for things that change nothing. */
+  mode?: LinkApproval
   messageId?: string
   /** The sentence before the fence, when the model omitted the # line. */
   fallbackReason?: string | null
@@ -66,7 +73,25 @@ export function ScreenCard({
     }
   }
 
-  const waiting = state === 'idle' && complete
+  /**
+   * Accept-all, and only accept-all.
+   *
+   * Not 'auto': that mode is for proposals that change nothing on the
+   * machine, and a photograph of the screen leaving for a model is not
+   * nothing. Someone on 'auto' has asked for the harmless things to proceed,
+   * which is a different request from this one.
+   */
+  const itself = complete && mode === 'all'
+  const taken = useRef(false)
+  useEffect(() => {
+    if (!itself || state !== 'idle' || taken.current) return
+    /* Claimed outside React so a remount cannot take a second photograph. */
+    if (!claimOnce(`screen:${messageId}`)) return
+    taken.current = true
+    void go()
+  }, [itself, state, messageId])
+
+  const waiting = state === 'idle' && complete && !itself
 
   /** Ctrl+Enter reaches this card too, like every other pending proposal. */
   useEffect(() => {
@@ -102,6 +127,7 @@ export function ScreenCard({
             </button>
           </>
         )}
+        {state === 'idle' && itself && <span className="cmd-status">capturing automatically…</span>}
         {state === 'working' && <span className="cmd-status">capturing…</span>}
         {state === 'skipped' && <span className="cmd-status">declined</span>}
         {state === 'done' && shot && (

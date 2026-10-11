@@ -12,6 +12,7 @@ import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import rehypeHighlight from 'rehype-highlight'
 import { normaliseFences } from '@shared/fences'
+import { foldsCode, summarise } from '@shared/bulk'
 import { CommandCard } from './CommandCard'
 import { AskCard } from './AskCard'
 import { SearchCard } from './SearchCard'
@@ -20,8 +21,36 @@ import { LinkCard } from './LinkCard'
 import { WriteCard } from './WriteCard'
 import type { LinkApproval } from '@shared/links'
 
+/**
+ * Reads the text out of a rendered code block, for measuring it.
+ *
+ * react-markdown has already turned the fence into elements, so the source is
+ * only reachable through the child nodes.
+ */
+function codeTextOf(children: ReactNode): string {
+  if (!isValidElement(children)) return ''
+  const props = children.props as { children?: unknown }
+  if (typeof props.children === 'string') return props.children
+  if (Array.isArray(props.children)) {
+    return props.children.filter((c) => typeof c === 'string').join('')
+  }
+  return ''
+}
+
 function CodeBlock({ children }: { children: ReactNode }): React.JSX.Element {
   const [copied, setCopied] = useState(false)
+
+  /**
+   * A whole program in a 460px panel buries the sentence explaining it.
+   *
+   * Folded by default past the threshold in bulk.ts, with the size on the
+   * fold so the user knows what they are opening. Collapsed rather than
+   * truncated: the text is all still there, and Copy still copies the lot
+   * whether it is open or not, because it reads the DOM beneath.
+   */
+  const source = codeTextOf(children)
+  const long = foldsCode(source)
+  const [open, setOpen] = useState(false)
 
   const copy = (e: React.MouseEvent<HTMLButtonElement>): void => {
     const code = e.currentTarget.parentElement?.querySelector('code')
@@ -33,11 +62,17 @@ function CodeBlock({ children }: { children: ReactNode }): React.JSX.Element {
   }
 
   return (
-    <div className="codeblock">
+    <div className={`codeblock ${long && !open ? 'is-folded' : ''}`}>
       <button className="copy" onClick={copy} type="button">
         {copied ? 'Copied' : 'Copy'}
       </button>
-      <pre>{children}</pre>
+      {long && (
+        <button className="fold" type="button" onClick={() => setOpen((v) => !v)}>
+          {open ? 'Hide' : `Show (${summarise(source)})`}
+        </button>
+      )}
+      {/* Kept mounted while folded, so Copy still finds the code. */}
+      <pre hidden={long && !open}>{children}</pre>
     </div>
   )
 }
@@ -405,6 +440,7 @@ export const Markdown = memo(function Markdown({
               <ScreenCard
                 body={screen}
                 complete={settled(screen)}
+                mode={linkMode}
                 messageId={messageId ?? ''}
                 fallbackReason={leadIn(text)}
                 onCapture={onCaptureScreen!}

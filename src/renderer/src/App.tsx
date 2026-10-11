@@ -43,6 +43,7 @@ import { Composer } from './components/Composer'
 import { StatusBar } from './components/StatusBar'
 import logo from './assets/logo.png'
 import { Picker, type PickerProps } from './components/Picker'
+import { firstShown, foldsTranscript, hiddenCount, REVEAL_STEP } from './transcript'
 
 /** Mirrors the main process's accelerator formatting for display. */
 function prettify(accelerator: string): string {
@@ -86,7 +87,14 @@ export default function App(): React.JSX.Element {
    * nothing said why. One is held at a time - a second replaces it, because
    * what you meant to say next is the last thing you typed.
    */
-  const [queued, setQueued] = useState<string | null>(null)
+  /**
+   * Messages typed while an answer was running, oldest first.
+   *
+   * A list rather than one slot: typing a second thing used to overwrite the
+   * first, so of two queued lines only the last was ever sent and the other
+   * vanished without a trace.
+   */
+  const [queued, setQueued] = useState<string[]>([])
   /** Text the command menu has dropped into the composer, with a bump token. */
   const [prefill, setPrefillState] = useState({ text: '', token: 0 })
   const setPrefill = useCallback((text: string) => {
@@ -210,8 +218,15 @@ export default function App(): React.JSX.Element {
     return list
   }, [])
 
+  /**
+   * How much of a long transcript is in the page. Declared up here because
+   * both switching chats and opening one have to put it back to the start.
+   */
+  const [revealed, setRevealed] = useState(0)
+
   const newChat = useCallback(() => {
     chat.clear()
+    setRevealed(0)
     // The claims are per message id, and a new conversation has none of the
     // old ones. Left to grow they would also outlive every chat in the
     // session for no reason.
@@ -276,6 +291,7 @@ export default function App(): React.JSX.Element {
         chat.note('That chat could not be opened.', true)
         return
       }
+      setRevealed(0)
       chat.replace(loaded.messages)
       // A reopened chat brings back proposals whose ids were claimed when
       // they first ran. Without this it would find them all already done and
@@ -988,14 +1004,21 @@ export default function App(): React.JSX.Element {
          * it happens now rather than waiting in line. Queuing them meant `/stop`
          * sat behind the answer it was meant to stop, which is the one moment
          * someone is most likely to type it.
+         *
+         * A prompt wrapper is the exception, and missing it is why `/btw`
+         * looked broken. `/btw`, `/plan`, `/explain` and the rest are not
+         * instructions to the app at all - they are a message for the model
+         * with wording around it. Running one immediately meant calling
+         * chat.send() while a request was already active, which it refuses,
+         * so the line was dropped in silence.
          */
         const command = parseCommand(text)
-        if (command) {
+        if (command && command.kind !== 'prompt') {
           void runCommand(command, text)
           return
         }
 
-        setQueued(text)
+        setQueued((rest) => [...rest, text])
         return
       }
 
@@ -1032,6 +1055,31 @@ export default function App(): React.JSX.Element {
   )
 
   /**
+   * How much of a long transcript is in the page.
+   *
+   * Reset on a new or reopened chat, so switching conversations does not
+   * carry one chat's reveal over to the next.
+   */
+  const hidden = hiddenCount(messages.length, revealed)
+  const folded = foldsTranscript(messages.length, revealed)
+  const shown = useMemo(
+    () => messages.slice(firstShown(messages.length, revealed)),
+    [messages, revealed]
+  )
+  const revealMore = useCallback(() => setRevealed((r) => r + REVEAL_STEP), [])
+
+  /**
+   * Stop, and put the question back if it was withdrawn rather than cut off.
+   *
+   * One place, because there are three ways to stop - Escape, Ctrl+C and the
+   * Stop button - and they should not disagree about this.
+   */
+  const stopAndMaybeEdit = useCallback(() => {
+    const giveBack = chat.stop()
+    if (giveBack) setPrefill(giveBack)
+  }, [chat])
+
+  /**
    * Sends what was typed during the last answer, once that answer has landed.
    *
    * A frame later, so the turn that just finished has settled its state before
@@ -1040,10 +1088,21 @@ export default function App(): React.JSX.Element {
   const onSendRef = useRef(onSend)
   onSendRef.current = onSend
   useEffect(() => {
-    if (streaming || !queued) return
-    const text = queued
-    setQueued(null)
-    const timer = setTimeout(() => onSendRef.current(text), 60)
+    if (streaming || queued.length === 0) return
+    const [text] = queued
+    /**
+     * The queue is emptied INSIDE the timer, not before it.
+     *
+     * Clearing it first changed `queued`, which is a dependency of this
+     * effect, so React tore the effect down - and the cleanup cancelled the
+     * very timeout that had just been scheduled. The effect then re-ran,
+     * found an empty queue and returned. Nothing was ever sent, which is
+     * exactly what "queued messages do not work" looked like.
+     */
+    const timer = setTimeout(() => {
+      setQueued((rest) => rest.slice(1))
+      onSendRef.current(text)
+    }, 60)
     return () => clearTimeout(timer)
   }, [streaming, queued])
 
@@ -1228,7 +1287,7 @@ export default function App(): React.JSX.Element {
           return
         }
         e.preventDefault()
-        if (streaming) chat.stop()
+        if (streaming) stopAndMaybeEdit()
         else if (picker) setPicker(null)
         else close()
         return
@@ -1283,7 +1342,15 @@ export default function App(): React.JSX.Element {
           if ((window.getSelection()?.toString() ?? '') !== '') return
           if (!streaming) return
           e.preventDefault()
-          chat.stop()
+          /**
+           * Bailing out straight away hands the question back.
+           *
+           * Pressing this a second after sending nearly always means "wait,
+           * let me reword that", and having to fish the line back out with
+           * the up arrow is a step nobody wants. See abort.ts for where the
+           * line between that and "stop, I have read enough" is drawn.
+           */
+          stopAndMaybeEdit()
           return
         }
         // Ctrl+Enter approves the command being asked about, so a proposal can
@@ -1377,7 +1444,7 @@ export default function App(): React.JSX.Element {
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [chat, close, newChat, retitle, runCommand, scrollBy, stepMessage, picker, streaming])
+  }, [chat, close, newChat, retitle, runCommand, scrollBy, stepMessage, picker, streaming, stopAndMaybeEdit])
 
   const warnedRef = useRef(false)
   useEffect(() => {
@@ -1623,6 +1690,17 @@ export default function App(): React.JSX.Element {
         <Picker {...pickerProps(picker)} />
       ) : (
         <div className="scroll" ref={scroller} onScroll={onScroll}>
+          {/*
+            A long session is slow because every message is a live subtree,
+            not because of anything the model is doing. Only the end of it is
+            in the page; the rest is still in state and still sent. See
+            transcript.ts.
+          */}
+          {folded && (
+            <button type="button" className="earlier" onClick={revealMore}>
+              {hidden} earlier message{hidden === 1 ? '' : 's'} hidden — show {REVEAL_STEP} more
+            </button>
+          )}
           {messages.length === 0 ? (
             <Empty
               hotkeyLabel={hotkeyLabel}
@@ -1631,7 +1709,7 @@ export default function App(): React.JSX.Element {
               compact={compact}
             />
           ) : (
-            messages.map((m) => {
+            shown.map((m) => {
               // Produced in this session, rather than loaded from disk.
               const fresh = generated.current.has(m.id)
               return (
@@ -1727,7 +1805,7 @@ export default function App(): React.JSX.Element {
 
       <Composer
         onSend={onSend}
-        onStop={chat.stop}
+        onStop={stopAndMaybeEdit}
         streaming={streaming}
         focusToken={focusToken}
         canSeeMedia={seesMedia(model)}
@@ -1735,8 +1813,9 @@ export default function App(): React.JSX.Element {
         prefill={prefill}
         queued={queued}
         onUnqueue={() => {
-          setPrefill(queued ?? '')
-          setQueued(null)
+          /* Takes the oldest back into the box, leaving any others queued. */
+          setPrefill(queued[0] ?? '')
+          setQueued((rest) => rest.slice(1))
         }}
         placeholder="Ask Wumpy…"
       />
