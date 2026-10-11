@@ -10,7 +10,7 @@
  * Run with: npm run check:geometry
  */
 import { build } from 'esbuild'
-import { rmSync } from 'node:fs'
+import { rmSync, readFileSync } from 'node:fs'
 import { pathToFileURL } from 'node:url'
 
 const out = '.geometry-check.mjs'
@@ -94,6 +94,30 @@ for (const dock of DOCKS) {
   const r = G.geometryFor(dock, TINY, SIZES)
   check(`${dock} never has a negative size on a tiny screen`, r.width > 0 && r.height > 0, true)
 }
+
+/* ------------------------------------- what paints outside the outline */
+
+/*
+ * Nothing, now. The window is transparent, so anything the panel draws
+ * beyond its own border is a mark floating on the desktop rather than a
+ * shadow on a surface - and --shadow is a 56px blur with only 12px of room
+ * at the sides, so it could never have read as a drop shadow. It read as a
+ * haze leaking past the one crisp line that says where the panel stops,
+ * clipped square at the window edge. Reported twice in two turns: first the
+ * panel had no edge at all, then the edge had something sticking out behind
+ * it.
+ *
+ * The ring stays: 1px, hard, no blur. That IS the outline.
+ */
+const css = readFileSync('src/renderer/src/styles.css', 'utf8')
+const panelRule = css.slice(css.indexOf('.panel {'), css.indexOf('}', css.indexOf('.panel {')))
+const panelShadow = panelRule.match(/box-shadow:\s*([^;]*);/)?.[1].replace(/\s+/g, ' ').trim() ?? ''
+check('the panel casts no soft shadow', /var\(--shadow\)/.test(panelShadow), false)
+check('and nothing blurred at all', /0 0 0 1px/.test(panelShadow) && !/px\s+\d+px\s+\d/.test(panelShadow), true)
+check('the hard ring is still there', panelShadow, '0 0 0 1px rgb(0 0 0 / 0.8)')
+
+/* The popover keeps it: it floats over the opaque panel, not over nothing. */
+check('.palette still has one to cast on', /\.palette[\s\S]{0,400}?var\(--shadow\)/.test(css), true)
 
 console.log(`${String.fromCharCode(10)}${count - failed}/${count} geometry checks correct`)
 process.exit(failed === 0 ? 0 : 1)

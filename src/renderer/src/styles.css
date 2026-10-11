@@ -117,16 +117,24 @@ body {
   border: 1px solid rgb(var(--outline));
   border-radius: var(--radius);
   /*
-   * A dark ring immediately outside the hairline.
+   * A dark ring immediately outside the hairline, and nothing further out.
    *
    * A single light border vanishes against a light window behind it and a
    * single dark one vanishes against a dark one. Two rings, light inside and
    * dark outside, read against both - which matters here because the panel
    * lands on whatever the user happened to be working in.
+   *
+   * --shadow used to follow the ring and is gone. It is a 56px blur offset
+   * 20px down, and this window is transparent with only 12px of room at the
+   * sides and 2px at the ends - so it could never read as a drop shadow. It
+   * read as a soft dark haze leaking out past the one crisp line that says
+   * where the panel stops, cut off square at the window edge. The outline
+   * was added to give the panel a definite edge; this was undoing it.
+   *
+   * Still used by .palette, which floats over the opaque panel and has a
+   * surface to cast onto.
    */
-  box-shadow:
-    0 0 0 1px rgb(0 0 0 / 0.8),
-    var(--shadow);
+  box-shadow: 0 0 0 1px rgb(0 0 0 / 0.8);
   overflow: hidden;
 
   /* No entrance animation: the panel is simply there when summoned. */
