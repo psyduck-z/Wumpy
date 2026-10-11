@@ -1154,6 +1154,12 @@ body {
   replaced was perfectly legible, so that is what reduced motion gets back.
 */
 @media (prefers-reduced-motion: reduce) {
+  /* Still visible, just not moving: the dot is the "alive" signal. */
+  .activity-dot {
+    animation: none;
+    opacity: 0.7;
+    will-change: auto;
+  }
   .dots i {
     animation: none;
     will-change: auto;
@@ -2039,6 +2045,100 @@ body {
  * held, because a message you think you sent and a message you know is waiting
  * are very different things.
  */
+/*
+  What the model is doing, above the box, while it answers.
+
+  Asked for so a turn heading the wrong way can be stopped early - and then,
+  seeing it: "Don't make it like too salient, but like make it fit in with
+  the darkness, like the gray kind of theme."
+
+  So it is grey on grey and carries no box of its own: no border, no fill,
+  nothing that reads as a card. Three weights do the work instead. The verb
+  is the brightest thing here and is still well below body text; the detail
+  sits at muted; the stop hint is barely there until you look for it. Nothing
+  in the row is fully opaque, so it lies under the answer rather than beside
+  it.
+
+  It occupies the same slot as the queued chip, directly above the composer,
+  because that is where the eye already is while waiting - and unlike the
+  transcript it cannot be scrolled away from at the moment it matters.
+*/
+.activity {
+  display: flex;
+  align-items: baseline;
+  gap: 7px;
+  width: 100%;
+  min-width: 0;
+  margin: 0 0 6px;
+  padding: 0 2px;
+  font-size: 11.5px;
+  line-height: 1.6;
+  color: rgb(var(--muted) / 0.85);
+  user-select: none;
+}
+
+/*
+  A slow breathe rather than a spinner. It has to say "still going" from the
+  corner of the eye and nothing more; anything that tracks progress would be
+  claiming to know something this cannot know.
+*/
+.activity-dot {
+  flex: none;
+  align-self: center;
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: rgb(var(--muted) / 0.6);
+  animation: activity-breathe 1.7s ease-in-out infinite;
+  will-change: opacity;
+}
+
+.activity-label {
+  flex: none;
+  color: rgb(var(--text) / 0.55);
+}
+
+/* "Searching 2" - the count only appears when there is more than one. */
+.activity-count {
+  flex: none;
+  align-self: center;
+  padding: 0 5px;
+  border-radius: 999px;
+  background: rgb(255 255 255 / 0.05);
+  color: rgb(var(--muted) / 0.9);
+  font-size: 10px;
+  font-variant-numeric: tabular-nums;
+}
+
+.activity-detail {
+  flex: 1 1 auto;
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: rgb(var(--muted) / 0.72);
+}
+
+/* The point of the whole row, so it is present - and no louder than that. */
+.activity-stop {
+  flex: none;
+  margin-left: auto;
+  padding-left: 8px;
+  color: rgb(var(--muted) / 0.42);
+  font-size: 10px;
+  letter-spacing: 0.3px;
+}
+
+@keyframes activity-breathe {
+  0%,
+  100% {
+    opacity: 0.28;
+  }
+  50% {
+    opacity: 0.95;
+  }
+}
+
 .queued {
   display: flex;
   align-items: baseline;

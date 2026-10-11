@@ -77,7 +77,7 @@ const APPROVAL: Record<ApprovalMode, { label: string; title: string }> = {
   },
   all: {
     label: 'accept all',
-    title: 'Commands run without asking; destructive ones still raise a dialog. Click to change.'
+    title: 'Everything runs without asking, destructive commands included. Click to change.'
   }
 }
 

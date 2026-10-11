@@ -44,6 +44,7 @@ import { StatusBar } from './components/StatusBar'
 import logo from './assets/logo.png'
 import { Picker, type PickerProps } from './components/Picker'
 import { firstShown, foldsTranscript, hiddenCount, REVEAL_STEP } from './transcript'
+import { activityFor } from '@shared/activity'
 
 /** Mirrors the main process's accelerator formatting for display. */
 function prettify(accelerator: string): string {
@@ -55,6 +56,20 @@ const NEWLINE = String.fromCharCode(10)
 export default function App(): React.JSX.Element {
   const chat = useChat()
   const { messages, streaming, streamingId, stats } = chat
+
+  /**
+   * What the model is doing, read off the reply as it arrives.
+   *
+   * Derived rather than stored: the text is already in `messages` and a
+   * second copy in state would be one render behind the thing it describes.
+   * Only while streaming - once the turn lands the cards say everything this
+   * line was standing in for.
+   */
+  const activity = useMemo(() => {
+    if (!streaming || !streamingId) return null
+    const live = messages.find((m) => m.id === streamingId)
+    return live ? activityFor(live.content) : null
+  }, [streaming, streamingId, messages])
 
   const [settings, setSettings] = useState<WumpySettings | null>(null)
   const [assistant, setAssistant] = useState<AssistantStatus | null>(null)
@@ -1807,6 +1822,7 @@ export default function App(): React.JSX.Element {
         onSend={onSend}
         onStop={stopAndMaybeEdit}
         streaming={streaming}
+        activity={activity}
         focusToken={focusToken}
         canSeeMedia={seesMedia(model)}
         onSay={say}

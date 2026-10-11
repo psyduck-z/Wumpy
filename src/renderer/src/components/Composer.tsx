@@ -10,6 +10,7 @@ import { Mic } from './Mic'
 import { mediaIn, readMedia, TOKENS_PER_SECOND } from '../media'
 import type { Attachment } from '@shared/types'
 import { expandPastes, foldsPaste, pasteMarker, summarise } from '@shared/bulk'
+import type { Activity } from '@shared/activity'
 
 /** m:ss, for the length of a clip. */
 function clockOf(seconds: number): string {
@@ -20,6 +21,7 @@ export function Composer({
   onSend,
   onStop,
   streaming,
+  activity = null,
   queued = [],
   onUnqueue,
   focusToken,
@@ -31,6 +33,8 @@ export function Composer({
   onSend(text: string, images?: Attachment[]): void
   onStop(): void
   streaming: boolean
+  /** What the model is doing right now, or null. Only while streaming. */
+  activity?: Activity | null
   /** Shown as a chip under the box: typed while busy, sent when the turn ends. */
   /** Lines typed while an answer was running, oldest first. */
   queued?: string[]
@@ -568,6 +572,23 @@ export function Composer({
               </button>
             ) : null
           )}
+        </div>
+      )}
+
+      {/*
+        What the model is doing, so a turn heading the wrong way can be
+        stopped before it finishes. Deliberately quiet: muted grey, no
+        border, no background. It sits above the box for the seconds a reply
+        takes and then goes, and anything louder than the answer itself
+        would be the wrong way round.
+      */}
+      {streaming && activity && (
+        <div className="activity" role="status" aria-live="polite">
+          <span className="activity-dot" aria-hidden="true" />
+          <span className="activity-label">{activity.label}</span>
+          {activity.count > 1 && <span className="activity-count">{activity.count}</span>}
+          {activity.detail && <span className="activity-detail">{activity.detail}</span>}
+          <span className="activity-stop">Esc to stop</span>
         </div>
       )}
 
