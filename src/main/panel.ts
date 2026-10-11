@@ -29,7 +29,50 @@ export class Panel {
    */
   private activator: ((hwnd: bigint) => void) | null = null
 
+  /**
+   * Why the window is currently being shown or hidden.
+   *
+   * Set by show() and hide() so the trace below can say who asked, which is
+   * the whole difficulty: by the time a flicker is visible on screen the
+   * interesting part - which of six callers started it - is already over.
+   */
+  private because = 'startup'
+
   constructor(private readonly settings: SettingsStore) {}
+
+  /**
+   * Every change in whether the window is on screen, with a timestamp.
+   *
+   * Reported as a bug: "it opens for a brief second and it closes and it
+   * opens again". Three state changes where there should be one, and no way
+   * to tell from the outside which of show(), hide(), the blur handler, the
+   * minimize/restore fallback or a second process did them. Electron fires an
+   * event for each, so this writes them all down in order.
+   *
+   * Kept permanently, like the focus trace. It costs one log line per summon
+   * and it is the difference between fixing this and guessing at it again.
+   */
+  private traceVisibility(win: BrowserWindow): void {
+    /* One literal per listener: BrowserWindow.on is overloaded per event name,
+       and a union of names matches none of the overloads. */
+    const note =
+      (event: string) =>
+      (): void => {
+        /* Whether it is on screen, because blur fires on a hidden window too
+           and a bare "blur" line reads like something the user could see. */
+        const where = win.isDestroyed() ? 'gone' : win.isVisible() ? 'on screen' : 'hidden'
+        log(`[panel] ${event} +${Date.now() - this.openedAt}ms (${this.because}, now ${where})`)
+      }
+    win.on('show', note('show'))
+    win.on('hide', note('hide'))
+    win.on('focus', note('focus'))
+    win.on('blur', note('blur'))
+    win.on('minimize', note('minimize'))
+    win.on('restore', note('restore'))
+  }
+
+  /** When the current show() began, so the trace is relative to the summon. */
+  private openedAt = Date.now()
 
   create(): BrowserWindow {
     const { width, height } = this.geometryFor(this.settings.get('dock'))
@@ -107,6 +150,8 @@ export class Panel {
       }
     )
 
+    this.traceVisibility(this.window)
+
     // 'screen-saver' is the only level that reliably floats over fullscreen browsers.
     this.window.setAlwaysOnTop(true, 'screen-saver')
     this.window.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true })
@@ -114,7 +159,7 @@ export class Panel {
     this.window.on('blur', () => {
       if (this.pinned) return
       if (!this.settings.get('hideOnBlur')) return
-      this.hide()
+      this.hide('lost focus')
     })
 
     this.window.on('closed', () => {
@@ -216,7 +261,9 @@ export class Panel {
     this.window?.webContents.send(IPC.panelDock, dock)
   }
 
-  show(): void {
+  show(why = 'unknown'): void {
+    this.because = why
+    this.openedAt = Date.now()
     const win = this.window ?? this.create()
     this.reposition()
     win.setAlwaysOnTop(true, 'screen-saver')
@@ -279,6 +326,7 @@ export class Panel {
        * real hotkey presses from 2-of-3 to 0-of-3. Left visible rather than
        * broken quietly.
        */
+      this.because = `${why} + minimize/restore`
       win.minimize()
       win.restore()
       win.focus()
@@ -371,6 +419,7 @@ export class Panel {
   forceFocus(): void {
     const win = this.window
     if (!win || !win.isVisible()) return
+    this.because = 'forceFocus'
     console.log('[wumpy] renderer reports no keyboard; forcing the foreground')
 
     /**
@@ -421,8 +470,9 @@ export class Panel {
     }, 250)
   }
 
-  hide(): void {
+  hide(why = 'unknown'): void {
     if (!this.window?.isVisible()) return
+    this.because = why
     // hide() hands the foreground back to whatever the user was working in.
     this.window.hide()
   }
@@ -449,9 +499,9 @@ export class Panel {
     this.lastToggle = now
 
     if (this.window?.isVisible() && this.window.isFocused()) {
-      this.hide()
+      this.hide('hotkey')
     } else {
-      this.show()
+      this.show('hotkey')
     }
   }
 

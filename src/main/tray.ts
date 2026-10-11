@@ -44,7 +44,7 @@ export function createTray(deps: TrayDeps): Tray {
       Menu.buildFromTemplate([
         {
           label: live ? `Open Wumpy  (${prettify(live)})` : 'Open Wumpy  (no hotkey)',
-          click: () => deps.panel.show()
+          click: () => deps.panel.show('tray menu')
         },
         { type: 'separator' },
 

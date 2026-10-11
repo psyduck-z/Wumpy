@@ -97,7 +97,11 @@ check(/startsWith\('ACTIVATE'\)/.test(driver), "and main logs the helper's answe
  * the foreground to a window that is not on screen.
  */
 const shown = readFileSync('src/main/panel.ts', 'utf8')
-const show = shown.slice(shown.indexOf('show(): void'), shown.indexOf('watchKeyboard'))
+/* Located by a regex rather than a literal signature: show() grew a reason
+   parameter and this quietly started slicing from the wrong end. */
+const showAt = shown.search(/^  show\(/m)
+check(showAt > -1, 'show() is where this check thinks it is')
+const show = shown.slice(showAt, shown.indexOf('watchKeyboard'))
 check(
   show.indexOf('win.show()') < show.indexOf('this.activator?.('),
   'the panel is shown before the helper is asked to activate it'

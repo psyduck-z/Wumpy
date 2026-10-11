@@ -69,9 +69,42 @@ import { captureScreen } from './screen'
 captureConsole()
 console.log(`[wumpy] started; log at ${logPath()}`)
 
-// Only one Wumpy may own the tray icon and the global hotkey.
-if (!app.requestSingleInstanceLock()) {
-  app.quit()
+/**
+ * Only one Wumpy may own the tray icon and the global hotkey.
+ *
+ * The lock is taken here, at module scope, and the answer is kept - because
+ * app.quit() does not stop this file. It asks the event loop to shut down and
+ * returns, and everything below it goes on running: the ready handler is
+ * registered, and if it fires before the shutdown completes a second Wumpy
+ * builds a window and shows it, for as long as it takes to die.
+ *
+ * Which is one of the two things the user described as a flash: open a second
+ * copy and you get its window briefly, then its death, then the first copy's
+ * window from the second-instance handler. Open, shut, open.
+ *
+ * So the bootup below is guarded on this rather than on nothing.
+ */
+const isPrimary = app.requestSingleInstanceLock()
+if (!isPrimary) {
+  console.log('[wumpy] another Wumpy already has the lock; handing over and quitting')
+  /**
+   * exit(), not quit(), and the difference is visible.
+   *
+   * quit() asks the event loop to wind down, which took about a second -
+   * measured at +942ms, a whole second of a second Wumpy sitting there
+   * owning nothing. When it finally went, Windows reassigned the foreground
+   * and the panel that had just been summoned lost the keyboard: you clicked
+   * the shortcut, the panel opened and focused, and a second later you had
+   * to click the box to type.
+   *
+   * There is nothing to wind down. The lock was refused, so the guard below
+   * means this process never built a window, never registered a hotkey and
+   * never started the keyboard helper. The handover has already happened:
+   * requestSingleInstanceLock delivers 'second-instance' to the primary
+   * before it returns, which is why the primary's show() is logged ~9ms
+   * after this process started and 90ms before this line could matter.
+   */
+  app.exit(0)
 }
 
 app.setAppUserModelId('dev.psyduckz.wumpy')
@@ -963,7 +996,7 @@ ${command}`
 
   ipcMain.on(IPC.chatAbort, (_e, requestId: string) => cloud.abort(requestId))
   ipcMain.on(IPC.panelRefocus, () => panel.forceFocus())
-  ipcMain.on(IPC.panelHide, () => panel.hide())
+  ipcMain.on(IPC.panelHide, () => panel.hide('the close button'))
   ipcMain.on(IPC.panelPin, (_e, pinned: boolean) => panel.setPinned(pinned))
   ipcMain.on(IPC.panelDock, (_e, dock: Dock) => panel.setDock(dock))
   ipcMain.handle(IPC.hotkeyState, () => hotkeyState)
@@ -1015,6 +1048,9 @@ function syncLaunchAtLogin(enabled: boolean): void {
 /* ------------------------------------------------------------------ bootup */
 
 void app.whenReady().then(async () => {
+  /* Losing the lock means this process owns nothing and shows nothing. */
+  if (!isPrimary) return
+
   settings = new SettingsStore()
   chats = new ChatStore()
   inputHistory = new InputHistory()
@@ -1054,10 +1090,10 @@ void app.whenReady().then(async () => {
   await refreshModels()
 
   // Launched by the login item: stay in the tray instead of popping up.
-  if (!process.argv.includes('--hidden')) panel.show()
+  if (!process.argv.includes('--hidden')) panel.show('launch')
 })
 
-app.on('second-instance', () => panel?.show())
+app.on('second-instance', () => panel?.show('a second Wumpy was started'))
 
 app.on('will-quit', () => {
   unregisterHotkeys()
