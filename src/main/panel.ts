@@ -2,11 +2,9 @@ import { BrowserWindow, screen, app } from 'electron'
 import { log } from './log'
 import { openLink } from './browser'
 import { join } from 'node:path'
-import { IPC, isTall, type Dock } from '@shared/types'
+import { IPC, type Dock } from '@shared/types'
+import { geometryFor as layoutFor, type Rect } from '@shared/geometry'
 import type { SettingsStore } from './store'
-
-/** Gap between the panel card and the screen edges, in px. */
-const EDGE_MARGIN = 12
 
 /**
  * The overlay window: frameless, transparent and always on top.
@@ -168,30 +166,11 @@ export class Panel {
   }
 
   /** Window bounds for a dock, on whichever display the cursor is on. */
-  private geometryFor(dock: Dock): { x: number; y: number; width: number; height: number } {
+  private geometryFor(dock: Dock): Rect {
     const cursor = screen.getCursorScreenPoint()
     const { workArea } = screen.getDisplayNearestPoint(cursor)
     const s = this.settings.all()
-
-    if (isTall(dock)) {
-      const width = s.tallWidth + EDGE_MARGIN * 2
-      const height = workArea.height - EDGE_MARGIN * 2
-      const x = dock === 'right' ? workArea.x + workArea.width - width : workArea.x
-      return { x, y: workArea.y + EDGE_MARGIN, width, height }
-    }
-
-    // Compact card: clamped so it still fits on small displays.
-    const width = Math.min(s.compactWidth, workArea.width - EDGE_MARGIN * 2) + EDGE_MARGIN * 2
-    const height = Math.min(s.compactHeight, workArea.height - EDGE_MARGIN * 2) + EDGE_MARGIN * 2
-    const right = dock === 'top-right' || dock === 'bottom-right'
-    const bottom = dock === 'bottom-left' || dock === 'bottom-right'
-
-    return {
-      x: right ? workArea.x + workArea.width - width : workArea.x,
-      y: bottom ? workArea.y + workArea.height - height : workArea.y,
-      width,
-      height
-    }
+    return layoutFor(dock, workArea, s)
   }
 
   private reposition(): void {
