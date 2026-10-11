@@ -288,12 +288,35 @@ export class CloudClient {
 
       const detail = await res.text().catch(() => '')
 
+      /**
+       * ONE rejected key is not a rejected account.
+       *
+       * This used to end the turn outright, and with one key that was right -
+       * a bad key is bad everywhere, and answering locally would have hidden
+       * the thing the user has to go and fix. With ten it is wrong, and
+       * measurably so: a 401 appeared partway through a benchmark run and
+       * took whole questions down with it while nine working keys sat
+       * unused. A key revoked, a project deleted, a quota shut off - any one
+       * of those and roughly every tenth thing the user asked would fail with
+       * "Google rejected the key" and no way to tell which key was meant.
+       *
+       * So the key is set aside and the turn carries on. The error only
+       * reaches the user when there is nothing left to try, which is the
+       * only time it is actually true.
+       */
       if (res.status === 401 || res.status === 403) {
-        // Explicitly not answerable elsewhere. A bad key is bad everywhere,
-        // and quietly answering locally would hide the one thing the user
-        // actually has to go and fix.
+        const A_DAY = 24 * 60 * 60 * 1000
+        rotation.rest(index, Date.now() + A_DAY, 'rejected')
+        console.warn(
+          `[wumpy] ${PROVIDERS[provider].label} key ${index + 1}/${keyCount} ` +
+            `(${this.keys.hint(provider, index)}) was REJECTED (${res.status}) and ` +
+            'is out of rotation for today. Replace it with /key.'
+        )
+        if (rotation.availableCount() > 0) continue
         handlers.onError(
-          `${PROVIDERS[provider].label} rejected the key. Add a new one with /key.`,
+          keyCount > 1
+            ? `All ${keyCount} ${PROVIDERS[provider].label} keys were rejected. Add a working one with /key.`
+            : `${PROVIDERS[provider].label} rejected the key. Add a new one with /key.`,
           {
             kind: 'auth',
             elsewhere: false

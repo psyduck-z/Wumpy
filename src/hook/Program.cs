@@ -495,7 +495,15 @@ internal static class Program
                  * only runs when it is needed, and reporting which one won
                  * means the next person to touch this does not have to guess.
                  */
-                var after = "nothing tried";
+                /*
+                 * The usual answer, and it reads as one in the log.
+                 *
+                 * Measured over real hotkey presses: the panel already holds
+                 * the foreground by the time this runs, every time, so the
+                 * loop breaks before pulling a lever. "nothing tried" was
+                 * technically true and told the reader nothing.
+                 */
+                var after = "already foreground";
                 for (attempts = 1; attempts <= 4; attempts++)
                 {
                     if (GetForegroundWindow() == hwnd) break;

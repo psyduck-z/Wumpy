@@ -31,8 +31,21 @@
  * read-only to run itself, still raises a dialog if it is destructive, and
  * still needs a click in every mode but accept-all.
  */
+/**
+ * Every tag the model is asked to write.
+ *
+ * One list, because the guard below was written as a hand-kept alternation
+ * and had already drifted: `wumpy-open` was missing, so a reply that
+ * correctly proposed opening a page and then illustrated something with a
+ * ```powershell fence had that illustration promoted to a live Run button -
+ * exactly the case the guard exists to prevent. Adding `wumpy-screen` to a
+ * literal would have made the same mistake a second time.
+ */
+export const WUMPY_TAGS = ['run', 'ask', 'write', 'search', 'open', 'screen'] as const
+
 export function normaliseFences(text: string): string {
-  if (/```wumpy-(run|ask|write|search)/.test(text)) return text
+  const BT = String.fromCharCode(96).repeat(3)
+  if (new RegExp(`${BT}wumpy-(${WUMPY_TAGS.join('|')})`).test(text)) return text
 
   const SHELLS: Array<[RegExp, string]> = [
     [/^(\s*```)(powershell|pwsh|ps1|ps)(\s*)$/i, 'wumpy-run'],

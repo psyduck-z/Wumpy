@@ -359,6 +359,32 @@ export default function App(): React.JSX.Element {
     []
   )
 
+  /* ----------------------------------------------------------- the screen */
+
+  const canSeeScreen = settings?.screenEnabled ?? true
+
+  const captureScreen = useCallback(() => window.wumpy.screen.capture(), [])
+
+  /**
+   * Hands the photograph to the model as the user's own next turn.
+   *
+   * Attached to a user message rather than slipped in as a result, because
+   * that is where attachments already render - so the picture the model was
+   * given is the picture on the screen in front of them, with no separate
+   * path to trust.
+   */
+  const onScreenCaptured = useCallback((shot: Attachment) => {
+    chatRef.current.send(
+      [
+        'This is a photograph of my screen, taken just now.',
+        'Answer from what you can actually see on it. If something is too small',
+        'or cut off to read, say so rather than guessing.'
+      ].join(String.fromCharCode(10)),
+      'Shared my screen',
+      [shot]
+    )
+  }, [])
+
   /* ------------------------------------------------------------- file writes */
 
   const writeFile = useCallback(
@@ -1641,6 +1667,8 @@ export default function App(): React.JSX.Element {
                    * the buttons come back and a deliberate click still works.
                    */
                   autoWrite={fresh && (settings?.approvalMode ?? 'manual') === 'all'}
+                  onCaptureScreen={canSeeScreen ? captureScreen : undefined}
+                  onScreenCaptured={onScreenCaptured}
                   onOpenLink={canOpenLinks ? openLink : undefined}
                   onOpenSearch={openSearch}
                   onOpened={onOpened}

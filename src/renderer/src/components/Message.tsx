@@ -1,5 +1,6 @@
 import { memo, useEffect, useState } from 'react'
 import type {
+  Attachment,
   ChatMessage,
   LinkResult,
   SearchResult,
@@ -32,6 +33,8 @@ export const Message = memo(function Message({
   onAnswer,
   onSearch,
   onSearchResults,
+  onCaptureScreen,
+  onScreenCaptured,
   onOpenLink,
   onOpenSearch,
   onOpened,
@@ -67,6 +70,8 @@ export const Message = memo(function Message({
   onCheckWrite?: (path: string) => Promise<WriteTarget>
   onWritten?: (result: WriteResult, messageId: string) => void
   autoWrite?: boolean
+  onCaptureScreen?: () => Promise<Attachment>
+  onScreenCaptured?: (shot: Attachment) => void
   onOpenLink?: (url: string) => Promise<LinkResult>
   onOpenSearch?: (query: string) => Promise<LinkResult>
   onOpened?: (result: LinkResult, messageId: string) => void
@@ -214,6 +219,8 @@ export const Message = memo(function Message({
             onCheckWrite={onCheckWrite}
             onWritten={onWritten}
             autoWrite={autoWrite}
+            onCaptureScreen={onCaptureScreen}
+            onScreenCaptured={onScreenCaptured}
             onOpenLink={onOpenLink}
             onOpenSearch={onOpenSearch}
             onOpened={onOpened}

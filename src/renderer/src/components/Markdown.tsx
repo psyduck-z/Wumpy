@@ -1,5 +1,6 @@
 import { memo, useState, isValidElement, type ReactNode } from 'react'
 import type {
+  Attachment,
   LinkResult,
   SearchResult,
   ShellKind,
@@ -14,6 +15,7 @@ import { normaliseFences } from '@shared/fences'
 import { CommandCard } from './CommandCard'
 import { AskCard } from './AskCard'
 import { SearchCard } from './SearchCard'
+import { ScreenCard } from './ScreenCard'
 import { LinkCard } from './LinkCard'
 import { WriteCard } from './WriteCard'
 import type { LinkApproval } from '@shared/links'
@@ -128,6 +130,21 @@ function readWrite(children: ReactNode): string | null {
 /** Pulls the body out of a `wumpy-open` block. */
 function readOpen(children: ReactNode): string | null {
   return readTagged(children, 'language-wumpy-open')
+}
+
+/**
+ * A `wumpy-screen` block, which asks to look at the screen.
+ *
+ * Unlike the others this one carries no payload - there is nothing to run,
+ * only a reason - so an empty body still counts as a request. readTagged
+ * returns null for an empty fence, hence the explicit check on the tag.
+ */
+function readScreen(children: ReactNode): string | null {
+  if (!isValidElement(children)) return null
+  const props = children.props as { className?: unknown }
+  if (typeof props.className !== 'string') return null
+  if (!props.className.split(/\s+/).includes('language-wumpy-screen')) return null
+  return readTagged(children, 'language-wumpy-screen') ?? ''
 }
 
 /** Pulls the query out of a `wumpy-search` block. */
@@ -280,6 +297,10 @@ export interface MarkdownProps {
   /** True when accept-all is on, so a file may be written without a click. */
   autoWrite?: boolean
   /** Supplied for assistant turns that may open a page in the browser. */
+  /** Takes the picture. Absent when screen capture is turned off. */
+  onCaptureScreen?: () => Promise<Attachment>
+  /** Hands the picture to the conversation. */
+  onScreenCaptured?: (shot: Attachment) => void
   onOpenLink?: (url: string) => Promise<LinkResult>
   onOpenSearch?: (query: string) => Promise<LinkResult>
   onOpened?: (result: LinkResult, messageId: string) => void
@@ -325,6 +346,8 @@ export const Markdown = memo(function Markdown({
   onCheckWrite,
   onWritten,
   autoWrite = false,
+  onCaptureScreen,
+  onScreenCaptured,
   onOpenLink,
   onOpenSearch,
   onOpened,
@@ -372,6 +395,20 @@ export const Markdown = memo(function Markdown({
                 }
                 onOpened={onOpened ?? (() => {})}
                 messageId={messageId ?? ''}
+              />
+            )
+          }
+
+          const screen = onCaptureScreen ? readScreen(children) : null
+          if (screen !== null) {
+            return (
+              <ScreenCard
+                body={screen}
+                complete={settled(screen)}
+                messageId={messageId ?? ''}
+                fallbackReason={leadIn(text)}
+                onCapture={onCaptureScreen!}
+                onCaptured={onScreenCaptured ?? (() => {})}
               />
             )
           }

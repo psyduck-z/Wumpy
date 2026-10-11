@@ -10,7 +10,7 @@
  * Run with: npm run check:rotation
  */
 import { build } from 'esbuild'
-import { rmSync } from 'node:fs'
+import { readFileSync, rmSync } from 'node:fs'
 import { join } from 'node:path'
 import { pathToFileURL } from 'node:url'
 
@@ -181,6 +181,35 @@ check('and no wait to report', new KeyRotation(0).waitMs(T0), 0)
   check('stray whitespace is dropped', split('  a   b  '), ['a', 'b'])
   check('an empty paste is no keys', split('   ').length, 0)
   check('one key stays one key', split('AIzaOnlyOne'), ['AIzaOnlyOne'])
+}
+
+/* ------------------------------------- one bad key out of ten ------------ */
+
+/**
+ * A rejected key must not end the turn while others are untried.
+ *
+ * The retry loop lives inside a fetch and cannot be exercised here, so this
+ * reads the source - the same way the hotkey and keyboard suites pin
+ * arrangements no unit test can reach.
+ *
+ * Pinned because the old behaviour was right when there was one key and
+ * became a bug when there were ten, silently: a revoked key meant roughly
+ * every tenth question failed with "Google rejected the key" while nine
+ * working keys sat idle. Observed in a benchmark run, where one 401 took
+ * whole questions down with it.
+ */
+{
+  const cloud = readFileSync('src/main/cloud.ts', 'utf8')
+  const at = cloud.indexOf('res.status === 401')
+  const auth = cloud.slice(at, at + 1600)
+  check('a rejected key is rested', /rotation\.rest\(index/.test(auth), true)
+  check('and the turn tries the next one', /availableCount\(\) > 0\)\s*continue/.test(auth), true)
+  check('the user is told which key it was', /keys\.hint\(provider, index\)/.test(auth), true)
+  check(
+    'the error only speaks when nothing is left',
+    auth.indexOf('availableCount()') < auth.indexOf('handlers.onError'),
+    true
+  )
 }
 
 console.log(`\n${count - failed}/${count} rotation checks correct`)

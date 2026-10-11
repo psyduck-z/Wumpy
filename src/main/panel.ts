@@ -199,6 +199,17 @@ export class Panel {
     this.window.setBounds(this.geometryFor(this.settings.get('dock')))
   }
 
+  /**
+   * The live window, for the one or two things that need the object itself.
+   *
+   * Named apart from the private field it returns. Screen capture needs it
+   * to work out which display the user is looking at, and to keep the panel
+   * out of its own photograph.
+   */
+  liveWindow(): BrowserWindow | null {
+    return this.window
+  }
+
   /** Wire up whoever can take the foreground on this window's behalf. */
   setActivator(activate: (hwnd: bigint) => void): void {
     this.activator = activate

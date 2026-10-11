@@ -718,6 +718,23 @@ body {
   color: rgb(var(--text));
 }
 
+/*
+ * The screen-capture card.
+ *
+ * Deliberately not styled like a danger: it is a request, and refusing it
+ * costs nothing. But the line explaining what the button does is set apart
+ * from the ordinary body text, because it is the only place the user is
+ * told that a picture of whatever is on screen leaves the machine.
+ */
+.cmd.screen .screen-warning {
+  background: transparent;
+  color: rgb(var(--muted));
+  font-size: 11.5px;
+  line-height: 1.5;
+  white-space: normal;
+  font-family: inherit;
+}
+
 /* A block with no stated purpose is worth flagging, not hiding. */
 .cmd-reason.is-missing {
   color: rgb(var(--danger));

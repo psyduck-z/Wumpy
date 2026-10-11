@@ -328,6 +328,15 @@ export interface WumpySettings {
   voiceAutoStop: boolean
   /** Let the model propose opening a page in the real browser. */
   browserEnabled: boolean
+  /**
+   * Whether the model may ASK to look at the screen.
+   *
+   * Off means it is never offered and never mentioned in the instructions,
+   * so the model does not propose something that cannot happen. On does not
+   * mean it can look - the capture still needs a click every time, whatever
+   * the approval mode.
+   */
+  screenEnabled: boolean
   /** Which engine `/open` and a proposed search use. */
   searchEngine: string
 }
@@ -462,7 +471,15 @@ export const IPC = {
   keyStatus: 'key:status',
   keySet: 'key:set',
   keyAdd: 'key:add',
-  keyClear: 'key:clear'
+  keyClear: 'key:clear',
+  /**
+   * Take a photograph of the screen.
+   *
+   * Only ever in response to a click on a card. There is deliberately no
+   * channel that captures without one, and no way for the model to reach
+   * this except by proposing a block the user then presses.
+   */
+  screenCapture: 'screen:capture'
 } as const
 
 /* --------------------------------------------------------------------- keys */

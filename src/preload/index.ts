@@ -2,6 +2,7 @@ import { contextBridge, ipcRenderer } from 'electron'
 import { IPC } from '@shared/types'
 import type { LinkCheck } from '@shared/links'
 import type {
+  Attachment,
   ChatDelta,
   ChatDone,
   ChatError,
@@ -101,6 +102,14 @@ const api = {
      */
     check: (req: { command: string }): Promise<CommandVerdict> =>
       ipcRenderer.invoke(IPC.shellRisk, req)
+  },
+  screen: {
+    /**
+     * Capture the screen, returning the image. Resolves only after the user
+     * has clicked the card that asked for it; nothing here can be reached
+     * from a model reply on its own.
+     */
+    capture: (): Promise<Attachment> => ipcRenderer.invoke(IPC.screenCapture)
   },
   search: {
     /** Runs an approved web search. */

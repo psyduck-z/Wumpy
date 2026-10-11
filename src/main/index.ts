@@ -23,7 +23,8 @@ import {
   APP_PROMPT,
   ASK_PROMPT,
   SEARCH_PROMPT,
-  OPEN_PROMPT
+  OPEN_PROMPT,
+  SCREEN_PROMPT
 } from '@shared/assistant'
 import { SettingsStore } from './store'
 import { ChatStore } from './chats'
@@ -57,6 +58,7 @@ import type { ProviderId } from '@shared/cloud'
 import { checkLink, isSearchEngine } from '@shared/links'
 import { POLISH_PROMPT, polishAcceptable, tidyTranscript } from '@shared/dictation'
 import { captureConsole, logPath } from './log'
+import { captureScreen } from './screen'
 
 /**
  * Before anything else, so that whatever happens during startup is readable.
@@ -209,6 +211,7 @@ function systemPromptFor(assistant: Assistant, scope: 'none' | 'read' | 'full'):
     scope === 'full' ? SHELL_PROMPT : scope === 'read' ? READ_SHELL_PROMPT : NO_SHELL_PROMPT,
     scope !== 'none' && settings.get('searchEnabled') ? SEARCH_PROMPT : '',
     scope !== 'none' && settings.get('browserEnabled') ? OPEN_PROMPT : '',
+    settings.get('screenEnabled') ? SCREEN_PROMPT : '',
     ASK_PROMPT
   ]
     .filter(Boolean)
@@ -719,6 +722,20 @@ function registerIpc(): void {
    * machine only after a click: a model can put anything in it, including
    * whatever it has just read.
    */
+  /**
+   * A photograph of the screen, and only on a click.
+   *
+   * There is no autonomous path to this handler. The model can only ask, by
+   * proposing a block that renders as a card; the capture happens when the
+   * user presses it, and the image then appears in the transcript so they
+   * can see exactly what was sent.
+   */
+  ipcMain.handle(IPC.screenCapture, async () => {
+    const shot = await captureScreen(panel.liveWindow())
+    console.log(`[wumpy] screen captured: ${shot.width}x${shot.height}, ${shot.bytes} bytes`)
+    return shot
+  })
+
   ipcMain.handle(IPC.searchRun, async (_e, query: string) => {
     if (!settings.get('searchEnabled')) {
       return { results: [], provider: 'none', error: 'Search is turned off in settings.' }

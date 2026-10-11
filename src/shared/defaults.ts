@@ -59,6 +59,7 @@ export const DEFAULT_SETTINGS: WumpySettings = {
   // Opening a page is allowed to be proposed; whether it happens without a click
   // depends on the approval mode, the same way a command does.
   browserEnabled: true,
+  screenEnabled: true,
   // DuckDuckGo because it needs no account and does not follow you, which is the
   // same reason the in-panel search falls back to it.
   searchEngine: 'duckduckgo'

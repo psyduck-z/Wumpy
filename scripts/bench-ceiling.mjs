@@ -1437,9 +1437,51 @@ function retryAfterMs(res, body) {
   return 20_000
 }
 
+/**
+ * The network, which is not a rung.
+ *
+ * A 41-rung ladder at two runs each is forty minutes of requests, and an
+ * unguarded fetch makes the whole thing hostage to any one of them. Measured,
+ * exactly that: a full run and the comparison it was being measured against
+ * both died on `getaddrinfo ENOTFOUND generativelanguage.googleapis.com` -
+ * one DNS blip, forty minutes of quota, no answer at either end.
+ *
+ * A dropped connection says nothing about whether a model can read a command's
+ * output, so it must not be allowed to end the measurement. Three tries with a
+ * widening pause, and only then is it a real failure.
+ */
+/** Growing pauses, about two and a half minutes in all. */
+const NETWORK_WAITS = [5000, 10_000, 20_000, 30_000, 45_000, 45_000]
+
+async function fetchWithRetry(url, init, attempt = 0) {
+  try {
+    return await fetch(url, init)
+  } catch (err) {
+    const code = err?.cause?.code ?? err?.code ?? err?.message
+    if (attempt >= NETWORK_WAITS.length) {
+      /**
+       * Give up on the request, NOT on the ladder.
+       *
+       * Three tries over twenty-four seconds was not enough: the same DNS
+       * outage took out two consecutive runs and the second one died before
+       * it had graded a single rung. Throwing from here ends the process and
+       * loses every rung already measured, which is the worst of the
+       * available outcomes - so this returns a response-shaped object the
+       * caller already knows how to report instead.
+       */
+      process.stdout.write(`    (network ${code} - giving up on this request)${NL}`)
+      return { ok: false, status: 0, headers: new Headers(), json: async () => ({ network: code }) }
+    }
+    const wait = NETWORK_WAITS[attempt]
+    process.stdout.write(`    (network ${code}, waiting ${wait / 1000}s)${NL}`)
+    await new Promise((r) => setTimeout(r, wait))
+    return fetchWithRetry(url, init, attempt + 1)
+  }
+}
+
 async function ask(provider, model, turns, attempt = 0) {
   const p = PROVIDERS[provider]
-  const res = await fetch(`${p.base}/chat/completions`, {
+  const res = await fetchWithRetry(`${p.base}/chat/completions`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${p.key()}` },
     body: JSON.stringify({

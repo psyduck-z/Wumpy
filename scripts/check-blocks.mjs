@@ -77,6 +77,63 @@ function controlCharsIn(text) {
   )
 }
 
+/* ----------------------------- backslashes the language ate -------------- */
+
+/**
+ * A Windows path in a prompt, with its separators silently removed.
+ *
+ * `'C:\Users\...'` written with single backslashes is not an error in
+ * JavaScript. An unrecognised escape just loses its backslash, so the source
+ * reads correctly, the editor shows a path, and the model is handed
+ * `C:Users...claude.exe` - a path that cannot exist, in the one block that
+ * teaches it how to report where a tool lives.
+ *
+ * Found by measurement rather than review: the bundled prompt was scanned for
+ * path-shaped text and that line came back wrong. The same family as the
+ * control-character scan above - something no listing can show you - so it is
+ * written the same way, with character codes and no escape sequences.
+ */
+{
+  const BACKSLASH = String.fromCharCode(92)
+  /* The escapes JavaScript recognises. Everything else drops the backslash. */
+  const KNOWN = new Set([
+    'n', 't', 'r', 'b', 'f', 'v', '0', 'u', 'x',
+    BACKSLASH, String.fromCharCode(39), String.fromCharCode(34),
+    String.fromCharCode(96), '$', String.fromCharCode(10), String.fromCharCode(13)
+  ])
+  const QUOTE = String.fromCharCode(39)
+
+  let eaten = 0
+  let scanned = 0
+  for (const file of ['src/shared/assistant.ts', 'src/shared/lean.ts']) {
+    readFileSync(file, 'utf8')
+      .split(String.fromCharCode(10))
+      .forEach((line, i) => {
+        /* Single-quoted literals only: these prompts are arrays of them. */
+        let open = -1
+        for (let k = 0; k < line.length; k++) {
+          if (line[k] === BACKSLASH && open >= 0) {
+            scanned++
+            if (!KNOWN.has(line[k + 1])) {
+              eaten++
+              failedControl++
+              console.log(
+                `FAIL ${file}:${i + 1} loses a backslash before ` +
+                  `${JSON.stringify(line[k + 1])}: ${line.trim().slice(0, 80)}`
+              )
+            }
+            k++
+            continue
+          }
+          if (line[k] === QUOTE) open = open < 0 ? k : -1
+        }
+      })
+  }
+  console.log(
+    `${eaten ? 'FAIL' : 'ok  '} ${scanned} backslashes in the prompts all survive the language`
+  )
+}
+
 const CASES = [
   [
     'powershell command',
@@ -87,6 +144,14 @@ const CASES = [
   ['bash command', '```wumpy-run-bash\n# list files\nls -la\n```', 'CommandCard'],
   ['question', '```wumpy-ask\nWhich folder?\n- Downloads\n- Documents\n```', 'AskCard'],
   ['web search', '```wumpy-search\n# find it\nlatest electron version\n```', 'SearchCard'],
+  /**
+   * A screen capture carries no payload - only a reason - so the fence is
+   * effectively empty. Every other reader in Markdown.tsx returns null for
+   * an empty body, which would have made this render as inert code and the
+   * feature simply not exist. The case with no # line is the one that matters.
+   */
+  ['screen capture', '```wumpy-screen\n# See what the error says\n```', 'ScreenCard'],
+  ['screen capture, no reason', '```wumpy-screen\n```', 'ScreenCard'],
   ['ordinary code', '```powershell\nGet-Date\n```', 'code block'],
   ['untagged code', '```\nsome text\n```', 'code block'],
   ['prose', 'Just a sentence.', 'prose'],
@@ -136,7 +201,9 @@ writeFileSync(
     "      text, tier: 'thinker', complete, looseFences,",
     '      onRunCommand: async () => null, onCommandResult: () => {},',
     '      onAnswer: () => {},',
-    "      onSearch: async () => ({ results: [], provider: 'none' }), onSearchResults: () => {}",
+    "      onSearch: async () => ({ results: [], provider: 'none' }), onSearchResults: () => {},",
+    "      onCaptureScreen: async () => ({ kind: 'image', dataUrl: '', width: 8, height: 8, bytes: 0 }),",
+    '      onScreenCaptured: () => {}',
     '    })',
     '  )',
     '}'
@@ -160,7 +227,12 @@ try {
   rmSync(entry, { force: true })
 }
 
+const BT = String.fromCharCode(96).repeat(3)
+
 function classify(html) {
+  /* Before the generic cmd test: every card shares that class, so whichever
+   * one is checked last is indistinguishable from a command. */
+  if (html.includes('class="cmd screen')) return 'ScreenCard'
   if (html.includes('class="cmd search')) return 'SearchCard'
   if (html.includes('class="ask')) return 'AskCard'
   if (html.includes('class="cmd ')) return 'CommandCard'
@@ -269,6 +341,36 @@ function check(name, got, want) {
   const psOnly = ['Here is how:', '```powershell', 'Get-PSDrive C', '```'].join(NL)
 
   // Off by default: a compliant model keeps the distinction it drew.
+
+  /**
+   * A reply that already used a Wumpy tag keeps the distinction it drew.
+   *
+   * The guard listed the tags by hand and had drifted: wumpy-open was not
+   * among them, so a model that correctly proposed opening a page and then
+   * illustrated something in a powershell fence had the illustration turned
+   * into a live Run button. Both tags are checked, so the list cannot rot
+   * again without this saying so.
+   */
+  for (const tag of ['open', 'screen', 'search', 'ask', 'write']) {
+    const mixed = [
+      BT + 'wumpy-' + tag,
+      '# why',
+      'https://example.com',
+      BT,
+      '',
+      'For reference:',
+      '',
+      BT + 'powershell',
+      'Remove-Item -Recurse C:/',
+      BT
+    ].join(String.fromCharCode(10))
+    check(
+      `a ${tag} block stops a powershell example becoming runnable`,
+      classify(render(mixed, true, true)) === 'CommandCard',
+      false
+    )
+  }
+
   check('a plain fence is inert by default', classify(render(psOnly)), 'code block')
   check('and runnable for a model that needs it', classify(render(psOnly, true, true)), 'CommandCard')
   check(
