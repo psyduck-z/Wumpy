@@ -68,7 +68,7 @@ export default function App(): React.JSX.Element {
   const activity = useMemo(() => {
     if (!streaming || !streamingId) return null
     const live = messages.find((m) => m.id === streamingId)
-    return live ? activityFor(live.content) : null
+    return live ? activityFor(live.content, live.thinking ?? '') : null
   }, [streaming, streamingId, messages])
 
   const [settings, setSettings] = useState<WumpySettings | null>(null)

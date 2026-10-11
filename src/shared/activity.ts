@@ -144,7 +144,102 @@ function payloadOf(body: string[]): string | null {
   return line ? line.trim() : null
 }
 
-function detailFor(kind: ActivityKind, body: string[]): string | null {
+/**
+ * What a shell command is actually for, so the note says it.
+ *
+ * "Running" is true of every wumpy-run block and therefore says nothing -
+ * asked for by name: "add other ones too... for example, checking (e.g what
+ * model this pc is)". Checking the PC model and uninstalling a program are
+ * the same tag and should not read the same, because the whole purpose of
+ * the line is deciding whether to stop it.
+ *
+ * Ordered, and the order is the meaning: a pipeline that reads and then acts
+ * is named for the acting. `Get-StartApps | ... | Start-Process` is Opening,
+ * not Checking, and `Get-Process ollama | Stop-Process` is Stopping. So the
+ * read verbs come last and only win when nothing else matched.
+ *
+ * This is a LABEL, not a permission. isReadOnly in the main process decides
+ * what may run; nothing here is consulted for that, and a wrong guess costs
+ * a wrong word rather than anything else. That is why it may be this short.
+ */
+const COMMAND_VERBS: Array<[RegExp, string]> = [
+  [
+    /\b(winget|choco|scoop)\s+(install|upgrade)\b|\bInstall-\w+|\bmsiexec\b(?![^|]*\/(x|uninstall))/i,
+    'Installing'
+  ],
+  [
+    /\b(winget|choco|scoop)\s+uninstall\b|\bUninstall-\w+|\bunins(tall)?[\w-]*\.exe\b|\bmsiexec\b[^|]*\/(x|uninstall)\b|\bRemove-Appx/i,
+    'Uninstalling'
+  ],
+  [/\bStop-Process\b|\btaskkill\b|\bStop-Service\b|\bStop-Computer\b/i, 'Stopping'],
+  [
+    /\bRemove-Item\b|\bClear-(Content|RecycleBin)\b|(?:^|[|;&]\s*)\s*(del|erase|rd|rmdir)\b/i,
+    'Deleting'
+  ],
+  [/\bStart-Process\b|\bStart-Service\b|\bexplorer(\.exe)?\b|shell:AppsFolder/i, 'Opening'],
+  [
+    /\b(Set|New|Add|Rename|Move|Copy|Disable|Enable|Restart)-\w+|\bOut-File\b|\bbcdedit\b|\bnetsh\b/i,
+    'Changing'
+  ],
+  [
+    /\b(Get|Test|Measure|Select|Resolve|Find|Compare)-\w+|\bwhere\.exe\b|--version\b|-Version\b|\bsysteminfo\b|\bwmic\b/i,
+    'Checking'
+  ]
+]
+
+/**
+ * The same thing from the reason line, which arrives first.
+ *
+ * The command is the better evidence and the reason is the EARLIER evidence,
+ * which is the one this feature is about. So the reason names the verb until
+ * the command shows up and overrules it. The label sharpening mid-block is
+ * fine; what must not happen is it going vague again, and a command that
+ * matches nothing leaves the reason's verb standing rather than resetting to
+ * "Running".
+ */
+const REASON_VERBS: Array<[RegExp, string]> = [
+  [/^(install|set up|add)\b/i, 'Installing'],
+  [/^(uninstall|get rid of)\b/i, 'Uninstalling'],
+  [/^(stop|kill|quit|close|shut|end|terminate)\b/i, 'Stopping'],
+  [/^(delete|clear|empty|wipe|erase)\b/i, 'Deleting'],
+  [/^(open|launch|start|play)\b/i, 'Opening'],
+  [/^(set|change|rename|move|copy|turn|enable|disable|restart|update)\b/i, 'Changing'],
+  [/^(check|see|find|look|show|list|get|read|count|confirm|verify|work out|tell)\b/i, 'Checking']
+]
+
+function matchVerb(table: Array<[RegExp, string]>, text: string): string | null {
+  for (const [pattern, verb] of table) if (pattern.test(text)) return verb
+  return null
+}
+
+/**
+ * The verb for a run block: the command's if there is one, else the reason's.
+ */
+function runVerb(body: string[]): string {
+  const command = payloadOf(body)
+  const fromCommand = command ? matchVerb(COMMAND_VERBS, command) : null
+  if (fromCommand) return fromCommand
+  const reason = reasonOf(body)
+  const fromReason = reason ? matchVerb(REASON_VERBS, reason) : null
+  return fromReason ?? LABELS.run
+}
+
+/**
+ * Drops the reason's opening verb when the label has already said it.
+ *
+ * "Stopping · Stop the Ollama process" says it twice. Only when that first
+ * word is what produced the label, so a reason whose verb disagrees with the
+ * command keeps both halves - there the disagreement is the interesting part.
+ */
+function trimVerb(reason: string, label: string): string {
+  const first = /^([a-z]+(?:\s+(?:up|out|of|rid of))?)\b\s*/i.exec(reason)
+  if (!first) return reason
+  if (matchVerb(REASON_VERBS, reason) !== label) return reason
+  const rest = reason.slice(first[0].length).trim()
+  return rest.length > 2 ? rest : reason
+}
+
+function detailFor(kind: ActivityKind, body: string[], label: string): string | null {
   const reason = reasonOf(body)
   const payload = payloadOf(body)
 
@@ -169,21 +264,31 @@ function detailFor(kind: ActivityKind, body: string[]): string | null {
 
   if (kind === 'ask' && !reason && payload) return shorten(payload)
 
-  if (reason) return shorten(reason)
+  /* "Stopping · Stop the Ollama process" says it twice; drop the repeat. */
+  if (reason) return shorten(kind === 'run' ? trimVerb(reason, label) : reason)
   return payload ? shorten(payload) : null
 }
 
 /**
  * What to show while `text` streams in, or null when there is nothing to say.
  *
- * Null rather than "Thinking" when the message is empty, because the dots are
- * already there and two indicators for one state is noise.
+ * `thinking` is the reasoning channel, which on a reasoning model arrives
+ * well before the answer does. Without it the line stays empty for the whole
+ * of a long think and the user has nothing to judge - which is the one stretch
+ * where "is this going the wrong way" is hardest to answer and the dots say
+ * only that something is happening.
+ *
+ * Still null when BOTH are empty: the dots already cover that, and two
+ * indicators for one state is noise.
  */
-export function activityFor(text: string): Activity | null {
+export function activityFor(text: string, thinking = ''): Activity | null {
   const blocks = blocksIn(text)
 
   if (blocks.length === 0) {
-    if (!text.trim()) return null
+    if (!text.trim()) {
+      if (!thinking.trim()) return null
+      return { kind: 'think', label: LABELS.think, detail: null, count: 1, open: true }
+    }
     return { kind: 'reply', label: LABELS.reply, detail: null, count: 1, open: true }
   }
 
@@ -196,11 +301,12 @@ export function activityFor(text: string): Activity | null {
    */
   const current = blocks.find((b) => b.open) ?? blocks[blocks.length - 1]
   const count = blocks.filter((b) => b.kind === current.kind).length
+  const label = current.kind === 'run' ? runVerb(current.body) : LABELS[current.kind]
 
   return {
     kind: current.kind,
-    label: LABELS[current.kind],
-    detail: detailFor(current.kind, current.body),
+    label,
+    detail: detailFor(current.kind, current.body, label),
     count,
     open: current.open
   }

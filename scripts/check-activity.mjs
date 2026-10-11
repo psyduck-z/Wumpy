@@ -72,12 +72,12 @@ check(
 check(
   'a command is named before the command is written',
   note(line(`${BT}wumpy-run`, '# Stop the Ollama process')),
-  'Running · Stop the Ollama process'
+  'Stopping · the Ollama process'
 )
 check(
   'and falls back to the command when there is no reason',
   note(line(`${BT}wumpy-run`, 'Get-Process | Where-Object MainWindowHandle -ne 0')),
-  'Running · Get-Process | Where-Object MainWindowHandle -ne 0'
+  'Checking · Get-Process | Where-Object MainWindowHandle -ne 0'
 )
 
 /* ------------------------------------------------------------- every kind */
@@ -123,6 +123,51 @@ check('and the count is of that kind only', A.activityFor(twoSearches).count, 2)
 const mixed = line(`${BT}wumpy-search`, '# a', 'a', BT, `${BT}wumpy-run`, '# b')
 check('a different kind does not inherit the count', note(mixed), 'Running · b')
 
+/* ------------------------------------------- the verb matches the command */
+
+/*
+ * "Running" is true of every run block and so says nothing. Asked for by
+ * name: "add other ones too... for example, checking (e.g what model this pc
+ * is)."
+ */
+const run = (...body) => note(line(`${BT}wumpy-run`, ...body))
+
+check('a read is Checking', run('# Find out what model this PC is', 'Get-CimInstance Win32_ComputerSystem'), 'Checking · what model this PC is')
+check('an install is Installing', run('# Get Spotify', 'winget install --id Spotify.Spotify -e'), 'Installing · Get Spotify')
+check('an uninstall is Uninstalling', run('# Remove it again', 'winget uninstall Spotify.Spotify'), 'Uninstalling · Remove it again')
+check('a kill is Stopping', run('# Stop the Ollama process', 'Stop-Process -Name ollama -Force'), 'Stopping · the Ollama process')
+check('a delete is Deleting', run('# Tidy up', 'Remove-Item -Recurse C:/tmp/x'), 'Deleting · Tidy up')
+check('a launch is Opening', run('# Open the notes app', 'Start-Process notepad'), 'Opening · the notes app')
+check('a setting is Changing', run('# Turn the firewall back on', 'Set-NetFirewallProfile -Enabled True'), 'Changing · the firewall back on')
+check('something unrecognised stays Running', run('# Do the thing', 'somebinary --flag'), 'Running · Do the thing')
+
+/*
+ * The order is the meaning: a pipeline that reads and then acts is named for
+ * the acting, or every destructive one-liner reads as "Checking".
+ */
+check('read-then-kill is Stopping, not Checking', run('# Close it', 'Get-Process ollama | Stop-Process -Force'), 'Stopping · Close it')
+check('read-then-launch is Opening', run('# Start it', 'Get-StartApps | Where-Object Name -like "*VNC*" | Start-Process'), 'Opening · Start it')
+
+/* ------------------------------- the verb before the command has arrived */
+
+/*
+ * The reason is the EARLIER evidence and this whole feature is about being
+ * early, so it names the verb until the command overrules it.
+ */
+check('the reason names the verb first', run('# Check the Node version'), 'Checking · the Node version')
+check('and the command sharpens it', run('# Sort it out', 'winget install --id Git.Git -e'), 'Installing · Sort it out')
+check('an unrecognised command leaves the reason standing', run('# Stop the server', 'pkill -f server'), 'Stopping · the server')
+
+/* The repeated word is dropped, but only when the label came from it. */
+check('a disagreeing reason keeps both halves', run('# Check whether it is running', 'Stop-Process -Name x'), 'Stopping · Check whether it is running')
+check('a one-word reason is left alone', run('# Stop', 'Stop-Process -Name x'), 'Stopping · Stop')
+
+/* --------------------------------------------------------- the long think */
+
+check('reasoning with no answer yet is Thinking', A.activityLine(A.activityFor('', 'Let me work through this...')), 'Thinking')
+check('and the answer takes over once it starts', A.activityLine(A.activityFor('Right, so', 'Let me work through this...')), 'Writing a reply')
+check('neither still says nothing', A.activityFor('', ''), null)
+
 /* ------------------------------------------------ fences that are not ours */
 
 /*
@@ -139,7 +184,7 @@ const withCode = line(
   `${BT}wumpy-run`,
   '# List the running processes'
 )
-check('a plain fence does not close our block', note(withCode), 'Running · List the running processes')
+check('a plain fence does not close our block', note(withCode), 'Checking · the running processes')
 check(
   'and a plain fence alone is still just a reply',
   note(line('Example:', `${BT}powershell`, 'Get-Process')),
@@ -147,8 +192,8 @@ check(
 )
 
 /* The normalised variants, which WUMPY_TAGS does not contain. */
-check('run-cmd is recognised', note(line(`${BT}wumpy-run-cmd`, '# Show the IP')), 'Running · Show the IP')
-check('run-bash is recognised', note(line(`${BT}wumpy-run-bash`, '# List files')), 'Running · List files')
+check('run-cmd is recognised', note(line(`${BT}wumpy-run-cmd`, '# Show the IP')), 'Checking · the IP')
+check('run-bash is recognised', note(line(`${BT}wumpy-run-bash`, '# List files')), 'Checking · files')
 
 /* ------------------------------------------------------------- open state */
 
@@ -159,7 +204,7 @@ check('a closed one does not', A.activityFor(closed).open, false)
 check(
   'and the note stays up after it closes',
   note(line(closed, '', 'That will stop it.')),
-  'Running · Stop it'
+  'Stopping · Stop it'
 )
 
 /* ------------------------------------------------------------- shortening */
