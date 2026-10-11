@@ -9,6 +9,8 @@
 :root {
   --radius: 14px;
   --gutter: 12px;
+  /* Room for the dark ring drawn outside the panel's hairline border. */
+  --ring: 2px;
   --font: "Segoe UI Variable Text", "Segoe UI", system-ui, sans-serif;
   --mono: "Cascadia Code", "Consolas", ui-monospace, monospace;
 }
@@ -45,6 +47,8 @@
   --surface: 11 11 13;
   --raised: 20 20 23;
   --border: 255 255 255 / 0.06;
+  /* The panel's outer edge. Deliberately well above --border: see .panel. */
+  --outline: 255 255 255 / 0.18;
   --text: 216 216 220;
   --muted: 124 124 130;
   --accent: 139 128 255;
@@ -81,8 +85,16 @@ body {
 
 .panel {
   position: relative;
-  height: 100%;
-  margin: 0 var(--gutter);
+  /*
+   * A little room above and below for the ring to draw into.
+   *
+   * The window carries 12px of transparent padding at the sides but none
+   * vertically - the card filled it exactly - so a border drawn OUTSIDE the
+   * element was clipped flat at the top and bottom, giving the panel an edge
+   * down its sides and none across its ends.
+   */
+  height: calc(100% - var(--ring) * 2);
+  margin: var(--ring) var(--gutter);
   display: flex;
   flex-direction: column;
   color: rgb(var(--text));
@@ -93,9 +105,28 @@ body {
    * the panel's own text legible over any window, and costs nothing to composite.
    */
   background: rgb(var(--bg));
-  border: 1px solid rgb(var(--border));
+  /*
+   * The panel's own edge, brighter than the dividers inside it.
+   *
+   * It used to share --border with every rule and separator in the app, and
+   * when the theme went darker that token went with it - so the one line that
+   * has to define where the panel ENDS was the same near-invisible hairline
+   * used for lines that are meant to disappear. Floating frameless over
+   * another dark window, it had no edge at all.
+   */
+  border: 1px solid rgb(var(--outline));
   border-radius: var(--radius);
-  box-shadow: var(--shadow);
+  /*
+   * A dark ring immediately outside the hairline.
+   *
+   * A single light border vanishes against a light window behind it and a
+   * single dark one vanishes against a dark one. Two rings, light inside and
+   * dark outside, read against both - which matters here because the panel
+   * lands on whatever the user happened to be working in.
+   */
+  box-shadow:
+    0 0 0 1px rgb(0 0 0 / 0.8),
+    var(--shadow);
   overflow: hidden;
 
   /* No entrance animation: the panel is simply there when summoned. */
