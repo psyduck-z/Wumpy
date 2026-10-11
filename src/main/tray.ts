@@ -110,9 +110,18 @@ export function createTray(deps: TrayDeps): Tray {
             },
             { type: 'separator' },
             {
-              label: 'Still confirm destructive commands',
+              /*
+               * Says so when it is doing nothing. "Run everything" now
+               * overrides this outright, and a ticked box that has no
+               * effect is how someone concludes the app is ignoring them.
+               */
+              label:
+                settings.approvalMode === 'all'
+                  ? 'Confirm destructive commands  (off: running everything)'
+                  : 'Still confirm destructive commands',
               type: 'checkbox',
-              checked: settings.confirmRisky,
+              enabled: settings.approvalMode !== 'all',
+              checked: settings.confirmRisky && settings.approvalMode !== 'all',
               click: (item) => {
                 deps.settings.patch({ confirmRisky: item.checked })
                 render()

@@ -81,9 +81,11 @@ export type ShellKind = 'powershell' | 'cmd' | 'bash'
  *
  * - `manual`: every command waits for a click. The default.
  * - `auto`: commands that only read run themselves; anything that writes asks.
- * - `all`: everything runs. Commands matching a destructive pattern still raise
- *   a native dialog unless `confirmRisky` is turned off, because the model
- *   wrote them and a wrong path is not recoverable.
+ * - `all`: everything runs, including the destructive ones. No card to click
+ *   and no native dialog, and `confirmRisky` does not override it. A risky
+ *   command is still labelled and outlined in red as it runs - showing is not
+ *   asking - but nothing stops it. The protection in this mode is the command
+ *   the model chose, not a question afterwards.
  */
 export type ApprovalMode = 'manual' | 'auto' | 'all'
 

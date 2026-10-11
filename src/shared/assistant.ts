@@ -481,6 +481,38 @@ export const OPEN_PROMPT = [
   'do not report success.'
 ].join(String.fromCharCode(10))
 
+/**
+ * Closing an app, which is not the same as ending its processes.
+ *
+ * Asked "close it" about Ollama, the model proposed Stop-Process -Force on
+ * "ollama" and on "ollama app". It ran - this was the first thing to run
+ * after accept-all stopped asking - and took the tray icon and the local
+ * model server with it. The user wanted the window shut.
+ *
+ * Measured on this machine: 14 of 321 running processes own a window, and
+ * NEITHER Ollama process is one of them. So there was no window to close,
+ * and the honest answer was to say that rather than to reach for -Force.
+ *
+ * This is the protection that replaced the dialog. There is no gate left in
+ * accept-all, so the care has to be in the command, which means here.
+ */
+export const CLOSE_PROMPT = [
+  'CLOSING AN APP IS NOT KILLING ITS PROCESSES.',
+  '"close it", "quit it", "shut it" means ask its WINDOW to close, so the app can',
+  'save what it was doing and its tray icon survives:',
+  '  Get-Process -Name <name> -ErrorAction SilentlyContinue |',
+  '    Where-Object MainWindowHandle -ne 0 | ForEach-Object { $_.CloseMainWindow() }',
+  'Stop-Process -Force is for kill, force, frozen or not responding — the words the',
+  'user actually said, not your reading of what would be simpler.',
+  'IF NOTHING BY THAT NAME OWNS A WINDOW, it is a background or tray app. Say so and',
+  'ask first: stopping it takes away the tray icon and whatever it was serving, and',
+  'that is a different thing from what they asked for.',
+  'Observed: "Ollama is open." / "close it" became Stop-Process -Force on "ollama"',
+  'and "ollama app". Neither owns a window. The tray icon disappeared, the local',
+  'model server went with it, and the user had to start it again.',
+  'Never sweep up helpers by name prefix. One process: the one with the window.'
+].join(String.fromCharCode(10))
+
 /** Appended when Wumpy may search the web. */
 export const SEARCH_PROMPT = [
   'For anything current, or a version or product you are unsure of, search the web:',

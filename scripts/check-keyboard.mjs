@@ -199,19 +199,16 @@ check('and says so rather than going quiet', searchSrc.includes('searching autom
 check('it cannot fire twice for one commit', /searched\.current/.test(searchSrc), true)
 
 /**
- * Risky commands are the deliberate exception: the verdict refuses auto for
- * them, so those buttons come back on purpose.
+ * Risky commands are the deliberate exception in the ASKING modes, where
+ * the verdict refuses auto for them and those buttons come back on purpose.
  *
- * Narrowed since. Accept-all stops only for the SEVERE ones now - deleting
- * files, disabling Defender, writing into Startup, reading a private key.
- * An uninstall is undone by installing the app again, and being stopped by
- * a native dialog for one was accept-all failing to be accept-all, which
- * is what the Spotify test ran into.
- *
- * Asserted on the rule rather than on one line of it, because the previous
- * version matched an exact string and broke the moment the rule gained a
- * second clause - which is a check guarding its own wording instead of the
- * behaviour.
+ * Narrowed twice and then abandoned. First it stopped for anything risky,
+ * then only for the severe ones - deleting files, disabling Defender,
+ * writing into Startup - and the user's answer to the second narrowing was
+ * the same as to the first: "I SAID ALLOW EVERYTHING". Accept-all now stops
+ * for nothing at all, so the severity split survives only for manual and
+ * auto. See check-acceptall.mjs, which owns that rule; this file only has
+ * to agree with it.
  */
 const mainSrc = read('src/main/index.ts')
 check(
@@ -220,11 +217,15 @@ check(
   true
 )
 check(
-  'accept-all stops only for severe',
-  /mode === 'all' \? level === 'severe' : level !== 'none'/.test(mainSrc),
+  'accept-all stops for nothing',
+  /mode !== 'all' && level !== 'none'/.test(mainSrc),
   true
 )
-check('and the dialog follows the same verdict', /verdict\.auto \|\| !settings/.test(mainSrc), true)
+check(
+  'and the dialog follows the same verdict',
+  /const silent =[\s\S]{0,160}verdict\.auto/.test(mainSrc),
+  true
+)
 check('and auto requires not-risky', mainSrc.includes('const auto = allowed && !risky'), true)
 // A link to something on this machine is what an injected link would aim at.
 check(

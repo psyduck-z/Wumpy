@@ -24,7 +24,8 @@ import {
   ASK_PROMPT,
   SEARCH_PROMPT,
   OPEN_PROMPT,
-  SCREEN_PROMPT
+  SCREEN_PROMPT,
+  CLOSE_PROMPT
 } from '@shared/assistant'
 import { SettingsStore } from './store'
 import { ChatStore } from './chats'
@@ -242,6 +243,8 @@ function systemPromptFor(assistant: Assistant, scope: 'none' | 'read' | 'full'):
     assistant.systemPrompt,
     APP_PROMPT,
     scope === 'full' ? SHELL_PROMPT : scope === 'read' ? READ_SHELL_PROMPT : NO_SHELL_PROMPT,
+    /* Same condition as SHELL_PROMPT: there is nothing to close without it. */
+    scope === 'full' ? CLOSE_PROMPT : '',
     scope !== 'none' && settings.get('searchEnabled') ? SEARCH_PROMPT : '',
     scope !== 'none' && settings.get('browserEnabled') ? OPEN_PROMPT : '',
     settings.get('screenEnabled') ? SCREEN_PROMPT : '',
@@ -791,22 +794,32 @@ function registerIpc(): void {
     const mode = settings.get('approvalMode')
 
     /**
-     * Accept-all means accept all, short of something that cannot be undone.
+     * Accept-all means accept all. Everything. Including the red ones.
      *
-     * It used to stop for anything risky at all, which included uninstalling
-     * an app - and an uninstall is not data loss, because installing it
-     * again puts it back. Being interrupted by a native dialog for that is
-     * the mode failing to be the mode.
+     * This was narrowed once already - from "stop for anything risky" to
+     * "stop only for the severe ones" - and narrowing it again was still the
+     * wrong shape of fix, because the user's answer both times was the same
+     * one: "I SAID ALLOW EVERYTHING". They own the machine, they turned the
+     * mode on deliberately, and a tool that keeps asking after being told
+     * three times not to is not being careful, it is being disobedient.
      *
-     * So accept-all now stops only for the severe ones: deleting files,
-     * disabling Defender or the firewall, writing into Startup, reading a
-     * private key. The other modes are unchanged - there the user has not
-     * said "stop asking me", and a second look costs them nothing.
+     * confirmRisky does not override it either. Leaving that as the escape
+     * hatch would have meant nothing changed for someone who has it on and
+     * has never heard of it, which is the user, which is everyone here.
+     *
+     * What is kept is the LABEL: the card is still outlined in red and still
+     * says what the command does, so a destructive proposal is visible for
+     * the second it sits there before it runs. Showing is not asking.
+     *
+     * The argument for a dialog is now entirely an argument for not using
+     * this mode, and it is written down rather than enforced: with no gate
+     * left, the only thing standing between a wrong guess and the machine is
+     * the command the model proposes. That is where the care has to go - see
+     * CLOSE_PROMPT, which exists because the first command to run under this
+     * killed a tray icon the user wanted to keep.
      */
     const level = riskLevel(command)
-    const confirm = settings.get('confirmRisky')
-    const stops = mode === 'all' ? level === 'severe' : level !== 'none'
-    const risky = stops && confirm
+    const risky = mode !== 'all' && level !== 'none' && settings.get('confirmRisky')
     const auto = allowed && !risky && (mode === 'all' || (mode === 'auto' && readOnly))
 
     return { risk, allowed, scope, auto, readOnly, level }
@@ -874,9 +887,15 @@ function registerIpc(): void {
        *
        * Deciding it separately here was how accept-all ended up stopping
        * for an uninstall it had already decided to allow: judge() said run
-       * it, and then this asked anyway.
+       * it, and then this asked anyway. The mode is named explicitly as
+       * well as implied through verdict.auto, so that a future change to
+       * what `auto` means cannot quietly put the dialog back.
        */
-      const risk = verdict.auto || !settings.get('confirmRisky') ? null : verdict.risk
+      const silent =
+        verdict.auto ||
+        settings.get('approvalMode') === 'all' ||
+        !settings.get('confirmRisky')
+      const risk = silent ? null : verdict.risk
       if (risk) {
         const { response } = await dialog.showMessageBox({
           type: 'warning',
