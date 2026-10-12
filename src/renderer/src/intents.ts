@@ -55,9 +55,18 @@ function readTitle(raw: string): { title: string; alternative: string | null } {
 
 const INTENTS: Intent[] = [
   {
-    // "rename this chat to X" / "call this chat X" / "retitle it to X"
+    /*
+     * "rename this chat to X" / "call this chat X" / "retitle the conversation as X"
+     *
+     * The word chat or conversation is REQUIRED. It used to be optional, and
+     * the object could be a bare "it" or "this" - so "rename it to Bob",
+     * said one turn after talking about a file, renamed the CHAT and never
+     * reached the model. Short-circuiting a model is only free when the
+     * phrasing cannot mean anything else; anything vaguer goes to the model,
+     * which answers a chat rename with /rename anyway.
+     */
     pattern:
-      /^(?:please\s+)?(?:can\s+you\s+)?(?:rename|retitle|call|name)\s+(?:this\s+|the\s+|it\s+)?(?:chat|conversation)?\s*(?:to|as)?\s+(.{2,60})$/i,
+      /^(?:please\s+)?(?:can\s+you\s+)?(?:rename|retitle|call|name)\s+(?:this\s+|the\s+|that\s+|my\s+)?(?:chat|conversation)\s*(?:to|as)?\s+(.{2,60})$/i,
     build: (m) => {
       const { title, alternative } = readTitle(m[1])
       // "rename this chat" with no name is a request for the picker, not a title.
@@ -87,8 +96,14 @@ const INTENTS: Intent[] = [
     build: () => ({ kind: 'compact' })
   },
   {
+    /*
+     * "history" on its own is not this. PowerShell has a history, the
+     * browser has a history, and the composer has one of its own - so a bare
+     * "show history" went to the chat picker instead of being answered. It
+     * has to be said to be the chats'.
+     */
     pattern:
-      /^(?:please\s+)?(?:show|list|open)\s+(?:my\s+)?(?:saved\s+)?(?:chats|conversations|history)\.?$/i,
+      /^(?:please\s+)?(?:show|list|open)\s+(?:me\s+)?(?:my\s+|the\s+)?(?:saved\s+)?(?:chats|conversations|chat history|conversation history)\.?$/i,
     build: () => ({ kind: 'resume' })
   }
 ]
