@@ -233,6 +233,9 @@ internal static class Program
     /// <summary>Process allowed to take the foreground, or 0 for none.</summary>
     private static uint _grantPid;
 
+    /// <summary>TickCount of the last keystroke the user made themselves.</summary>
+    private static long _lastRealKey;
+
     /// <summary>Virtual-key code to intercept while a Windows key is held.</summary>
     private static uint _targetVk = 'C';
 
@@ -428,6 +431,22 @@ internal static class Program
 
         var data = Marshal.PtrToStructure<KBDLLHOOKSTRUCT>(lParam);
         var injected = data.dwExtraInfo == WumpySignature || (data.flags & LLKHF_INJECTED) != 0;
+
+        /*
+         * When the person last touched the keyboard themselves.
+         *
+         * This hook is already the only place in Wumpy that can tell a real
+         * keystroke from one we synthesised - the signature on our own
+         * events, and LLKHF_INJECTED for anyone else's - so it is the only
+         * place that can answer "is the user doing something right now".
+         *
+         * Which is the question a plan has to ask between steps: "if it
+         * detects that it's on the wrong page or like you're interfering
+         * make it stop... Otherwise, I might like mess up some stuff." A
+         * plan carrying on while someone types into the same box is how two
+         * sets of keystrokes get interleaved into one field.
+         */
+        if (!injected && isDown) _lastRealKey = Environment.TickCount64;
 
         var winHeld = (GetAsyncKeyState(VK_LWIN) & 0x8000) != 0
                       || (GetAsyncKeyState(VK_RWIN) & 0x8000) != 0;
@@ -768,6 +787,9 @@ internal static class Program
             case "KEY":
                 Key(rest);
                 return;
+            case "GUARD":
+                Guard();
+                return;
             case "ELEMENTS":
             {
                 /* "[limit] [filter words]" - the filter narrows a busy page. */
@@ -798,6 +820,39 @@ internal static class Program
                 Console.WriteLine($"{verb} FAILED unknown-command");
                 return;
         }
+    }
+
+    [DllImport("user32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+    private static extern int GetWindowTextW(IntPtr hWnd, System.Text.StringBuilder text, int count);
+
+    /// <summary>
+    /// Is anyone else using this computer right now?
+    ///
+    /// Three facts, cheap enough to ask between every step of a plan:
+    /// which window has the keyboard, where the pointer is, and how long
+    /// ago the user last pressed a key themselves.
+    ///
+    /// The caller compares them against what it saw when the plan started.
+    /// A changed foreground window means the plan is now aiming at
+    /// something else - the page navigated, a dialog opened, the user
+    /// alt-tabbed - and the remaining clicks would land in a stranger's
+    /// window. A pointer that moved somewhere nobody put it, or a keystroke
+    /// nobody synthesised, means the person is using the machine.
+    ///
+    /// None of it is a judgement. It is the evidence, reported, and the
+    /// decision is made where the plan is.
+    /// </summary>
+    private static void Guard()
+    {
+        var hwnd = GetForegroundWindow();
+        var title = new System.Text.StringBuilder(256);
+        GetWindowTextW(hwnd, title, title.Capacity);
+        GetCursorPos(out var at);
+        /* Milliseconds since the user's own last keypress, or -1 for never. */
+        var since = _lastRealKey == 0 ? -1 : Environment.TickCount64 - _lastRealKey;
+        Console.WriteLine(
+            $"GUARD ok hwnd={hwnd.ToInt64()} cursor={at.x},{at.y} keyms={since} " +
+            $"title={Convert.ToBase64String(System.Text.Encoding.UTF8.GetBytes(title.ToString()))}");
     }
 
     /// <summary>Moves the pointer and reports where it actually landed.</summary>

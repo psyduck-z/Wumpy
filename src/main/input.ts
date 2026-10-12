@@ -70,6 +70,11 @@ export interface PlanResult {
   ran: StepResult[]
   /** Set when nothing ran at all, with the reason. */
   refused: string | null
+  /**
+   * Set when the plan was abandoned part-way because the machine changed
+   * under it - the window went, the mouse moved, somebody typed.
+   */
+  stopped: string | null
 }
 
 /**
@@ -96,6 +101,68 @@ async function throughThePanel<T>(panel: BrowserWindow | null, run: () => Promis
 }
 
 const wait = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms))
+
+/** Who has the keyboard, where the pointer is, and whether a person is typing. */
+interface Guard {
+  hwnd: string
+  title: string
+  cursorX: number
+  cursorY: number
+  /** Milliseconds since the user's own last keypress, or -1 for never. */
+  keyMs: number
+}
+
+async function readGuard(
+  send: (command: string, timeoutMs?: number) => Promise<string>
+): Promise<Guard | null> {
+  const reply = await send('GUARD', 2500)
+  const m = /^GUARD ok hwnd=(-?\d+) cursor=(-?\d+),(-?\d+) keyms=(-?\d+) title=(\S*)/.exec(reply)
+  if (!m) return null
+  let title = ''
+  try {
+    title = Buffer.from(m[5], 'base64').toString('utf8')
+  } catch {
+    /* a title we cannot decode is not a reason to refuse to act */
+  }
+  return { hwnd: m[1], title, cursorX: Number(m[2]), cursorY: Number(m[3]), keyMs: Number(m[4]) }
+}
+
+/**
+ * How far the pointer may drift before it counts as someone using it.
+ *
+ * A click puts the pointer back where it found it, so between steps it
+ * should not move at all. A few pixels is a desk knock or a trackpad
+ * resting on a thumb; forty is a hand.
+ */
+const POINTER_SLACK = 40
+
+/**
+ * Has somebody started using the computer while the plan was running?
+ *
+ * Asked for in plain terms: "if it detects that it's on the wrong page or
+ * like you're interfering make it stop wait or something... Otherwise, I
+ * might like mess up some stuff."
+ *
+ * Stop, not wait. Waiting assumes the interruption is momentary and that
+ * the screen will come back to how it was, and neither is knowable from
+ * here - the user may have alt-tabbed away for ten minutes, or navigated
+ * somewhere the remaining clicks mean something entirely different. The
+ * steps that have not run are reported as skipped, the model is told what
+ * changed, and it can look again. That is recoverable; typing half an email
+ * address into whatever window arrived in the meantime is not.
+ */
+function interference(before: Guard, now: Guard, elapsedMs: number): string | null {
+  if (now.hwnd !== before.hwnd) {
+    const went = now.title.trim()
+    return `the foreground window changed${went ? ` to "${went}"` : ''}`
+  }
+  /* keyMs counts back from now, so a value under the plan's age is a
+     keystroke made since it started - and ours are never counted. */
+  if (now.keyMs >= 0 && now.keyMs < elapsedMs) return 'you typed something'
+  const moved = Math.hypot(now.cursorX - before.cursorX, now.cursorY - before.cursorY)
+  if (moved > POINTER_SLACK) return 'the mouse moved'
+  return null
+}
 
 /**
  * What is on screen and what it is called, from the accessibility tree.
@@ -151,17 +218,18 @@ export async function runPlan(
   if (!frame && needsFrame) {
     return {
       ran: [],
+      stopped: null,
       refused:
         'Nothing has been looked at yet. Take a screenshot first - the coordinates are ' +
         'pixels in that picture, so without one there is nothing to aim at.'
     }
   }
   if (plan.steps.length === 0) {
-    return { ran: [], refused: 'No steps that could be understood.' }
+    return { ran: [], stopped: null, refused: 'No steps that could be understood.' }
   }
 
   const unaimed = typingIsAimed(plan.steps)
-  if (unaimed) return { ran: [], refused: unaimed }
+  if (unaimed) return { ran: [], stopped: null, refused: unaimed }
 
   /* Checked before anything runs, so a plan that would wander off the screen
      half way through does not leave the first half done. */
@@ -169,6 +237,7 @@ export async function runPlan(
     if ((step.kind === 'click' || step.kind === 'move') && frame && !onShot(frame, step.x, step.y)) {
       return {
         ran: [],
+        stopped: null,
         refused:
           `${step.x}, ${step.y} is outside the screenshot ` +
           `(${frame.imageWidth} by ${frame.imageHeight}). Look again and use what you see.`
@@ -176,8 +245,32 @@ export async function runPlan(
     }
   }
 
+  /*
+   * What the machine looked like before any of this, so a change can be
+   * noticed. Null when the helper cannot answer, in which case the plan
+   * still runs: a missing guard is a reason to watch less closely, not a
+   * reason to refuse something the user asked for.
+   */
+  const before = await readGuard(send)
+  const startedAt = Date.now()
+
   const ran: StepResult[] = []
+  let stopped: string | null = null
   for (const step of plan.steps) {
+    /*
+     * Checked before each step rather than after, so the step that would
+     * have gone astray is the one that does not happen.
+     */
+    if (before && ran.length > 0) {
+      const now = await readGuard(send)
+      const why = now ? interference(before, now, Date.now() - startedAt) : null
+      if (why) {
+        stopped = why
+        log(`[do] stopped: ${why}`)
+        break
+      }
+    }
+
     const label = describe(step)
     const reply = await oneStep(step, frame, panel, send)
     const ok = / ok\b/.test(reply) || reply === 'waited'
@@ -186,7 +279,19 @@ export async function runPlan(
     if (!ok) break
     if (step.kind !== 'wait') await wait(SETTLE_MS)
   }
-  return { ran, refused: null }
+
+  if (stopped) {
+    const left = plan.steps.length - ran.length
+    return {
+      ran,
+      refused: null,
+      stopped:
+        `Stopped after ${ran.length} of ${plan.steps.length} steps because ${stopped}. ` +
+        `${left} step${left === 1 ? '' : 's'} did not run. ` +
+        'Look at the screen again before trying anything else.'
+    }
+  }
+  return { ran, refused: null, stopped: null }
 }
 
 async function oneStep(

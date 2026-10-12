@@ -117,6 +117,11 @@ export interface DesktopResult {
   ran: DesktopStep[]
   /** Set when nothing ran at all, with the reason. */
   refused: string | null
+  /**
+   * Set when the plan was abandoned part-way because somebody else was
+   * using the machine, or the window it was aiming at went away.
+   */
+  stopped: string | null
   /** Lines in the block that were not steps. */
   problems: string[]
   /** The screen afterwards, so the model can see what it did. */

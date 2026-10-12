@@ -505,6 +505,9 @@ function namedControls(shot: Attachment): string[] {
     if (!result.refused && result.ran.some((r) => !r.ok)) {
       lines.push('Everything after the failed step was skipped.')
     }
+    /* The user came back to their machine. Say so plainly, because the
+       model's next move should be to look rather than to retry. */
+    if (result.stopped) lines.push(result.stopped)
     chatRef.current.send(
       [
         'The plan was carried out automatically. This is a report, not the user',
@@ -837,6 +840,41 @@ function namedControls(shot: Attachment): string[] {
             return
           }
           setPicker('delete')
+          return
+        }
+        case 'screen': {
+          /*
+           * The picture goes with the question, in one turn.
+           *
+           * The long way round is the model proposing a wumpy-screen block
+           * and the capture arriving on the turn after - two round trips
+           * before it has seen anything. Here the user already knows they
+           * want it looked at, so there is nothing to propose.
+           *
+           * Visible as a normal message, unlike the automatic captures:
+           * this one the user asked for, so hiding it would lose the only
+           * record of what they sent.
+           */
+          if (!canSeeScreen) {
+            say('Screen capture is turned off in settings.')
+            return
+          }
+          try {
+            const shot = await window.wumpy.screen.capture()
+            chat.send(
+              [
+                action.ask || 'What is on my screen?',
+                '',
+                'A screenshot of my screen is attached. Answer from what is actually',
+                'visible; if something is too small or cut off, say so.',
+                ...namedControls(shot)
+              ].join(String.fromCharCode(10)),
+              action.ask || 'What is on my screen?',
+              [shot]
+            )
+          } catch (err) {
+            say(err instanceof Error ? err.message : 'Could not capture the screen.')
+          }
           return
         }
         case 'rename':

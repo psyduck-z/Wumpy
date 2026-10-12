@@ -217,5 +217,39 @@ check('the screenshot turn says it was automatic', /taken automatically/.test(ap
 check('and tells the model the user did not speak', /not sent[\s\S]{0,40}by the user/.test(app), true)
 check('the plan report is passive too', /carried out automatically/.test(app), true)
 
+/* ----------------------------------- stopping when somebody else is there */
+
+/*
+ * "if it detects that it's on the wrong page or like you're interfering make
+ * it stop wait or something... Otherwise, I might like mess up some stuff."
+ *
+ * Stop, not wait: waiting assumes the interruption is momentary and that the
+ * screen will come back to how it was, and neither is knowable from here.
+ */
+check('a guard snapshot is taken first', /readGuard\(send\)/.test(inputSrc), true)
+check('and re-read between steps', /ran\.length > 0[\s\S]{0,120}readGuard/.test(inputSrc), true)
+check('a changed window stops it', /foreground window changed/.test(inputSrc), true)
+check('a keystroke of theirs stops it', /you typed something/.test(inputSrc), true)
+check('the mouse moving stops it', /the mouse moved/.test(inputSrc), true)
+check('the pointer has some slack', /POINTER_SLACK/.test(inputSrc), true)
+check('and ours are never counted as theirs', /dwExtraInfo == WumpySignature/.test(readFileSync('src/hook/Program.cs', 'utf8')), true)
+check('only real keystrokes are recorded', /if \(!injected && isDown\) _lastRealKey/.test(readFileSync('src/hook/Program.cs', 'utf8')), true)
+check('a missing guard does not block the plan', /a missing guard is a reason to watch less closely/.test(inputSrc), true)
+check('it says how many steps did not run', /did not run/.test(inputSrc), true)
+check('the model is told it stopped', /STOPS BY ITSELF/.test(desktop), true)
+check('and told to look rather than retry', /not a failure to retry/.test(desktop), true)
+
+const card = readFileSync('src/renderer/src/components/DoCard.tsx', 'utf8')
+check('the card says interrupted, not failed', /interrupted/.test(card), true)
+
+/* ------------------------------------------- the short way to be seen */
+
+const cmds = readFileSync('src/renderer/src/commands.ts', 'utf8')
+check('/screen exists', /name: 'screen'/.test(cmds), true)
+check('and takes the question with it', /kind: 'screen'; ask: string/.test(cmds), true)
+check('it sends the picture in one turn', /A screenshot of my screen is attached/.test(app), true)
+check('with the control names too', /\.\.\.namedControls\(shot\)/.test(app), true)
+check('and is visible, unlike the automatic ones', /hiding it would lose the only/.test(app), true)
+
 console.log(`${NL}${count - failed}/${count} desktop checks passed`)
 if (failed) process.exit(1)

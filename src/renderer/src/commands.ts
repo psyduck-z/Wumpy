@@ -11,6 +11,8 @@ export type CommandAction =
   | { kind: 'error'; message: string }
   | { kind: 'info'; message: string }
   | { kind: 'new' }
+  /** Hand the model a photograph of the screen, without it having to ask. */
+  | { kind: 'screen'; ask: string }
   | { kind: 'chats' }
   | { kind: 'resume' }
   /** No argument deletes the chat you are in; `/delete pick` opens the list. */
@@ -133,6 +135,21 @@ export const COMMANDS: CommandSpec[] = [
     aliases: ['clear', 'reset'],
     hint: 'Start a fresh chat',
     run: () => ({ kind: 'new' })
+  },
+  {
+    name: 'screen',
+    aliases: ['see', 'look', 'shot'],
+    /*
+     * The short way round.
+     *
+     * Showing the model the screen took three turns: ask it something, have
+     * it propose a wumpy-screen block, let that capture, and only then get
+     * an answer. "Make it easier way... for the model to see what's on my
+     * screen." This is one keystroke: the picture goes with whatever is in
+     * the box, or on its own.
+     */
+    hint: 'Show the model your screen  (/screen what is this error)',
+    run: (arg) => ({ kind: 'screen', ask: (arg ?? '').trim() })
   },
   {
     name: 'resume',

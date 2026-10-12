@@ -54,6 +54,7 @@ export function DoCard({
       setResult({
         ran: [],
         refused: err instanceof Error ? err.message : String(err),
+        stopped: null,
         problems: [],
         after: null
       })
@@ -83,7 +84,8 @@ export function DoCard({
   }, [waiting, messageId])
 
   const cardRef = useRef<HTMLDivElement>(null)
-  const failed = Boolean(result?.refused) || Boolean(result?.ran.some((r) => !r.ok))
+  const failed =
+    Boolean(result?.refused) || Boolean(result?.stopped) || Boolean(result?.ran.some((r) => !r.ok))
 
   return (
     <div
@@ -113,7 +115,8 @@ export function DoCard({
         {state === 'idle' && itself && <span className="cmd-status">running automatically…</span>}
         {state === 'working' && <span className="cmd-status">on your screen…</span>}
         {state === 'skipped' && <span className="cmd-status">declined</span>}
-        {state === 'done' && !result?.refused && (
+        {state === 'done' && result?.stopped && <span className="cmd-status">interrupted</span>}
+        {state === 'done' && !result?.refused && !result?.stopped && (
           <span className="cmd-status">
             {result?.ran.filter((r) => r.ok).length ?? 0}/{result?.ran.length ?? 0} done
           </span>
@@ -142,6 +145,8 @@ export function DoCard({
         <div className="cmd-output">{plan.problems.join(String.fromCharCode(10))}</div>
       )}
       {result?.refused && <div className="cmd-output">{result.refused}</div>}
+      {/* Interrupted rather than failed: say so in its own words. */}
+      {result?.stopped && <div className="cmd-output">{result.stopped}</div>}
       {result?.ran.some((r) => !r.ok) && (
         <div className="cmd-output">
           {result.ran.find((r) => !r.ok)?.detail}
