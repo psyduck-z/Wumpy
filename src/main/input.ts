@@ -521,6 +521,24 @@ async function oneStep(
           'you mean first.'
         )
       }
+      /*
+       * And is it a box at all? Asked before the select-all, not after.
+       *
+       * This step presses ctrl+a and then pastes over the selection, which
+       * is exactly right in a text field and destructive anywhere else: aim
+       * it at a message list and ctrl+a selects every message; aim it at an
+       * editor nobody meant to touch and the paste replaces the document.
+       * The reply already says which control was chosen, so the role is
+       * checked rather than assumed - and it is checked even against the
+       * older helper, which reports a role but not whether focus landed.
+       */
+      const role = /role=(\S+)/.exec(focus)?.[1] ?? ''
+      if (role && !/^(Edit|ComboBox|Document)$/i.test(role)) {
+        return (
+          `FILL FAILED ${JSON.stringify(step.name)} is a ${role}, not a box text goes into, ` +
+          'so nothing was selected or typed. Name the field itself, or press it and look again.'
+        )
+      }
       /* Select what is there, so the text replaces rather than joins it. */
       const selected = await send('KEY ctrl+a', 6000)
       if (!OK.test(selected)) return `FILL FAILED could not select the contents: ${selected}`

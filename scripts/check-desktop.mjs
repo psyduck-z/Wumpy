@@ -657,6 +657,11 @@ check('reveal is preferred over the wheel', /prefer reveal/.test(desktop), true)
 
 check('fill focuses, selects, pastes and reads back', /FOCUS \$\{named\}[\s\S]{0,2000}KEY ctrl\+a[\s\S]{0,400}pasteText[\s\S]{0,400}readValue/.test(inputSrc), true)
 check('a focus that did not take stops it', /focused=no/.test(inputSrc), true)
+/* fill presses ctrl+a and pastes over the selection. That is right in a text
+   field and destructive anywhere else - a message list, somebody's open
+   document - so the role is checked before anything is selected. */
+check('and a control that is not a box stops it too', /is a \$\{role\}, not a box text goes into/.test(inputSrc), true)
+check('before the select-all, not after', inputSrc.indexOf('not a box text goes into') < inputSrc.indexOf("send('KEY ctrl+a'"), true)
 check('and nothing is typed in that case', /did not take the keyboard, so nothing was typed/.test(inputSrc), true)
 check('a box that still says the wrong thing is a failure', /FILL FAILED the text did not land/.test(inputSrc), true)
 check('and an unreadable box is neither', /so this is unproven/.test(inputSrc), true)
