@@ -100,9 +100,25 @@ check('and forbids the name-prefix sweep', /name prefix/i.test(close), true)
  * that is absent whenever commands are on is worse than no rule, because
  * the file says it exists.
  */
-check('it is wired into the system prompt', /CLOSE_PROMPT/.test(main), true)
-const assembly = main.slice(main.indexOf('function systemPromptFor'), main.indexOf('function currentAssistant'))
+/*
+ * Read where the assembly actually lives, which is no longer main.
+ *
+ * It moved into @shared/assistant when the panel had to be able to measure the
+ * preamble it was about to send, and this check went on reading main - so it
+ * failed for a week without saying anything true. It stayed quiet because
+ * `npm run typecheck` chains on && and the hook-staleness gate above it halts
+ * the run, which is its own lesson: a check this far down the chain is only
+ * ever seen when everything before it passes.
+ */
+const prompts = readFileSync('src/shared/assistant.ts', 'utf8')
+check('it is wired into the system prompt', /CLOSE_PROMPT/.test(prompts), true)
+const assembly = prompts.slice(
+  prompts.indexOf('export function promptSections'),
+  prompts.indexOf('export function assemblePrompt')
+)
 check('and only with full shell scope', /scope === 'full' \? CLOSE_PROMPT/.test(assembly), true)
+/* And main still has to be the thing that decides the scope from settings. */
+check('main maps settings to that shape', /function promptShape/.test(main), true)
 
 /*
  * What it costs, because the user asked for the preamble to come down and

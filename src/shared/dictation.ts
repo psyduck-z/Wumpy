@@ -17,7 +17,11 @@
  * The third thing, which is not a fix: silence. Whisper hallucinates on it,
  * confidently and in a small number of recognisable ways, so `isNoise` throws
  * those away rather than typing "Thank you." into the box.
+ *
+ * And a fourth, which needed its own module: a spoken web address, where every
+ * rule below is actively wrong. See @shared/spokenurl.
  */
+import { maskUrls, restoreUrls, urlsIn } from './spokenurl'
 
 /**
  * The Whisper size, fixed rather than chosen.
@@ -174,15 +178,24 @@ const SPOKEN: Fix[] = [
   { from: /\b(new|next) (line|paragraph)\b/gi, to: '\n' },
   { from: /\bopen (paren|parenthesis|bracket)\b/gi, to: '(' },
   { from: /\bclose (paren|parenthesis|bracket)\b/gi, to: ')' },
-  // These eat the space after them, because they are nearly always dictated as
-  // part of a path. The general cleanup below deliberately does not touch
-  // slashes, so that "and / or" in ordinary speech survives.
-  { from: /\bforward slash */gi, to: '/' },
-  { from: /\bback ?slash */gi, to: '\\' },
+  // These eat the space on BOTH sides, because they are nearly always dictated
+  // as part of a path, and a path has no spaces in it: "users back slash
+  // zecha" was coming out as "users \zecha". The general cleanup below
+  // deliberately does not touch a bare slash, so "and / or" in ordinary speech
+  // survives.
+  { from: / *\bforward slash */gi, to: '/' },
+  { from: / *\bback ?slash */gi, to: '\\' },
   { from: /\bdouble dash\b/gi, to: '--' },
   { from: /\bunder ?score\b/gi, to: '_' },
   { from: /\bat sign\b/gi, to: '@' },
-  { from: /\bhash ?tag\b/gi, to: '#' }
+  { from: /\bhash ?tag\b/gi, to: '#' },
+  /*
+   * A drive letter, which is the one other address this app is dictated.
+   * "C colon backslash users" came out as "C colon \users", because the rule
+   * above had already made the backslash and nothing turned "colon" into one.
+   * Only ever next to a backslash, so a colon said in a sentence is untouched.
+   */
+  { from: /\b([a-z]) colon *(?=\\)/gi, to: '$1:' }
 ]
 
 /** Leading hesitation. Whisper usually drops it; when it does not, this does. */
@@ -239,6 +252,19 @@ export function tidyTranscript(raw: string, opts: TidyOptions = {}): string {
   let text = raw.trim().replace(/\s+/g, ' ')
   text = text.replace(FILLER, '')
 
+  /*
+   * Web addresses come out first, before a single table runs.
+   *
+   * Everything below this line was written for prose and is wrong inside a
+   * URL: the vocabulary table shouts /json into /JSON, "github dot com" became
+   * "GitHub dot com" before any slash was fixed, and the last rule in the
+   * function puts a capital H on https. So an address is repaired on its own
+   * terms by @shared/spokenurl, replaced by a placeholder that is not made of
+   * letters, and put back at the very end.
+   */
+  const addresses = maskUrls(text)
+  text = addresses.text
+
   for (const { from, to } of EXTENSIONS) text = text.replace(from, to)
   for (const { from, to } of VOCABULARY) text = text.replace(from, to)
   for (const { from, to } of SPOKEN) text = text.replace(from, to)
@@ -268,7 +294,7 @@ export function tidyTranscript(raw: string, opts: TidyOptions = {}): string {
     text = text[0].toUpperCase() + text.slice(1)
   }
 
-  return text
+  return restoreUrls(text, addresses.urls)
 }
 
 /* -------------------------------------------------------------- polish guard */
@@ -333,6 +359,19 @@ export function polishAcceptable(raw: string, polished: string): boolean {
   if (/^["'`]|["'`]$/.test(clean)) return false
   // Polish punctuates one utterance. It never has cause to add lines.
   if (clean.split('\n').length > raw.split('\n').length) return false
+
+  /*
+   * A URL must survive the pass character for character.
+   *
+   * This is the one kind of damage the user cannot catch by reading the box
+   * before pressing Enter: a model asked to tidy a sentence will helpfully
+   * drop a join code's leading zero, or "fix" a host it does not recognise,
+   * and the result looks exactly as plausible as the real address. The word
+   * comparison below cannot see it, because it strips the punctuation that
+   * makes a URL a URL.
+   */
+  const addressesBefore = urlsIn(raw)
+  if (addressesBefore.join(' ') !== urlsIn(clean).join(' ')) return false
 
   const before = words(raw)
   const after = words(clean)

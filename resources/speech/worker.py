@@ -23,11 +23,21 @@ import time
 # Words no acoustic model has heard of. Whisper accepts a prompt and biases
 # towards its vocabulary, which fixes some of these before they go wrong; the
 # table in src/shared/dictation.ts catches what survives.
+#
+# The addresses at the end are doing a second job. An initial prompt sets the
+# STYLE of the transcript as well as its vocabulary, and Whisper's default
+# style for a dictated run of digits is the one subtitles use: "1-2-3-4-5-6".
+# Showing it a URL with a plain six-digit code is what stops the hyphens being
+# written in the first place. src/shared/spokenurl.ts repairs the rest, but it
+# has to refuse to guess at "123-456" - so it is worth more to prevent the
+# hyphens than to unpick them.
 VOCABULARY = (
     "Wumpy, Ollama, phi4-mini, qwen2.5, llama3.2, qwen2.5-coder, Whisper, "
     "PowerShell, GitHub, Node.js, Electron, TypeScript, JSON, YAML, "
     "tier, thinker, keep-alive, accept edits, auto-compact, "
-    "/also, /tier, /new, /model, .py, .ts, .md, .json"
+    "/also, /tier, /new, /model, .py, .ts, .md, .json, "
+    "https://vocabulary.com/join/123456, https://github.com/psyduck-z/wumpy, "
+    "www.example.com/signup?code=408217"
 )
 
 
