@@ -7,6 +7,9 @@ import type { ChatStats } from '../hooks/useChat'
  * Elapsed and load times, which on a CPU-only machine and a 14B model can run
  * well past a minute. Seconds alone stopped being readable around "184.3s".
  */
+/** A line break in a tooltip, built without an escape sequence. */
+const LINE = String.fromCharCode(10)
+
 function duration(ms: number): string {
   if (ms < 1000) return `${Math.round(ms)}ms`
 
@@ -53,11 +56,24 @@ function ContextMeter({
       type="button"
       className={`ctx ${level}`}
       onClick={onCompact}
-      title={
+      title={[
         `Context: ${usage.used.toLocaleString()} of ${usage.limit.toLocaleString()} tokens ` +
-        `(${pct.toFixed(0)}%)${usage.estimated ? ', estimated' : ', counted by the provider'}\n` +
-        'Click to compact older turns.'
-      }
+          `(${pct.toFixed(0)}%)${usage.estimated ? ', estimated' : ', counted by the provider'}`,
+        /*
+         * The split, because the number is mostly not the conversation.
+         *
+         * The instructions are re-sent in full on every turn and compaction
+         * cannot shrink them, so "40% full with two messages in the chat" is
+         * the truth and used to look like a bug.
+         */
+        usage.instructions
+          ? `Instructions, re-sent every turn: ~${usage.instructions.toLocaleString()}` +
+            `${LINE}This conversation: ~${Math.max(0, usage.used - usage.instructions).toLocaleString()}`
+          : '',
+        'Click to compact older turns (the instructions stay).'
+      ]
+        .filter(Boolean)
+        .join(LINE)}
     >
       <span className="ctx-track">
         <span className="ctx-fill" style={{ width: `${Math.max(2, pct)}%` }} />

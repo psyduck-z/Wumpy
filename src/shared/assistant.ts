@@ -1152,6 +1152,65 @@ export const DEFAULT_MODEL = 'gemini-3.5-flash'
  * talking for four minutes. Measured, Codestral's longest answer on the
  * benchmark was 346 tokens, so this is headroom rather than a target.
  */
+/**
+ * Which sections the preamble is made of, for one configuration.
+ *
+ * The assembly used to live in the main process, where nothing else could
+ * see it - and the one number everybody wanted from it was how big it is.
+ * The context meter was estimating the conversation from its characters and
+ * counting the instructions as nothing, so after a compaction it read 1%
+ * when the truth was 41%: thirteen thousand tokens of preamble go out with
+ * every single turn and they are most of what fills the window.
+ */
+export interface PromptShape {
+  /** What the model may do with the shell, which picks one of three sections. */
+  scope: 'none' | 'read' | 'full'
+  search: boolean
+  screen: boolean
+  browser: boolean
+  /** Whether there are keys to have a quota at all. */
+  quota: boolean
+  /** The voice, normally VOICE_PROMPT. Passed in so a benchmark can vary it. */
+  base?: string
+}
+
+/** The sections, in the order they are sent, with the empties dropped. */
+export function promptSections(shape: PromptShape): string[] {
+  const { scope, search, screen, browser, quota } = shape
+  return [
+    shape.base ?? VOICE_PROMPT,
+    APP_PROMPT,
+    scope === 'full' ? SHELL_PROMPT : scope === 'read' ? READ_SHELL_PROMPT : NO_SHELL_PROMPT,
+    /* Same condition as SHELL_PROMPT: there is nothing to close without it. */
+    scope === 'full' ? CLOSE_PROMPT : '',
+    scope !== 'none' && search ? SEARCH_PROMPT : '',
+    scope !== 'none' && browser ? OPEN_PROMPT : '',
+    screen ? SCREEN_PROMPT : '',
+    quota ? QUOTA_PROMPT : '',
+    /* Both, because driving the screen without seeing it is aiming blind. */
+    screen && browser && scope === 'full' ? DESKTOP_PROMPT : '',
+    ASK_PROMPT
+  ].filter(Boolean)
+}
+
+/** The preamble itself. One assembly, used by the sender and the meter. */
+export function assemblePrompt(shape: PromptShape): string {
+  return promptSections(shape).join(String.fromCharCode(10, 10))
+}
+
+/**
+ * What it costs, without building the string.
+ *
+ * Four characters to a token, like every other estimate in this app. Called
+ * from a render, so it adds lengths rather than concatenating 53KB of text
+ * on the way past.
+ */
+export function preambleTokens(shape: PromptShape): number {
+  const parts = promptSections(shape)
+  const chars = parts.reduce((n, s) => n + s.length, 0) + Math.max(0, parts.length - 1) * 2
+  return Math.ceil(chars / 4)
+}
+
 export function assistantFor(model: string, canShell: boolean): Assistant {
   return {
     model,

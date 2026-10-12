@@ -14,6 +14,7 @@ import type { LinkApproval } from '@shared/links'
 import { Markdown } from './Markdown'
 import { AskCard } from './AskCard'
 import { useSmoothText } from '../hooks/useSmoothText'
+import { copyText } from '../copy'
 
 /**
  * Memoised on purpose.
@@ -99,7 +100,11 @@ export const Message = memo(function Message({
   const isUser = message.role === 'user'
 
   const copy = (): void => {
-    void navigator.clipboard.writeText(message.content).then(() => {
+    /* Through the main process: the page's own clipboard needs document focus
+       and this panel often does not have it. The badge now follows what
+       actually happened rather than the attempt. */
+    void copyText(message.content).then((ok) => {
+      if (!ok) return
       setCopied(true)
       setTimeout(() => setCopied(false), 1400)
     })

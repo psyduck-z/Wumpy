@@ -155,5 +155,46 @@ check('and the real client width, not the styled one', /el\.clientWidth/.test(ca
 check('the text after the caret is measured too', /after\.length/.test(caret), true)
 check('a failed measurement falls back rather than dying', /catch[\s\S]{0,400}includes\(NL\)/.test(caret), true)
 
+/* ------------------------------------- what a panel without focus cannot do */
+
+/*
+ * The same split that cost six attempts at autofocus - the caret can be in
+ * one place while the keyboard belongs to another - has a second victim.
+ * navigator.clipboard.writeText REQUIRES document focus, and the log has
+ * this, twice:
+ *
+ *   ERROR [renderer] Uncaught (in promise) NotAllowedError: Failed to execute
+ *   'writeText' on 'Clipboard': Write permission denied.
+ *
+ * So every Copy button was a coin toss, and Ctrl+Shift+C announced "Copied
+ * the last answer." either way. Electron's own clipboard has no such
+ * requirement, so the write goes through the main process and the result is
+ * reported rather than assumed.
+ */
+const copy = readFileSync('src/renderer/src/copy.ts', 'utf8')
+check('copying goes through the main process', /window\.wumpy\?\.clipboard\?\.write/.test(copy), true)
+check('the page API is only a fallback', copy.indexOf('wumpy?.clipboard?.write') < copy.lastIndexOf('navigator.clipboard.writeText'), true)
+check('and a refusal is returned, not thrown', /return false/.test(copy), true)
+
+const appSrc = readFileSync('src/renderer/src/App.tsx', 'utf8')
+const messageSrc = readFileSync('src/renderer/src/components/Message.tsx', 'utf8')
+const markdownSrc = readFileSync('src/renderer/src/components/Markdown.tsx', 'utf8')
+for (const [name, src] of [
+  ['the shortcut', appSrc],
+  ['a message', messageSrc],
+  ['a code block', markdownSrc]
+]) {
+  check(`${name} uses it`, /copyText\(/.test(src), true)
+  check(`${name} does not write the clipboard itself`, /navigator\.clipboard\.writeText/.test(src), false)
+}
+check('and the shortcut only claims success when it worked', /ok \? 'Copied the last answer\.'/.test(appSrc), true)
+check('the badge waits for the same answer', /then\(\(ok\) => \{\s*if \(!ok\) return/.test(messageSrc), true)
+
+const preload = readFileSync('src/preload/index.ts', 'utf8')
+check('the bridge writes only', /clipboard: \{\s*write:/.test(preload), true)
+check('and never reads the clipboard back', /clipboardRead|readText/.test(preload), false)
+/* check-cloud owns the key boundary; this only asserts the new channel did
+   not open a way back. */
+
 console.log(`${NL}${count - failed}/${count} caret checks passed`)
 if (failed) process.exit(1)

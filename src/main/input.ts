@@ -195,6 +195,8 @@ export async function visibleElements(
 ): Promise<{
   elements: Array<{ name: string; role: string; x: number; y: number }>
   window: string
+  /** How many usable controls the window has, not just how many are listed. */
+  total: number
 }> {
   const reply = await send(`ELEMENTS ${limit}${filter ? ' ' + filter : ''}`, 8000)
   const at = reply.indexOf('[')
@@ -212,11 +214,12 @@ export async function visibleElements(
       /* an undecodable title is not worth failing a capture over */
     }
   }
-  if (!reply.startsWith('ELEMENTS ok') || at < 0) return { elements: [], window }
+  const total = Number(/total=(\d+)/.exec(reply)?.[1] ?? 0)
+  if (!reply.startsWith('ELEMENTS ok') || at < 0) return { elements: [], window, total }
   try {
-    return { elements: JSON.parse(reply.slice(at)), window }
+    return { elements: JSON.parse(reply.slice(at)), window, total }
   } catch {
-    return { elements: [], window }
+    return { elements: [], window, total }
   }
 }
 
@@ -412,15 +415,22 @@ async function pasteText(
 async function readValue(
   name: string,
   send: (command: string, timeoutMs?: number) => Promise<string>
-): Promise<{ text: string | null; via: string; raw: string }> {
+): Promise<{ text: string | null; via: string; exact: boolean; raw: string }> {
   const raw = await send(`VALUE ${Buffer.from(name, 'utf8').toString('base64')}`, 6000)
   const encoded = /text=(\S*)/.exec(raw)?.[1]
   const via = /via=(\S+)/.exec(raw)?.[1] ?? '?'
-  if (!raw.startsWith('VALUE ok') || encoded === undefined) return { text: null, via, raw }
+  /*
+   * Whether this is the control that was chosen or merely another one with
+   * the same name. A page holds forty things called "Select", and reading a
+   * different one proves nothing about the one that was typed into. Absent
+   * from an older helper, where it is treated as unknown rather than wrong.
+   */
+  const exact = !/matched=name-only/.test(raw)
+  if (!raw.startsWith('VALUE ok') || encoded === undefined) return { text: null, via, exact, raw }
   try {
-    return { text: Buffer.from(encoded, 'base64').toString('utf8'), via, raw }
+    return { text: Buffer.from(encoded, 'base64').toString('utf8'), via, exact, raw }
   } catch {
-    return { text: null, via, raw }
+    return { text: null, via, exact, raw }
   }
 }
 
@@ -525,7 +535,13 @@ async function oneStep(
       const wanted = step.text.trim()
       const got = back.text.trim()
       if (got.includes(wanted) || (wanted.length > 40 && got.startsWith(wanted.slice(0, 40)))) {
-        return `FILL ok ${JSON.stringify(step.name)} now says ${JSON.stringify(back.text)} ${put.note}`
+        /* `via` and the warning are in the success line on purpose: a read
+           that came from a control's NAME rather than its value, or from a
+           different control with the same name, is weaker evidence than one
+           that came from the box itself, and the difference should not be
+           invisible. */
+        const weak = back.exact ? '' : ' (warning: read from another control with the same name)'
+        return `FILL ok ${JSON.stringify(step.name)} now says ${JSON.stringify(back.text)} (via ${back.via})${weak} ${put.note}`
       }
       return (
         `FILL FAILED the text did not land: ${JSON.stringify(step.name)} says ` +

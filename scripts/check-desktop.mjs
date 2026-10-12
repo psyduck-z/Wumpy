@@ -480,7 +480,10 @@ check('a read decodes what came back', /it says \$\{JSON\.stringify\(back\.text\
 /* A read that failed must not come back as an empty box: fill decides whether
    the text landed by comparing what the box says, and "could not read it" has
    to be a third answer rather than "it says nothing". */
-check('and a read that failed says so instead', /return \{ text: null, via, raw \}/.test(inputSrc), true)
+check('and a read that failed says so instead', /return \{ text: null, via, exact, raw \}/.test(inputSrc), true)
+/* A read from another control with the same name is weaker evidence than one
+   from the box itself, and fill says which it had. */
+check('a name-only match is admitted in the proof', /read from another control with the same name/.test(inputSrc), true)
 check('a scroll at a point needs the frame', /SCROLL FAILED no-screenshot/.test(inputSrc), true)
 check('and without one it uses the pointer', /cannot-find-the-pointer/.test(inputSrc), true)
 
@@ -707,11 +710,33 @@ check('tool windows and tooltips are skipped', /WS_EX_TOOLWINDOW/.test(uia), tru
 check('the elements reply names its window', uia.includes('window={Encode(TargetTitle())}'), true)
 check('and the model is shown that name', /in "\$\{shot\.window\}"/.test(readFileSync('src/renderer/src/App.tsx', 'utf8')), true)
 check('a focus is verified, not assumed', /HasKeyboardFocus/.test(uia), true)
+check('and the helper says whether it re-found the same control', uia.includes('matched={(exact ? "spot" : "name-only")}'), true)
+check('the nearest match is taken, not the first by name', /bestGap <= 4/.test(uia), true)
+/* The list is capped, so what gets cut matters: Gmail reports 971 elements.
+   A box you type in is worth more than the fortieth button. */
+check('typeable controls are listed first', /"Edit" or "ComboBox" => 0/.test(uia), true)
+check('and duplicate names do not fill the cap', /\.GroupBy\(f => \$"\{f\.Role\}/.test(uia), true)
+check('focus prefers the box over the label beside it', /preferEditable: focusOnly/.test(uia), true)
 check('and reported either way', /focused=\{TakeFocus\(el\)\}/.test(uia), true)
 check('the window is activated before giving up', /SetForegroundWindow\(hwnd\)/.test(uia), true)
 check(
   'the report says which window the steps acted on',
   /acted on the window behind it/.test(readFileSync('src/renderer/src/App.tsx', 'utf8')),
+  true
+)
+
+/* The list is capped and the window has more: say so, because a model that
+   believes the list is everything starts guessing pixels for the rest. */
+check('the total is carried back from the helper', inputSrc.includes(String.raw`/total=(\d+)/`), true)
+check('and reaches the attachment', /elementTotal: named\.total/.test(readFileSync('src/main/index.ts', 'utf8')), true)
+check(
+  'the model is told the list is the useful part of a longer one',
+  /most useful of \$\{shot\.elementTotal\}/.test(readFileSync('src/renderer/src/App.tsx', 'utf8')),
+  true
+)
+check(
+  'and that a name off the list still works',
+  /search ALL of them/.test(readFileSync('src/renderer/src/App.tsx', 'utf8')),
   true
 )
 

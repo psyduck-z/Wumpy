@@ -247,10 +247,37 @@ internal static class UiTree
                 .ToList();
         }
 
-        /* Interactive things first: a page has far more Text than Button and
-           the buttons are what a plan is usually reaching for. */
+        /*
+         * BOXES YOU CAN TYPE IN FIRST, then things you press, then text.
+         *
+         * The list is capped - sixty names is already most of a screenshot's
+         * worth of tokens - and Gmail alone reports 971 elements, 673 of them
+         * named. So what gets cut matters: under the old order (everything
+         * interactive by Y, text last) the compose window's recipient box sat
+         * below a whole left-hand navigation bar of buttons and could fall
+         * off the end of the list entirely. The box you are about to fill in
+         * is the single most useful thing on the list.
+         */
+        static int Rank(string role) => role switch
+        {
+            "Edit" or "ComboBox" => 0,
+            "Text" or "Document" => 2,
+            _ => 1
+        };
+
+        /*
+         * And one entry per name per role.
+         *
+         * A mail list reports forty controls called "Select", a dozen called
+         * "Unread". Repeats fill the cap with choices that cannot be told
+         * apart - PRESS picks by name, so forty identical names are one
+         * target, not forty - and they push the controls that are actually
+         * distinct off the end.
+         */
         var ordered = found
-            .OrderBy(f => f.Role is "Text" or "Document" ? 1 : 0)
+            .GroupBy(f => $"{f.Role}\u0000{f.Name}")
+            .Select(g => g.First())
+            .OrderBy(f => Rank(f.Role))
             .ThenBy(f => f.Y)
             .ThenBy(f => f.X)
             .Take(limit)
@@ -306,14 +333,16 @@ internal static class UiTree
             return;
         }
 
-        var chosen = Best(root, want);
+        /* FOCUS is about to be typed into, so it wants the box rather than
+           the label beside it with the same name. */
+        var chosen = Best(root, want, includeOffscreen: false, preferEditable: focusOnly);
         if (chosen is null)
         {
             Console.WriteLine($"{verb} FAILED nothing-named {Encode(want)}");
             return;
         }
 
-        var el = FindAgain(root, chosen);
+        var el = FindAgain(root, chosen, out var exact);
         if (el is null)
         {
             Console.WriteLine($"{verb} FAILED element-vanished");
@@ -321,7 +350,11 @@ internal static class UiTree
         }
 
         var where = $"{chosen.X + chosen.W / 2},{chosen.Y + chosen.H / 2}";
-        var what = $"name={Encode(chosen.Name)} role={chosen.Role} at={where}";
+        /* `matched` says whether this is the control that was chosen or just
+           another one with the same name, which is the difference between
+           pressing a row and pressing a different row. */
+        var what = $"name={Encode(chosen.Name)} role={chosen.Role} at={where} " +
+                   $"matched={(exact ? "spot" : "name-only")}";
 
         try
         {
@@ -432,7 +465,7 @@ internal static class UiTree
             return;
         }
 
-        var el = FindAgain(root, best);
+        var el = FindAgain(root, best, out var exact);
         if (el is null)
         {
             Console.WriteLine("VALUE FAILED element-vanished");
@@ -470,6 +503,7 @@ internal static class UiTree
         if (text.Length > 600) text = text[..600];
         Console.WriteLine(
             $"VALUE ok via={via} name={Encode(best.Name)} role={best.Role} " +
+            $"matched={(exact ? "spot" : "name-only")} " +
             $"len={text.Length} text={Encode(text)}");
     }
 
@@ -531,12 +565,30 @@ internal static class UiTree
     /// The best match for a name, shared by PRESS, VALUE and REVEAL so that
     /// all three choose the same element for the same words.
     /// </summary>
-    private static Found? Best(AutomationElement root, string want, bool includeOffscreen = false)
+    private static Found? Best(
+        AutomationElement root,
+        string want,
+        bool includeOffscreen = false,
+        bool preferEditable = false)
     {
+        /*
+         * `preferEditable` is for FOCUS and FILL, where the caller is about
+         * to type.
+         *
+         * A web page labels its fields: "To recipients" is the name of the
+         * box AND the name of the text sitting beside it, and an exact match
+         * on a label beats a partial match on the box - so the keyboard went
+         * to a piece of static text, which cannot hold it. The characters
+         * then go wherever the keyboard already was, which in Gmail means
+         * single letters as shortcuts. Asked to put the cursor somewhere,
+         * prefer the thing that takes a cursor.
+         */
         var best = Collect(root, 4000, includeOffscreen)
             .Select(f => (f, score: Score(f.Name, want)))
             .Where(t => t.score > 0)
-            .OrderByDescending(t => t.score)
+            .OrderByDescending(t => preferEditable && t.f.Role is "Edit" or "ComboBox" or "Document"
+                ? t.score + 25
+                : t.score)
             .ThenBy(t => t.f.Role is "Text" or "Document" ? 1 : 0)
             .ThenBy(t => t.f.Y)
             .FirstOrDefault();
@@ -549,22 +601,53 @@ internal static class UiTree
     /// Matching on name AND position: a page can hold several controls with
     /// the same name, and the one that was chosen is the one at that spot.
     /// </summary>
-    private static AutomationElement? FindAgain(AutomationElement root, Found f)
+    private static AutomationElement? FindAgain(AutomationElement root, Found f) =>
+        FindAgain(root, f, out _);
+
+    /// <summary>
+    /// The same, saying whether it is really the element that was chosen.
+    ///
+    /// The old fallback was `all[0]`: if nothing sat at the remembered spot it
+    /// took the first control with that name and said nothing. That is a
+    /// different control - possibly a different message, a different row, a
+    /// different compose window - and it was reported as success. Worse for
+    /// VALUE than for PRESS: `fill` proves itself by reading the box back, and
+    /// reading a DIFFERENT box with the same name proves nothing at all.
+    ///
+    /// So: the nearest one, and the caller is told when it was not exact.
+    /// </summary>
+    private static AutomationElement? FindAgain(AutomationElement root, Found f, out bool exact)
     {
+        exact = false;
         try
         {
             var byName = new PropertyCondition(AutomationElement.NameProperty, f.Name);
             var all = root.FindAll(TreeScope.Descendants, byName);
+            AutomationElement? nearest = null;
+            var bestGap = double.MaxValue;
             foreach (AutomationElement e in all)
             {
                 try
                 {
                     var r = e.Current.BoundingRectangle;
-                    if ((int)r.X == f.X && (int)r.Y == f.Y) return e;
+                    var gap = Math.Abs(r.X - f.X) + Math.Abs(r.Y - f.Y);
+                    if ((int)r.X == f.X && (int)r.Y == f.Y)
+                    {
+                        exact = true;
+                        return e;
+                    }
+                    if (gap < bestGap)
+                    {
+                        bestGap = gap;
+                        nearest = e;
+                    }
                 }
                 catch { /* gone */ }
             }
-            return all.Count > 0 ? all[0] : null;
+            /* A couple of pixels is the same control after a redraw; a hundred
+               is a different one wearing the same name. */
+            exact = nearest is not null && bestGap <= 4;
+            return nearest ?? (all.Count > 0 ? all[0] : null);
         }
         catch
         {

@@ -1,4 +1,5 @@
 import { memo, useState, isValidElement, type ReactNode } from 'react'
+import { copyText } from '../copy'
 import type {
   Attachment,
   DesktopResult,
@@ -57,7 +58,10 @@ function CodeBlock({ children }: { children: ReactNode }): React.JSX.Element {
   const copy = (e: React.MouseEvent<HTMLButtonElement>): void => {
     const code = e.currentTarget.parentElement?.querySelector('code')
     if (!code?.textContent) return
-    void navigator.clipboard.writeText(code.textContent).then(() => {
+    /* Main process, not the page: writeText needs document focus and this
+       window often does not have it. */
+    void copyText(code.textContent).then((ok) => {
+      if (!ok) return
       setCopied(true)
       setTimeout(() => setCopied(false), 1400)
     })

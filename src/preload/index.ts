@@ -151,6 +151,14 @@ const api = {
     requestFocus: (): void => ipcRenderer.send(IPC.panelRefocus),
     onDock: (cb: (d: Dock) => void) => on(IPC.panelDock, cb)
   },
+  /**
+   * One way, text only. The page's own clipboard API needs document focus and
+   * this window often does not have it, so every Copy button was a coin toss.
+   * Nothing here reads the clipboard back.
+   */
+  clipboard: {
+    write: (text: string): Promise<boolean> => ipcRenderer.invoke(IPC.clipboardWrite, text)
+  },
   hotkey: {
     get: (): Promise<HotkeyState> => ipcRenderer.invoke(IPC.hotkeyState),
     onChange: (cb: (s: HotkeyState) => void) => on(IPC.hotkeyState, cb)

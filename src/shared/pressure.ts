@@ -60,13 +60,43 @@ export function fullness(used: number, limit: number): number {
 }
 
 /**
+ * The smallest conversation worth summarising, in tokens.
+ *
+ * Because the pressure is not always the conversation. The instructions are
+ * about 13,300 tokens of a 32,768 budget and a summary cannot touch them, so
+ * a chat holding two short messages can sit above the send-time threshold
+ * with nothing to compact. Without this floor that is a loop: compact,
+ * still over, send, compact again - a request spent per turn, buying
+ * nothing, and the user is never told why.
+ *
+ * Two thousand tokens is roughly five exchanges, or one screenshot and its
+ * report. Below that, summarising is not the answer and saying so is.
+ */
+export const MIN_COMPACTABLE = 2000
+
+/**
+ * Don't summarise twice in a minute automatically.
+ *
+ * The same protection from the other side, for the case where a summary does
+ * help but not enough. Each compaction is a model request out of a tier
+ * counted per day, and two in quick succession means the second one is
+ * summarising a summary.
+ */
+export const COMPACT_COOLDOWN_MS = 60_000
+
+/**
  * Should this turn wait for a compaction first?
  *
  * One function for all three callers, so a threshold can never be compared
  * with the wrong operator in one place and the right one in another.
+ *
+ * `instructions` is the part of `used` that a summary cannot shrink. Passing
+ * it is what stops the preamble from triggering compactions that cannot
+ * possibly help.
  */
-export function needsRoom(turn: Turn, used: number, limit: number): boolean {
-  return fullness(used, limit) > thresholdFor(turn)
+export function needsRoom(turn: Turn, used: number, limit: number, instructions = 0): boolean {
+  if (fullness(used, limit) <= thresholdFor(turn)) return false
+  return used - Math.max(0, instructions) >= MIN_COMPACTABLE
 }
 
 /**
@@ -125,4 +155,55 @@ export const IMAGE_TOKENS = 1100
 /** Characters at four to a token, plus the pictures. */
 export function estimateTokens(chars: number, images = 0): number {
   return Math.ceil(Math.max(0, chars) / 4) + Math.max(0, Math.floor(images)) * IMAGE_TOKENS
+}
+
+/**
+ * How many screenshots the model is actually sent.
+ *
+ * Every image in the conversation was re-sent on every turn. That was a
+ * deliberate choice while a picture was a rare thing the user attached - "a
+ * follow-up question about a screenshot two turns back still has the
+ * screenshot" - and it became something else entirely once every step of a
+ * desktop plan returns one.
+ *
+ * The cost is quadratic. Turn one sends one picture, turn two sends two,
+ * turn ten sends ten: fifty-five pictures over a ten-step sequence, about
+ * 60,000 tokens of photographs, for ten pictures' worth of information.
+ * Against a free tier that is counted per minute and per day.
+ *
+ * Two, because the useful comparison is before and after: the screen as it
+ * was and the screen as it is. Anything older has been superseded by the
+ * thing that was done to it, and the model is told it was dropped rather
+ * than left to wonder why its description of turn three no longer matches.
+ */
+export const KEEP_PICTURES = 2
+
+/** What is said in place of a picture that is no longer attached. */
+export const DROPPED_PICTURE =
+  '(The screenshot that was attached here is no longer being sent, to leave room. Look again if you need it.)'
+
+/**
+ * The conversation as it should go out: only the newest pictures attached.
+ *
+ * Pure, and returns new objects rather than editing them, because the
+ * transcript the user is looking at keeps every picture it ever showed. This
+ * is only what crosses the wire.
+ */
+export function trimPictures<T extends { content: string; images?: unknown[] }>(
+  messages: readonly T[],
+  keep: number = KEEP_PICTURES
+): T[] {
+  const withPictures = messages
+    .map((m, i) => (m.images?.length ? i : -1))
+    .filter((i) => i >= 0)
+  /* slice(-0) is slice(0), which keeps the whole array: asking for none
+     would have kept every picture. Caught by the check that asked for none. */
+  const wanted = Math.max(0, Math.floor(keep))
+  const kept = new Set(wanted === 0 ? [] : withPictures.slice(-wanted))
+  return messages.map((m, i) => {
+    if (!m.images?.length || kept.has(i)) return m
+    const { images: _dropped, ...rest } = m
+    const note = m.content.trim() ? `${m.content}${String.fromCharCode(10)}${DROPPED_PICTURE}` : DROPPED_PICTURE
+    return { ...(rest as T), content: note }
+  })
 }

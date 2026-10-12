@@ -174,5 +174,99 @@ check(
   true
 )
 
+/* --------------------------------------------- the pictures that go out */
+
+/*
+ * Every image in the conversation used to be attached to every request. The
+ * cost is quadratic: ten steps of a desktop plan sends fifty-five pictures,
+ * about 60,000 tokens of photographs, for ten pictures' worth of news - on a
+ * tier metered per minute and per day.
+ */
+{
+  const shot = [{ dataUrl: 'x' }]
+  const convo = [
+    { role: 'user', content: 'look', images: shot },
+    { role: 'assistant', content: 'a plan' },
+    { role: 'user', content: 'report one', images: shot },
+    { role: 'assistant', content: 'another plan' },
+    { role: 'user', content: 'report two', images: shot }
+  ]
+  const out = P.trimPictures(convo)
+  check(
+    'only the newest pictures are attached',
+    out.map((m) => Boolean(m.images?.length)),
+    [false, false, true, false, true]
+  )
+  check('two is the default, because before-and-after is the useful pair', P.KEEP_PICTURES, 2)
+  check('a dropped picture is admitted, not silently gone', /no longer being sent/.test(out[0].content), true)
+  check('and the words that were with it are kept', out[0].content.startsWith('look'), true)
+  check('the attachment is actually removed', 'images' in out[0], false)
+  check('the ones kept are untouched', out[4], convo[4])
+  check('a conversation of words is returned as it was', P.trimPictures([{ role: 'user', content: 'hi' }])[0].content, 'hi')
+  check('keeping none drops them all', P.trimPictures(convo, 0).some((m) => m.images?.length), false)
+  check('and nothing is mutated', convo[0].images?.length, 1)
+}
+
+check('main trims before it sends', /trimPictures\(/.test(readFileSync('src/main/index.ts', 'utf8')), true)
+/* The transcript keeps them: it is the user's record of what was sent on
+   their behalf, and that must not be edited to save tokens. */
+check('the renderer does not trim its own transcript', /trimPictures/.test(app), false)
+check('but the meter counts only what goes out', /Math\.min\(\s*KEEP_PICTURES/.test(app), true)
+
+/* ------------------------------------------ the instructions, which are not free */
+
+/*
+ * Thirteen thousand tokens go out ahead of every turn. The estimate counted
+ * them as nothing, so immediately after a compaction the meter read about 1%
+ * when the truth was 41% - and compaction cannot shrink them, which is the
+ * thing a user would most want to know from that number.
+ *
+ * Measured against the same assembly the main process sends, so the two
+ * cannot drift: the sections and their order live in @shared/assistant now.
+ */
+const A = await load('src/shared/assistant.ts', 'assistant')
+{
+  const full = { scope: 'full', search: true, screen: true, browser: true, quota: true }
+  const bare = { scope: 'none', search: false, screen: false, browser: false, quota: false }
+  check('the preamble is measured, not guessed', A.preambleTokens(full), Math.ceil(A.assemblePrompt(full).length / 4))
+  check('and for a reduced one too', A.preambleTokens(bare), Math.ceil(A.assemblePrompt(bare).length / 4))
+  check('the full preamble is most of a 32k window', A.preambleTokens(full) > 10_000, true)
+  check('turning the screen off is worth real tokens', A.preambleTokens(full) - A.preambleTokens(bare) > 4000, true)
+  check('the desktop section only ships with both', A.assemblePrompt({ ...full, browser: false }).includes('A CLICK IS NOT AIM'), false)
+  check('and with both, it does', A.assemblePrompt(full).includes('A CLICK IS NOT AIM'), true)
+  check('read-only shell gets its own section', A.assemblePrompt({ ...full, scope: 'read' }).includes('may only READ') || A.assemblePrompt({ ...full, scope: 'read' }).includes('only look'), true)
+}
+check('main no longer assembles its own', /assemblePrompt\(promptShape\(/.test(readFileSync('src/main/index.ts', 'utf8')), true)
+check('and the meter adds it to the estimate', /preamble \+\s*estimateTokens/.test(app), true)
+check('the tooltip says what cannot be compacted', /Instructions, re-sent every turn/.test(bar), true)
+
+/* ------------------------------ what a summary cannot fix, it must not try */
+
+const LIMIT2 = 32_768
+/*
+ * The instructions are 13,300 tokens of a 32,768 budget and a summary cannot
+ * touch them. Without a floor, a chat holding two short messages sits above
+ * the send threshold with nothing to compact - so it compacts, is still over,
+ * sends, and compacts again: one request per turn, buying nothing.
+ */
+check(
+  'a conversation that is almost all preamble is not compacted',
+  P.needsRoom('send', 22_000, LIMIT2, 21_000),
+  false
+)
+check(
+  'but a real conversation over the line is',
+  P.needsRoom('send', 22_000, LIMIT2, 13_300),
+  true
+)
+check('the floor is a handful of exchanges', P.MIN_COMPACTABLE >= 1000 && P.MIN_COMPACTABLE <= 4000, true)
+check('and without a figure for them, it behaves as before', P.needsRoom('send', 22_000, LIMIT2), true)
+check('under the threshold is still under it', P.needsRoom('send', 1000, LIMIT2, 0), false)
+
+check('the cooldown is a minute', P.COMPACT_COOLDOWN_MS, 60_000)
+check('the hand-back honours it', /Date\.now\(\) - lastCompact\.current < COMPACT_COOLDOWN_MS/.test(app), true)
+check('and a compaction records when it ran', /lastCompact\.current = Date\.now\(\)/.test(app), true)
+check('all three triggers pass the instructions through', (app.match(/usage\.instructions|instructions\)/g) ?? []).length >= 3, true)
+
 console.log(`${NL}${count - failed}/${count} pressure checks passed`)
 if (failed) process.exit(1)

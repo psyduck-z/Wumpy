@@ -61,6 +61,32 @@ export function emptySpend(): KeySpend {
   return { models: {}, restUntil: 0, why: '', outOf: {} }
 }
 
+/**
+ * Has anything expensive to rediscover changed?
+ *
+ * Request counts can wait for the debounce - losing the last few costs the
+ * meter a little accuracy. A REST cannot: it is the one fact in this ledger
+ * that costs a request to learn, and a key rejected at 10:50 was being
+ * rejected again at 12:21 after a restart in between. The restart is
+ * `Stop-Process -Force`, so nothing gets a chance to save on the way out and
+ * whatever was sitting in a four-second timer is simply gone.
+ *
+ * So the store asks this and writes immediately when the answer is yes. It
+ * happens a handful of times a day, against a file of two kilobytes.
+ */
+export function restsChanged(before: PoolDay | null, after: PoolDay): boolean {
+  if (!before) return after.spend.some((s) => s.restUntil > 0 || Object.keys(s.outOf).length > 0)
+  if (before.spend.length !== after.spend.length || before.day !== after.day) return true
+  return after.spend.some((now, i) => {
+    const was = before.spend[i]
+    if (!was) return true
+    if (was.restUntil !== now.restUntil || was.why !== now.why) return true
+    const models = new Set([...Object.keys(was.outOf), ...Object.keys(now.outOf)])
+    for (const m of models) if (was.outOf[m] !== now.outOf[m]) return true
+    return false
+  })
+}
+
 export function emptyPool(day: string, keys: number): PoolDay {
   return { day, keys, spend: Array.from({ length: Math.max(0, keys) }, emptySpend) }
 }

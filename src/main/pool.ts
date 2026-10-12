@@ -1,7 +1,7 @@
 import { app } from 'electron'
 import { readFileSync, writeFileSync, mkdirSync } from 'node:fs'
 import { join, dirname } from 'node:path'
-import type { PoolDay } from '@shared/pool'
+import { restsChanged, type PoolDay } from '@shared/pool'
 import { PROVIDER_IDS, type ProviderId } from '@shared/cloud'
 
 /**
@@ -27,6 +27,22 @@ export class PoolStore {
 
   constructor() {
     this.data = this.read()
+    /*
+     * Said out loud, because "the rest was remembered" and "the rest was
+     * lost" looked identical in the log - and the difference between them is
+     * three wasted requests on the first turn after a restart.
+     */
+    for (const id of PROVIDER_IDS) {
+      const day = this.data[id]
+      if (!day) continue
+      const now = Date.now()
+      const resting = day.spend.filter((s) => s.restUntil > now).length
+      const out = day.spend.filter((s) => Object.keys(s.outOf).length > 0).length
+      console.log(
+        `[wumpy] key pool restored for ${id}: ${day.spend.length} keys, ` +
+          `${resting} resting, ${out} out of a model (day ${day.day})`
+      )
+    }
   }
 
   private read(): Partial<Record<ProviderId, PoolDay>> {
@@ -71,8 +87,25 @@ export class PoolStore {
    * on purpose.
    */
   save(provider: ProviderId, pool: PoolDay): void {
+    /*
+     * A rest is written at once; the counts can wait.
+     *
+     * The debounce was fine for the part that only costs accuracy, and wrong
+     * for the part that costs quota. From the log: key 1 rejected (401) at
+     * 10:50:40, three restarts, and the same key rejected again at 12:21 -
+     * the rest that should have stopped that was still sitting in a
+     * four-second timer when `Stop-Process -Force` arrived. Nothing in this
+     * app gets a graceful shutdown, so nothing may depend on one.
+     *
+     * This fires a handful of times a day, on a file of two kilobytes.
+     */
+    const urgent = restsChanged(this.data[provider] ?? null, pool)
     this.data = { ...this.data, [provider]: pool }
     this.dirty = true
+    if (urgent) {
+      this.flush()
+      return
+    }
     if (!this.timer) {
       this.timer = setTimeout(() => {
         this.timer = null

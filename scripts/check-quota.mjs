@@ -499,5 +499,48 @@ check('without polling', /setInterval[^\n]*usage/.test(app), false)
 check('the report includes the pool', /poolLines\(report\.pool\)/.test(app), true)
 check('and prints it even on a quiet day', app.indexOf('const poolReport') < app.indexOf('!report.lines.length'), true)
 
+/* ------------------------------------------- surviving a forced restart */
+
+/*
+ * `npm run restart` is `Stop-Process -Force`, so nothing in this app ever
+ * gets a graceful shutdown. The ledger was written on a four-second timer,
+ * and the log shows what that cost: key 1 rejected (401) at 10:50:40, three
+ * restarts, and the same key rejected again at 12:21 - a request spent
+ * rediscovering something that had already been written down, twice over.
+ */
+{
+  const empty = P.emptyPool('2026-10-12', 3)
+  const rested = {
+    ...empty,
+    spend: empty.spend.map((s, i) => (i === 1 ? { ...s, restUntil: 999, why: 'rejected' } : s))
+  }
+  check('a new rest is urgent', P.restsChanged(empty, rested), true)
+  check('and so is one appearing from nothing', P.restsChanged(null, rested), true)
+  check('an unrested pool is not', P.restsChanged(null, empty), false)
+  check('and neither is the same pool again', P.restsChanged(rested, rested), false)
+  const counted = {
+    ...rested,
+    spend: rested.spend.map((s, i) => (i === 0 ? { ...s, models: { 'gemini-3.5-flash': 4 } } : s))
+  }
+  check('a request count can wait for the timer', P.restsChanged(rested, counted), false)
+  const out = {
+    ...rested,
+    spend: rested.spend.map((s, i) => (i === 2 ? { ...s, outOf: { 'gemini-3.8-flash': 123 } } : s))
+  }
+  check('a model going out for the day is urgent', P.restsChanged(rested, out), true)
+  check('a different day is urgent', P.restsChanged(rested, { ...rested, day: '2026-10-13' }), true)
+  check('and so is a different number of keys', P.restsChanged(rested, P.emptyPool('2026-10-12', 4)), true)
+}
+
+check('the store writes a rest at once', /if \(urgent\) \{\s*this\.flush\(\)/.test(ledger), true)
+check('and says why it cannot wait', /Stop-Process -Force/.test(ledger), true)
+check('what was restored is logged', /key pool restored for/.test(ledger), true)
+
+const usageStore = readFileSync('src/main/usage.ts', 'utf8')
+/* Once per completed turn, not once per token: a millisecond write a few
+   times a minute, against the figure the meter and the measured cap use. */
+check('usage is written as it happens', usageStore.indexOf('this.flush()') < usageStore.indexOf('if (!this.flushTimer)'), true)
+check('and both are flushed on an orderly quit', /pools\?\.flush\(\)[\s\S]{0,40}usage\?\.flush\(\)/.test(main), true)
+
 console.log(`${NL}${count - failed}/${count} quota checks passed`)
 if (failed) process.exit(1)

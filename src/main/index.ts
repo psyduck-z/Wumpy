@@ -1,4 +1,4 @@
-import { app, dialog, ipcMain, nativeImage, Tray } from 'electron'
+import { app, clipboard, dialog, ipcMain, nativeImage, Tray } from 'electron'
 import { homedir } from 'node:os'
 import { IPC } from '@shared/types'
 import type {
@@ -16,21 +16,7 @@ import type {
   UsageReport,
   WumpySettings
 } from '@shared/types'
-import {
-  DEFAULT_MODEL,
-  assistantFor,
-  SHELL_PROMPT,
-  READ_SHELL_PROMPT,
-  NO_SHELL_PROMPT,
-  APP_PROMPT,
-  ASK_PROMPT,
-  SEARCH_PROMPT,
-  OPEN_PROMPT,
-  SCREEN_PROMPT,
-  QUOTA_PROMPT,
-  CLOSE_PROMPT,
-  DESKTOP_PROMPT
-} from '@shared/assistant'
+import { DEFAULT_MODEL, assistantFor, assemblePrompt, type PromptShape } from '@shared/assistant'
 import { SettingsStore } from './store'
 import { ChatStore } from './chats'
 import { InputHistory } from './history'
@@ -39,6 +25,7 @@ import { KeyStore } from './keys'
 import { UsageStore } from './usage'
 import { PoolStore } from './pool'
 import { perKeyCapFor } from '@shared/usage'
+import { trimPictures } from '@shared/pressure'
 import { Panel } from './panel'
 import { createTray, resourcePath } from './tray'
 import { registerHotkeys, unregisterHotkeys } from './hotkey'
@@ -285,30 +272,27 @@ function factsFor(chatTitle: string | null, actions: string[] = []): string {
  * the whole preamble on every single turn. Nothing would look wrong; it would
  * just be slow for a reason nobody could see.
  */
-/** A blank line between prompt sections, built without an escape sequence. */
-const SECTION_GAP = String.fromCharCode(10, 10)
-
-function systemPromptFor(assistant: Assistant, scope: 'none' | 'read' | 'full'): string {
-  return [
-    assistant.systemPrompt,
-    APP_PROMPT,
-    scope === 'full' ? SHELL_PROMPT : scope === 'read' ? READ_SHELL_PROMPT : NO_SHELL_PROMPT,
-    /* Same condition as SHELL_PROMPT: there is nothing to close without it. */
-    scope === 'full' ? CLOSE_PROMPT : '',
-    scope !== 'none' && settings.get('searchEnabled') ? SEARCH_PROMPT : '',
-    scope !== 'none' && settings.get('browserEnabled') ? OPEN_PROMPT : '',
-    settings.get('screenEnabled') ? SCREEN_PROMPT : '',
+/*
+ * The sections and their order moved to @shared/assistant, so the panel can
+ * measure the preamble instead of treating it as free. This is now only the
+ * mapping from settings to that shape - which is the part that belongs here,
+ * because settings do.
+ */
+function promptShape(assistant: Assistant, scope: 'none' | 'read' | 'full'): PromptShape {
+  return {
+    scope,
+    base: assistant.systemPrompt,
+    search: settings.get('searchEnabled'),
+    screen: settings.get('screenEnabled'),
+    browser: settings.get('browserEnabled'),
     /* Only when there is a pool to talk about: a local-only install has no
        quota and a sentence about keys would be noise. */
-    keys.count('google') > 0 ? QUOTA_PROMPT : '',
-    /* Both, because driving the screen without seeing it is aiming blind. */
-    settings.get('screenEnabled') && settings.get('browserEnabled') && scope === 'full'
-      ? DESKTOP_PROMPT
-      : '',
-    ASK_PROMPT
-  ]
-    .filter(Boolean)
-    .join(SECTION_GAP)
+    quota: keys.count('google') > 0
+  }
+}
+
+function systemPromptFor(assistant: Assistant, scope: 'none' | 'read' | 'full'): string {
+  return assemblePrompt(promptShape(assistant, scope))
 }
 
 /**
@@ -883,13 +867,21 @@ function registerIpc(): void {
             ? lowLevelHook.send(cmd, ms)
             : Promise.resolve('ELEMENTS FAILED helper-not-running')
         )
-      : { elements: [], window: '' }
+      : { elements: [], window: '', total: 0 }
     if (named.elements.length) {
       console.log(
         `[wumpy] ${named.elements.length} named controls in ${JSON.stringify(named.window || 'an unnamed window')}`
       )
     }
-    return { ...shot, elements: named.elements, window: named.window }
+    return {
+      ...shot,
+      elements: named.elements,
+      window: named.window,
+      /* How many there are, not just how many are listed: a list of 60 out of
+         673 reads as "that is everything on screen", and the model then
+         concludes a button it cannot see does not exist. */
+      elementTotal: named.total
+    }
   }
 
   ipcMain.handle(IPC.screenCapture, async () => shotWithNames())
@@ -1224,6 +1216,27 @@ ${command}`
   ipcMain.handle(IPC.panelVisible, () => panel.onScreen)
   ipcMain.handle(IPC.hotkeyState, () => hotkeyState)
 
+  /**
+   * Copying, from here rather than from the page.
+   *
+   * The page's own clipboard needs document focus, and this window often does
+   * not have it - so the Copy buttons failed silently and Ctrl+Shift+C
+   * claimed success regardless. Reported by the renderer as
+   * "NotAllowedError: Write permission denied". Returns whether it worked, so
+   * the panel can stop saying "Copied" when it did not.
+   */
+  ipcMain.handle(IPC.clipboardWrite, (_e, text: string) => {
+    const out = String(text ?? '')
+    if (!out) return false
+    try {
+      clipboard.writeText(out)
+      return true
+    } catch (err) {
+      console.warn(`[wumpy] could not write the clipboard: ${(err as Error)?.message ?? 'unknown'}`)
+      return false
+    }
+  })
+
   // ---- what the user typed, for the composer's history ----
   ipcMain.handle(IPC.historyGet, () => inputHistory.all())
   ipcMain.handle(IPC.historyAdd, (_e, text: string) => inputHistory.add(text))
@@ -1335,6 +1348,17 @@ app.on('will-quit', () => {
   unregisterHotkeys()
   lowLevelHook?.stop()
   speech?.stop()
+  /*
+   * The two ledgers, in case this is the one exit that gets a say.
+   *
+   * It usually is not - `npm run restart` is `Stop-Process -Force`, and
+   * nothing runs after that - which is why both stores now write the
+   * expensive parts as they happen rather than relying on this. Quitting
+   * from the tray does come through here, though, and there is no reason to
+   * lose the last turn's counts on the one orderly exit there is.
+   */
+  pools?.flush()
+  usage?.flush()
 })
 
 /**
@@ -1347,9 +1371,22 @@ app.on('will-quit', () => {
 function withContext(req: ChatRequest): Array<Pick<ChatMessage, 'role' | 'content' | 'images'>> {
   const facts = factsFor(req.context.chatTitle, req.context.actions ?? [])
 
-  const messages: Array<Pick<ChatMessage, 'role' | 'content' | 'images'>> = [
-    ...req.messages.map((m) => ({ role: m.role, content: m.content, images: m.images }))
-  ]
+  /*
+   * Only the newest screenshots go out, which was costing a fortune.
+   *
+   * Every image in the conversation was attached to every request. Fine while
+   * a picture was something the user occasionally pasted; quadratic once each
+   * step of a desktop plan returns one - fifty-five pictures over a ten-step
+   * sequence, around 60,000 tokens of photographs for ten pictures' worth of
+   * information, on a tier metered per minute and per day.
+   *
+   * Done here rather than in the renderer on purpose: the transcript keeps
+   * every picture it ever showed, because that is the user's record of what
+   * was sent on their behalf. This is only the wire.
+   */
+  const messages: Array<Pick<ChatMessage, 'role' | 'content' | 'images'>> = trimPictures(
+    req.messages.map((m) => ({ role: m.role, content: m.content, images: m.images }))
+  )
   // Directly behind the latest user turn, so everything before it stays cached.
   //
   // Moving it in front of the conversation instead looks like it should be

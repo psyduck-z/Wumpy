@@ -244,6 +244,16 @@ export interface Attachment {
    * kind of mistake visible in one line instead of ten turns.
    */
   window?: string
+  /**
+   * How many usable controls that window has in total.
+   *
+   * The list is capped - sixty names is already most of a screenshot's worth
+   * of tokens - and Gmail reports 673 named elements. Saying only the sixty
+   * invites the conclusion that nothing else exists, when in fact PRESS,
+   * FOCUS, FILL, REVEAL and READ all search the whole tree: a name that is
+   * not on the list can still be found.
+   */
+  elementTotal?: number
 }
 
 export interface SearchResult {
@@ -463,6 +473,15 @@ export interface ContextUsage {
   limit: number
   /** True when `used` is a character-based estimate, not a counted value. */
   estimated: boolean
+  /**
+   * The instructions, which are re-sent in full on every turn.
+   *
+   * Shown separately because they are most of the number and none of the
+   * conversation: thirteen thousand tokens of preamble against a 32k budget
+   * means a chat that looks nearly empty is already 40% full, and compacting
+   * cannot touch it. Without this the meter read as a mystery.
+   */
+  instructions?: number
 }
 
 export interface ChatError {
@@ -515,6 +534,22 @@ export const IPC = {
    * on it and did nothing.
    */
   panelRefocus: 'panel:refocus',
+  /**
+   * Copying text, through the main process rather than the page.
+   *
+   * navigator.clipboard.writeText REQUIRES the document to have focus, and
+   * this window frequently does not - that is the whole autofocus saga, and
+   * document.hasFocus() has been logged as false while the caret sat in the
+   * composer. So every Copy button was a coin toss, and the one bound to
+   * Ctrl+Shift+C announced "Copied the last answer." either way:
+   *
+   *   ERROR [renderer] Uncaught (in promise) NotAllowedError: Failed to
+   *   execute 'writeText' on 'Clipboard': Write permission denied.
+   *
+   * Electron's own clipboard has no such requirement. Text only, one way:
+   * nothing here ever READS the clipboard on the renderer's behalf.
+   */
+  clipboardWrite: 'clipboard:write',
   hotkeyState: 'hotkey:state',
   historyGet: 'history:get',
   historyAdd: 'history:add',

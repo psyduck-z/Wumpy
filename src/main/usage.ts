@@ -64,9 +64,21 @@ export class UsageStore {
   add(event: UsageEvent): void {
     this.day = record(this.current(), event)
     this.dirty = true
-    // Batched, because this fires on every turn and the totals are not worth
-    // a synchronous write each time. Written soon enough to survive a crash
-    // that happens while the user is reading the answer.
+    /*
+     * Written now, not in four seconds.
+     *
+     * The batching was reasoned from the wrong frequency: this fires once per
+     * completed TURN, not once per token, so it is a millisecond write a few
+     * times a minute at most - against a turn that takes seconds. And the
+     * thing it was risking is the figure the quota meter and the measured
+     * daily cap are built on, in an app that is restarted with
+     * `Stop-Process -Force` several times an hour. Every one of those
+     * restarts could lose the last turn it counted.
+     *
+     * The timer stays as a safety net for anything that sets `dirty` without
+     * coming through here.
+     */
+    this.flush()
     if (!this.flushTimer) {
       this.flushTimer = setTimeout(() => {
         this.flushTimer = null

@@ -20,8 +20,15 @@ import { isTall } from '@shared/types'
 import type { PoolView } from '@shared/pool'
 import { looksLikeUrl, SEARCH_ENGINES, type LinkApproval } from '@shared/links'
 import { clippedOutput, commandFeedback } from '@shared/parsefail'
-import { CONTEXT_TOKENS, DEFAULT_MODEL } from '@shared/assistant'
-import { estimateTokens, needsRoom, roomNote, tooBig } from '@shared/pressure'
+import { CONTEXT_TOKENS, DEFAULT_MODEL, preambleTokens } from '@shared/assistant'
+import {
+  COMPACT_COOLDOWN_MS,
+  estimateTokens,
+  KEEP_PICTURES,
+  needsRoom,
+  roomNote,
+  tooBig
+} from '@shared/pressure'
 import { shouldRetitle } from '@shared/titles'
 import { CLOUD_MODELS, PROVIDERS, seesMedia } from '@shared/cloud'
 import { useChat, nextId, type ChatStats } from './hooks/useChat'
@@ -37,6 +44,7 @@ import { newestPending } from './pending'
 import { forgetClaims } from './once'
 import { forgetAllLive } from './live'
 import { poolLines } from './quota'
+import { copyText } from './copy'
 import { Toast } from './components/Toast'
 import { forgetActions, record } from './ledger'
 import { matchIntent } from './intents'
@@ -444,6 +452,8 @@ export default function App(): React.JSX.Element {
    * Returns true when it summarised something, so the caller can say so.
    */
   const makeRoomRef = useRef<(() => Promise<boolean>) | null>(null)
+  /** When the last automatic summary ran, for the cooldown below. */
+  const lastCompact = useRef(0)
   const makeRoom = useCallback(async (): Promise<boolean> => {
     const room = makeRoomRef.current
     return room ? room() : false
@@ -546,11 +556,30 @@ function namedControls(shot: Attachment): string[] {
    * window turns that into something the model can see in one line.
    */
   const where = shot.window ? ` in "${shot.window}"` : ''
+  /*
+   * And how many there are altogether.
+   *
+   * The list is capped at sixty and Gmail reports 673 named controls, so
+   * "these 60 controls are on screen" invited the conclusion that a button
+   * it could not see did not exist - which is exactly when a model starts
+   * guessing pixels. Every by-name step searches the whole tree, so a name
+   * that is missing from the list can still be used, and that is worth one
+   * sentence.
+   */
+  const more =
+    (shot.elementTotal ?? 0) > list.length
+      ? [
+          `That is the ${list.length} most useful of ${shot.elementTotal} named controls in that`,
+          'window. press, focus, fill, read and reveal search ALL of them, so a name you',
+          'expect but cannot see in this list is still worth trying.'
+        ]
+      : []
   return [
     '',
     `These ${list.length} controls are on screen right now${where}, with their`,
     'real centres. PRESS one by name rather than guessing a pixel from the picture:',
-    ...list.map((e) => `  ${e.role}: ${JSON.stringify(e.name)}`)
+    ...list.map((e) => `  ${e.role}: ${JSON.stringify(e.name)}`),
+    ...more
   ]
 }
 
@@ -796,13 +825,41 @@ function namedControls(shot: Attachment): string[] {
    * thousand tokens the meter could not see, in the exact loop that fills the
    * window fastest.
    */
+  /**
+   * The instructions, which the estimate used to count as nothing.
+   *
+   * Thirteen thousand tokens go out ahead of every turn - most of what fills
+   * the window - so leaving them out meant the meter read 1% immediately
+   * after a compaction when the truth was 41%, and a reopened chat looked
+   * emptier than it was. Measured from the same assembly the main process
+   * sends, by the same settings, so the two cannot disagree.
+   */
+  const preamble = useMemo(
+    () =>
+      preambleTokens({
+        scope: (settings?.shellEnabled ?? true) ? 'full' : 'none',
+        search: settings?.searchEnabled ?? true,
+        screen: settings?.screenEnabled ?? true,
+        browser: settings?.browserEnabled ?? false,
+        quota: (keyStatus?.counts?.google ?? 0) > 0
+      }),
+    [settings, keyStatus]
+  )
+
   const guessed = useMemo(
     () =>
+      preamble +
       estimateTokens(
         messages.reduce((n, m) => (m.error || m.local ? n : n + m.content.length), 0),
-        messages.reduce((n, m) => (m.error || m.local ? n : n + (m.images?.length ?? 0)), 0)
+        /* Capped at what actually goes out: main sends only the newest
+           pictures, so counting all of them would have the meter reporting a
+           conversation nobody is paying for. */
+        Math.min(
+          KEEP_PICTURES,
+          messages.reduce((n, m) => (m.error || m.local ? n : n + (m.images?.length ?? 0)), 0)
+        )
       ),
-    [messages]
+    [messages, preamble]
   )
 
   /**
@@ -824,9 +881,9 @@ function namedControls(shot: Attachment): string[] {
     // After a turn lands, the counted value is authoritative. Before the first
     // turn, or after loading a saved chat, fall back to characters.
     if (counted !== null && counted >= estimate * 0.5) {
-      return { used: counted, limit, estimated: false }
+      return { used: counted, limit, estimated: false, instructions: preamble }
     }
-    return { used: estimate, limit, estimated: true }
+    return { used: estimate, limit, estimated: true, instructions: preamble }
   })()
 
   /**
@@ -892,6 +949,9 @@ function namedControls(shot: Attachment): string[] {
         },
         ...recent
       ])
+      /* For the cooldown: a summary that helped but not enough must not be
+         summarised again on the very next hand-back. */
+      lastCompact.current = Date.now()
       return true
     },
     [chat]
@@ -915,9 +975,15 @@ function namedControls(shot: Attachment): string[] {
    * indicator was added for in the first place.
    */
   const makeRoomNow = useCallback(async (): Promise<boolean> => {
-    const { used, limit } = usageRef.current
+    const { used, limit, instructions } = usageRef.current
     if (!(settings?.autoCompact ?? true)) return false
-    if (!needsRoom('auto', used, limit)) return false
+    if (!needsRoom('auto', used, limit, instructions)) return false
+    /*
+     * Not twice in a minute. A summary that helped but not enough would
+     * otherwise be summarised again on the next hand-back, and each attempt
+     * is a request out of a tier counted per day.
+     */
+    if (Date.now() - lastCompact.current < COMPACT_COOLDOWN_MS) return false
     const done = await compactHistory({ silent: true })
     if (done) chatRef.current.note(roomNote(used, limit))
     return done
@@ -1471,7 +1537,10 @@ function namedControls(shot: Attachment): string[] {
 
       // Compact before sending when the context is filling up, so the model
       // never silently loses the start of the conversation.
-      if ((settings?.autoCompact ?? true) && needsRoom('send', usage.used, usage.limit)) {
+      if (
+        (settings?.autoCompact ?? true) &&
+        needsRoom('send', usage.used, usage.limit, usage.instructions)
+      ) {
         void (async () => {
           const done = await compactHistory({ silent: true })
           if (done) chat.note('Compacted earlier turns to make room.')
@@ -1510,7 +1579,7 @@ function namedControls(shot: Attachment): string[] {
      * state where nobody is looking.
      */
     if (!tucked) return
-    if (!needsRoom('idle', usage.used, usage.limit)) return
+    if (!needsRoom('idle', usage.used, usage.limit, usage.instructions)) return
     /* A few seconds after it goes away, not twenty: the panel being gone
        is already the evidence that nobody is waiting. */
     const timer = setTimeout(() => {
@@ -1934,8 +2003,13 @@ function namedControls(shot: Attachment): string[] {
         const last = [...messages].reverse().find((m) => m.role === 'assistant' && !m.local)
         if (!last?.content.trim()) return
         e.preventDefault()
-        void navigator.clipboard.writeText(last.content.trim())
-        chat.note('Copied the last answer.')
+        /* It used to say this whether or not anything was copied: the page's
+           clipboard needs document focus, which this window often lacks, and
+           the rejection went to the console as an unhandled NotAllowedError.
+           Now it reports what happened. */
+        void copyText(last.content).then((ok) =>
+          chat.note(ok ? 'Copied the last answer.' : 'Could not copy it to the clipboard.', !ok)
+        )
         return
       }
 
