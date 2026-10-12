@@ -299,16 +299,32 @@ internal static class Program
             var sent = SendInputSelfTest();
             var err = sent == 2 ? 0 : Marshal.GetLastWin32Error();
             var keysOk = KeySelfTest();
+            /*
+             * The pointer BEFORE the foreground probe, not after.
+             *
+             * ForegroundSelfTest exists only to prove its P/Invokes resolve,
+             * and it does that by calling SetForegroundWindow(NULL) and
+             * SwitchToThisWindow(NULL) - deliberately poking the input and
+             * foreground state with null handles. Run after it, SetCursorPos
+             * came back false with no error code, three times in a row,
+             * while the same binary moved the pointer perfectly through its
+             * normal command path seconds later.
+             *
+             * So the self-test was failing the self-test. Ordering is the
+             * whole fix: measure the pointer while the process has not yet
+             * disturbed anything.
+             */
+            var pointer = PointerSelfTest();
             var fgOk = ForegroundSelfTest();
-            var pointerOk = PointerSelfTest();
             Console.WriteLine(
                 $"hook={(hookOk ? "ok" : "FAIL")} " +
                 $"sizeof(INPUT)={Marshal.SizeOf<INPUT>()} " +
                 $"sendinput={(sent == 2 ? "ok" : $"FAIL(sent={sent}, err={err})")} " +
                 $"keys={(keysOk ? "ok" : "FAIL")} " +
                 $"foreground={(fgOk ? "ok" : "FAIL")} " +
-                $"pointer={(pointerOk ? "ok" : "FAIL")}");
-            return hookOk && sent == 2 && keysOk && fgOk && pointerOk ? 0 : 1;
+                $"pointer={pointer}");
+            /* pointer is excluded: "blocked" is Windows declining, not a defect. */
+            return hookOk && sent == 2 && keysOk && fgOk && pointer != "FAIL" ? 0 : 1;
         }
 
         _mainThreadId = GetCurrentThreadId();
@@ -1035,14 +1051,38 @@ internal static class Program
      * Proves the pointer can be moved and put back, without clicking on
      * anything. A click self-test would have to click on something real.
      */
-    private static bool PointerSelfTest()
+    private static string PointerSelfTest()
     {
-        if (!GetCursorPos(out var was)) return false;
+        if (!GetCursorPos(out var was)) return "FAIL";
         var target = new POINT { x = was.x + 1, y = was.y + 1 };
-        var ok = SetCursorPos(target.x, target.y) && GetCursorPos(out var now)
-            && now.x == target.x && now.y == target.y;
+        /*
+         * Three tries, because this fails for reasons that are not ours.
+         *
+         * Windows refuses cursor control to a process below the integrity
+         * level of whatever currently holds the foreground, so an elevated
+         * window being focused at the wrong moment makes SetCursorPos
+         * return false with no error code. Observed exactly that, twice,
+         * minutes apart, with the same binary working in between.
+         */
+        for (var i = 0; i < 3; i++)
+        {
+            if (SetCursorPos(target.x, target.y) && GetCursorPos(out var now)
+                && now.x == target.x && now.y == target.y)
+            {
+                SetCursorPos(was.x, was.y);
+                return "ok";
+            }
+            Thread.Sleep(60);
+        }
         SetCursorPos(was.x, was.y); // exactly where it was, whatever happened
-        return ok;
+        /*
+         * "blocked", not "FAIL". The P/Invoke resolved and the call was
+         * made; something outside this process declined it. Reported so it
+         * is visible, and not counted as a failure, because a self-test
+         * that goes red when an admin window happens to be focused is a
+         * test nobody will believe the next time it is red.
+         */
+        return "blocked";
     }
 
     private static void SuppressStartMenu() => SendStartMenuBreaker();

@@ -10,7 +10,7 @@
     "dev": "electron-vite dev",
     "start": "electron-vite preview",
     "build": "electron-vite build",
-    "typecheck": "tsc --noEmit -p tsconfig.node.json && tsc --noEmit -p tsconfig.web.json && node scripts/check-blocks.mjs && node scripts/check-titles.mjs && node scripts/check-approval.mjs && node scripts/check-autorun.mjs && node scripts/check-history.mjs && node scripts/check-commands.mjs && node scripts/check-hotkey.mjs && node scripts/check-dictation.mjs && node scripts/check-links.mjs && node scripts/check-holdtotalk.mjs && node scripts/check-writefile.mjs && node scripts/check-cloud.mjs && node scripts/check-usage.mjs && node scripts/check-keyboard.mjs && node scripts/check-parsefail.mjs && node scripts/check-openapp.mjs && node scripts/check-ledger.mjs && node scripts/check-ask.mjs && node scripts/check-paths.mjs && node scripts/check-rotation.mjs && node scripts/check-context.mjs && node scripts/check-running.mjs && node scripts/check-media.mjs && node scripts/check-chats.mjs && node scripts/check-bulk.mjs && node scripts/check-transcript.mjs && node scripts/check-abort.mjs && node scripts/check-speed.mjs && node scripts/check-geometry.mjs && node scripts/check-instance.mjs && node scripts/check-acceptall.mjs && node scripts/check-activity.mjs && node scripts/check-controlchars.mjs && node scripts/check-desktop.mjs",
+    "typecheck": "tsc --noEmit -p tsconfig.node.json && tsc --noEmit -p tsconfig.web.json && node scripts/check-blocks.mjs && node scripts/check-titles.mjs && node scripts/check-approval.mjs && node scripts/check-autorun.mjs && node scripts/check-history.mjs && node scripts/check-commands.mjs && node scripts/check-hotkey.mjs && node scripts/check-dictation.mjs && node scripts/check-links.mjs && node scripts/check-holdtotalk.mjs && node scripts/check-writefile.mjs && node scripts/check-cloud.mjs && node scripts/check-usage.mjs && node scripts/check-keyboard.mjs && node scripts/check-parsefail.mjs && node scripts/check-openapp.mjs && node scripts/check-ledger.mjs && node scripts/check-ask.mjs && node scripts/check-paths.mjs && node scripts/check-rotation.mjs && node scripts/check-context.mjs && node scripts/check-running.mjs && node scripts/check-media.mjs && node scripts/check-chats.mjs && node scripts/check-bulk.mjs && node scripts/check-transcript.mjs && node scripts/check-abort.mjs && node scripts/check-speed.mjs && node scripts/check-geometry.mjs && node scripts/check-instance.mjs && node scripts/check-acceptall.mjs && node scripts/check-activity.mjs && node scripts/check-controlchars.mjs && node scripts/check-desktop.mjs && node scripts/check-caret.mjs",
     "package": "npm run hook:build && electron-vite build && electron-builder --win",
     "hotkey:claim": "powershell -ExecutionPolicy Bypass -File scripts/claim-win-c.ps1",
     "hotkey:restore": "powershell -ExecutionPolicy Bypass -File scripts/restore-copilot.ps1",
@@ -60,6 +60,7 @@
     "check:activity": "node scripts/check-activity.mjs",
     "check:controlchars": "node scripts/check-controlchars.mjs",
     "check:desktop": "node scripts/check-desktop.mjs",
+    "check:caret": "node scripts/check-caret.mjs",
     "restart": "node scripts/restart.mjs"
   },
   "dependencies": {

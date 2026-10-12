@@ -3,6 +3,7 @@ import { allCommands, completions, type CommandSpec } from '../commands'
 import { CommandPalette } from './CommandPalette'
 import { useInputHistory } from '../hooks/useInputHistory'
 import { insistFocus } from '../focus'
+import { caretRows } from '../caret'
 import { adoptsKeystroke } from '../keyboard'
 import { useDictation } from '../hooks/useDictation'
 import { HOLD_MS, HoldToTalk, isPlainSpace, type HoldAction } from '../holdtotalk'
@@ -456,11 +457,23 @@ export function Composer({
       return
     }
 
-    // History, once the palette has had its say. Only from the edge of the
-    // text, so arrowing around a multi-line draft still moves the caret: Up on
-    // the first line, Down on the last.
+    /*
+     * History, once the palette has had its say. Only from the edge of the
+     * text, so arrowing around a draft still moves the caret: Up on the
+     * first ROW, Down on the last.
+     *
+     * Rows, not lines. This used to look for a newline before the caret,
+     * which finds the first LOGICAL line - and in a 440px composer a
+     * message of fifty characters already wraps across three rows with no
+     * newline in it anywhere. So the caret was reported as being on the
+     * first line while sitting on the third row: every Up recalled an older
+     * entry instead of moving, and a recalled message could not be edited
+     * from the top at all. Down had the same fault at the other end, which
+     * is why it looked as though it did not navigate.
+     */
     const el = e.currentTarget
-    if (e.key === 'ArrowUp' && !e.shiftKey && atFirstLine(el)) {
+    const rows = caretRows(el)
+    if (e.key === 'ArrowUp' && !e.shiftKey && rows.first) {
       const prev = history.older(value)
       if (prev !== null) {
         e.preventDefault()
@@ -468,25 +481,13 @@ export function Composer({
       }
       return
     }
-    if (e.key === 'ArrowDown' && !e.shiftKey && atLastLine(el)) {
+    if (e.key === 'ArrowDown' && !e.shiftKey && rows.last) {
       const next = history.newer()
       if (next !== null) {
         e.preventDefault()
         recall(next)
       }
     }
-  }
-
-  /** True when the caret sits on the first line, so Up has nowhere else to go. */
-  function atFirstLine(el: HTMLTextAreaElement): boolean {
-    if (el.selectionStart !== el.selectionEnd) return false
-    return !el.value.slice(0, el.selectionStart).includes('\n')
-  }
-
-  /** True when the caret sits on the last line. */
-  function atLastLine(el: HTMLTextAreaElement): boolean {
-    if (el.selectionStart !== el.selectionEnd) return false
-    return !el.value.slice(el.selectionEnd).includes('\n')
   }
 
   return (
