@@ -40,6 +40,31 @@ export type Step =
    * It also leaves the pointer alone, which was the other request.
    */
   | { kind: 'press'; name: string; focusOnly: boolean }
+  /*
+   * Reading a control back, which is how a plan checks its own work.
+   *
+   * Looking used to mean a screenshot: about 1,100 tokens of a free tier
+   * that genuinely runs out, and a picture the model then has to interpret.
+   * "Read the To box" is a string, and it answers the question the misses
+   * were about directly rather than by inference.
+   */
+  | { kind: 'read'; name: string }
+  /*
+   * Bringing something below the fold into view.
+   *
+   * The elements list only reports what is on screen, so a Send button
+   * under the window's edge did not exist as far as a plan was concerned -
+   * and the only way to reach it was a wheel over a guessed coordinate.
+   * UI Automation asks the container to scroll instead, and the pointer is
+   * not touched.
+   */
+  | { kind: 'reveal'; name: string }
+  /*
+   * The wheel, for what UI Automation cannot scroll: a canvas, a map, a
+   * custom list. Positive is down, because that is what "scroll down"
+   * means. This one does borrow the pointer, like a coordinate click.
+   */
+  | { kind: 'scroll'; x: number; y: number; notches: number }
 
 export interface Plan {
   /** The `# why` line, for the card. */
@@ -64,6 +89,16 @@ export const MAX_TYPE = 500
 
 /** A pause the user can sit through. Anything longer is a hang. */
 export const MAX_WAIT = 5000
+
+/**
+ * Notches in one scroll step.
+ *
+ * Ten is most of a page in a browser. A plan that wants further should say
+ * so in a second step, so the guard gets a look in between - a scroll that
+ * flies past what was being looked for is how a plan ends up acting on a
+ * screen nobody has seen.
+ */
+export const MAX_SCROLL = 10
 
 function clamp(n: number, low: number, high: number): number {
   return Math.min(high, Math.max(low, n))
@@ -118,6 +153,62 @@ export function readPlan(raw: string): Plan {
           button: verb === 'rightclick' ? 'right' : 'left',
           times: verb === 'doubleclick' ? 2 : 1
         })
+      continue
+    }
+
+    if (verb === 'read' || verb === 'reveal') {
+      const name = rest.replace(/^["']|["']$/g, '').trim()
+      if (!name) {
+        problems.push(`${verb} needs the name of something on screen: ${text}`)
+        continue
+      }
+      if (name.length > MAX_TYPE) {
+        problems.push(`${verb} name is absurdly long; dropped`)
+        continue
+      }
+      steps.push(verb === 'read' ? { kind: 'read', name } : { kind: 'reveal', name })
+      continue
+    }
+
+    if (verb === 'scroll') {
+      /* "scroll 900 600 3" or "scroll down 3" - the second form scrolls
+         wherever the pointer already is, which is what a model usually
+         means and avoids inventing a coordinate for it. */
+      const words = rest.split(/[\s,]+/).filter(Boolean)
+      const direction = /^(up|down)$/i.exec(words[0] ?? '')
+      if (direction) {
+        const n = Number(words[1] ?? '3')
+        if (!Number.isFinite(n) || n <= 0) {
+          problems.push(`scroll needs a number of notches: ${text}`)
+          continue
+        }
+        steps.push({
+          kind: 'scroll',
+          x: -1,
+          y: -1,
+          notches: clamp(Math.round(n), 1, MAX_SCROLL) * (direction[1].toLowerCase() === 'up' ? -1 : 1)
+        })
+        continue
+      }
+      const nums = words.map(Number)
+      if (nums.length < 3 || nums.some((n) => !Number.isFinite(n))) {
+        problems.push(`scroll needs x, y and notches, or a direction: ${text}`)
+        continue
+      }
+      if (nums[0] < 0 || nums[1] < 0) {
+        problems.push(`scroll has a negative coordinate: ${text}`)
+        continue
+      }
+      if (nums[2] === 0) {
+        problems.push(`scroll by nothing does nothing: ${text}`)
+        continue
+      }
+      steps.push({
+        kind: 'scroll',
+        x: nums[0],
+        y: nums[1],
+        notches: clamp(Math.round(nums[2]), -MAX_SCROLL, MAX_SCROLL)
+      })
       continue
     }
 
@@ -192,6 +283,16 @@ export function describe(step: Step): string {
       return `Wait ${step.ms}ms`
     case 'press':
       return `${step.focusOnly ? 'Put the cursor in' : 'Press'} ${JSON.stringify(step.name)}`
+    case 'read':
+      return `Read ${JSON.stringify(step.name)} back`
+    case 'reveal':
+      return `Scroll ${JSON.stringify(step.name)} into view`
+    case 'scroll': {
+      const way = step.notches > 0 ? 'down' : 'up'
+      const n = Math.abs(step.notches)
+      const where = step.x < 0 ? 'where the pointer is' : `at ${step.x}, ${step.y}`
+      return `Scroll ${way} ${n} notch${n === 1 ? '' : 'es'} ${where}`
+    }
   }
 }
 

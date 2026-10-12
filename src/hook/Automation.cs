@@ -53,7 +53,7 @@ internal static class UiTree
 
     private static IntPtr NativeForeground() => GetForegroundWindow();
 
-    private static List<Found> Collect(AutomationElement root, int limit)
+    private static List<Found> Collect(AutomationElement root, int limit, bool includeOffscreen = false)
     {
         var found = new List<Found>();
         AutomationElementCollection all;
@@ -86,7 +86,10 @@ internal static class UiTree
                 continue; // an element that went away mid-walk
             }
 
-            if (string.IsNullOrWhiteSpace(name) || !enabled || offscreen) continue;
+            if (string.IsNullOrWhiteSpace(name) || !enabled) continue;
+            /* Offscreen is skipped for a list of things to press, and kept
+               for REVEAL, whose whole job is to bring one into view. */
+            if (offscreen && !includeOffscreen) continue;
             if (!Useful.Contains(role)) continue;
             /* A zero or negative rectangle is a control that is not really
                there - Gmail parks offscreen labels at -12091,-12388. */
@@ -184,29 +187,22 @@ internal static class UiTree
             return;
         }
 
-        var best = Collect(root, 4000)
-            .Select(f => (f, score: Score(f.Name, want)))
-            .Where(t => t.score > 0)
-            .OrderByDescending(t => t.score)
-            .ThenBy(t => t.f.Role is "Text" or "Document" ? 1 : 0)
-            .ThenBy(t => t.f.Y)
-            .FirstOrDefault();
-
-        if (best.f is null)
+        var chosen = Best(root, want);
+        if (chosen is null)
         {
             Console.WriteLine($"{verb} FAILED nothing-named {Encode(want)}");
             return;
         }
 
-        var el = FindAgain(root, best.f);
+        var el = FindAgain(root, chosen);
         if (el is null)
         {
             Console.WriteLine($"{verb} FAILED element-vanished");
             return;
         }
 
-        var where = $"{best.f.X + best.f.W / 2},{best.f.Y + best.f.H / 2}";
-        var what = $"name={Encode(best.f.Name)} role={best.f.Role} at={where}";
+        var where = $"{chosen.X + chosen.W / 2},{chosen.Y + chosen.H / 2}";
+        var what = $"name={Encode(chosen.Name)} role={chosen.Role} at={where}";
 
         try
         {
@@ -217,13 +213,13 @@ internal static class UiTree
              * wrong way round is a silent no-op, which is the failure this
              * whole file exists to stop.
              */
-            if (focusOnly || best.f.Role is "Edit" or "ComboBox" or "Document")
+            if (focusOnly || chosen.Role is "Edit" or "ComboBox" or "Document")
             {
                 el.SetFocus();
                 Console.WriteLine($"{verb} ok via=focus {what}");
                 return;
             }
-            if (best.f.Invokable && el.TryGetCurrentPattern(InvokePattern.Pattern, out var pattern))
+            if (chosen.Invokable && el.TryGetCurrentPattern(InvokePattern.Pattern, out var pattern))
             {
                 ((InvokePattern)pattern).Invoke();
                 Console.WriteLine($"{verb} ok via=invoke {what}");
@@ -238,6 +234,148 @@ internal static class UiTree
                the next attempt can pick a different one. */
             Console.WriteLine($"{verb} FAILED {ex.GetType().Name} {what}");
         }
+    }
+
+    /// <summary>
+    /// Reads a named control back, so a plan can check its own work.
+    ///
+    /// This is the cheap half of "look again between steps". Looking used to
+    /// mean a screenshot: about 1,100 tokens of a free tier that runs out,
+    /// plus a model deciding what it sees. Reading the To box after typing
+    /// into it is a string comparison - and it is the exact question the
+    /// failures were about ("it keeps on missing the TO fillin box"), asked
+    /// directly instead of inferred from a picture.
+    ///
+    /// ValuePattern first, because that is what an Edit holds. Then the
+    /// text pattern, then the name, because a Document and a Text report
+    /// their contents in different places and a plan should not have to know
+    /// which kind of control it is looking at.
+    /// </summary>
+    public static void Value(string want)
+    {
+        var root = ForegroundTree();
+        if (root is null)
+        {
+            Console.WriteLine("VALUE FAILED no-foreground-window");
+            return;
+        }
+
+        var best = Best(root, want);
+        if (best is null)
+        {
+            Console.WriteLine($"VALUE FAILED nothing-named {Encode(want)}");
+            return;
+        }
+
+        var el = FindAgain(root, best);
+        if (el is null)
+        {
+            Console.WriteLine("VALUE FAILED element-vanished");
+            return;
+        }
+
+        var text = string.Empty;
+        var via = "none";
+        try
+        {
+            if (el.TryGetCurrentPattern(ValuePattern.Pattern, out var value))
+            {
+                text = ((ValuePattern)value).Current.Value ?? string.Empty;
+                via = "value";
+            }
+            else if (el.TryGetCurrentPattern(TextPattern.Pattern, out var textPattern))
+            {
+                text = ((TextPattern)textPattern).DocumentRange.GetText(4000) ?? string.Empty;
+                via = "text";
+            }
+            else
+            {
+                text = best.Name;
+                via = "name";
+            }
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"VALUE FAILED {ex.GetType().Name} name={Encode(best.Name)}");
+            return;
+        }
+
+        /* Trimmed, because a Document can hold the whole page and the caller
+           is checking a field, not reading a book. */
+        if (text.Length > 600) text = text[..600];
+        Console.WriteLine(
+            $"VALUE ok via={via} name={Encode(best.Name)} role={best.Role} " +
+            $"len={text.Length} text={Encode(text)}");
+    }
+
+    /// <summary>
+    /// Scrolls a named control into view, without touching the pointer.
+    ///
+    /// Everything below the fold used to be out of reach: the elements list
+    /// only reports what is on screen, so a Send button under the window's
+    /// edge simply did not exist as far as a plan was concerned. ScrollItem
+    /// is how a screen reader does this, and it asks the container to move
+    /// rather than simulating a wheel over it.
+    /// </summary>
+    public static void Reveal(string want)
+    {
+        var root = ForegroundTree();
+        if (root is null)
+        {
+            Console.WriteLine("REVEAL FAILED no-foreground-window");
+            return;
+        }
+
+        /* Offscreen elements are skipped by Collect - that is right for a
+           list of things to press and wrong here, since bringing an
+           offscreen thing into view is the entire point. */
+        var best = Best(root, want, includeOffscreen: true);
+        if (best is null)
+        {
+            Console.WriteLine($"REVEAL FAILED nothing-named {Encode(want)}");
+            return;
+        }
+
+        var el = FindAgain(root, best);
+        if (el is null)
+        {
+            Console.WriteLine("REVEAL FAILED element-vanished");
+            return;
+        }
+
+        try
+        {
+            if (el.TryGetCurrentPattern(ScrollItemPattern.Pattern, out var scroll))
+            {
+                ((ScrollItemPattern)scroll).ScrollIntoView();
+                var r = el.Current.BoundingRectangle;
+                Console.WriteLine(
+                    $"REVEAL ok name={Encode(best.Name)} role={best.Role} " +
+                    $"at={(int)(r.X + r.Width / 2)},{(int)(r.Y + r.Height / 2)}");
+                return;
+            }
+            Console.WriteLine($"REVEAL FAILED no-scroll-pattern name={Encode(best.Name)}");
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"REVEAL FAILED {ex.GetType().Name} name={Encode(best.Name)}");
+        }
+    }
+
+    /// <summary>
+    /// The best match for a name, shared by PRESS, VALUE and REVEAL so that
+    /// all three choose the same element for the same words.
+    /// </summary>
+    private static Found? Best(AutomationElement root, string want, bool includeOffscreen = false)
+    {
+        var best = Collect(root, 4000, includeOffscreen)
+            .Select(f => (f, score: Score(f.Name, want)))
+            .Where(t => t.score > 0)
+            .OrderByDescending(t => t.score)
+            .ThenBy(t => t.f.Role is "Text" or "Document" ? 1 : 0)
+            .ThenBy(t => t.f.Y)
+            .FirstOrDefault();
+        return best.f;
     }
 
     /// <summary>

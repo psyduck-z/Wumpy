@@ -2,6 +2,7 @@ import type { BrowserWindow } from 'electron'
 import { log } from './log'
 import { lastShot } from './screen'
 import { describe, onShot, toScreen, type Plan, type Step } from '@shared/steps'
+import { interference, parseGuard, type Guard } from '@shared/guard'
 
 /**
  * Driving the desktop: the clicks and keystrokes the model asked for.
@@ -102,66 +103,16 @@ async function throughThePanel<T>(panel: BrowserWindow | null, run: () => Promis
 
 const wait = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms))
 
-/** Who has the keyboard, where the pointer is, and whether a person is typing. */
-interface Guard {
-  hwnd: string
-  title: string
-  cursorX: number
-  cursorY: number
-  /** Milliseconds since the user's own last keypress, or -1 for never. */
-  keyMs: number
-}
-
+/**
+ * Asks the helper how things stand. The reading and the judging are pure and
+ * live in @shared/guard, so both can be driven by a check instead of by a
+ * subprocess - which for a pair of regexes is the difference between a test
+ * and a comment.
+ */
 async function readGuard(
   send: (command: string, timeoutMs?: number) => Promise<string>
 ): Promise<Guard | null> {
-  const reply = await send('GUARD', 2500)
-  const m = /^GUARD ok hwnd=(-?\d+) cursor=(-?\d+),(-?\d+) keyms=(-?\d+) title=(\S*)/.exec(reply)
-  if (!m) return null
-  let title = ''
-  try {
-    title = Buffer.from(m[5], 'base64').toString('utf8')
-  } catch {
-    /* a title we cannot decode is not a reason to refuse to act */
-  }
-  return { hwnd: m[1], title, cursorX: Number(m[2]), cursorY: Number(m[3]), keyMs: Number(m[4]) }
-}
-
-/**
- * How far the pointer may drift before it counts as someone using it.
- *
- * A click puts the pointer back where it found it, so between steps it
- * should not move at all. A few pixels is a desk knock or a trackpad
- * resting on a thumb; forty is a hand.
- */
-const POINTER_SLACK = 40
-
-/**
- * Has somebody started using the computer while the plan was running?
- *
- * Asked for in plain terms: "if it detects that it's on the wrong page or
- * like you're interfering make it stop wait or something... Otherwise, I
- * might like mess up some stuff."
- *
- * Stop, not wait. Waiting assumes the interruption is momentary and that
- * the screen will come back to how it was, and neither is knowable from
- * here - the user may have alt-tabbed away for ten minutes, or navigated
- * somewhere the remaining clicks mean something entirely different. The
- * steps that have not run are reported as skipped, the model is told what
- * changed, and it can look again. That is recoverable; typing half an email
- * address into whatever window arrived in the meantime is not.
- */
-function interference(before: Guard, now: Guard, elapsedMs: number): string | null {
-  if (now.hwnd !== before.hwnd) {
-    const went = now.title.trim()
-    return `the foreground window changed${went ? ` to "${went}"` : ''}`
-  }
-  /* keyMs counts back from now, so a value under the plan's age is a
-     keystroke made since it started - and ours are never counted. */
-  if (now.keyMs >= 0 && now.keyMs < elapsedMs) return 'you typed something'
-  const moved = Math.hypot(now.cursorX - before.cursorX, now.cursorY - before.cursorY)
-  if (moved > POINTER_SLACK) return 'the mouse moved'
-  return null
+  return parseGuard(await send('GUARD', 2500))
 }
 
 /**
@@ -338,5 +289,48 @@ async function oneStep(
           Buffer.from(step.name, 'utf8').toString('base64'),
         6000
       )
+    case 'read': {
+      /*
+       * The reply carries the text base64-encoded, and it is decoded here
+       * so that what comes back to the model is the content rather than a
+       * blob it has to decode in its head. This is the cheap way to look:
+       * a screenshot is about 1,100 tokens of a free tier and a picture to
+       * interpret, where this is the field's own value.
+       */
+      const reply = await send(
+        `VALUE ${Buffer.from(step.name, 'utf8').toString('base64')}`,
+        6000
+      )
+      const text = /text=(\S*)/.exec(reply)?.[1]
+      if (!reply.startsWith('VALUE ok') || text === undefined) return reply
+      let shown = ''
+      try {
+        shown = Buffer.from(text, 'base64').toString('utf8')
+      } catch {
+        return reply
+      }
+      const via = /via=(\S+)/.exec(reply)?.[1] ?? '?'
+      return `VALUE ok via=${via} it says ${JSON.stringify(shown)}`
+    }
+    case 'reveal':
+      return send(`REVEAL ${Buffer.from(step.name, 'utf8').toString('base64')}`, 6000)
+    case 'scroll': {
+      /*
+       * A wheel event goes to whatever is under the pointer, so a plan that
+       * names no point scrolls wherever the pointer already is - which is
+       * usually what was meant and avoids inventing a coordinate. A named
+       * point is in screenshot pixels like every other coordinate here.
+       */
+      let at = { x: -1, y: -1 }
+      if (step.x >= 0) {
+        if (!frame) return 'SCROLL FAILED no-screenshot'
+        at = toScreen(frame, step.x, step.y)
+      } else {
+        const where = await readGuard(send)
+        if (!where) return 'SCROLL FAILED cannot-find-the-pointer'
+        at = { x: where.cursorX, y: where.cursorY }
+      }
+      return throughThePanel(panel, () => send(`SCROLL ${at.x} ${at.y} ${step.notches}`))
+    }
   }
 }

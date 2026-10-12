@@ -19,6 +19,26 @@ using System.Runtime.InteropServices;
 internal static class Program
 {
     private const int WH_KEYBOARD_LL = 13;
+
+    /// <summary>
+    /// The mouse's own low-level hook.
+    ///
+    /// Added because the guard was half blind. It could see the user's
+    /// keystrokes and the pointer's position, so it caught someone typing
+    /// and someone shoving the mouse - and missed the most common
+    /// interruption of all, which is a person clicking something while a
+    /// plan is running. A click changes the focus, the selection and often
+    /// the page, and the next synthesised keystroke then lands somewhere
+    /// nobody chose.
+    /// </summary>
+    private const int WH_MOUSE_LL = 14;
+    private const int WM_LBUTTONDOWN = 0x0201;
+    private const int WM_RBUTTONDOWN = 0x0204;
+    private const int WM_MBUTTONDOWN = 0x0207;
+    private const int WM_MOUSEWHEEL = 0x020A;
+
+    /// <summary>Set on a mouse event we synthesised ourselves.</summary>
+    private const uint LLMHF_INJECTED = 0x0001;
     private const int WM_KEYDOWN = 0x0100;
     private const int WM_SYSKEYDOWN = 0x0104;
     private const int WM_KEYUP = 0x0101;
@@ -42,6 +62,10 @@ internal static class Program
     private const uint MOUSEEVENTF_LEFTUP = 0x0004;
     private const uint MOUSEEVENTF_RIGHTDOWN = 0x0008;
     private const uint MOUSEEVENTF_RIGHTUP = 0x0010;
+    private const uint MOUSEEVENTF_WHEEL = 0x0800;
+
+    /// <summary>One notch of a wheel, as Windows counts it.</summary>
+    private const int WHEEL_DELTA = 120;
 
     /// <summary>Marks input we synthesised, so the hook ignores its own events.</summary>
     private static readonly IntPtr WumpySignature = new(0x57554D50); // 'WUMP'
@@ -227,7 +251,9 @@ internal static class Program
 
     // Held in a static field so the GC cannot collect the delegate the OS holds.
     private static readonly HookProc Callback = OnKey;
+    private static readonly HookProc MouseCallback = OnMouse;
     private static IntPtr _hook = IntPtr.Zero;
+    private static IntPtr _mouseHook = IntPtr.Zero;
     private static uint _mainThreadId;
 
     /// <summary>Process allowed to take the foreground, or 0 for none.</summary>
@@ -235,6 +261,12 @@ internal static class Program
 
     /// <summary>TickCount of the last keystroke the user made themselves.</summary>
     private static long _lastRealKey;
+
+    /// <summary>TickCount of the last click or wheel turn the user made.</summary>
+    private static long _lastRealClick;
+
+    /// <summary>What they did, for a line a person can read.</summary>
+    private static string _lastClickWhat = string.Empty;
 
     /// <summary>Virtual-key code to intercept while a Windows key is held.</summary>
     private static uint _targetVk = 'C';
@@ -336,6 +368,23 @@ internal static class Program
             return 1;
         }
 
+        /*
+         * The mouse hook is wanted, not needed.
+         *
+         * Without it the guard cannot see a click, which is the commonest
+         * way a person interrupts a plan. With it failing, everything else
+         * still works - the hotkey, the typing, the keystroke half of the
+         * guard - so a failure here is reported and carried past rather
+         * than fatal. It observes only: every event is passed straight on.
+         */
+        _mouseHook = SetWindowsHookExW(WH_MOUSE_LL, MouseCallback, GetModuleHandleW(null), 0);
+        if (_mouseHook == IntPtr.Zero)
+        {
+            Console.Error.WriteLine(
+                $"WARN mouse hook failed: {Marshal.GetLastWin32Error()} - " +
+                "the guard will not see clicks");
+        }
+
         Console.WriteLine($"READY vk=0x{_targetVk:X2}");
         Console.Out.Flush();
 
@@ -433,6 +482,58 @@ internal static class Program
         _firedVk = vkCode;
         _firedAt = now;
         return Act.Toggle;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct MSLLHOOKSTRUCT
+    {
+        public POINT pt;
+        public uint mouseData;
+        public uint flags;
+        public uint time;
+        public IntPtr dwExtraInfo;
+    }
+
+    /// <summary>
+    /// Watches the mouse without touching it.
+    ///
+    /// A click is the commonest way a person takes the machine back, and
+    /// until now it was the one interruption the guard could not see: it
+    /// knew about keystrokes, because the keyboard hook was already there,
+    /// and about the pointer moving, by comparing positions. Someone
+    /// clicking a different field moved nothing and typed nothing, and the
+    /// plan carried on into whatever that click had just selected.
+    ///
+    /// Two ways to tell our own events from theirs, the same two the
+    /// keyboard uses: our signature in dwExtraInfo, and LLMHF_INJECTED for
+    /// anything else synthesised. Everything is passed on unchanged - this
+    /// hook never swallows an event, so the worst it can cost is the
+    /// microseconds of being in the chain.
+    /// </summary>
+    private static IntPtr OnMouse(int nCode, IntPtr wParam, IntPtr lParam)
+    {
+        if (nCode != HC_ACTION) return CallNextHookEx(_mouseHook, nCode, wParam, lParam);
+
+        var message = (int)wParam;
+        if (message is WM_LBUTTONDOWN or WM_RBUTTONDOWN or WM_MBUTTONDOWN or WM_MOUSEWHEEL)
+        {
+            var data = Marshal.PtrToStructure<MSLLHOOKSTRUCT>(lParam);
+            var ours = data.dwExtraInfo == WumpySignature;
+            var injected = (data.flags & LLMHF_INJECTED) != 0;
+            if (!ours && !injected)
+            {
+                _lastRealClick = Environment.TickCount64;
+                _lastClickWhat = message switch
+                {
+                    WM_LBUTTONDOWN => "left-click",
+                    WM_RBUTTONDOWN => "right-click",
+                    WM_MBUTTONDOWN => "middle-click",
+                    _ => "wheel"
+                };
+            }
+        }
+
+        return CallNextHookEx(_mouseHook, nCode, wParam, lParam);
     }
 
     private static IntPtr OnKey(int nCode, IntPtr wParam, IntPtr lParam)
@@ -803,6 +904,22 @@ internal static class Program
             case "KEY":
                 Key(rest);
                 return;
+            case "SCROLL":
+            {
+                /* "<x> <y> <notches>" - positive notches scroll DOWN, which
+                   is the direction a reader means by "scroll down". */
+                var bits = rest.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+                if (bits.Length < 3
+                    || !int.TryParse(bits[0], out var sx)
+                    || !int.TryParse(bits[1], out var sy)
+                    || !int.TryParse(bits[2], out var notches))
+                {
+                    Console.WriteLine("SCROLL FAILED bad-arguments");
+                    return;
+                }
+                Scroll(sx, sy, notches);
+                return;
+            }
             case "GUARD":
                 Guard();
                 return;
@@ -823,6 +940,34 @@ internal static class Program
                 {
                     var name = System.Text.Encoding.UTF8.GetString(Convert.FromBase64String(rest));
                     UiTree.Press(name, verb == "FOCUS", verb);
+                }
+                catch (FormatException)
+                {
+                    Console.WriteLine($"{verb} FAILED not-base64");
+                }
+                return;
+            }
+            case "VALUE":
+            case "REVEAL":
+            {
+                /*
+                 * Reading a control back, and bringing one into view.
+                 *
+                 * VALUE is how a plan checks its own work without spending a
+                 * screenshot on it: type into the To box, read the To box,
+                 * see whether "Stanley" is in it. A screenshot is ~1,100
+                 * tokens of a scarce free tier and has to be looked at by the
+                 * model; this is a string.
+                 *
+                 * REVEAL scrolls a named control into view through UI
+                 * Automation, so nothing below the fold needs a wheel and the
+                 * pointer is never touched.
+                 */
+                try
+                {
+                    var name = System.Text.Encoding.UTF8.GetString(Convert.FromBase64String(rest));
+                    if (verb == "VALUE") UiTree.Value(name);
+                    else UiTree.Reveal(name);
                 }
                 catch (FormatException)
                 {
@@ -866,8 +1011,16 @@ internal static class Program
         GetCursorPos(out var at);
         /* Milliseconds since the user's own last keypress, or -1 for never. */
         var since = _lastRealKey == 0 ? -1 : Environment.TickCount64 - _lastRealKey;
+        /*
+         * And since their last click, which used to be invisible from here.
+         * A click is how someone takes the machine back without moving the
+         * pointer far enough to notice or pressing a key at all.
+         */
+        var clickMs = _lastRealClick == 0 ? -1 : Environment.TickCount64 - _lastRealClick;
         Console.WriteLine(
             $"GUARD ok hwnd={hwnd.ToInt64()} cursor={at.x},{at.y} keyms={since} " +
+            $"clickms={clickMs} click={(_lastClickWhat.Length > 0 ? _lastClickWhat : "none")} " +
+            $"mousehook={(_mouseHook == IntPtr.Zero ? "off" : "on")} " +
             $"title={Convert.ToBase64String(System.Text.Encoding.UTF8.GetBytes(title.ToString()))}");
     }
 
@@ -941,6 +1094,63 @@ internal static class Program
                 ? $"CLICK ok at={x},{y} button={(right ? "right" : "left")} times={times} " +
                   $"pointer={(restored ? "restored" : "left-there")}"
                 : $"CLICK FAILED sent={sent}/{want} err={err}");
+    }
+
+    /// <summary>
+    /// Turns the wheel under a point, for the things UI Automation cannot
+    /// scroll.
+    ///
+    /// REVEAL is the first choice and does not touch the pointer at all.
+    /// This is the fallback for a canvas, a map, a custom list - anything
+    /// that scrolls without exposing a scroll pattern. A wheel event goes to
+    /// whatever is under the cursor, so the cursor has to be there; it is
+    /// borrowed and put back, exactly as a coordinate click does.
+    ///
+    /// Positive notches scroll DOWN, because that is what "scroll down"
+    /// means to the person asking. Windows counts the other way, so the sign
+    /// is flipped here once rather than in every caller.
+    /// </summary>
+    private static void Scroll(int x, int y, int notches)
+    {
+        var steps = Math.Clamp(notches, -10, 10);
+        if (steps == 0)
+        {
+            Console.WriteLine("SCROLL ok notches=0 nothing-to-do");
+            return;
+        }
+
+        var had = GetCursorPos(out var before);
+        if (!SetCursorPos(x, y))
+        {
+            Console.WriteLine($"SCROLL FAILED cursor err={Marshal.GetLastWin32Error()}");
+            return;
+        }
+        GetCursorPos(out var at);
+        if (at.x != x || at.y != y)
+        {
+            Console.WriteLine($"SCROLL REFUSED off-screen asked={x},{y} landed={at.x},{at.y}");
+            return;
+        }
+
+        var inputs = new INPUT[1];
+        inputs[0].type = INPUT_MOUSE;
+        inputs[0].mi = new MOUSEINPUT
+        {
+            dwFlags = MOUSEEVENTF_WHEEL,
+            /* Negated: Windows scrolls up on a positive delta. */
+            mouseData = unchecked((uint)(-steps * WHEEL_DELTA)),
+            dwExtraInfo = WumpySignature
+        };
+        var sent = SendInput(1, inputs, Marshal.SizeOf<INPUT>());
+        var err = sent == 1 ? 0 : Marshal.GetLastWin32Error();
+        var restored = had && SetCursorPos(before.x, before.y);
+
+        Console.WriteLine(
+            sent == 1
+                ? $"SCROLL ok at={x},{y} notches={steps} " +
+                  $"direction={(steps > 0 ? "down" : "up")} " +
+                  $"pointer={(restored ? "restored" : "left-there")}"
+                : $"SCROLL FAILED sent={sent}/1 err={err}");
     }
 
     /*

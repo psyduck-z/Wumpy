@@ -24,17 +24,22 @@ import { build } from 'esbuild'
 import { readFileSync, rmSync } from 'node:fs'
 import { pathToFileURL } from 'node:url'
 
-const out = '.desktop-check.mjs'
-await build({
-  entryPoints: ['src/shared/steps.ts'],
-  bundle: true,
-  platform: 'node',
-  format: 'esm',
-  outfile: out,
-  logLevel: 'error'
-})
-const S = await import(pathToFileURL(out).href)
-rmSync(out, { force: true })
+async function load(entry, tag) {
+  const out = `.desktop-check-${tag}.mjs`
+  await build({
+    entryPoints: [entry],
+    bundle: true,
+    platform: 'node',
+    format: 'esm',
+    outfile: out,
+    logLevel: 'error'
+  })
+  const mod = await import(pathToFileURL(out).href)
+  rmSync(out, { force: true })
+  return mod
+}
+const S = await load('src/shared/steps.ts', 'steps')
+const G = await load('src/shared/guard.ts', 'guard')
 
 let failed = 0
 let count = 0
@@ -228,10 +233,108 @@ check('the plan report is passive too', /carried out automatically/.test(app), t
  */
 check('a guard snapshot is taken first', /readGuard\(send\)/.test(inputSrc), true)
 check('and re-read between steps', /ran\.length > 0[\s\S]{0,120}readGuard/.test(inputSrc), true)
-check('a changed window stops it', /foreground window changed/.test(inputSrc), true)
-check('a keystroke of theirs stops it', /you typed something/.test(inputSrc), true)
-check('the mouse moving stops it', /the mouse moved/.test(inputSrc), true)
-check('the pointer has some slack', /POINTER_SLACK/.test(inputSrc), true)
+
+/*
+ * The rules themselves, run rather than grepped.
+ *
+ * They used to be checked by searching input.ts for the words it prints,
+ * because the parsing needed a subprocess to reach. Both halves are pure now
+ * and live in @shared/guard, which matters most for the regex: a pattern that
+ * stops matching reports "nothing has happened" forever, and a quiet machine
+ * is exactly what that looks like.
+ */
+const GUARD_LINE =
+  'GUARD ok hwnd=7603718 cursor=225,217 keyms=-1 clickms=-1 click=none mousehook=on ' +
+  'title=RG93bmxvYWQgV2luZG93cyAxMQ=='
+{
+  const g = G.parseGuard(GUARD_LINE)
+  check('a real guard line parses', g !== null, true)
+  check('the window is read', g.hwnd, '7603718')
+  check('the pointer is read', [g.cursorX, g.cursorY], [225, 217])
+  check('the title is decoded', g.title, 'Download Windows 11')
+  check('never-pressed reads as -1', [g.keyMs, g.clickMs], [-1, -1])
+  check('and the click kind comes through', g.clickWhat, 'none')
+
+  /* clickms= must not be mistaken for click=, which is the one way this
+     pair of patterns can quietly swap places. */
+  const busy = G.parseGuard(
+    'GUARD ok hwnd=1 cursor=0,0 keyms=4000 clickms=120 click=left-click mousehook=on title='
+  )
+  check('a recent click is read as a click', busy.clickMs, 120)
+  check('and named, not confused with its own age', busy.clickWhat, 'left-click')
+
+  /* An older helper reports neither, and must still parse. */
+  const old = G.parseGuard('GUARD ok hwnd=9 cursor=5,5 keyms=800 title=')
+  check('a helper without the click fields still parses', old !== null, true)
+  check('with the click unknown rather than now', old.clickMs, -1)
+
+  check('a failure is not a guard', G.parseGuard('GUARD FAILED whatever'), null)
+  check('nor is an empty line', G.parseGuard(''), null)
+}
+
+{
+  const at = (o) => ({
+    hwnd: '1',
+    title: 'Gmail',
+    cursorX: 100,
+    cursorY: 100,
+    keyMs: -1,
+    clickMs: -1,
+    clickWhat: 'none',
+    ...o
+  })
+  const before = at({})
+  check('an untouched machine does not stop a plan', G.interference(before, at({}), 500), null)
+  check(
+    'a changed window stops it',
+    G.interference(before, at({ hwnd: '2', title: 'Notepad' }), 500),
+    'the foreground window changed to "Notepad"'
+  )
+  check(
+    'a keystroke of theirs stops it',
+    G.interference(before, at({ keyMs: 200 }), 500),
+    'you typed something'
+  )
+  check(
+    'one from before the plan does not',
+    G.interference(before, at({ keyMs: 900 }), 500),
+    null
+  )
+  check(
+    'a click of theirs stops it',
+    G.interference(before, at({ clickMs: 100, clickWhat: 'left-click' }), 500),
+    'you clicked something'
+  )
+  check(
+    'their wheel says so in its own words',
+    G.interference(before, at({ clickMs: 100, clickWhat: 'wheel' }), 500),
+    'you scrolled'
+  )
+  check(
+    'a click from before the plan does not stop it',
+    G.interference(before, at({ clickMs: 2000, clickWhat: 'left-click' }), 500),
+    null
+  )
+  check(
+    'the mouse moving stops it',
+    G.interference(before, at({ cursorX: 400 }), 500),
+    'the mouse moved'
+  )
+  check(
+    'a desk knock does not',
+    G.interference(before, at({ cursorX: 100 + G.POINTER_SLACK - 1 }), 500),
+    null
+  )
+  check('the pointer has some slack', G.POINTER_SLACK > 10, true)
+  /* The window is checked before the keyboard: a plan that has lost its
+     window should say so, not blame the user for typing. */
+  check(
+    'the most specific reason wins',
+    G.interference(before, at({ hwnd: '3', title: 'Other', keyMs: 1, clickMs: 1 }), 500),
+    'the foreground window changed to "Other"'
+  )
+}
+
 check('and ours are never counted as theirs', /dwExtraInfo == WumpySignature/.test(readFileSync('src/hook/Program.cs', 'utf8')), true)
 check('only real keystrokes are recorded', /if \(!injected && isDown\) _lastRealKey/.test(readFileSync('src/hook/Program.cs', 'utf8')), true)
 check('a missing guard does not block the plan', /a missing guard is a reason to watch less closely/.test(inputSrc), true)
@@ -250,6 +353,124 @@ check('and takes the question with it', /kind: 'screen'; ask: string/.test(cmds)
 check('it sends the picture in one turn', /A screenshot of my screen is attached/.test(app), true)
 check('with the control names too', /\.\.\.namedControls\(shot\)/.test(app), true)
 check('and is visible, unlike the automatic ones', /hiding it would lose the only/.test(app), true)
+
+/* ------------------------------------------- reading, revealing, scrolling */
+
+/*
+ * Three things a plan could not do, each of which had been worked around
+ * badly.
+ *
+ * READ: checking your own work meant another screenshot - about 1,100 tokens
+ * of a free tier that runs out, and a picture the model then has to read. The
+ * question was always "is 'Stanley' in the To box", which the box can answer.
+ *
+ * REVEAL: the element list only reports what is on screen, so anything below
+ * the fold did not exist as far as a plan was concerned. Pressing it meant a
+ * wheel over a guessed coordinate, which is the pixel-guessing this whole
+ * file exists to replace.
+ *
+ * SCROLL: the fallback for a canvas or a map, where there are no names at
+ * all. The sign is the easy thing to get wrong - Windows scrolls UP on a
+ * positive wheel delta - so "down" is pinned here.
+ */
+check('read is a step', S.readPlan('read "To recipients"').steps, [
+  { kind: 'read', name: 'To recipients' }
+])
+check('reveal is a step', S.readPlan('reveal "Send"').steps, [{ kind: 'reveal', name: 'Send' }])
+check('both need a name', S.readPlan('read').problems.length, 1)
+check('and say so rather than guessing', /needs the name/.test(S.readPlan('reveal').problems[0]), true)
+
+check('scroll takes a direction and a count', S.readPlan('scroll down 3').steps, [
+  { kind: 'scroll', x: -1, y: -1, notches: 3 }
+])
+check('up is negative', S.readPlan('scroll up 2').steps[0].notches, -2)
+check('a bare direction scrolls a sensible amount', S.readPlan('scroll down').steps[0].notches, 3)
+check('and at a point when given one', S.readPlan('scroll 400 300 2').steps, [
+  { kind: 'scroll', x: 400, y: 300, notches: 2 }
+])
+check('no point means wherever the pointer is', S.readPlan('scroll down 1').steps[0].x, -1)
+check('a huge scroll is clamped, not refused', S.readPlan('scroll down 400').steps[0].notches, S.MAX_SCROLL)
+check('scrolling by nothing is dropped', S.readPlan('scroll 10 10 0').steps.length, 0)
+check('and named as pointless', /does nothing/.test(S.readPlan('scroll 10 10 0').problems[0]), true)
+check('a negative coordinate is refused', S.readPlan('scroll -5 10 2').steps.length, 0)
+check('nonsense is refused', S.readPlan('scroll sideways').steps.length, 0)
+
+check('a read step reads as English', S.describe({ kind: 'read', name: 'To' }), 'Read "To" back')
+check(
+  'a reveal step too',
+  S.describe({ kind: 'reveal', name: 'Send' }),
+  'Scroll "Send" into view'
+)
+check(
+  'a scroll says which way and where',
+  S.describe({ kind: 'scroll', x: -1, y: -1, notches: 2 }),
+  'Scroll down 2 notches where the pointer is'
+)
+check(
+  'and counts one notch properly',
+  S.describe({ kind: 'scroll', x: 10, y: 20, notches: -1 }),
+  'Scroll up 1 notch at 10, 20'
+)
+
+/* Reading a control back does not need a picture, so it must not demand one. */
+check('read does not require a screenshot', /s.kind === 'click' \|\| s.kind === 'move'/.test(inputSrc), true)
+check('a read decodes what came back', /it says \$\{JSON\.stringify\(shown\)\}/.test(inputSrc), true)
+check('a scroll at a point needs the frame', /SCROLL FAILED no-screenshot/.test(inputSrc), true)
+check('and without one it uses the pointer', /cannot-find-the-pointer/.test(inputSrc), true)
+
+const hook = readFileSync('src/hook/Program.cs', 'utf8')
+check('the helper understands SCROLL', /case "SCROLL":/.test(hook), true)
+check('and VALUE and REVEAL', /case "VALUE":[\s\S]{0,40}case "REVEAL":/.test(hook), true)
+check('down is negated for Windows', /-steps \* WHEEL_DELTA/.test(hook), true)
+check('a scroll borrows the pointer and puts it back', /SCROLL ok at=[\s\S]{0,160}restored/.test(hook), true)
+check('and refuses to scroll off-screen', /SCROLL REFUSED off-screen/.test(hook), true)
+
+const uia = readFileSync('src/hook/Automation.cs', 'utf8')
+check('VALUE prefers the value pattern', /ValuePattern\.Pattern/.test(uia), true)
+check('then the text pattern', /TextPattern\.Pattern/.test(uia), true)
+check('REVEAL uses ScrollItem', /ScrollItemPattern/.test(uia), true)
+check('and looks at offscreen elements, unlike the list', /includeOffscreen/.test(uia), true)
+check('all three choose the same element', (uia.match(/Best\(root, want/g) ?? []).length >= 3, true)
+
+/* ----------------------------------------- the click the guard could not see */
+
+/*
+ * A click was the one interruption nothing could notice: it presses no key
+ * and moves the pointer no further than the hand already was. Someone
+ * clicking into another field while a plan typed read as a quiet machine.
+ */
+check('the helper watches the mouse too', /WH_MOUSE_LL/.test(hook), true)
+check('only real clicks are recorded', /if \(!ours && !injected\)/.test(hook), true)
+check('the guard reports them', /clickms=/.test(hook), true)
+check('and says whether it is watching', /mousehook=/.test(hook), true)
+check('a failed mouse hook is not fatal', /WARN mouse hook failed/.test(hook), true)
+check('the mouse hook never swallows an event', (hook.match(/CallNextHookEx\(_mouseHook/g) ?? []).length, 2)
+/*
+ * The strict pattern must stop at keyms, so a helper built before the click
+ * fields existed still parses. Requiring them would turn an old binary into
+ * no guard at all, which is the dangerous way to fail: the watching simply
+ * stops rather than saying anything.
+ *
+ * Asserted with plain string tests on purpose - a regex matching a regex
+ * needs doubled backslashes, and this file has had them eaten in transit
+ * before, which is a check that passes while testing nothing.
+ */
+const guardSrc = readFileSync('src/shared/guard.ts', 'utf8')
+const guardLine = guardSrc.split(NL).find((l) => l.includes('GUARD ok hwnd=')) ?? ''
+check('the strict pattern stops at keyms', guardLine.includes('keyms='), true)
+check('and does not demand the new fields', guardLine.includes('clickms'), false)
+check('which are read on their own', guardSrc.includes('/clickms=(-?'), true)
+check('along with the title', guardSrc.includes('const title64 = /title='), true)
+check('a click of theirs stops a plan', /you clicked something/.test(guardSrc), true)
+check('a scroll of theirs too', /you scrolled/.test(guardSrc), true)
+check('the model is told clicks stop it', /CLICKED something/.test(desktop), true)
+
+/* ------------------------------------------------- what the guideline says */
+
+check('the guideline offers read', /read "<name>"/.test(desktop), true)
+check('and says why, not just how', /did my typing land in the right place/.test(desktop), true)
+check('it mentions the cost of a picture', /free quota is finite/.test(desktop), true)
+check('reveal is preferred over the wheel', /prefer reveal/.test(desktop), true)
 
 console.log(`${NL}${count - failed}/${count} desktop checks passed`)
 if (failed) process.exit(1)

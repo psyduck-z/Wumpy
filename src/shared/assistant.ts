@@ -514,6 +514,25 @@ export const CLOSE_PROMPT = [
 ].join(String.fromCharCode(10))
 
 /** Appended when Wumpy may search the web. */
+/**
+ * What to say about running out, which is a question Wumpy can answer and
+ * the model cannot.
+ *
+ * Kept to three lines on purpose. The model has no way to count quota - it
+ * does not see the keys, the counters or the rotation - so the only thing
+ * worth telling it is where the answer lives and that a rate limit is
+ * already being handled. Before this it apologised for 429s as though the
+ * turn were over, while Wumpy had nineteen other keys and had already
+ * switched.
+ */
+export const QUOTA_PROMPT = [
+  'Wumpy rotates several API keys by itself and each has its own free daily',
+  'allowance, so a rate limit on one is handled before you hear about it.',
+  'Asked how much is left, say `/usage` — it prints the day key by key, and',
+  'the meter in the status bar shows it at a glance. Do not guess a number',
+  'and do not apologise for a limit you were not told about.'
+].join(String.fromCharCode(10))
+
 export const SEARCH_PROMPT = [
   'For anything current, or a version or product you are unsure of, search the web:',
   'a wumpy-search block, a # line saying why, then a short query. You get the',
@@ -574,6 +593,7 @@ export const DESKTOP_PROMPT = [
   'A wumpy-do block, a # line saying why, then one step per line:',
   '  press "<name>"     focus "<name>"       type <text>',
   '  key ctrl+a         wait 500             click X Y',
+  '  read "<name>"      reveal "<name>"      scroll down 3',
   '',
   'PRESS BY NAME. NOT BY PIXEL. Every screenshot comes with a list of what is on',
   'screen and what each control is called. Use those names:',
@@ -602,6 +622,20 @@ export const DESKTOP_PROMPT = [
   'SO YOU MUST LOOK FIRST. With no screenshot there is nothing to aim at and the',
   'block is refused. Ask for wumpy-screen, wait for the picture, then act.',
   '',
+  'CHECK YOUR OWN WORK WITH read, NOT WITH A PICTURE. `read "To recipients"`',
+  'comes back with what that box actually contains now. It is the direct answer',
+  'to "did my typing land in the right place", it costs nothing like a',
+  'screenshot does, and their free quota is finite. Type, read, then decide.',
+  '  read "Address and search bar"   what is in the box',
+  '  read "Message body"             what has been written so far',
+  '',
+  'CANNOT SEE IT? REVEAL IT. The list of controls only holds what is on screen,',
+  'so something below the fold is missing rather than absent. `reveal "Send"`',
+  'asks the page to scroll it into view, without touching their pointer, and',
+  'then you can press it by name. `scroll down 3` turns the wheel instead, for',
+  'a canvas or a map that has no named controls at all — that one does borrow',
+  'the pointer, so prefer reveal.',
+  '',
   'LOOK AGAIN BETWEEN STEPS. Every wumpy-do returns a fresh screenshot of what',
   'happened, automatically. Use it. Propose the steps you can see targets for',
   'and STOP — then look at what came back and decide the next ones. A tab, then',
@@ -614,7 +648,8 @@ export const DESKTOP_PROMPT = [
   'then `type` is the shape you want.',
   'A step that fails stops the rest of the block, and you are told which one.',
   'A plan also STOPS BY ITSELF if the user comes back to their machine — they',
-  'moved the mouse, typed something, or the window changed under it. You are told',
+  'moved the mouse, CLICKED something, scrolled, typed, or the window changed',
+  'under it. You are told',
   'how many steps ran and why it stopped. That is not a failure to retry: the',
   'screen is not where you left it. Look again, and if they were clearly doing',
   'something else, ask before carrying on.',

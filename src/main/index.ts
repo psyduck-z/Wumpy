@@ -26,6 +26,7 @@ import {
   SEARCH_PROMPT,
   OPEN_PROMPT,
   SCREEN_PROMPT,
+  QUOTA_PROMPT,
   CLOSE_PROMPT,
   DESKTOP_PROMPT
 } from '@shared/assistant'
@@ -198,6 +199,45 @@ async function refreshModels(): Promise<void> {
 }
 
 /**
+ * The day's quota, but only when it is worth a sentence.
+ *
+ * Normally nothing, which is the point: this block is placed just behind the
+ * user's latest turn and a line that changes every time is a line that can
+ * never be cached. A count of requests remaining would do exactly that and
+ * buy nothing - the model cannot act on 474 any differently from 473.
+ *
+ * What it cannot work out for itself is that something is running out. So
+ * the line appears when a key has died or the pool is down to its last
+ * quarter, and says what that means for the next few turns.
+ */
+function quotaFacts(): string[] {
+  const model = activeModel()
+  const provider = providerFor(model)
+  if (!provider) return []
+  const pool = cloud.poolFor(model, perKeyCapFor(usage.today(), model, provider))
+  if (!pool || pool.keys === 0) return []
+
+  const low = pool.remaining !== null && pool.cap > 0 && pool.remaining <= pool.cap * 0.25
+  if (!low && pool.spent === 0 && pool.ready > 0) return []
+
+  const back = new Date(pool.resetAt).toLocaleTimeString(undefined, {
+    hour: '2-digit',
+    minute: '2-digit'
+  })
+  if (pool.ready === 0) {
+    return [
+      `- Today's free allowance for ${model} is gone on all ${pool.keys} keys; ` +
+        `it comes back at ${back}. Another model may still have some.`
+    ]
+  }
+  return [
+    `- Free allowance for ${model}: ${pool.ready} of ${pool.keys} keys still have some` +
+      (pool.spent ? `, ${pool.spent} spent for today` : '') +
+      `, resetting at ${back}. Keep answers brief if the user is working through something long.`
+  ]
+}
+
+/**
  * The live facts block, built in exactly one place.
  *
  * Deliberately no clock time and no message count. Both changed on every turn
@@ -223,6 +263,8 @@ function factsFor(chatTitle: string | null, actions: string[] = []): string {
     ...folderFacts(),
     // One file the user owns, carried from chat to chat. See context.ts.
     ...notes.forPrompt(),
+    // Silent unless something is running out. See quotaFacts.
+    ...quotaFacts(),
     // Written by the code that performed them, not recalled by the model.
     // Asked whether it had opened Spotify, the model denied it three times -
     // the app had the receipt and was not showing it.
@@ -255,6 +297,9 @@ function systemPromptFor(assistant: Assistant, scope: 'none' | 'read' | 'full'):
     scope !== 'none' && settings.get('searchEnabled') ? SEARCH_PROMPT : '',
     scope !== 'none' && settings.get('browserEnabled') ? OPEN_PROMPT : '',
     settings.get('screenEnabled') ? SCREEN_PROMPT : '',
+    /* Only when there is a pool to talk about: a local-only install has no
+       quota and a sentence about keys would be noise. */
+    keys.count('google') > 0 ? QUOTA_PROMPT : '',
     /* Both, because driving the screen without seeing it is aiming blind. */
     settings.get('screenEnabled') && settings.get('browserEnabled') && scope === 'full'
       ? DESKTOP_PROMPT
