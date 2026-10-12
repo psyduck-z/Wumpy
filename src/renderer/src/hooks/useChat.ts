@@ -376,6 +376,9 @@ export function useChat(): ChatState {
 
   const clear = useCallback(() => {
     stop()
+    /* Same reason as replace(): /new followed by a send must not carry the
+       old conversation into the first turn of the new one. */
+    messagesRef.current = []
     setMessages([])
     setStats({
       speed: null,
@@ -391,6 +394,19 @@ export function useChat(): ChatState {
   const replace = useCallback(
     (next: ChatMessage[]) => {
       stop()
+      /*
+       * The mirror is updated here as well as during the render, because the
+       * caller's next line is usually a send.
+       *
+       * `await compactHistory(); chat.send(text)` runs both halves in one
+       * microtask, and React's re-render is not one of the things that
+       * happens in between - so without this the send that a compaction was
+       * performed FOR still built its history from the conversation as it
+       * was before the summary. The whole point of compacting before a send
+       * was lost in silence, and the same would have been true of every
+       * automatic hand-back.
+       */
+      messagesRef.current = next
       setMessages(next)
       // The counted context belonged to the old conversation; fall back to the
       // estimate until the next turn reports real numbers.

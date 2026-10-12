@@ -310,6 +310,18 @@ internal static class Program
         if (grant is not null && uint.TryParse(grant["--grant-foreground=".Length..], out var grantPid))
         {
             _grantPid = grantPid;
+            /*
+             * The same pid, used for the opposite question.
+             *
+             * It says who may take the foreground; it also says which windows
+             * belong to Wumpy - and a plan must never act on one of those.
+             * Without this, a lookup by name searched whatever had the
+             * foreground, which at the moment a plan starts is the panel the
+             * user just typed into: one attempt pressed a control named
+             * `Press "Inbox - zechariah"`, which is the text of Wumpy's own
+             * step card. See UiTree.Target.
+             */
+            UiTree.Owner = grantPid;
         }
 
         var key = Array.Find(args, a => a.Length > 0 && !a.StartsWith('-'));
@@ -1017,10 +1029,22 @@ internal static class Program
          * pointer far enough to notice or pressing a key at all.
          */
         var clickMs = _lastRealClick == 0 ? -1 : Environment.TickCount64 - _lastRealClick;
+        /*
+         * And whether the window in front is Wumpy's own, with the name of
+         * the one a plan would act on instead.
+         *
+         * It usually IS Wumpy's: the user summons the panel, types, and
+         * presses Enter. Nothing said so before, and the consequence was a
+         * plan looking up control names inside Wumpy's own transcript -
+         * plus a guard that read the plan's own first click, which activates
+         * the window it clicked in, as the user coming back to the machine.
+         */
         Console.WriteLine(
             $"GUARD ok hwnd={hwnd.ToInt64()} cursor={at.x},{at.y} keyms={since} " +
             $"clickms={clickMs} click={(_lastClickWhat.Length > 0 ? _lastClickWhat : "none")} " +
             $"mousehook={(_mouseHook == IntPtr.Zero ? "off" : "on")} " +
+            $"own={(UiTree.ForegroundIsOurs() ? "yes" : "no")} " +
+            $"target={Convert.ToBase64String(System.Text.Encoding.UTF8.GetBytes(UiTree.TargetTitle()))} " +
             $"title={Convert.ToBase64String(System.Text.Encoding.UTF8.GetBytes(title.ToString()))}");
     }
 

@@ -2,6 +2,7 @@ import { app, dialog, ipcMain, nativeImage, Tray } from 'electron'
 import { homedir } from 'node:os'
 import { IPC } from '@shared/types'
 import type {
+  Attachment,
   ChatMessage,
   CommandVerdict,
   ShellKind,
@@ -859,28 +860,39 @@ function registerIpc(): void {
    * user presses it, and the image then appears in the transcript so they
    * can see exactly what was sent.
    */
-  ipcMain.handle(IPC.screenCapture, async () => {
+  /**
+   * A photograph, and what everything in it is CALLED.
+   *
+   * One function because both callers need both halves. The second one - the
+   * picture a plan returns - was taking the photograph alone, which meant
+   * every screenshot after the first arrived with no names attached. So the
+   * model was handed a list of controls once, at the start, and then asked to
+   * carry on from pictures; the log of a failed "email Stanley" is ten rounds
+   * of nudged coordinates, which is what a nameless picture leaves it.
+   *
+   * A picture alone makes the model estimate pixels, and an estimate off a
+   * scaled image is wrong identically every time - which is exactly what
+   * "keeps clicking the same place every time" looked like.
+   */
+  async function shotWithNames(): Promise<Attachment> {
     const shot = await captureScreen(panel.liveWindow())
     console.log(`[wumpy] screen captured: ${shot.width}x${shot.height}, ${shot.bytes} bytes`)
-    /*
-     * And what everything on it is CALLED.
-     *
-     * A picture alone makes the model estimate pixels, and an estimate off a
-     * scaled image is wrong identically every time - which is exactly what
-     * "keeps clicking the same place every time" looked like. The names come
-     * from the accessibility tree with real rectangles, so the model can
-     * point at a control instead of a coordinate.
-     */
-    const elements = settings.get('browserEnabled')
+    const named = settings.get('browserEnabled')
       ? await visibleElements((cmd, ms) =>
           lowLevelHook
             ? lowLevelHook.send(cmd, ms)
             : Promise.resolve('ELEMENTS FAILED helper-not-running')
         )
-      : []
-    if (elements.length) console.log(`[wumpy] ${elements.length} named controls on screen`)
-    return { ...shot, elements }
-  })
+      : { elements: [], window: '' }
+    if (named.elements.length) {
+      console.log(
+        `[wumpy] ${named.elements.length} named controls in ${JSON.stringify(named.window || 'an unnamed window')}`
+      )
+    }
+    return { ...shot, elements: named.elements, window: named.window }
+  }
+
+  ipcMain.handle(IPC.screenCapture, async () => shotWithNames())
 
   /**
    * Clicking and typing on the real desktop.
@@ -918,9 +930,7 @@ function registerIpc(): void {
      * look, act, look - the only loop there is.
      */
     const after =
-      result.refused === null && settings.get('screenEnabled')
-        ? await captureScreen(panel.liveWindow())
-        : null
+      result.refused === null && settings.get('screenEnabled') ? await shotWithNames() : null
     return { ...result, problems: plan.problems, after }
   })
 

@@ -79,6 +79,24 @@ export type Step =
    * afterwards.
    */
   | { kind: 'paste'; text: string }
+  /*
+   * Putting text in a named box, and proving it landed. One step.
+   *
+   * The three steps it replaces were the whole failure. From the log of a
+   * real attempt: `click 600,380`, `type "Stanley"`, `key enter` - ten times
+   * over, at ten nudged coordinates, every one of them reporting ok. The
+   * click missed the To field each time, so "Stanley" went to whatever had
+   * the keyboard, and in Gmail an unfocused page reads a letter as a
+   * shortcut: that is where the user's three empty compose windows came
+   * from. The recipient box stayed empty and nothing in the app said so.
+   *
+   * fill is the same intention expressed once: find the box by name, put the
+   * cursor in it, replace what is there, then READ IT BACK and fail if the
+   * text is not in it. A step that cannot prove it worked reports that it
+   * could not, which stops the plan instead of typing the next thing into
+   * the void.
+   */
+  | { kind: 'fill'; name: string; text: string }
 
 export interface Plan {
   /** The `# why` line, for the card. */
@@ -251,6 +269,44 @@ export function readPlan(raw: string): Plan {
       continue
     }
 
+    if (verb === 'fill') {
+      /*
+       * `fill "To recipients" stanley@example.com`
+       *
+       * The name has to be quoted, because a control is called things like
+       * "To recipients" and there is no way to tell where the name stops and
+       * the text starts otherwise. A model that forgets the quotes is told
+       * which half it left out rather than having its first word taken as a
+       * field name and the rest typed into whatever that found.
+       */
+      const quoted = /^(["'])(.+?)\1\s*([\s\S]*)$/.exec(rest)
+      if (!quoted) {
+        problems.push(`fill needs the box's name in quotes, then the text: ${text}`)
+        continue
+      }
+      const name = quoted[2].trim()
+      const value = quoted[3]
+      if (!name) {
+        problems.push(`fill needs the name of a box: ${text}`)
+        continue
+      }
+      if (!value) {
+        problems.push(`fill has nothing to put in "${name}"; use \`focus\` to only put the cursor there`)
+        continue
+      }
+      if (value.length > MAX_PASTE) {
+        problems.push(`fill is longer than ${MAX_PASTE} characters; dropped`)
+        continue
+      }
+      /* Same two-character escapes as paste, since it goes in the same way. */
+      steps.push({
+        kind: 'fill',
+        name,
+        text: value.replace(/\\n/g, NL).replace(/\\t/g, TAB)
+      })
+      continue
+    }
+
     if (verb === 'paste') {
       if (!rest) {
         problems.push(`paste has nothing to paste: ${text}`)
@@ -329,6 +385,10 @@ export function describe(step: Step): string {
       return `Paste ${JSON.stringify(short)}${
         step.text.length > 60 ? ` (${step.text.length} characters)` : ''
       }`
+    }
+    case 'fill': {
+      const short = step.text.length > 60 ? `${step.text.slice(0, 60)}…` : step.text
+      return `Put ${JSON.stringify(short)} in ${JSON.stringify(step.name)} and check it`
     }
     case 'read':
       return `Read ${JSON.stringify(step.name)} back`

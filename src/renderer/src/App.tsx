@@ -21,6 +21,7 @@ import type { PoolView } from '@shared/pool'
 import { looksLikeUrl, SEARCH_ENGINES, type LinkApproval } from '@shared/links'
 import { clippedOutput, commandFeedback } from '@shared/parsefail'
 import { CONTEXT_TOKENS, DEFAULT_MODEL } from '@shared/assistant'
+import { estimateTokens, needsRoom, roomNote, tooBig } from '@shared/pressure'
 import { shouldRetitle } from '@shared/titles'
 import { CLOUD_MODELS, PROVIDERS, seesMedia } from '@shared/cloud'
 import { useChat, nextId, type ChatStats } from './hooks/useChat'
@@ -430,6 +431,24 @@ export default function App(): React.JSX.Element {
   const retitleRef = useRef(retitle)
   retitleRef.current = retitle
 
+  /**
+   * Making room before a result is handed back, for callbacks defined above
+   * the compaction they need.
+   *
+   * A ref rather than the function itself: every automatic hand-back below is
+   * a stable callback with an empty dependency list, and compactHistory is
+   * declared two hundred lines further down. Naming it in a dependency array
+   * up here would read a `const` during the render that initialises it, which
+   * is a crash rather than a warning.
+   *
+   * Returns true when it summarised something, so the caller can say so.
+   */
+  const makeRoomRef = useRef<(() => Promise<boolean>) | null>(null)
+  const makeRoom = useCallback(async (): Promise<boolean> => {
+    const room = makeRoomRef.current
+    return room ? room() : false
+  }, [])
+
   /** The user picked one of the model's options: lock the card and reply with it. */
   const onAnswerQuestion = useCallback((messageId: string, option: string) => {
     const live = chatRef.current
@@ -449,8 +468,9 @@ export default function App(): React.JSX.Element {
 
   /** Hands search results back so the model can answer from them. */
   const onSearchResults = useCallback(
-    (query: string, results: SearchResult[], provider: string, error?: string) => {
+    async (query: string, results: SearchResult[], provider: string, error?: string) => {
       if (!error) record('search', query)
+      await makeRoom()
       const body = error
         ? `The search failed: ${error}`
         : results
@@ -467,7 +487,7 @@ export default function App(): React.JSX.Element {
         `Searched: ${query}`
       )
     },
-    []
+    [makeRoom]
   )
 
   /* ----------------------------------------------------------- the screen */
@@ -484,7 +504,11 @@ export default function App(): React.JSX.Element {
    * given is the picture on the screen in front of them, with no separate
    * path to trust.
    */
-  const onScreenCaptured = useCallback((shot: Attachment) => {
+  const onScreenCaptured = useCallback(async (shot: Attachment) => {
+    /* A photograph is the single most expensive thing in this conversation -
+       roughly 1,100 tokens of it - so this is the hand-back most worth
+       making room for first. */
+    await makeRoom()
     chatRef.current.send(
       [
         'A screenshot was taken automatically and is attached. This was not sent',
@@ -498,7 +522,7 @@ export default function App(): React.JSX.Element {
       [shot],
       true
     )
-  }, [])
+  }, [makeRoom])
 
 /**
  * The names of what is on screen, for the model to press instead of guess.
@@ -511,10 +535,21 @@ export default function App(): React.JSX.Element {
 function namedControls(shot: Attachment): string[] {
   const list = shot.elements ?? []
   if (list.length === 0) return []
+  /*
+   * And WHICH window they are in, because once they were the wrong ones.
+   *
+   * The list is read from the window that has the foreground, and when the
+   * user has just typed into Wumpy that window is Wumpy. A log of a real
+   * attempt shows sixty "controls on screen" that were Wumpy's own
+   * transcript, and then `PRESS FAILED` on an element named
+   * `Press "Inbox - zechariah"` - the text of Wumpy's own card. Saying the
+   * window turns that into something the model can see in one line.
+   */
+  const where = shot.window ? ` in "${shot.window}"` : ''
   return [
     '',
-    `These ${list.length} controls are on screen right now, with their real`,
-    'centres. PRESS one by name rather than guessing a pixel from the picture:',
+    `These ${list.length} controls are on screen right now${where}, with their`,
+    'real centres. PRESS one by name rather than guessing a pixel from the picture:',
     ...list.map((e) => `  ${e.role}: ${JSON.stringify(e.name)}`)
   ]
 }
@@ -534,7 +569,16 @@ function namedControls(shot: Attachment): string[] {
    * picture the model got. A plan that half worked says exactly where it
    * stopped, because that is the only thing the model can correct from.
    */
-  const onDesktopDone = useCallback((result: DesktopResult, after: Attachment | null) => {
+  const onDesktopDone = useCallback(async (result: DesktopResult, after: Attachment | null) => {
+    /*
+     * The loop this was written for.
+     *
+     * A desktop sequence is a dozen of these in a row, each carrying a fresh
+     * photograph, and none of them is a turn the user typed - so before this
+     * one the only compaction triggers were waiting for an Enter that was
+     * never coming and a tray the panel never reached while a plan ran.
+     */
+    await makeRoom()
     const lines = result.refused
       ? [`That did not run: ${result.refused}`]
       : result.ran.map((r) => `${r.ok ? 'did' : 'FAILED'}: ${r.step} (${r.detail})`)
@@ -544,21 +588,30 @@ function namedControls(shot: Attachment): string[] {
     /* The user came back to their machine. Say so plainly, because the
        model's next move should be to look rather than to retry. */
     if (result.stopped) lines.push(result.stopped)
-    chatRef.current.send(
-      [
-        'The plan was carried out automatically. This is a report, not the user',
-        'speaking - they have said nothing. What each step did:',
-        ...lines,
-        after ? 'The attached screenshot is the screen as it is now.' : '',
-        ...(after ? namedControls(after) : [])
-      ]
-        .filter(Boolean)
-        .join(String.fromCharCode(10)),
-      'Ran it on my screen',
-      after ? [after] : undefined,
-      true
-    )
-  }, [])
+    /* Which window it reached into. Wumpy's panel is usually the one in
+       front - the user just typed into it - so the names were looked up
+       somewhere other than the foreground, and that is worth one line. */
+    if (result.acting) {
+      lines.push(
+        `Wumpy's own panel was in front, so the steps acted on the window behind it: "${result.acting}".`
+      )
+    }
+    const report = [
+      'The plan was carried out automatically. This is a report, not the user',
+      'speaking - they have said nothing. What each step did:',
+      ...lines,
+      after ? 'The attached screenshot is the screen as it is now.' : '',
+      ...(after ? namedControls(after) : [])
+    ]
+      .filter(Boolean)
+      .join(String.fromCharCode(10))
+    const sent = chatRef.current.send(report, 'Ran it on my screen', after ? [after] : undefined, true)
+    /* A turn had started in the meantime, so the report would have vanished -
+       and a model that is never told what its own plan did will propose the
+       same steps again. It still reaches it, as a fact rather than a question;
+       the picture is the part that cannot be carried this way. */
+    if (!sent) chatRef.current.notice(report)
+  }, [makeRoom])
 
   /* ------------------------------------------------------------- file writes */
 
@@ -688,10 +741,14 @@ function namedControls(shot: Attachment): string[] {
    * outweigh the whole conversation, and on a 2-8k context window that would
    * push the actual question out of scope.
    */
-  const onCommandResult = useCallback((result: ShellResult, unattended: boolean) => {
+  const onCommandResult = useCallback(async (result: ShellResult, unattended: boolean) => {
     // Recorded by the code that ran it, before anything is interpreted. The
     // model is never asked to remember whether it acted.
     record('command', result.command)
+    /* Room first, for the same reason as every other automatic hand-back: a
+       command's output is a turn nobody typed, so nothing else was going to
+       make room for it. */
+    await makeRoom()
     // Only runs that happened without a click spend the budget; approving one
     // by hand is the person being present, which is what the budget protects.
     // An unattended run already spent its budget when it claimed the slot.
@@ -721,7 +778,7 @@ function namedControls(shot: Attachment): string[] {
         `Ran \`${result.command}\`:\n${clippedOutput(result) || '(no output)'}`
       )
     }
-  }, [])
+  }, [makeRoom])
 
   /* --------------------------------------------------- autosave + compaction */
 
@@ -731,10 +788,20 @@ function namedControls(shot: Attachment): string[] {
    * Memoised because it walks every message, and the panel re-renders on every
    * token: without this, the cost of counting the conversation was paid once
    * per token and grew with the conversation, while the model was generating.
+   *
+   * The pictures are counted too, at what one of this app's captures actually
+   * costs. Before that they were worth nothing here, which was survivable
+   * while a screenshot was a rare thing a user asked for and is not now that
+   * every step of a desktop plan returns one: twelve steps is thirteen
+   * thousand tokens the meter could not see, in the exact loop that fills the
+   * window fastest.
    */
-  const estimateTokens = useMemo(
+  const guessed = useMemo(
     () =>
-      Math.ceil(messages.reduce((n, m) => (m.error || m.local ? n : n + m.content.length), 0) / 4),
+      estimateTokens(
+        messages.reduce((n, m) => (m.error || m.local ? n : n + m.content.length), 0),
+        messages.reduce((n, m) => (m.error || m.local ? n : n + (m.images?.length ?? 0)), 0)
+      ),
     [messages]
   )
 
@@ -753,7 +820,7 @@ function namedControls(shot: Attachment): string[] {
   const usage: ContextUsage = (() => {
     const limit = CONTEXT_TOKENS
     const counted = stats.contextTokens
-    const estimate = estimateTokens
+    const estimate = guessed
     // After a turn lands, the counted value is authoritative. Before the first
     // turn, or after loading a saved chat, fall back to characters.
     if (counted !== null && counted >= estimate * 0.5) {
@@ -761,6 +828,16 @@ function namedControls(shot: Attachment): string[] {
     }
     return { used: estimate, limit, estimated: true }
   })()
+
+  /**
+   * The live figure, for the stable callbacks that hand results back.
+   *
+   * They cannot list `usage` as a dependency - that would rebuild them on
+   * every token - and a closure over the first render's value would compare
+   * today's conversation against an empty one.
+   */
+  const usageRef = useRef(usage)
+  usageRef.current = usage
 
   /**
    * Replaces all but the most recent turns with a model-written summary, so a
@@ -819,6 +896,68 @@ function namedControls(shot: Attachment): string[] {
     },
     [chat]
   )
+
+  /**
+   * Summarising in the middle of a task, which is the one case nothing covered.
+   *
+   * "If the context is above 90% while it's doing something, stop whatever
+   * it's doing, compact, and then continue. Because when it's burst the
+   * context, it can't do anything."
+   *
+   * Every automatic hand-back - a command's output, search results, a
+   * screenshot, the report from a plan - goes through this first. The two
+   * older triggers both needed the user: one fires when they press Enter, the
+   * other when the panel is away in the tray, and a desktop sequence does
+   * neither for a dozen turns while adding a photograph to each one.
+   *
+   * Done, then said. A pause with nothing in the panel explaining it looks
+   * exactly like the app having stopped, which is the thing the compacting
+   * indicator was added for in the first place.
+   */
+  const makeRoomNow = useCallback(async (): Promise<boolean> => {
+    const { used, limit } = usageRef.current
+    if (!(settings?.autoCompact ?? true)) return false
+    if (!needsRoom('auto', used, limit)) return false
+    const done = await compactHistory({ silent: true })
+    if (done) chatRef.current.note(roomNote(used, limit))
+    return done
+  }, [compactHistory, settings])
+  makeRoomRef.current = makeRoomNow
+
+  /**
+   * And the case where even that was too late: the provider refused the turn
+   * because what was sent was too big.
+   *
+   * At that point the conversation is unusable - every retry sends the same
+   * oversized history and fails the same way, which is what "when it's burst
+   * the context, it can't do anything" describes. So the failed pair is
+   * dropped, the history is summarised, and the question is asked again.
+   *
+   * Once per failure, tracked by message id: a compaction that does not shrink
+   * enough would otherwise retry forever, each attempt spending a request.
+   */
+  const retried = useRef(new Set<string>())
+  useEffect(() => {
+    if (streaming) return
+    const failed = messages.findLast((m) => m.error && tooBig(m.error))
+    if (!failed || retried.current.has(failed.id)) return
+    retried.current.add(failed.id)
+    const asked = messages[messages.indexOf(failed) - 1]
+    if (!asked || asked.role !== 'user') return
+    void (async () => {
+      const live = chatRef.current
+      const done = await compactHistory({ silent: true })
+      if (!done) {
+        live.note(
+          'That was too much for one request, and there is not enough history to summarise. Start a new chat with /new.',
+          true
+        )
+        return
+      }
+      live.note('That request was too large, so earlier turns were summarised. Asking again.')
+      live.send(asked.content, undefined, asked.images)
+    })()
+  }, [messages, streaming, compactHistory])
 
   /* --------------------------------------------------------------- commands */
 
@@ -1332,8 +1471,7 @@ function namedControls(shot: Attachment): string[] {
 
       // Compact before sending when the context is filling up, so the model
       // never silently loses the start of the conversation.
-      const budget = CONTEXT_TOKENS * 0.65
-      if ((settings?.autoCompact ?? true) && usage.used > budget) {
+      if ((settings?.autoCompact ?? true) && needsRoom('send', usage.used, usage.limit)) {
         void (async () => {
           const done = await compactHistory({ silent: true })
           if (done) chat.note('Compacted earlier turns to make room.')
@@ -1372,7 +1510,7 @@ function namedControls(shot: Attachment): string[] {
      * state where nobody is looking.
      */
     if (!tucked) return
-    if (usage.used <= CONTEXT_TOKENS * 0.6) return
+    if (!needsRoom('idle', usage.used, usage.limit)) return
     /* A few seconds after it goes away, not twenty: the panel being gone
        is already the evidence that nobody is waiting. */
     const timer = setTimeout(() => {

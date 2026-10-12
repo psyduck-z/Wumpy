@@ -2,7 +2,8 @@ import { clipboard, type BrowserWindow } from 'electron'
 import { log } from './log'
 import { lastShot } from './screen'
 import { describe, onShot, toScreen, type Plan, type Step } from '@shared/steps'
-import { interference, parseGuard, type Guard } from '@shared/guard'
+import { interference, parseGuard, rebase, windowMoved, type Guard } from '@shared/guard'
+import { aimNote, remember, repeats, type Aim } from '@shared/aim'
 
 /**
  * Driving the desktop: the clicks and keystrokes the model asked for.
@@ -62,15 +63,54 @@ function typingIsAimed(steps: readonly Step[]): string | null {
     (s) => s.kind === 'type' || s.kind === 'key' || s.kind === 'paste'
   )
   if (firstType === -1) return null
-  const clickedFirst = steps
+  /*
+   * A NAME counts as aim. A coordinate does not, and that changed because of
+   * what a coordinate turned out to be worth.
+   *
+   * The log of one attempt at "compose an email to Stanley" is ten rounds of
+   * `click 600,380` / `type "Stanley"` / `key enter`, at ten nudged
+   * coordinates, each reporting ok. The clicks missed the recipient box, so
+   * the letters went to whatever had the keyboard - and Gmail reads a letter
+   * on an unfocused page as a shortcut, which is where the user's three
+   * empty compose windows came from. "It composed three things, didn't put
+   * anything inside the sender."
+   *
+   * A click says a point was pressed. It says nothing about what is now
+   * listening to the keyboard. `press`, `focus` and `fill` are lookups
+   * against the accessibility tree, they report which control they chose,
+   * and `fill` reads the box back afterwards - so those are the ones allowed
+   * to be followed by typing.
+   */
+  const aimed = steps
     .slice(0, firstType)
-    .some((s) => s.kind === 'click' || s.kind === 'press')
-  if (clickedFirst) return null
-  return (
-    'This types without clicking anything first, and typed characters go to ' +
-    'whatever window currently holds the keyboard - which is probably not the ' +
-    'one you were looking at. Click the field you mean, then type.'
-  )
+    .some((s) => s.kind === 'press' || s.kind === 'fill')
+  if (aimed) return null
+  const clicked = steps.slice(0, firstType).some((s) => s.kind === 'click')
+  return clicked
+    ? 'This types after a click at a coordinate, which is an estimate off a scaled ' +
+        'screenshot. A click lands a point; it does not tell anyone what now holds the ' +
+        'keyboard, and when it misses, the characters go wherever the keyboard happens ' +
+        'to be - in a web app, where single letters are shortcuts, that is how three ' +
+        'empty compose windows got opened and no recipient got typed. Name the box ' +
+        'instead: `fill "To recipients" stanley@example.com` puts the text in and reads ' +
+        'it back to prove it, and `focus "<name>"` puts the cursor there.'
+    : 'This types without aiming at anything first, and typed characters go to ' +
+        'whatever window currently holds the keyboard - which is probably not the ' +
+        'one you were looking at. Name the box with `fill` or `focus` first.'
+}
+
+/**
+ * Where coordinate clicks have landed lately, so a loop can be seen.
+ *
+ * Module-level on purpose: the retries in the log were in ten SEPARATE plans,
+ * one per turn, so anything scoped to a plan would have seen one click each
+ * time and noticed nothing.
+ */
+let aimHistory: Aim[] = []
+
+/** For the checks, which must not inherit a previous case's clicks. */
+export function forgetAim(): void {
+  aimHistory = []
 }
 
 export interface StepResult {
@@ -81,6 +121,12 @@ export interface StepResult {
 
 export interface PlanResult {
   ran: StepResult[]
+  /**
+   * The window the plan reached past Wumpy to work in, when the panel was
+   * the one in front. Null when the foreground window was the target
+   * already, which is the case the model would assume anyway.
+   */
+  acting?: string | null
   /** Set when nothing ran at all, with the reason. */
   refused: string | null
   /**
@@ -146,14 +192,31 @@ export async function visibleElements(
   send: (command: string, timeoutMs?: number) => Promise<string>,
   limit = 60,
   filter = ''
-): Promise<Array<{ name: string; role: string; x: number; y: number }>> {
+): Promise<{
+  elements: Array<{ name: string; role: string; x: number; y: number }>
+  window: string
+}> {
   const reply = await send(`ELEMENTS ${limit}${filter ? ' ' + filter : ''}`, 8000)
   const at = reply.indexOf('[')
-  if (!reply.startsWith('ELEMENTS ok') || at < 0) return []
+  /*
+   * Which window they came from, so the list can say. The helper reports it
+   * base64-encoded like every other title on this protocol; an older one
+   * reports nothing, and an empty string is handled by the caller.
+   */
+  let window = ''
+  const encoded = /window=(\S*)/.exec(reply)?.[1]
+  if (encoded) {
+    try {
+      window = Buffer.from(encoded, 'base64').toString('utf8')
+    } catch {
+      /* an undecodable title is not worth failing a capture over */
+    }
+  }
+  if (!reply.startsWith('ELEMENTS ok') || at < 0) return { elements: [], window }
   try {
-    return JSON.parse(reply.slice(at))
+    return { elements: JSON.parse(reply.slice(at)), window }
   } catch {
-    return []
+    return { elements: [], window }
   }
 }
 
@@ -214,8 +277,18 @@ export async function runPlan(
    * still runs: a missing guard is a reason to watch less closely, not a
    * reason to refuse something the user asked for.
    */
-  const before = await readGuard(send)
+  let before = await readGuard(send)
   const startedAt = Date.now()
+  /*
+   * Which window the plan is working in, said once at the start.
+   *
+   * It is usually NOT the one in front. The user summons the panel, types
+   * into it, and the panel has the keyboard when the plan runs - so a step
+   * that looks things up by name has to reach past Wumpy to the window
+   * behind it. That was invisible until a log showed a plan pressing a
+   * control inside Wumpy's own card, and it belongs in the report.
+   */
+  const acting = before?.own && before.target ? before.target : null
 
   const ran: StepResult[] = []
   let stopped: string | null = null
@@ -224,6 +297,7 @@ export async function runPlan(
      * Checked before each step rather than after, so the step that would
      * have gone astray is the one that does not happen.
      */
+    let moved: string | null = null
     if (before && ran.length > 0) {
       const now = await readGuard(send)
       const why = now ? interference(before, now, Date.now() - startedAt) : null
@@ -232,12 +306,36 @@ export async function runPlan(
         log(`[do] stopped: ${why}`)
         break
       }
+      /*
+       * The window changed and the user did nothing, so it was us - almost
+       * always the plan's own first click activating the window it clicked
+       * in. This used to end the plan and tell the model the user had come
+       * back; now it is noted and the baseline moves on.
+       */
+      if (now) {
+        moved = windowMoved(before, now)
+        if (moved) log(`[do] ${moved} (ours, carrying on)`)
+        before = rebase(before, now)
+      }
+    }
+
+    /* A click at a point that has been clicked and clicked already. */
+    if (step.kind === 'click' && frame) {
+      const at = toScreen(frame, step.x, step.y)
+      const verdict = aimNote(repeats(aimHistory, at.x, at.y, Date.now()))
+      if (verdict.refuse) {
+        stopped = verdict.note
+        log(`[do] refused a repeated click at ${at.x},${at.y}`)
+        break
+      }
+      aimHistory = remember(aimHistory, { x: at.x, y: at.y, at: Date.now() }, Date.now())
+      if (verdict.note) moved = moved ? `${moved}; ${verdict.note}` : verdict.note
     }
 
     const label = describe(step)
     const reply = await oneStep(step, frame, panel, send)
     const ok = OK.test(reply) || reply === 'waited'
-    ran.push({ step: label, ok, detail: reply })
+    ran.push({ step: label, ok, detail: moved ? `${reply} - ${moved}` : reply })
     log(`[do] ${label} -> ${reply}`)
     if (!ok) break
     if (step.kind !== 'wait') await wait(SETTLE_MS)
@@ -251,10 +349,79 @@ export async function runPlan(
       stopped:
         `Stopped after ${ran.length} of ${plan.steps.length} steps because ${stopped}. ` +
         `${left} step${left === 1 ? '' : 's'} did not run. ` +
-        'Look at the screen again before trying anything else.'
+        'Look at the screen again before trying anything else.',
+      acting
     }
   }
-  return { ran, refused: null, stopped: null }
+  return { ran, refused: null, stopped: null, acting }
+}
+
+/**
+ * Puts text in through the clipboard, and puts the clipboard back.
+ *
+ * Shared by `paste` and `fill`, because the borrowing is the delicate part
+ * and two copies of it would be two places for the restore to go missing.
+ *
+ * Typing is one pair of SendInput events per character - a thousand of them
+ * for an email body, arriving faster than any human types, which a web editor
+ * that debounces its input handler quietly drops some of. A paste lands whole
+ * and carries newlines, which a line-based block cannot express any other way.
+ *
+ * What was in the clipboard goes back afterwards. Text can be put back
+ * exactly; an image cannot be read as text and so cannot be restored, and
+ * that is said in the reply rather than passed over - it is the user's
+ * clipboard and they are entitled to know it changed.
+ */
+async function pasteText(
+  text: string,
+  send: (command: string, timeoutMs?: number) => Promise<string>
+): Promise<{ ok: boolean; note: string; reply: string }> {
+  const hadText = await clipboard.readText()
+  /*
+   * Electron 44's clipboard is the promise-based API and has no
+   * availableFormats, so "it held something that is not text" is asked as a
+   * question about the one format that actually turns up: an image, from a
+   * snip. Asked only when there is no text to restore, because text is the
+   * case that can be put back.
+   */
+  const hadImage = !hadText && (await clipboard.has('image/png').catch(() => false))
+  await clipboard.writeText(text)
+  const reply = await send('KEY ctrl+v', 6000)
+  /* After the paste, or the restore wins the race with it. */
+  await wait(250)
+  if (hadText) await clipboard.writeText(hadText)
+  return {
+    ok: OK.test(reply),
+    reply,
+    note: hadText
+      ? 'clipboard=restored'
+      : hadImage
+        ? 'clipboard=REPLACED (it held an image, which cannot be put back)'
+        : 'clipboard=was-empty'
+  }
+}
+
+/**
+ * What a named control says right now, decoded.
+ *
+ * Shared by `read` and by `fill`'s proof. `text` is null when the helper
+ * could not answer, and then `raw` is its own words - a failure to read is
+ * not the same as a box that is empty, and a fill must never report success
+ * because it could not see.
+ */
+async function readValue(
+  name: string,
+  send: (command: string, timeoutMs?: number) => Promise<string>
+): Promise<{ text: string | null; via: string; raw: string }> {
+  const raw = await send(`VALUE ${Buffer.from(name, 'utf8').toString('base64')}`, 6000)
+  const encoded = /text=(\S*)/.exec(raw)?.[1]
+  const via = /via=(\S+)/.exec(raw)?.[1] ?? '?'
+  if (!raw.startsWith('VALUE ok') || encoded === undefined) return { text: null, via, raw }
+  try {
+    return { text: Buffer.from(encoded, 'base64').toString('utf8'), via, raw }
+  } catch {
+    return { text: null, via, raw }
+  }
 }
 
 async function oneStep(
@@ -309,58 +476,69 @@ async function oneStep(
        * a screenshot is about 1,100 tokens of a free tier and a picture to
        * interpret, where this is the field's own value.
        */
-      const reply = await send(
-        `VALUE ${Buffer.from(step.name, 'utf8').toString('base64')}`,
-        6000
-      )
-      const text = /text=(\S*)/.exec(reply)?.[1]
-      if (!reply.startsWith('VALUE ok') || text === undefined) return reply
-      let shown = ''
-      try {
-        shown = Buffer.from(text, 'base64').toString('utf8')
-      } catch {
-        return reply
+      const back = await readValue(step.name, send)
+      if (back.text === null) return back.raw
+      return `VALUE ok via=${back.via} it says ${JSON.stringify(back.text)}`
+    }
+    case 'fill': {
+      /*
+       * Find the box, put the cursor in it, replace what is there, and read
+       * it back. The reading back is the point.
+       *
+       * Every piece of this existed and the model never assembled it: the
+       * log shows `click`, `type`, `enter`, ten times, with no `focus` and
+       * no `read` anywhere in it. A verb that does the whole thing cannot be
+       * half-done, and a verb that fails when the box is still empty cannot
+       * be mistaken for success - which is what ten "CLICK ok / TYPE ok"
+       * pairs were.
+       */
+      const named = Buffer.from(step.name, 'utf8').toString('base64')
+      const focus = await send(`FOCUS ${named}`, 6000)
+      if (!OK.test(focus)) return `FILL FAILED could not put the cursor in ${JSON.stringify(step.name)}: ${focus}`
+      /*
+       * Did the box actually take the keyboard? A newer helper answers;
+       * an older one does not report it at all, and absence is not a no.
+       *
+       * This is the check that stops the damage rather than noticing it
+       * afterwards. Characters sent at a box that does not have the keyboard
+       * do not vanish - they go to whatever does, and in a web app single
+       * letters are shortcuts.
+       */
+      if (/focused=no\b/.test(focus)) {
+        return (
+          `FILL FAILED ${JSON.stringify(step.name)} did not take the keyboard, so nothing was typed. ` +
+          `(${focus.trim()}) Something else has it - look at the screen and press the window ` +
+          'you mean first.'
+        )
       }
-      const via = /via=(\S+)/.exec(reply)?.[1] ?? '?'
-      return `VALUE ok via=${via} it says ${JSON.stringify(shown)}`
+      /* Select what is there, so the text replaces rather than joins it. */
+      const selected = await send('KEY ctrl+a', 6000)
+      if (!OK.test(selected)) return `FILL FAILED could not select the contents: ${selected}`
+      const put = await pasteText(step.text, send)
+      if (!put.ok) return `FILL FAILED ${put.reply} ${put.note}`
+      /* Long enough for a web editor to have run its input handler. */
+      await wait(250)
+      const back = await readValue(step.name, send)
+      if (back.text === null) {
+        return `FILL sent ok chars=${step.text.length} ${put.note} - but the box could not be read back (${back.raw.trim()}), so this is unproven`
+      }
+      const wanted = step.text.trim()
+      const got = back.text.trim()
+      if (got.includes(wanted) || (wanted.length > 40 && got.startsWith(wanted.slice(0, 40)))) {
+        return `FILL ok ${JSON.stringify(step.name)} now says ${JSON.stringify(back.text)} ${put.note}`
+      }
+      return (
+        `FILL FAILED the text did not land: ${JSON.stringify(step.name)} says ` +
+        `${JSON.stringify(back.text)} (via ${back.via}), not ${JSON.stringify(step.text)}. ` +
+        'The characters went somewhere else. Do not repeat this step blindly - look at ' +
+        'the screen and find the right box by name.'
+      )
     }
     case 'paste': {
-      /*
-       * The clipboard is the user's, and it is borrowed rather than taken.
-       *
-       * Typing is one pair of SendInput events per character - a thousand of
-       * them for an email body, arriving faster than any human types, which
-       * a web editor that debounces its input handler quietly drops some of.
-       * A paste lands whole and carries newlines, which a line-based block
-       * cannot express any other way.
-       *
-       * What was in the clipboard goes back afterwards. Text can be put back
-       * exactly; an image cannot be read as text and so cannot be restored,
-       * and that is said in the reply rather than passed over - it is the
-       * user's clipboard and they are entitled to know it changed.
-       */
-      const hadText = await clipboard.readText()
-      /*
-       * Electron 44's clipboard is the promise-based API and has no
-       * availableFormats, so "it held something that is not text" is asked
-       * as a question about the one format that actually turns up: an image,
-       * from a snip. Asked only when there is no text to restore, because
-       * text is the case that can be put back.
-       */
-      const hadImage = !hadText && (await clipboard.has('image/png').catch(() => false))
-      await clipboard.writeText(step.text)
-      const reply = await send('KEY ctrl+v', 6000)
-      /* After the paste, or the restore wins the race with it. */
-      await wait(250)
-      if (hadText) await clipboard.writeText(hadText)
-      const note = hadText
-        ? 'clipboard=restored'
-        : hadImage
-          ? 'clipboard=REPLACED (it held an image, which cannot be put back)'
-          : 'clipboard=was-empty'
-      return OK.test(reply)
-        ? `PASTE ok chars=${step.text.length} ${note}`
-        : `PASTE FAILED ${reply} ${note}`
+      const put = await pasteText(step.text, send)
+      return put.ok
+        ? `PASTE ok chars=${step.text.length} ${put.note}`
+        : `PASTE FAILED ${put.reply} ${put.note}`
     }
     case 'reveal':
       return send(`REVEAL ${Buffer.from(step.name, 'utf8').toString('base64')}`, 6000)

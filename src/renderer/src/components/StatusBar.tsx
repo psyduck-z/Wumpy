@@ -1,4 +1,5 @@
 import type { ApprovalMode, ContextUsage } from '@shared/types'
+import { MIDTASK_AT, SEND_AT } from '@shared/pressure'
 import type { PoolView } from '@shared/pool'
 import type { ChatStats } from '../hooks/useChat'
 
@@ -27,8 +28,9 @@ function compactTokens(n: number): string {
 }
 
 /**
- * How full the context window is. Turns amber past 65%, which is where
- * auto-compaction kicks in, and red once there is very little room left.
+ * How full the context window is. Turns amber at the percentage where a send
+ * compacts first, and red at the one where even a result handed back by the
+ * app itself stops to make room. Both come from @shared/pressure.
  */
 function ContextMeter({
   usage,
@@ -41,7 +43,10 @@ function ContextMeter({
   // app entirely, naming a backend that is no longer there. Whichever
   // provider is configured reports these counts now.
   const pct = Math.min(100, (usage.used / usage.limit) * 100)
-  const level = pct >= 90 ? 'is-critical' : pct >= 65 ? 'is-warn' : ''
+  /* The same two numbers the compaction uses, imported rather than typed
+     again: a meter that turns amber at a different percentage from the one
+     that acts is a meter that lies about what is about to happen. */
+  const level = pct >= MIDTASK_AT * 100 ? 'is-critical' : pct >= SEND_AT * 100 ? 'is-warn' : ''
 
   return (
     <button

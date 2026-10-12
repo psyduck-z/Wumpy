@@ -148,10 +148,18 @@ const inputSrc = readFileSync('src/main/input.ts', 'utf8')
 check('a plan that types without clicking is refused', /typingIsAimed/.test(inputSrc), true)
 check('and the refusal runs before any step does', inputSrc.indexOf('typingIsAimed(plan.steps)') < inputSrc.indexOf('for (const step of plan.steps)'), true)
 check('a key press counts as typing too', /s\.kind === 'type' \|\| s\.kind === 'key'/.test(inputSrc), true)
-check('a click satisfies it', /s\.kind === 'click' \|\| s\.kind === 'press'/.test(inputSrc), true)
-/* Pressing by name focuses the control, so it aims the keyboard too - and
-   it is the route the model should prefer, so it must not be refused. */
-check('and so does pressing a named control', /s\.kind === 'press'/.test(inputSrc), true)
+/*
+ * A COORDINATE CLICK NO LONGER SATISFIES IT, and that is the whole lesson of
+ * the Gmail log: ten rounds of `click 620 380` / `type "Stanley"`, every one
+ * reporting ok, every one missing the recipient box - so the letters became
+ * Gmail keyboard shortcuts and opened three empty compose windows.
+ *
+ * Pressing by name focuses the control and says which one it chose, so that
+ * still aims the keyboard. fill goes further and reads the box back.
+ */
+check('a bare click no longer aims the keyboard', /s\.kind === 'press' \|\| s\.kind === 'fill'/.test(inputSrc), true)
+check('and the refusal names fill as the way to do it', /fill "To recipients"/.test(inputSrc), true)
+check('and says why, in the words it was reported in', /empty compose windows/.test(inputSrc), true)
 
 /* ------------------------------------------------------------ the wiring */
 
@@ -169,7 +177,17 @@ check('every point is checked before anything runs', /for \(const step of plan\.
 check('a failed step stops the rest', /if \(!ok\) break/.test(input), true)
 check('the panel is made click-through', /setIgnoreMouseEvents\(true\)/.test(input), true)
 check('and put back afterwards', /finally[\s\S]{0,80}setIgnoreMouseEvents\(false\)/.test(input), true)
-check('a fresh screenshot follows every plan', /captureScreen\(panel\.liveWindow\(\)\)[\s\S]{0,40}: null/.test(main), true)
+check('a fresh screenshot follows every plan', /settings\.get\('screenEnabled'\) \? await shotWithNames\(\) : null/.test(main), true)
+/*
+ * And it carries the control names, which it did not.
+ *
+ * The capture handler collected the names; the one a plan returns called
+ * captureScreen directly, so every picture after the first arrived nameless -
+ * which leaves a model nothing to press BY name and is why the log is full of
+ * nudged coordinates. One function now does both halves.
+ */
+check('and names what is in it', /async function shotWithNames\(\)/.test(main), true)
+check('both callers use it', (main.match(/shotWithNames\(\)/g) ?? []).length >= 3, true)
 
 /*
  * The prompt must insist on looking between steps. Without that habit the
@@ -183,10 +201,14 @@ check('it says to look again between steps', /LOOK AGAIN BETWEEN STEPS/.test(des
 check('it says coordinates are the screenshot you saw', /pixels in the SCREENSHOT/.test(desktop), true)
 check('it stops at passwords', /password/i.test(desktop), true)
 check('and forbids the old refusal outright', /Never say you cannot reach their browser/.test(desktop), true)
-check('and the prompt says to aim before typing', /AIM BEFORE YOU TYPE/.test(desktop), true)
+check('and the prompt says a click is not aim', /A CLICK IS NOT AIM/.test(desktop), true)
+check('it gives fill as the way to fill a box', /FILL IS HOW TEXT GETS INTO A BOX/.test(desktop), true)
+check('with the example that failed', /fill "To recipients" stanley@example\.com/.test(desktop), true)
+check('and it says not to open a second compose', /ONE COMPOSE WINDOW/.test(desktop), true)
+check('the control list names its window', /WHICH WINDOW it came from/.test(desktop), true)
 check('the prompt leads on pressing by name', /PRESS BY NAME\. NOT BY PIXEL\./.test(desktop), true)
-check('it explains why a repeated miss repeats', /SAME way every time/.test(desktop), true)
-check('and forbids re-clicking a coordinate that did nothing', /do NOT[\s\S]{0,20}click it again/.test(desktop), true)
+check('it explains why a repeated miss repeats', /SAME way[\s\S]{0,6}every time/.test(desktop), true)
+check('and says a fourth click at the same spot is refused', /A fourth[\s\S]{0,20}click at the same spot is refused/.test(desktop), true)
 check('coordinates are demoted to last resort', /last resort/.test(desktop), true)
 
 /* ------------------------------------------- pressing by name, not pixel */
@@ -285,10 +307,50 @@ const GUARD_LINE =
   })
   const before = at({})
   check('an untouched machine does not stop a plan', G.interference(before, at({}), 500), null)
+  /*
+   * A CHANGED WINDOW NO LONGER STOPS IT, which is the fix for the thing that
+   * made every plan unfinishable. From the log, one millisecond apart:
+   *
+   *   [18:30:21.163] [do] Click at 600, 380 -> CLICK ok
+   *   [18:30:21.352] [do] stopped: the foreground window changed to
+   *                       "Inbox - ... Gmail ... - Microsoft Edge Dev"
+   *
+   * The plan's own click activated the window it clicked in, and the guard
+   * read that as the user coming back. Our clicks are filtered out of the
+   * key and click clocks, so "the window moved and the user did nothing" is
+   * this app's own doing.
+   */
   check(
-    'a changed window stops it',
+    'a changed window alone does not stop it',
     G.interference(before, at({ hwnd: '2', title: 'Notepad' }), 500),
-    'the foreground window changed to "Notepad"'
+    null
+  )
+  check(
+    'it is reported instead',
+    G.windowMoved(before, at({ hwnd: '2', title: 'Notepad' })),
+    'the foreground window is now "Notepad"'
+  )
+  check('and the same window is not news', G.windowMoved(before, at({})), null)
+  check(
+    'the baseline moves with it',
+    G.rebase(before, at({ hwnd: '2', title: 'Notepad', cursorX: 900 })).hwnd,
+    '2'
+  )
+  /* But never the user's own clocks: a plan cannot forgive itself for a
+     keystroke they made while it was running. */
+  check(
+    'but never their keyboard',
+    G.rebase(at({ keyMs: -1 }), at({ hwnd: '2', keyMs: 10 })).keyMs,
+    -1
+  )
+  check(
+    'and a rebased plan still stops for them',
+    G.interference(
+      G.rebase(before, at({ hwnd: '2', title: 'Notepad' })),
+      at({ hwnd: '2', title: 'Notepad', keyMs: 100 }),
+      500
+    ),
+    'you typed something'
   )
   check(
     'a keystroke of theirs stops it',
@@ -326,12 +388,12 @@ const GUARD_LINE =
     null
   )
   check('the pointer has some slack', G.POINTER_SLACK > 10, true)
-  /* The window is checked before the keyboard: a plan that has lost its
-     window should say so, not blame the user for typing. */
+  /* With the window out of it, the user's own keyboard is the first thing
+     named - it is the most specific evidence that they are back. */
   check(
-    'the most specific reason wins',
+    'their keyboard is named first',
     G.interference(before, at({ hwnd: '3', title: 'Other', keyMs: 1, clickMs: 1 }), 500),
-    'the foreground window changed to "Other"'
+    'you typed something'
   )
 }
 
@@ -414,7 +476,11 @@ check(
 
 /* Reading a control back does not need a picture, so it must not demand one. */
 check('read does not require a screenshot', /s.kind === 'click' \|\| s.kind === 'move'/.test(inputSrc), true)
-check('a read decodes what came back', /it says \$\{JSON\.stringify\(shown\)\}/.test(inputSrc), true)
+check('a read decodes what came back', /it says \$\{JSON\.stringify\(back\.text\)\}/.test(inputSrc), true)
+/* A read that failed must not come back as an empty box: fill decides whether
+   the text landed by comparing what the box says, and "could not read it" has
+   to be a third answer rather than "it says nothing". */
+check('and a read that failed says so instead', /return \{ text: null, via, raw \}/.test(inputSrc), true)
 check('a scroll at a point needs the frame', /SCROLL FAILED no-screenshot/.test(inputSrc), true)
 check('and without one it uses the pointer', /cannot-find-the-pointer/.test(inputSrc), true)
 
@@ -471,8 +537,11 @@ const BS = String.fromCharCode(92)
 
 /* Pasting is typing: it must still be aimed at something first. */
 check('an unaimed paste is refused like an unaimed type', /s\.kind === 'paste'/.test(inputSrc), true)
-check('the clipboard is read before it is written', inputSrc.indexOf('clipboard.readText()') < inputSrc.indexOf('clipboard.writeText(step.text)'), true)
+check('the clipboard is read before it is written', inputSrc.indexOf('clipboard.readText()') < inputSrc.indexOf('clipboard.writeText(text)'), true)
 check('and put back after the paste', /await wait\(250\)[\s\S]{0,80}clipboard\.writeText\(hadText\)/.test(inputSrc), true)
+/* One copy of the borrowing, used by both paste and fill: two would be two
+   places for the restore to go missing. */
+check('fill and paste share the clipboard dance', (inputSrc.match(/pasteText\(/g) ?? []).length >= 3, true)
 check('the reply says what happened to it', /clipboard=restored/.test(inputSrc), true)
 check('an image cannot be put back, and that is said', /clipboard=REPLACED/.test(inputSrc), true)
 check('the guideline says when to paste and when to type', /PASTE ANYTHING LONG/.test(desktop), true)
@@ -533,7 +602,9 @@ const guardLine = guardSrc.split(NL).find((l) => l.includes('GUARD ok hwnd=')) ?
 check('the strict pattern stops at keyms', guardLine.includes('keyms='), true)
 check('and does not demand the new fields', guardLine.includes('clickms'), false)
 check('which are read on their own', guardSrc.includes('/clickms=(-?'), true)
-check('along with the title', guardSrc.includes('const title64 = /title='), true)
+check('along with the title', guardSrc.includes("const title = decode('title')"), true)
+check('and the window a plan would act on', guardSrc.includes("decode('target')"), true)
+check('and whether the panel is the one in front', guardSrc.includes('own=yes'), true)
 check('a click of theirs stops a plan', /you clicked something/.test(guardSrc), true)
 check('a scroll of theirs too', /you scrolled/.test(guardSrc), true)
 check('the model is told clicks stop it', /CLICKED something/.test(desktop), true)
@@ -541,9 +612,108 @@ check('the model is told clicks stop it', /CLICKED something/.test(desktop), tru
 /* ------------------------------------------------- what the guideline says */
 
 check('the guideline offers read', /read "<name>"/.test(desktop), true)
-check('and says why, not just how', /did my typing land in the right place/.test(desktop), true)
-check('it mentions the cost of a picture', /free quota is finite/.test(desktop), true)
+check('and says why, not just how', /did my typing land in the[\s\S]{0,12}right place/.test(desktop), true)
+check('it mentions the cost of a picture', /free[\s\S]{0,20}quota is finite/.test(desktop), true)
 check('reveal is preferred over the wheel', /prefer reveal/.test(desktop), true)
+
+/* -------------------------------------------------- fill: the whole point */
+
+/*
+ * One step that finds the box, replaces its contents and proves it.
+ *
+ * It exists because the three steps it replaces were the failure. The log of
+ * a real "email Stanley" is `click 620 380`, `type "Stanley"`, `key enter`,
+ * ten times at ten nudged coordinates, every one reporting ok - and the
+ * user's side of it was three empty drafts with no recipient.
+ */
+{
+  const p = plan('# address it', 'fill "To recipients" stanley@example.com')
+  check('fill parses', kinds(p), ['fill'])
+  check('and keeps the name and the text apart', [p.steps[0].name, p.steps[0].text], [
+    'To recipients',
+    'stanley@example.com'
+  ])
+  check(
+    'the name may hold spaces and punctuation',
+    plan('fill "To recipients, Press Delete to remove" x').steps[0]?.name,
+    'To recipients, Press Delete to remove'
+  )
+  check(
+    'a newline is two characters here as well',
+    plan(`fill "Message body" Hi${BS}nthere`).steps[0]?.text.includes(NL),
+    true
+  )
+  check('an unquoted name is refused rather than guessed at', plan('fill To recipients x').steps.length, 0)
+  check('and says which half is missing', /name in quotes/.test(plan('fill To x').problems[0] ?? ''), true)
+  check('nothing to put in it is not a fill', plan('fill "Subject"').steps.length, 0)
+  check('and it points at focus instead', /focus/.test(plan('fill "Subject"').problems[0] ?? ''), true)
+  check('a book is not a fill', plan(`fill "Body" ${'x'.repeat(S.MAX_PASTE + 1)}`).steps.length, 0)
+  check('the card says what it will do', S.describe(p.steps[0]), 'Put "stanley@example.com" in "To recipients" and check it')
+  check('and fill aims the keyboard for what follows', plan('fill "To" a', 'key tab').steps.length, 2)
+}
+
+check('fill focuses, selects, pastes and reads back', /FOCUS \$\{named\}[\s\S]{0,2000}KEY ctrl\+a[\s\S]{0,400}pasteText[\s\S]{0,400}readValue/.test(inputSrc), true)
+check('a focus that did not take stops it', /focused=no/.test(inputSrc), true)
+check('and nothing is typed in that case', /did not take the keyboard, so nothing was typed/.test(inputSrc), true)
+check('a box that still says the wrong thing is a failure', /FILL FAILED the text did not land/.test(inputSrc), true)
+check('and an unreadable box is neither', /so this is unproven/.test(inputSrc), true)
+
+/* ------------------------------------------- the same pixel, over and over */
+
+const AIM = await load('src/shared/aim.ts', 'aim')
+{
+  const now = 1_000_000
+  const history = [
+    { x: 700, y: 400, at: now - 1000 },
+    { x: 710, y: 405, at: now - 2000 },
+    { x: 1200, y: 400, at: now - 3000 },
+    { x: 700, y: 400, at: now - 10 * 60_000 }
+  ]
+  check('two nearby clicks count as the same place', AIM.repeats(history, 705, 402, now), 2)
+  check('a different place does not', AIM.repeats(history, 300, 300, now), 0)
+  check('and one from ten minutes ago is forgotten', AIM.repeats(history, 700, 400, now) < 3, true)
+  check('the first time is not worth mentioning', AIM.aimNote(0).note, null)
+  check('the third is', /3rd click at this same point/.test(AIM.aimNote(2).note ?? ''), true)
+  check('and it is still allowed', AIM.aimNote(2).refuse, false)
+  check('the fourth is refused', AIM.aimNote(AIM.TOO_MANY).refuse, true)
+  check('with the alternative named', /press "<name>"/.test(AIM.aimNote(AIM.TOO_MANY).note), true)
+  check('stale clicks are dropped as they are remembered', AIM.remember(history, { x: 1, y: 1, at: now }, now).length, 4)
+}
+check('the plan runner refuses a repeated click', /aimNote\(repeats\(aimHistory/.test(inputSrc), true)
+/* Across plans, not within one: the ten retries in the log were ten separate
+   turns, so anything scoped to a plan would have seen one click each time. */
+check('and remembers them across plans', /^let aimHistory/m.test(inputSrc), true)
+
+/* --------------------------------------- never acting on Wumpy's own panel */
+
+/*
+ * The bug under all of it. The panel has the keyboard when a plan starts -
+ * the user just typed into it - so a lookup against the foreground window
+ * searched Wumpy's own transcript. From the log:
+ *
+ *   PRESS FAILED InvalidOperationException
+ *     name=UHJlc3MgIkluYm94IC0gemVjaGFyaWFoIg==  role=ListItem at=1698,547
+ *
+ * which decodes to `Press "Inbox - zechariah"` - the text of Wumpy's own
+ * step card, at the coordinates of the panel.
+ */
+check('the helper knows which process is Wumpy', /public static uint Owner/.test(uia), true)
+check('and the app tells it', /UiTree\.Owner = grantPid/.test(hook), true)
+check('a lookup never uses the foreground blindly', /var root = ForegroundTree\(\)/.test(uia), false)
+check('it acts on the window a plan should act on', (uia.match(/var root = TargetTree\(\)/g) ?? []).length, 4)
+check('which is never one of ours', /if \(Ours\(next\)/.test(uia), true)
+check('and is found by walking the z-order', /GW_HWNDNEXT/.test(uia), true)
+check('tool windows and tooltips are skipped', /WS_EX_TOOLWINDOW/.test(uia), true)
+check('the elements reply names its window', uia.includes('window={Encode(TargetTitle())}'), true)
+check('and the model is shown that name', /in "\$\{shot\.window\}"/.test(readFileSync('src/renderer/src/App.tsx', 'utf8')), true)
+check('a focus is verified, not assumed', /HasKeyboardFocus/.test(uia), true)
+check('and reported either way', /focused=\{TakeFocus\(el\)\}/.test(uia), true)
+check('the window is activated before giving up', /SetForegroundWindow\(hwnd\)/.test(uia), true)
+check(
+  'the report says which window the steps acted on',
+  /acted on the window behind it/.test(readFileSync('src/renderer/src/App.tsx', 'utf8')),
+  true
+)
 
 console.log(`${NL}${count - failed}/${count} desktop checks passed`)
 if (failed) process.exit(1)

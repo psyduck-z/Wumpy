@@ -122,6 +122,12 @@ export interface DesktopResult {
    * using the machine, or the window it was aiming at went away.
    */
   stopped: string | null
+  /**
+   * The window the plan worked in when it was not the one in front - which
+   * is the normal case, because the panel holds the keyboard while the user
+   * is talking to it. Null when there was nothing to say.
+   */
+  acting?: string | null
   /** Lines in the block that were not steps. */
   problems: string[]
   /** The screen afterwards, so the model can see what it did. */
@@ -225,6 +231,19 @@ export interface Attachment {
    * mistake it can correct and the same wrong click forever.
    */
   elements?: Array<{ name: string; role: string; x: number; y: number }>
+  /**
+   * Which window those names came from.
+   *
+   * Added because they once came from the wrong one and nothing said so. The
+   * panel is normally the window in front when a screenshot is taken - the
+   * user has just typed into it - and the list was read from whatever had
+   * the foreground, so the model was handed sixty controls out of Wumpy's own
+   * transcript and told they were what was on screen. It then pressed one of
+   * them: `PRESS FAILED` on an element named `Press "Inbox - zechariah"`,
+   * which is the text of Wumpy's own card. Naming the window makes that
+   * kind of mistake visible in one line instead of ten turns.
+   */
+  window?: string
 }
 
 export interface SearchResult {

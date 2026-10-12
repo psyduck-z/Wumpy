@@ -27,6 +27,22 @@ export interface Guard {
   clickMs: number
   /** What that was: "left-click", "wheel", or "none". */
   clickWhat: string
+  /**
+   * True when the window in front is one of Wumpy's own.
+   *
+   * It usually is, at the moment a plan starts: the user summoned the panel
+   * and typed into it, so the panel has the keyboard. That was invisible
+   * before, and it is why a plan once pressed a control in Wumpy's own card
+   * instead of in Gmail.
+   */
+  own: boolean
+  /**
+   * The window a named step will actually act on - the one the user was last
+   * in, which is Wumpy's panel only when there is nothing behind it.
+   *
+   * Empty from an older helper, which is why nothing here requires it.
+   */
+  target: string
 }
 
 /**
@@ -42,13 +58,16 @@ export interface Guard {
 export function parseGuard(reply: string): Guard | null {
   const m = /^GUARD ok hwnd=(-?\d+) cursor=(-?\d+),(-?\d+) keyms=(-?\d+)/.exec(reply)
   if (!m) return null
-  const title64 = /title=(\S*)/.exec(reply)?.[1] ?? ''
-  let title = ''
-  try {
-    title = Buffer.from(title64, 'base64').toString('utf8')
-  } catch {
-    /* a title we cannot decode is not a reason to refuse to act */
+  const decode = (field: string): string => {
+    const raw = new RegExp(`${field}=(\\S*)`).exec(reply)?.[1] ?? ''
+    try {
+      return Buffer.from(raw, 'base64').toString('utf8')
+    } catch {
+      /* a title we cannot decode is not a reason to refuse to act */
+      return ''
+    }
   }
+  const title = decode('title')
   return {
     hwnd: m[1],
     title,
@@ -56,7 +75,11 @@ export function parseGuard(reply: string): Guard | null {
     cursorY: Number(m[3]),
     keyMs: Number(m[4]),
     clickMs: Number(/clickms=(-?\d+)/.exec(reply)?.[1] ?? -1),
-    clickWhat: /\bclick=(\S+)/.exec(reply)?.[1] ?? 'none'
+    clickWhat: /\bclick=(\S+)/.exec(reply)?.[1] ?? 'none',
+    own: /\bown=yes\b/.test(reply),
+    /* Falls back to the foreground title, so a helper that does not report a
+       target still names a window rather than nothing. */
+    target: decode('target') || title
   }
 }
 
@@ -81,10 +104,6 @@ export const POINTER_SLACK = 40
  * window arrived in the meantime is not.
  */
 export function interference(before: Guard, now: Guard, elapsedMs: number): string | null {
-  if (now.hwnd !== before.hwnd) {
-    const went = now.title.trim()
-    return `the foreground window changed${went ? ` to "${went}"` : ''}`
-  }
   /* keyMs counts back from now, so a value under the plan's age is a
      keystroke made since it started - and ours are never counted. */
   if (now.keyMs >= 0 && now.keyMs < elapsedMs) return 'you typed something'
@@ -103,4 +122,52 @@ export function interference(before: Guard, now: Guard, elapsedMs: number): stri
   const moved = Math.hypot(now.cursorX - before.cursorX, now.cursorY - before.cursorY)
   if (moved > POINTER_SLACK) return 'the mouse moved'
   return null
+}
+
+/**
+ * The foreground window is not the same one. Did WE do that?
+ *
+ * Almost always, and it took a log file to see it. From a real attempt at
+ * "compose an email to Stanley":
+ *
+ *   [18:30:21.163] [do] Click at 600, 380 -> CLICK ok
+ *   [18:30:21.164] [panel] blur
+ *   [18:30:21.352] [do] stopped: the foreground window changed to
+ *                       "Inbox - ... Gmail ... - Microsoft Edge Dev"
+ *
+ * One click, one millisecond apart. Wumpy's panel had the keyboard because
+ * the user had just typed into it; the plan's own first click activated the
+ * browser; and the guard read that as the user coming back and threw the
+ * rest of the plan away - with a message telling the model the screen was no
+ * longer where it left it. Every plan that reaches outside the panel does
+ * this, which is every plan there is. Nine retries follow in that log.
+ *
+ * So the window is no longer evidence on its own. The user's own keyboard
+ * and mouse are - those are filtered for injection, so ours never count -
+ * and they are what interference() asks about. A window change with no
+ * keystroke and no click behind it is this app's doing, and the honest
+ * response is to say which window it is now on and carry on.
+ */
+export function windowMoved(before: Guard, now: Guard): string | null {
+  if (now.hwnd === before.hwnd) return null
+  const went = now.title.trim()
+  return `the foreground window is now${went ? ` "${went}"` : ' something else'}`
+}
+
+/**
+ * A new baseline after a step of our own moved things.
+ *
+ * Only what we are allowed to have changed: the window and the pointer. The
+ * user-activity clocks are read fresh from the helper every time and count
+ * back from now, so they are never rebased - a plan cannot forgive itself for
+ * a keystroke the user made.
+ */
+export function rebase(before: Guard, now: Guard): Guard {
+  return {
+    ...before,
+    hwnd: now.hwnd,
+    title: now.title,
+    cursorX: now.cursorX,
+    cursorY: now.cursorY
+  }
 }

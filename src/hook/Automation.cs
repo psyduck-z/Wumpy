@@ -39,19 +39,134 @@ internal static class UiTree
 
     private sealed record Found(string Name, string Role, int X, int Y, int W, int H, bool Invokable);
 
-    /// <summary>The foreground window, which is the one the user is looking at.</summary>
-    private static AutomationElement? ForegroundTree()
+    /// <summary>
+    /// Wumpy's own process id, so its own windows can be told apart from the
+    /// user's. Set from --grant-foreground, which the app already passes.
+    /// </summary>
+    public static uint Owner { get; set; }
+
+    /// <summary>The last window we looked at that was not Wumpy's.</summary>
+    private static IntPtr _lastForeign;
+
+    /// <summary>Is this one of Wumpy's own windows?</summary>
+    private static bool Ours(IntPtr hwnd)
     {
-        var hwnd = NativeForeground();
+        if (Owner == 0 || hwnd == IntPtr.Zero) return false;
+        GetWindowThreadProcessId(hwnd, out var pid);
+        return pid == Owner;
+    }
+
+    /// <summary>
+    /// The window a plan should act on - which is usually NOT the one in front.
+    ///
+    /// This is the bug that made the whole press-by-name feature look broken.
+    /// The user summons the panel, types "go to my Gmail tab and click
+    /// compose", and presses Enter: at that moment WUMPY has the foreground,
+    /// so a lookup against the foreground window searches Wumpy's own
+    /// transcript. From the log of a real attempt:
+    ///
+    ///   PRESS FAILED InvalidOperationException
+    ///     name=UHJlc3MgIkluYm94IC0gemVjaGFyaWFoIg==  role=ListItem at=1698,547
+    ///
+    /// Decoded, that name is `Press "Inbox - zechariah"` - the text of
+    /// Wumpy's own step card, at 1698,547, which is where the panel is. It
+    /// found its own user interface and pressed that. The next attempt hit
+    /// `element-vanished` for the same reason: the card re-rendered.
+    ///
+    /// The model was also handed those controls as "what is on screen" - 60
+    /// of them, out of Wumpy's transcript - so it had no real names to use
+    /// and fell back to estimating pixels off the screenshot, which is the
+    /// ten-nudged-clicks loop in the same log. "It composed three things,
+    /// didn't put anything inside the sender."
+    ///
+    /// So: never Wumpy. If the foreground belongs to this app, walk down the
+    /// Z-order for the first real window underneath it, which is the one the
+    /// user was in before they summoned the panel.
+    /// </summary>
+    private static IntPtr Target()
+    {
+        var fg = GetForegroundWindow();
+        if (fg != IntPtr.Zero && !Ours(fg))
+        {
+            _lastForeign = fg;
+            return fg;
+        }
+
+        for (var next = GetWindow(fg, GW_HWNDNEXT); next != IntPtr.Zero; next = GetWindow(next, GW_HWNDNEXT))
+        {
+            if (Ours(next) || !IsWindowVisible(next) || IsIconic(next)) continue;
+            /* Tool windows are palettes and tooltips, not places to click. */
+            if ((GetWindowLong(next, GWL_EXSTYLE) & WS_EX_TOOLWINDOW) != 0) continue;
+            if (GetWindowTextLength(next) == 0) continue;
+            _lastForeign = next;
+            return next;
+        }
+
+        /* Nothing underneath: the last real window we saw, or - if there has
+           never been one - the foreground, even if that is Wumpy. Acting on
+           the panel is wrong, and refusing to answer at all is worse. */
+        if (_lastForeign != IntPtr.Zero && IsWindow(_lastForeign)) return _lastForeign;
+        return fg;
+    }
+
+    /// <summary>The title of the window a plan would act on, for the report.</summary>
+    public static string TargetTitle()
+    {
+        var hwnd = Target();
+        if (hwnd == IntPtr.Zero) return string.Empty;
+        var text = new StringBuilder(256);
+        GetWindowText(hwnd, text, text.Capacity);
+        return text.ToString();
+    }
+
+    /// <summary>True when the window in front belongs to Wumpy itself.</summary>
+    public static bool ForegroundIsOurs() => Ours(GetForegroundWindow());
+
+    /// <summary>
+    /// The accessibility tree of the window to act on.
+    ///
+    /// Named for what it is rather than for the foreground, because those
+    /// stopped being the same thing the moment this app grew a window of its
+    /// own that takes the keyboard.
+    /// </summary>
+    private static AutomationElement? TargetTree()
+    {
+        var hwnd = Target();
         if (hwnd == IntPtr.Zero) return null;
         try { return AutomationElement.FromHandle(hwnd); }
         catch { return null; }
     }
 
+    private const uint GW_HWNDNEXT = 2;
+    private const int GWL_EXSTYLE = -20;
+    private const int WS_EX_TOOLWINDOW = 0x00000080;
+
     [System.Runtime.InteropServices.DllImport("user32.dll")]
     private static extern IntPtr GetForegroundWindow();
 
-    private static IntPtr NativeForeground() => GetForegroundWindow();
+    [System.Runtime.InteropServices.DllImport("user32.dll")]
+    private static extern uint GetWindowThreadProcessId(IntPtr hWnd, out uint processId);
+
+    [System.Runtime.InteropServices.DllImport("user32.dll")]
+    private static extern IntPtr GetWindow(IntPtr hWnd, uint command);
+
+    [System.Runtime.InteropServices.DllImport("user32.dll")]
+    private static extern bool IsWindowVisible(IntPtr hWnd);
+
+    [System.Runtime.InteropServices.DllImport("user32.dll")]
+    private static extern bool IsIconic(IntPtr hWnd);
+
+    [System.Runtime.InteropServices.DllImport("user32.dll")]
+    private static extern bool IsWindow(IntPtr hWnd);
+
+    [System.Runtime.InteropServices.DllImport("user32.dll", EntryPoint = "GetWindowLongW")]
+    private static extern int GetWindowLong(IntPtr hWnd, int index);
+
+    [System.Runtime.InteropServices.DllImport("user32.dll", EntryPoint = "GetWindowTextLengthW")]
+    private static extern int GetWindowTextLength(IntPtr hWnd);
+
+    [System.Runtime.InteropServices.DllImport("user32.dll", EntryPoint = "GetWindowTextW", CharSet = System.Runtime.InteropServices.CharSet.Unicode)]
+    private static extern int GetWindowText(IntPtr hWnd, StringBuilder text, int count);
 
     private static List<Found> Collect(AutomationElement root, int limit, bool includeOffscreen = false)
     {
@@ -116,10 +231,10 @@ internal static class UiTree
     /// </summary>
     public static void Elements(string filter, int limit)
     {
-        var root = ForegroundTree();
+        var root = TargetTree();
         if (root is null)
         {
-            Console.WriteLine("ELEMENTS FAILED no-foreground-window");
+            Console.WriteLine("ELEMENTS FAILED no-window-to-act-on");
             return;
         }
 
@@ -150,7 +265,11 @@ internal static class UiTree
             w = f.W,
             h = f.H
         }));
-        Console.WriteLine($"ELEMENTS ok count={ordered.Count} total={found.Count} {json}");
+        /* Which window they came from, because once they came from Wumpy's
+           own and nothing in the reply said so. The model is shown this. */
+        Console.WriteLine(
+            $"ELEMENTS ok count={ordered.Count} total={found.Count} " +
+            $"window={Encode(TargetTitle())} {json}");
     }
 
     /// <summary>
@@ -180,10 +299,10 @@ internal static class UiTree
     /// </summary>
     public static void Press(string want, bool focusOnly, string verb)
     {
-        var root = ForegroundTree();
+        var root = TargetTree();
         if (root is null)
         {
-            Console.WriteLine($"{verb} FAILED no-foreground-window");
+            Console.WriteLine($"{verb} FAILED no-window-to-act-on");
             return;
         }
 
@@ -215,8 +334,7 @@ internal static class UiTree
              */
             if (focusOnly || chosen.Role is "Edit" or "ComboBox" or "Document")
             {
-                el.SetFocus();
-                Console.WriteLine($"{verb} ok via=focus {what}");
+                Console.WriteLine($"{verb} ok via=focus {what} focused={TakeFocus(el)}");
                 return;
             }
             if (chosen.Invokable && el.TryGetCurrentPattern(InvokePattern.Pattern, out var pattern))
@@ -225,8 +343,7 @@ internal static class UiTree
                 Console.WriteLine($"{verb} ok via=invoke {what}");
                 return;
             }
-            el.SetFocus();
-            Console.WriteLine($"{verb} ok via=focus-fallback {what}");
+            Console.WriteLine($"{verb} ok via=focus-fallback {what} focused={TakeFocus(el)}");
         }
         catch (Exception ex)
         {
@@ -235,6 +352,54 @@ internal static class UiTree
             Console.WriteLine($"{verb} FAILED {ex.GetType().Name} {what}");
         }
     }
+
+    /// <summary>
+    /// Puts the keyboard in a control, and says whether it actually went there.
+    ///
+    /// SetFocus returning without throwing is not evidence. The caller is
+    /// about to send characters, and characters go to whatever holds the
+    /// keyboard at that instant - so a focus that quietly did not take is
+    /// how an email address ends up typed into a web page, where single
+    /// letters are shortcuts. That is where the user's three empty compose
+    /// windows came from: "it composed three things, didn't put anything
+    /// inside the sender."
+    ///
+    /// So: ask, then check. HasKeyboardFocus is the question the next step
+    /// actually depends on. When the answer is no and the control's window is
+    /// not in front, the window is activated once and the answer is asked
+    /// again - from a background process Windows may refuse that, and a
+    /// refusal reported as "no" is worth far more than one reported as ok.
+    /// </summary>
+    private static string TakeFocus(AutomationElement el)
+    {
+        try { el.SetFocus(); }
+        catch { /* reported as no, below */ }
+        if (HasFocus(el)) return "yes";
+
+        /* Second attempt, after bringing the window forward. */
+        try
+        {
+            var hwnd = new IntPtr(el.Current.NativeWindowHandle);
+            if (hwnd == IntPtr.Zero) hwnd = Target();
+            if (hwnd != IntPtr.Zero && hwnd != GetForegroundWindow())
+            {
+                SetForegroundWindow(hwnd);
+                try { el.SetFocus(); }
+                catch { /* same */ }
+            }
+        }
+        catch { /* and the same again */ }
+        return HasFocus(el) ? "yes" : "no";
+    }
+
+    private static bool HasFocus(AutomationElement el)
+    {
+        try { return el.Current.HasKeyboardFocus; }
+        catch { return false; }
+    }
+
+    [System.Runtime.InteropServices.DllImport("user32.dll")]
+    private static extern bool SetForegroundWindow(IntPtr hWnd);
 
     /// <summary>
     /// Reads a named control back, so a plan can check its own work.
@@ -253,10 +418,10 @@ internal static class UiTree
     /// </summary>
     public static void Value(string want)
     {
-        var root = ForegroundTree();
+        var root = TargetTree();
         if (root is null)
         {
-            Console.WriteLine("VALUE FAILED no-foreground-window");
+            Console.WriteLine("VALUE FAILED no-window-to-act-on");
             return;
         }
 
@@ -319,10 +484,10 @@ internal static class UiTree
     /// </summary>
     public static void Reveal(string want)
     {
-        var root = ForegroundTree();
+        var root = TargetTree();
         if (root is null)
         {
-            Console.WriteLine("REVEAL FAILED no-foreground-window");
+            Console.WriteLine("REVEAL FAILED no-window-to-act-on");
             return;
         }
 

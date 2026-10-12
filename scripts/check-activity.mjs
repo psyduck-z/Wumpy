@@ -275,8 +275,11 @@ check('"Esc to stop" only while streaming', /\{streaming && <span className="act
 
 /* Idle compaction, under the send-time threshold so it gets there first. */
 check('there is an idle compaction', /Compacting while nothing is happening/.test(app), true)
-check('it triggers above 60%', /CONTEXT_TOKENS \* 0\.6\b/.test(app), true)
-check('below the send-time 65%', /CONTEXT_TOKENS \* 0\.65/.test(app), true)
+/* The percentages moved into @shared/pressure, where there are now three of
+   them and check-pressure proves their order. Here it only matters that this
+   one asks for the idle threshold rather than naming a number of its own. */
+check('it triggers at the idle threshold', /needsRoom\('idle'/.test(app), true)
+check('and the send path uses its own', /needsRoom\('send'/.test(app), true)
 check('it will not run during a turn', /if \(chatRef\.current\.streaming\) return/.test(app), true)
 
 console.log(`${NL}${count - failed}/${count} activity checks passed`)
