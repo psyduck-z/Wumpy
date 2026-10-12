@@ -168,6 +168,32 @@ export class KeyStore {
     this.persist()
   }
 
+  /**
+   * Removes keys by POSITION, which is the only handle anyone outside has.
+   *
+   * `/key google check` found three dead service accounts out of twenty and
+   * could only say which numbers they were, because a key never leaves this
+   * file. Replacing the whole list to drop three of them means re-pasting
+   * seventeen working keys, which is how a working key gets lost.
+   *
+   * Positions are 1-based, like the report. Removing from the end backwards
+   * so that earlier indexes still mean what they meant when they were
+   * chosen - the obvious loop forwards deletes key 1 and then deletes what
+   * used to be key 3 when asked for key 2.
+   */
+  drop(provider: ProviderId, numbers: number[]): { removed: number[]; total: number } {
+    const list = [...this.secrets(provider)]
+    const wanted = [...new Set(numbers)]
+      .filter((n) => Number.isInteger(n) && n >= 1 && n <= list.length)
+      .sort((a, b) => b - a)
+    for (const n of wanted) list.splice(n - 1, 1)
+    this.load()
+    this.cache = { ...this.cache, [provider]: list }
+    if (!list.length) delete this.cache[provider]
+    this.persist()
+    return { removed: wanted.sort((a, b) => a - b), total: list.length }
+  }
+
   /** For a log line that needs to identify a key without revealing it. */
   hint(provider: ProviderId, index = 0): string {
     const key = this.secrets(provider)[index]

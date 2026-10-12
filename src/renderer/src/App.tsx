@@ -1123,11 +1123,27 @@ function namedControls(shot: Attachment): string[] {
                 `Refused: key ${dead.map((k) => k.number).join(', ')}.`,
                 ...reasons.map((r) => `_${r}_`),
                 '',
-                'They are out of the rotation now, so nothing waits on them. Replace the',
-                `whole list with \`/key ${provider} <key…>\` when you have new ones.`
+                'They are out of the rotation now, so nothing waits on them.',
+                `Drop them with \`/key ${provider} drop ${dead.map((k) => k.number).join(' ')}\`, ` +
+                  `or replace the whole list with \`/key ${provider} <key…>\`.`
               ].join(NEWLINE)
             )
             setKeyStatus(await window.wumpy.keys.status())
+            return
+          }
+
+          if (action.drop?.length) {
+            const result = await window.wumpy.keys.drop(provider, action.drop)
+            if (!result.ok) {
+              chat.note(result.why)
+              return
+            }
+            setKeyStatus(await window.wumpy.keys.status())
+            void window.wumpy.assistant.status().then(setAssistant)
+            chat.note(
+              `Removed ${label} key ${result.removed?.join(', ')}. ` +
+                `${result.total} left. The day's counts start again, since the positions moved.`
+            )
             return
           }
 

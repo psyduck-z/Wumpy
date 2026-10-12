@@ -205,7 +205,13 @@ const api = {
       why: string
       label?: string
       keys: Array<{ number: number; ok: boolean; status: number; why: string }>
-    }> => ipcRenderer.invoke(IPC.keyCheck, { provider })
+    }> => ipcRenderer.invoke(IPC.keyCheck, { provider }),
+    /** Removes keys by position - the only handle this side ever has. */
+    drop: (
+      provider: ProviderName,
+      numbers: number[]
+    ): Promise<{ ok: boolean; why: string; removed?: number[]; total?: number; label?: string }> =>
+      ipcRenderer.invoke(IPC.keyDrop, { provider, numbers })
   },
   files: {
     /** Writes a file the user approved. The main process vets the path again. */

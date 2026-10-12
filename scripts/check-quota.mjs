@@ -408,7 +408,7 @@ check('the reply is numbers and reasons only', /number: index \+ 1, ok: true/.te
 
 const cmds = readFileSync('src/renderer/src/commands.ts', 'utf8')
 check('/key google check exists', /\(check\|test\|verify\)/.test(cmds), true)
-check('and is advertised in the hint', /add\|check\|clear/.test(cmds), true)
+check('and is advertised in the hint', /add\|check\|drop\|clear/.test(cmds), true)
 
 const appSrc = readFileSync('src/renderer/src/App.tsx', 'utf8')
 check('the chat names the dead keys by position', /Refused: key \$\{dead\.map/.test(appSrc), true)
@@ -417,6 +417,34 @@ check('no masked key reaches the renderer', /maskKey/.test(appSrc), false)
 
 const barSrc = readFileSync('src/renderer/src/components/StatusBar.tsx', 'utf8')
 check('the meter mentions a refusal', /REFUSED/.test(barSrc), true)
+
+/* --------------------------------------------- dropping the ones that died */
+
+/*
+ * The check can only name positions, because a key never leaves the main
+ * process. Removing three of twenty therefore meant pasting the other
+ * seventeen again, which risks the working keys for the sake of the dead
+ * ones - so positions have to be a handle you can act on.
+ *
+ * The order of removal is the trap: deleting 1 then 2 removes what used to
+ * be key 3, so they come off from the end backwards.
+ */
+const keysSrc = readFileSync('src/main/keys.ts', 'utf8')
+check('keys can be dropped by position', /drop\(provider: ProviderId, numbers: number\[\]\)/.test(keysSrc), true)
+check('from the end backwards', /\.sort\(\(a, b\) => b - a\)/.test(keysSrc), true)
+check('and the reason is written down', /deletes what\s*\*? ?used to be key 3/.test(keysSrc), true)
+check('out-of-range numbers are ignored, not thrown', /n >= 1 && n <= list\.length/.test(keysSrc), true)
+check('duplicates cannot remove two keys', /new Set\(numbers\)/.test(keysSrc), true)
+
+const mainSrc = readFileSync('src/main/index.ts', 'utf8')
+check('an empty list is refused', /Say which ones, by number/.test(mainSrc), true)
+check('the models are refreshed after', /keys\.drop\(provider, asked\)[\s\S]{0,260}refreshModels/.test(mainSrc), true)
+
+const cmdSrc = readFileSync('src/renderer/src/commands.ts', 'utf8')
+check('/key google drop parses numbers', /\(drop\|remove\|delete\)/.test(cmdSrc), true)
+check('and refuses words', /Which ones\?/.test(cmdSrc), true)
+check('the check offers the exact command', /drop \$\{dead\.map/.test(appSrc), true)
+check('and says the counts restart', /the positions moved/.test(appSrc), true)
 
 /* ------------------------------------------------------- the small words */
 

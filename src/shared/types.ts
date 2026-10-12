@@ -545,6 +545,12 @@ export const IPC = {
    */
   keyCheck: 'key:check',
   /**
+   * Remove keys by position, so three dead ones can go without re-pasting
+   * the seventeen that work. Positions are all the renderer has - a key
+   * never crosses this boundary in either direction.
+   */
+  keyDrop: 'key:drop',
+  /**
    * Take a photograph of the screen.
    *
    * Only ever in response to a click on a card. There is deliberately no

@@ -588,12 +588,24 @@ export const SCREEN_PROMPT = [
  * steps. A model that writes eight clicks from one screenshot is predicting
  * a UI it has not seen, and the third click lands on whatever moved.
  */
+/**
+ * A single backslash, by code point.
+ *
+ * The paste example has to show the model a literal backslash-n, and writing
+ * one here as an escape is how a two-character sequence silently becomes a
+ * real newline - which puts a line break in the middle of an example whose
+ * entire subject is how to write a line break. By code point it cannot be
+ * misread, by a reader or by a tool.
+ */
+const BACKSLASH = String.fromCharCode(92)
+
 export const DESKTOP_PROMPT = [
   'YOU CAN CLICK AND TYPE ON THEIR SCREEN. Not just look at it.',
   'A wumpy-do block, a # line saying why, then one step per line:',
   '  press "<name>"     focus "<name>"       type <text>',
   '  key ctrl+a         wait 500             click X Y',
   '  read "<name>"      reveal "<name>"      scroll down 3',
+  '  paste <text>       (for anything long, or with line breaks in it)',
   '',
   'PRESS BY NAME. NOT BY PIXEL. Every screenshot comes with a list of what is on',
   'screen and what each control is called. Use those names:',
@@ -621,6 +633,28 @@ export const DESKTOP_PROMPT = [
   '',
   'SO YOU MUST LOOK FIRST. With no screenshot there is nothing to aim at and the',
   'block is refused. Ask for wumpy-screen, wait for the picture, then act.',
+  '',
+  'PASTE ANYTHING LONG. `type` sends one keystroke per character, which an',
+  'editor that debounces its input handler drops some of, and a block is read',
+  'line by line so typed text can never contain a line break. `paste` lands',
+  'whole and takes a two-character backslash-n for a newline:',
+  `  paste Hi Stanley,${BACKSLASH}n${BACKSLASH}nThe notes are attached.`,
+  'Their clipboard is put back afterwards. Use `type` for a short thing like an',
+  'address or a search term, where a keystroke is what a field is expecting.',
+  '',
+  'FOCUS DOES NOT EMPTY THE BOX. It puts the cursor where the cursor already',
+  'was, so typing or pasting goes IN BESIDE what is there. Measured: focus the',
+  'address bar and paste, and the box reads your text followed by the URL that',
+  'was already in it. To REPLACE the contents, select them first:',
+  '  focus "Address and search bar"',
+  '  key ctrl+a',
+  '  paste https://example.com',
+  'To add to the end instead, `key end` first.',
+  '',
+  '"ok" MEANS THE KEYSTROKE WAS SENT, NOT THAT IT WORKED. Also measured: a',
+  '`key escape` reported ok and the box kept its text, because the first Escape',
+  'only closed the suggestions dropdown. So when it matters whether something',
+  'took effect, `read` it back - do not assume from ok.',
   '',
   'CHECK YOUR OWN WORK WITH read, NOT WITH A PICTURE. `read "To recipients"`',
   'comes back with what that box actually contains now. It is the direct answer',

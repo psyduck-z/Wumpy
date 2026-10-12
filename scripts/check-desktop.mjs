@@ -432,6 +432,79 @@ check('REVEAL uses ScrollItem', /ScrollItemPattern/.test(uia), true)
 check('and looks at offscreen elements, unlike the list', /includeOffscreen/.test(uia), true)
 check('all three choose the same element', (uia.match(/Best\(root, want/g) ?? []).length >= 3, true)
 
+/* ------------------------------------------------- pasting instead of typing */
+
+/*
+ * `type` is one pair of SendInput events per character. An email body is a
+ * thousand of them arriving faster than any human types, and an editor that
+ * debounces its input handler drops some - and a block is read line by line,
+ * so typed text can never contain a line break at all.
+ *
+ * The backslash-n in a paste is the fiddly part, and this file has had
+ * backslashes eaten in transit before, so the test input is built from the
+ * code point rather than written as an escape.
+ */
+const BS = String.fromCharCode(92)
+{
+  const plan = S.readPlan(`paste Dear Stanley,${BS}n${BS}nThe notes are attached.`)
+  check('paste is a step', plan.steps.length, 1)
+  check('the backslash-n becomes a real newline', plan.steps[0].text.split(NL).length, 3)
+  check('and the words survive', plan.steps[0].text.startsWith('Dear Stanley,'), true)
+  check('a tab too', S.readPlan(`paste a${BS}tb`).steps[0].text, `a${String.fromCharCode(9)}b`)
+
+  check('an empty paste is refused', S.readPlan('paste').steps.length, 0)
+  check('and named', /nothing to paste/.test(S.readPlan('paste').problems[0]), true)
+  const huge = 'x'.repeat(S.MAX_PASTE + 1)
+  check('an absurd paste is dropped', S.readPlan(`paste ${huge}`).steps.length, 0)
+  check('with the ceiling named', new RegExp(String(S.MAX_PASTE)).test(S.readPlan(`paste ${huge}`).problems[0]), true)
+  check('a paste may be longer than a type', S.MAX_PASTE > S.MAX_TYPE, true)
+
+  check(
+    'the card shows a short paste in full',
+    S.describe({ kind: 'paste', text: 'hello' }),
+    'Paste "hello"'
+  )
+  const long = S.describe({ kind: 'paste', text: 'y'.repeat(200) })
+  check('and a long one by its length', /\(200 characters\)$/.test(long), true)
+  check('truncated rather than printed whole', long.length < 120, true)
+}
+
+/* Pasting is typing: it must still be aimed at something first. */
+check('an unaimed paste is refused like an unaimed type', /s\.kind === 'paste'/.test(inputSrc), true)
+check('the clipboard is read before it is written', inputSrc.indexOf('clipboard.readText()') < inputSrc.indexOf('clipboard.writeText(step.text)'), true)
+check('and put back after the paste', /await wait\(250\)[\s\S]{0,80}clipboard\.writeText\(hadText\)/.test(inputSrc), true)
+check('the reply says what happened to it', /clipboard=restored/.test(inputSrc), true)
+check('an image cannot be put back, and that is said', /clipboard=REPLACED/.test(inputSrc), true)
+check('the guideline says when to paste and when to type', /PASTE ANYTHING LONG/.test(desktop), true)
+/*
+ * Both of these came out of running the thing rather than reasoning about
+ * it. Focus leaves the caret where it was, so a paste landed BESIDE the URL
+ * already in the address bar; and a `key escape` reported ok while the box
+ * kept its text, because the first Escape only closes Edge's suggestions
+ * dropdown. Either one, believed, produces a plan that is confidently wrong.
+ */
+check('it says focus does not empty the box', /FOCUS DOES NOT EMPTY THE BOX/.test(desktop), true)
+check('and how to replace the contents', /key ctrl\+a/.test(desktop), true)
+check('it says ok is not the same as worked', /NOT THAT IT WORKED/.test(desktop), true)
+check('with the escape that proved it', /only closed the suggestions dropdown/.test(desktop), true)
+check('and why type exists at all', /where a keystroke is what a field is expecting/.test(desktop), true)
+/*
+ * The example has to reach the model as a literal backslash-n, so the source
+ * builds it from the code point: written as an escape it becomes a real
+ * newline, putting a line break in the middle of an example whose whole
+ * subject is how to write a line break.
+ *
+ * Checked against the BUILT prompt rather than the source text, because the
+ * source now says ${BACKSLASH}n and only the built string can prove what the
+ * model actually sees.
+ */
+const A = await load('src/shared/assistant.ts', 'prompt')
+const assistantSrc = assistant
+const pasteExample = A.DESKTOP_PROMPT.split(NL).find((l) => l.includes('paste Hi Stanley')) ?? ''
+check('the example shows a literal backslash-n', pasteExample.includes(`${BS}n${BS}n`), true)
+check('and not a real newline', pasteExample.includes('The notes are attached.'), true)
+check('the source does not write it as an escape', /paste Hi Stanley,\\n/.test(assistantSrc), false)
+
 /* ----------------------------------------- the click the guard could not see */
 
 /*

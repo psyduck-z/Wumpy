@@ -1,4 +1,4 @@
-import type { BrowserWindow } from 'electron'
+import { clipboard, type BrowserWindow } from 'electron'
 import { log } from './log'
 import { lastShot } from './screen'
 import { describe, onShot, toScreen, type Plan, type Step } from '@shared/steps'
@@ -30,6 +30,16 @@ import { interference, parseGuard, type Guard } from '@shared/guard'
 const SETTLE_MS = 180
 
 /**
+ * The helper's way of saying a command worked: the verb, then " ok".
+ *
+ * Named rather than written twice, because it is a word boundary escape and
+ * those keep getting eaten in transit - a `\b` that arrives as a literal
+ * backspace byte compiles, matches nothing, and is invisible in an editor.
+ * check-controlchars catches it; one copy is one chance to be caught.
+ */
+const OK = / ok\b/
+
+/**
  * Typing goes to whatever holds the keyboard, which is not where you looked.
  *
  * Found by typing into Wumpy's own composer as a test: the helper reported
@@ -48,7 +58,9 @@ const SETTLE_MS = 180
  * to refuse rather than to scatter them.
  */
 function typingIsAimed(steps: readonly Step[]): string | null {
-  const firstType = steps.findIndex((s) => s.kind === 'type' || s.kind === 'key')
+  const firstType = steps.findIndex(
+    (s) => s.kind === 'type' || s.kind === 'key' || s.kind === 'paste'
+  )
   if (firstType === -1) return null
   const clickedFirst = steps
     .slice(0, firstType)
@@ -224,7 +236,7 @@ export async function runPlan(
 
     const label = describe(step)
     const reply = await oneStep(step, frame, panel, send)
-    const ok = / ok\b/.test(reply) || reply === 'waited'
+    const ok = OK.test(reply) || reply === 'waited'
     ran.push({ step: label, ok, detail: reply })
     log(`[do] ${label} -> ${reply}`)
     if (!ok) break
@@ -311,6 +323,44 @@ async function oneStep(
       }
       const via = /via=(\S+)/.exec(reply)?.[1] ?? '?'
       return `VALUE ok via=${via} it says ${JSON.stringify(shown)}`
+    }
+    case 'paste': {
+      /*
+       * The clipboard is the user's, and it is borrowed rather than taken.
+       *
+       * Typing is one pair of SendInput events per character - a thousand of
+       * them for an email body, arriving faster than any human types, which
+       * a web editor that debounces its input handler quietly drops some of.
+       * A paste lands whole and carries newlines, which a line-based block
+       * cannot express any other way.
+       *
+       * What was in the clipboard goes back afterwards. Text can be put back
+       * exactly; an image cannot be read as text and so cannot be restored,
+       * and that is said in the reply rather than passed over - it is the
+       * user's clipboard and they are entitled to know it changed.
+       */
+      const hadText = await clipboard.readText()
+      /*
+       * Electron 44's clipboard is the promise-based API and has no
+       * availableFormats, so "it held something that is not text" is asked
+       * as a question about the one format that actually turns up: an image,
+       * from a snip. Asked only when there is no text to restore, because
+       * text is the case that can be put back.
+       */
+      const hadImage = !hadText && (await clipboard.has('image/png').catch(() => false))
+      await clipboard.writeText(step.text)
+      const reply = await send('KEY ctrl+v', 6000)
+      /* After the paste, or the restore wins the race with it. */
+      await wait(250)
+      if (hadText) await clipboard.writeText(hadText)
+      const note = hadText
+        ? 'clipboard=restored'
+        : hadImage
+          ? 'clipboard=REPLACED (it held an image, which cannot be put back)'
+          : 'clipboard=was-empty'
+      return OK.test(reply)
+        ? `PASTE ok chars=${step.text.length} ${note}`
+        : `PASTE FAILED ${reply} ${note}`
     }
     case 'reveal':
       return send(`REVEAL ${Buffer.from(step.name, 'utf8').toString('base64')}`, 6000)

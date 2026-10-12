@@ -21,6 +21,7 @@
  */
 
 const NL = String.fromCharCode(10)
+const TAB = String.fromCharCode(9)
 
 export type Step =
   | { kind: 'click'; x: number; y: number; button: 'left' | 'right'; times: number }
@@ -65,6 +66,19 @@ export type Step =
    * means. This one does borrow the pointer, like a coordinate click.
    */
   | { kind: 'scroll'; x: number; y: number; notches: number }
+  /*
+   * Putting text in through the clipboard instead of keystroke by keystroke.
+   *
+   * `type` is SendInput, which is one pair of events per character: an email
+   * body is a thousand of them arriving faster than any human types, and a
+   * web editor that debounces its input handler drops some. A paste is one
+   * event, lands whole, and can carry newlines - which a line-based block
+   * cannot otherwise express at all.
+   *
+   * The clipboard belongs to the user, so whatever was in it is put back
+   * afterwards.
+   */
+  | { kind: 'paste'; text: string }
 
 export interface Plan {
   /** The `# why` line, for the card. */
@@ -86,6 +100,15 @@ export const MAX_STEPS = 12
 
 /** Long enough for an address or a sentence; not a document. */
 export const MAX_TYPE = 500
+
+/**
+ * A paste can be longer than typing, because it costs one event either way.
+ *
+ * Two thousand characters is a long email and a short document. The point of
+ * the ceiling is that this is still a step in a plan the user is reading
+ * before it happens, not a file write.
+ */
+export const MAX_PASTE = 2000
 
 /** A pause the user can sit through. Anything longer is a hang. */
 export const MAX_WAIT = 5000
@@ -228,6 +251,24 @@ export function readPlan(raw: string): Plan {
       continue
     }
 
+    if (verb === 'paste') {
+      if (!rest) {
+        problems.push(`paste has nothing to paste: ${text}`)
+        continue
+      }
+      if (rest.length > MAX_PASTE) {
+        problems.push(`paste is longer than ${MAX_PASTE} characters; dropped`)
+        continue
+      }
+      /*
+       * A backslash-n in the text means a newline. A block is read line by
+       * line, so this is the only way a paste can carry one - and carrying
+       * newlines is most of why paste exists.
+       */
+      steps.push({ kind: 'paste', text: rest.replace(/\\n/g, NL).replace(/\\t/g, TAB) })
+      continue
+    }
+
     if (verb === 'type') {
       /* Not trimmed beyond the line's own edges: a trailing space in a typed
          string is sometimes the point, and leading indentation never is. */
@@ -283,6 +324,12 @@ export function describe(step: Step): string {
       return `Wait ${step.ms}ms`
     case 'press':
       return `${step.focusOnly ? 'Put the cursor in' : 'Press'} ${JSON.stringify(step.name)}`
+    case 'paste': {
+      const short = step.text.length > 60 ? `${step.text.slice(0, 60)}…` : step.text
+      return `Paste ${JSON.stringify(short)}${
+        step.text.length > 60 ? ` (${step.text.length} characters)` : ''
+      }`
+    }
     case 'read':
       return `Read ${JSON.stringify(step.name)} back`
     case 'reveal':

@@ -34,6 +34,8 @@ export type CommandAction =
       add: boolean
       /** `/key google check` - are they all still good? */
       check?: boolean
+      /** `/key google drop 1 2 3` - remove these by position. */
+      drop?: number[]
     }
   | { kind: 'remember'; value: string; clear: boolean }
   | { kind: 'usage'; reset: boolean }
@@ -291,7 +293,7 @@ export const COMMANDS: CommandSpec[] = [
     name: 'key',
     aliases: ['apikey'],
     hint: 'Add or remove hosted-model API keys (several rotate)',
-    arg: 'google|groq|mistral|nvidia [add|check|clear] <key…>',
+    arg: 'google|groq|mistral|nvidia [add|check|drop|clear] <key…>',
     argRequired: true,
     /**
      * Parsed here rather than in a dialog because a key is pasted, and the
@@ -324,6 +326,25 @@ export const COMMANDS: CommandSpec[] = [
        */
       if (/^(check|test|verify)$/i.test(rest)) {
         return { kind: 'key', provider, value: '', clear: false, add: false, check: true }
+      }
+      /*
+       * `drop 1 2 3` removes by position, which is what `check` reports.
+       * Parsed here so the numbers are numbers before they cross: the
+       * handler on the other side has no way to ask what was meant.
+       */
+      const dropping = /^(drop|remove|delete)\s+(.+)$/i.exec(rest)
+      if (dropping) {
+        const numbers = dropping[2]
+          .split(/[\s,]+/)
+          .filter(Boolean)
+          .map(Number)
+        if (!numbers.length || numbers.some((n) => !Number.isInteger(n) || n < 1)) {
+          return {
+            kind: 'error',
+            message: 'Which ones? `/key google drop 1 2 3` — the numbers `/key google check` gave.'
+          }
+        }
+        return { kind: 'key', provider, value: '', clear: false, add: false, drop: numbers }
       }
       /**
        * `add` keeps what is already stored, which matters once there is

@@ -1173,6 +1173,27 @@ ${command}`
     return { ok: true, why: '', keys: results, label: PROVIDERS[provider].label }
   })
 
+  /**
+   * Drops the keys the check found dead, by position.
+   *
+   * The alternative was pasting the whole list again to lose three of
+   * twenty, which risks the seventeen that work for the sake of the three
+   * that do not.
+   */
+  ipcMain.handle(IPC.keyDrop, (_e, req: { provider: ProviderId; numbers: number[] }) => {
+    const provider = req?.provider
+    if (!isProviderId(provider)) return { ok: false, why: 'Unknown provider.' }
+    const asked = Array.isArray(req?.numbers) ? req.numbers.map(Number) : []
+    if (!asked.length) return { ok: false, why: 'Say which ones, by number.' }
+    const before = keys.count(provider)
+    const { removed, total } = keys.drop(provider, asked)
+    if (!removed.length) {
+      return { ok: false, why: `There ${before === 1 ? 'is' : 'are'} only ${before} key(s).` }
+    }
+    void refreshModels()
+    return { ok: true, why: '', removed, total, label: PROVIDERS[provider].label }
+  })
+
   ipcMain.handle(IPC.keyClear, (_e, req: { provider: ProviderId }) => {
     if (!isProviderId(req?.provider)) {
       return { ok: false, why: 'Unknown provider.' }
