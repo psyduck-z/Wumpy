@@ -123,6 +123,9 @@ function QuotaMeter({
         `${pool.ready} ready` +
         (dead ? `, ${pool.spent} out for the day` : '') +
         (pool.resting ? `, ${pool.resting} resting a moment` : '') +
+        /* The one that needs doing something about, so it is said in the
+           hover rather than only in the full report. */
+        (pool.rejected ? `, ${pool.rejected} REFUSED — run /key google check` : '') +
         `.\n${comesBack}\nClick for the full breakdown.`
       }
     >

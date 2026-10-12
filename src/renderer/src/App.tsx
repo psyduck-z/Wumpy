@@ -1091,6 +1091,46 @@ function namedControls(shot: Attachment): string[] {
           if (!provider) return
           const label = PROVIDERS[provider].label
 
+          /*
+           * Which keys are still good.
+           *
+           * Reported by POSITION, because that is what the main process
+           * sends: a key never crosses that boundary, not even masked, so
+           * "key 1, 2 and 3" is the most that can be said - and it is
+           * enough, since /key google <the rest> replaces the list.
+           */
+          if (action.check) {
+            chat.note(`Checking the ${label} keys…`)
+            const result = await window.wumpy.keys.check(provider)
+            if (!result.ok && !result.keys.length) {
+              chat.note(result.why)
+              return
+            }
+            const dead = result.keys.filter((k) => !k.ok)
+            const alive = result.keys.length - dead.length
+            if (!dead.length) {
+              chat.note(
+                `All ${result.keys.length} ${label} key(s) still work. ` +
+                  'Checked with a models listing, so it cost nothing from today.'
+              )
+              return
+            }
+            const reasons = [...new Set(dead.map((k) => k.why).filter(Boolean))]
+            chat.note(
+              [
+                `**${alive} of ${result.keys.length} ${label} keys work.**`,
+                '',
+                `Refused: key ${dead.map((k) => k.number).join(', ')}.`,
+                ...reasons.map((r) => `_${r}_`),
+                '',
+                'They are out of the rotation now, so nothing waits on them. Replace the',
+                `whole list with \`/key ${provider} <key…>\` when you have new ones.`
+              ].join(NEWLINE)
+            )
+            setKeyStatus(await window.wumpy.keys.status())
+            return
+          }
+
           if (action.clear) {
             const result = await window.wumpy.keys.clear(provider)
             setKeyStatus(await window.wumpy.keys.status())

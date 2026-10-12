@@ -26,7 +26,15 @@ export type CommandAction =
   | { kind: 'voice'; setting: 'on' | 'polish' | 'autostop'; on: boolean | 'toggle' }
   | { kind: 'open'; what: string }
   | { kind: 'engine' }
-  | { kind: 'key'; provider: ProviderName | null; value: string; clear: boolean; add: boolean }
+  | {
+      kind: 'key'
+      provider: ProviderName | null
+      value: string
+      clear: boolean
+      add: boolean
+      /** `/key google check` - are they all still good? */
+      check?: boolean
+    }
   | { kind: 'remember'; value: string; clear: boolean }
   | { kind: 'usage'; reset: boolean }
   | { kind: 'approve'; mode: 'manual' | 'auto' | 'all' | 'cycle' }
@@ -283,7 +291,7 @@ export const COMMANDS: CommandSpec[] = [
     name: 'key',
     aliases: ['apikey'],
     hint: 'Add or remove hosted-model API keys (several rotate)',
-    arg: 'google|groq|mistral|nvidia [add] <key…>',
+    arg: 'google|groq|mistral|nvidia [add|check|clear] <key…>',
     argRequired: true,
     /**
      * Parsed here rather than in a dialog because a key is pasted, and the
@@ -307,6 +315,15 @@ export const COMMANDS: CommandSpec[] = [
       if (!rest) return { kind: 'key', provider, value: '', clear: false, add: false }
       if (/^(clear|remove|forget|off)$/i.test(rest)) {
         return { kind: 'key', provider, value: '', clear: true, add: false }
+      }
+      /*
+       * `check` asks the provider whether each key still authenticates, with
+       * a models listing that costs nothing from the day's allowance. Worth
+       * a word of its own because a dead key is invisible otherwise: three
+       * of the twenty on this machine had been refused for weeks.
+       */
+      if (/^(check|test|verify)$/i.test(rest)) {
+        return { kind: 'key', provider, value: '', clear: false, add: false, check: true }
       }
       /**
        * `add` keeps what is already stored, which matters once there is

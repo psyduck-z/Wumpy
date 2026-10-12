@@ -40,7 +40,8 @@ export function poolLines(pool: PoolView, now: number = Date.now()): string[] {
 
   const keyWord = pool.keys === 1 ? 'key' : 'keys'
   const lines: string[] = [
-    `**${pool.model}** — ${pool.ready} of ${pool.keys} ${keyWord} ready`
+    `**${pool.model}** — ${pool.ready} of ${pool.keys} ${keyWord} ready` +
+      (pool.rejected ? `, ${pool.rejected} refused` : '')
   ]
 
   /*
@@ -64,6 +65,21 @@ export function poolLines(pool: PoolView, now: number = Date.now()): string[] {
 
   const out = pool.rows.filter((r) => r.state === 'out').map((r) => r.number)
   const resting = pool.rows.filter((r) => r.state === 'resting').map((r) => r.number)
+  const dead = pool.rows.filter((r) => r.state === 'rejected').map((r) => r.number)
+
+  /*
+   * First, because it is the only state that needs the user to do something.
+   * Waiting does not fix a rejected key and neither does tomorrow. Three of
+   * the twenty on this machine had been refused for weeks with nothing
+   * saying so, which is the whole reason this line exists.
+   */
+  if (dead.length) {
+    lines.push(
+      `**${dead.length === 1 ? 'Key' : 'Keys'} ${keyList(dead)} ${dead.length === 1 ? 'was' : 'were'} refused** ` +
+        '(deleted project or revoked key). Waiting will not fix those — replace the list ' +
+        'with `/key google <key…>`. They are left out of the figures above.'
+    )
+  }
 
   if (out.length) {
     lines.push(
@@ -104,11 +120,13 @@ export function poolLines(pool: PoolView, now: number = Date.now()): string[] {
     lines.push('| --- | --- | --- |')
     for (const row of busy) {
       const state =
-        row.state === 'out'
-          ? `out for the day`
-          : row.state === 'resting'
-            ? `resting, back ${untilText(row.untilMs - now)}`
-            : 'ready'
+        row.state === 'rejected'
+          ? 'refused — replace it'
+          : row.state === 'out'
+            ? `out for the day`
+            : row.state === 'resting'
+              ? `resting, back ${untilText(row.untilMs - now)}`
+              : 'ready'
       const left = pool.perKeyCap ? ` / ${pool.perKeyCap}` : ''
       lines.push(`| ${row.number} | ${row.requests}${left} | ${state} |`)
     }

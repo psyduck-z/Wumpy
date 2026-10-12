@@ -192,7 +192,20 @@ const api = {
     ): Promise<{ ok: boolean; why: string; label?: string; total?: number }> =>
       ipcRenderer.invoke(IPC.keyAdd, { provider, key }),
     clear: (provider: ProviderName): Promise<{ ok: boolean; why: string }> =>
-      ipcRenderer.invoke(IPC.keyClear, { provider })
+      ipcRenderer.invoke(IPC.keyClear, { provider }),
+    /**
+     * Which keys still work. Answered with a models listing per key, so it
+     * costs nothing from the day's allowance, and it comes back as POSITIONS
+     * - never a key, not even masked.
+     */
+    check: (
+      provider: ProviderName
+    ): Promise<{
+      ok: boolean
+      why: string
+      label?: string
+      keys: Array<{ number: number; ok: boolean; status: number; why: string }>
+    }> => ipcRenderer.invoke(IPC.keyCheck, { provider })
   },
   files: {
     /** Writes a file the user approved. The main process vets the path again. */

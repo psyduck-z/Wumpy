@@ -2,6 +2,7 @@ import type { ChatMessage } from '@shared/types'
 import type { ProviderId, WireMessage } from '@shared/cloud'
 import { KeyRotation, nextPacificMidnight } from '@shared/rotation'
 import type { PoolDay, PoolView } from '@shared/pool'
+import { REJECTED } from '@shared/pool'
 import {
   PROVIDERS,
   classifyLimit,
@@ -167,6 +168,57 @@ export class CloudClient {
   /** Writes the ledger back, debounced by the store. */
   private remember(provider: ProviderId, rotation: KeyRotation): void {
     this.ledger?.save(provider, rotation.snapshot())
+  }
+
+  /**
+   * Which keys are still alive, asked without spending any allowance.
+   *
+   * A models listing authenticates the key and is not a generation, so
+   * twenty of them cost nothing from a tier counted in requests per day.
+   * That matters because the alternative - finding out by trying to answer
+   * with it - is what was happening: measured here, three of twenty keys
+   * reply 401 "the bound service account is deleted or disabled", so roughly
+   * one turn in seven was spent discovering a key that will never work
+   * again, and the meter was measuring the day against 500 requests when
+   * 425 existed.
+   *
+   * Dead keys are rested for the day as they are found, so the rotation
+   * stops reaching for them immediately rather than at the next 401.
+   *
+   * Returns POSITIONS ONLY. No key, no masked form: this result goes to the
+   * renderer, and the rule on that boundary has no exceptions.
+   */
+  async checkKeys(
+    provider: ProviderId
+  ): Promise<Array<{ number: number; ok: boolean; status: number; why: string }>> {
+    const all = this.keys.secrets(provider)
+    const rotation = this.rotation(provider)
+    const out: Array<{ number: number; ok: boolean; status: number; why: string }> = []
+
+    for (const [index, key] of all.entries()) {
+      try {
+        const res = await fetch(`${PROVIDERS[provider].base}/models`, {
+          headers: { Authorization: `Bearer ${key}` },
+          signal: AbortSignal.timeout(15_000)
+        })
+        if (res.ok) {
+          out.push({ number: index + 1, ok: true, status: res.status, why: '' })
+          continue
+        }
+        const body = stripKey(await res.text().catch(() => ''))
+        const why = /"message":\s*"([^"]{0,160})/.exec(body)?.[1] ?? `HTTP ${res.status}`
+        /* A 429 means the key works and is busy, which is not a dead key. */
+        if (res.status !== 429) {
+          rotation.rest(index, Date.now() + 24 * 60 * 60 * 1000, REJECTED)
+        }
+        out.push({ number: index + 1, ok: res.status === 429, status: res.status, why })
+      } catch (err) {
+        /* A network failure says nothing about the key, so it is not rested. */
+        out.push({ number: index + 1, ok: false, status: 0, why: describe(err) })
+      }
+    }
+    this.remember(provider, rotation)
+    return out
   }
 
   /**
@@ -338,7 +390,7 @@ export class CloudClient {
        */
       if (res.status === 401 || res.status === 403) {
         const A_DAY = 24 * 60 * 60 * 1000
-        rotation.rest(index, Date.now() + A_DAY, 'rejected')
+        rotation.rest(index, Date.now() + A_DAY, REJECTED)
         console.warn(
           `[wumpy] ${PROVIDERS[provider].label} key ${index + 1}/${keyCount} ` +
             `(${this.keys.hint(provider, index)}) was REJECTED (${res.status}) and ` +

@@ -169,7 +169,20 @@ export function requestsFor(pool: PoolDay, model: string): number {
 
 /* ------------------------------------------------------------ what to show */
 
-export type KeyState = 'ready' | 'resting' | 'out'
+/**
+ * 'rejected' is its own thing, and finding that out was the point.
+ *
+ * Measured on this machine: three of twenty keys answered 401 with "the
+ * bound service account is deleted or disabled". The app had been rotating
+ * across all twenty for weeks, so one turn in seven was spending a request
+ * to rediscover a key that will never work again, and the meter was
+ * measuring the day against 500 requests when 425 existed. Nothing said so,
+ * because a rejected key was rested like any other and read as "resting".
+ */
+export type KeyState = 'ready' | 'resting' | 'out' | 'rejected'
+
+/** A rest with this reason is a key that needs replacing, not waiting for. */
+export const REJECTED = 'rejected'
 
 export interface KeyRow {
   /** 1-based, because that is how the log lines name them. */
@@ -191,6 +204,14 @@ export interface PoolView {
   spent: number
   /** Resting for a minute or so, not for the day. */
   resting: number
+  /**
+   * Keys the provider refused outright - deleted project, revoked key.
+   *
+   * Counted apart from the rest because it is the only state the user has to
+   * do something about: waiting does not fix it and tomorrow will not
+   * either. Three of twenty were in this state here and nothing said so.
+   */
+  rejected: number
   /** Requests made on this model today, across the pool. */
   requests: number
   /** The per-project daily cap, or 0 when nothing credible is known. */
@@ -232,6 +253,7 @@ export function poolView(
   let ready = 0
   let spent = 0
   let resting = 0
+  let rejected = 0
   let requests = 0
   let left = 0
   const rows: KeyRow[] = []
@@ -241,22 +263,33 @@ export function poolView(
     requests += mine
     const out = (spend.outOf[key] ?? 0) > now
     const held = spend.restUntil > now
-    const state: KeyState = out ? 'out' : held ? 'resting' : 'ready'
+    const dead = held && spend.why === REJECTED
+    const state: KeyState = dead ? 'rejected' : out ? 'out' : held ? 'resting' : 'ready'
     if (state === 'ready') ready++
     else if (state === 'out') spent++
+    else if (state === 'rejected') rejected++
     else resting++
-    /* A key that is out of this model for the day has nothing left to give. */
-    if (!out && cap) left += Math.max(0, cap - mine)
+    /*
+     * Only a key that can still answer has anything left to give. One that
+     * is out for the day contributes nothing; one the provider rejected
+     * contributes nothing ever, and counting its full allowance is how the
+     * meter came to promise 500 requests on a pool that could serve 425.
+     */
+    if (!out && !dead && cap) left += Math.max(0, cap - mine)
     rows.push({
       number: index + 1,
       requests: mine,
       state,
       untilMs: out ? (spend.outOf[key] ?? 0) : held ? spend.restUntil : 0,
-      why: out ? 'daily quota' : held ? spend.why : ''
+      why: dead ? REJECTED : out ? 'daily quota' : held ? spend.why : ''
     })
   })
 
-  const ceiling = cap * pool.spend.length
+  /*
+   * The ceiling counts only the keys that could serve today, so a dead key
+   * lowers the ceiling rather than silently inflating what is remaining.
+   */
+  const ceiling = cap * (pool.spend.length - rejected)
   return {
     day: pool.day,
     model: key,
@@ -264,6 +297,7 @@ export function poolView(
     ready,
     spent,
     resting,
+    rejected,
     requests,
     perKeyCap: cap,
     cap: ceiling,

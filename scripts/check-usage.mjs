@@ -237,13 +237,36 @@ check(
 // machine" - it had said "You can see their machine, but only through
 // commands they approve", and the qualifier lost to the clause in front
 // of it.
-check('it cannot see the machine', /You CANNOT see their machine/.test(flat), true)
+check(
+  'nothing is visible by default',
+  /Nothing about this computer is visible to you by default/.test(flat),
+  true
+)
 check(
   'the permission model is stated',
   /propose a command, have\s*them click it, and read what comes back/.test(flat),
   true
 )
-check('and it says so outright', /Never say you can see the machine/.test(flat), true)
+/*
+ * And the sections that follow overrule it.
+ *
+ * The flat "You CANNOT see their machine" that used to be here was true
+ * about files and processes and read as true about everything: asked to use
+ * a Gmail tab that was open on screen, the model refused on the grounds it
+ * could not see the browser, while the block for doing exactly that was
+ * further down its own instructions. The nuance has to be stated as an
+ * ORDER OF PRECEDENCE rather than as a qualifier, because a qualifier in
+ * the same breath loses - that was measured once already, when "you can see
+ * their machine, but only through commands they approve" came back as "I
+ * can see the machine".
+ */
+check('what follows overrules it', /WHAT FOLLOWS OVERRULES THIS/.test(flat), true)
+check('the refusal that caused this is named', /a Gmail\s*tab that was open on screen/.test(flat), true)
+check(
+  'and the no-guessing rule survives',
+  /no fact about this\s*computer unless something in this conversation showed it to you/.test(flat),
+  true
+)
 check('and that nothing runs by itself', /Nothing you write runs on its own/.test(flat), true)
 
 check('answer first', /Answer first/.test(flat), true)

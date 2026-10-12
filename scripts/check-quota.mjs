@@ -347,6 +347,77 @@ const LITE = 'gemini-3.1-flash-lite'
   check('an empty pool prints nothing at all', Q.poolLines(P.poolView(P.emptyPool('d', 0), FLASH, 25, NOW, MIDNIGHT), NOW), [])
 }
 
+/* ------------------------------------------------- the key that is simply dead */
+
+/*
+ * Measured on this machine: three of twenty keys answer 401 "the bound
+ * service account is deleted or disabled". They had been in the rotation for
+ * weeks. Two separate costs, both silent:
+ *
+ *   the meter counted a ceiling of 500 requests on a pool that could serve
+ *   425, because a dead key's allowance was counted like anyone else's;
+ *
+ *   and roughly one turn in seven paid a request to rediscover one, since
+ *   the only way the app found out was by trying to answer with it.
+ */
+{
+  let pool = P.emptyPool('2026-10-12', 20)
+  for (const i of [0, 1, 2]) pool = P.restOn(pool, i, NOW + 24 * HOUR, P.REJECTED)
+  const view = P.poolView(pool, FLASH, 25, NOW, MIDNIGHT)
+  check('a refused key is not merely resting', view.rejected, 3)
+  check('it is not counted as resting', view.resting, 0)
+  check('nor as out for the day', view.spent, 0)
+  check('seventeen keys can answer', view.ready, 17)
+  check('the ceiling leaves the dead ones out', view.cap, 425)
+  check('and so does what is remaining', view.remaining, 425)
+  check('its row says what it is', view.rows[0].state, 'rejected')
+  check('and why', view.rows[0].why, 'rejected')
+
+  const text = Q.poolLines(view, NOW).join(NL)
+  check('the report leads with the refusal', /\*\*Keys 1, 2 and 3 were refused\*\*/.test(text), true)
+  check('and says waiting will not help', /Waiting will not fix those/.test(text), true)
+  check('and what to do instead', /\/key google <key/.test(text), true)
+  check('the headline counts them apart', /17 of 20 keys ready, 3 refused/.test(text), true)
+  check('and the table calls it refused', text.includes('refused — replace it'), true)
+}
+
+{
+  /* One refused key, singular, and a 429 is NOT a refusal: it means the key
+     works and is busy. */
+  let pool = P.emptyPool('2026-10-12', 3)
+  pool = P.restOn(pool, 1, NOW + 24 * HOUR, P.REJECTED)
+  const text = Q.poolLines(P.poolView(pool, FLASH, 25, NOW, MIDNIGHT), NOW).join(NL)
+  check('one refusal reads as one', /\*\*Key 2 was refused\*\*/.test(text), true)
+
+  let busy = P.emptyPool('2026-10-12', 3)
+  busy = P.restOn(busy, 1, NOW + 30_000, 'per-minute')
+  const view = P.poolView(busy, FLASH, 25, NOW, MIDNIGHT)
+  check('a throttled key is not refused', view.rejected, 0)
+  check('it is resting', view.resting, 1)
+  check('and keeps its place in the ceiling', view.cap, 75)
+}
+
+const cloudSrc = readFileSync('src/main/cloud.ts', 'utf8')
+check('the check uses a models listing, not a generation', /\/models`, \{[\s\S]{0,80}Authorization/.test(cloudSrc), true)
+check('which is said out loud', /is not a generation/.test(cloudSrc), true)
+check('a 429 is not treated as a dead key', /res\.status !== 429/.test(cloudSrc), true)
+check('a network failure is not either', /says nothing about the key/.test(cloudSrc), true)
+check('dead keys leave the rotation at once', /rotation\.rest\(index, Date\.now\(\) \+ 24 \* 60 \* 60 \* 1000, REJECTED\)/.test(cloudSrc), true)
+check('and the result carries no key', /POSITIONS ONLY/.test(cloudSrc), true)
+check('the reply is numbers and reasons only', /number: index \+ 1, ok: true/.test(cloudSrc), true)
+
+const cmds = readFileSync('src/renderer/src/commands.ts', 'utf8')
+check('/key google check exists', /\(check\|test\|verify\)/.test(cmds), true)
+check('and is advertised in the hint', /add\|check\|clear/.test(cmds), true)
+
+const appSrc = readFileSync('src/renderer/src/App.tsx', 'utf8')
+check('the chat names the dead keys by position', /Refused: key \$\{dead\.map/.test(appSrc), true)
+check('and says the check was free', /cost nothing from today/.test(appSrc), true)
+check('no masked key reaches the renderer', /maskKey/.test(appSrc), false)
+
+const barSrc = readFileSync('src/renderer/src/components/StatusBar.tsx', 'utf8')
+check('the meter mentions a refusal', /REFUSED/.test(barSrc), true)
+
 /* ------------------------------------------------------- the small words */
 
 check('one key is "4"', Q.keyList([4]), '4')

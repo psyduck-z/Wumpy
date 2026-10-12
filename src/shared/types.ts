@@ -536,6 +536,15 @@ export const IPC = {
   keyAdd: 'key:add',
   keyClear: 'key:clear',
   /**
+   * Are these keys still good?
+   *
+   * Answered with a models listing per key, which authenticates without
+   * spending any of the day's allowance. The reply names POSITIONS - key 1,
+   * key 2 - and never a key or a masked form of one, like everything else
+   * that crosses this boundary.
+   */
+  keyCheck: 'key:check',
+  /**
    * Take a photograph of the screen.
    *
    * Only ever in response to a click on a card. There is deliberately no

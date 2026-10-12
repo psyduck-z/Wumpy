@@ -1154,6 +1154,25 @@ ${command}`
     return { ok: true, why: '', label: PROVIDERS[provider].label, total: keys.count(provider) }
   })
 
+  /**
+   * Which keys still work, without spending a request to find out.
+   *
+   * Built after measuring this machine's own pool: three of twenty keys
+   * answer 401 "the bound service account is deleted or disabled". They had
+   * been in the rotation for weeks, so about one turn in seven paid a
+   * request to rediscover a dead key, and the quota meter was counting a
+   * ceiling that included them.
+   */
+  ipcMain.handle(IPC.keyCheck, async (_e, req: { provider: ProviderId }) => {
+    const provider = req?.provider
+    if (!isProviderId(provider)) return { ok: false, why: 'Unknown provider.', keys: [] }
+    if (!keys.count(provider)) {
+      return { ok: false, why: `No ${PROVIDERS[provider].label} key to check.`, keys: [] }
+    }
+    const results = await cloud.checkKeys(provider)
+    return { ok: true, why: '', keys: results, label: PROVIDERS[provider].label }
+  })
+
   ipcMain.handle(IPC.keyClear, (_e, req: { provider: ProviderId }) => {
     if (!isProviderId(req?.provider)) {
       return { ok: false, why: 'Unknown provider.' }
