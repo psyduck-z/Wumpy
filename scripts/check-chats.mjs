@@ -205,8 +205,26 @@ check('once, on the edge, not continuously', /wasStreaming\.current = streaming/
 
 /* Compaction waits until the panel is away. */
 check('idle compaction needs the panel hidden', /if \(!tucked\) return/.test(app), true)
-check('tucked follows document.hidden', /setTucked\(document\.hidden\)/.test(app), true)
 check('and it waits a few seconds, not twenty', /\}, 5_000\)/.test(app), true)
+
+/*
+ * And "away" has to come from the main process.
+ *
+ * It was read from document.hidden, which this window never reports: the
+ * panel turns off backgroundThrottling so that the focus retry and the open
+ * animation survive being hidden, and Chromium then calls the page visible
+ * for as long as it exists. Measured over the DevTools protocol on a window
+ * that had never been shown at all: visibilityState 'visible'. So the flag
+ * never flipped and this feature could not fire once.
+ */
+check('tucked is told, not guessed', /panel\.onTucked\(\(\) => \{/.test(app), true)
+check('and asked for on arrival', /panel\.visible\(\)\.then/.test(app), true)
+check('a shown panel is not tucked', /panel\.onShown\(\(\) => setTucked\(false\)\)/.test(app), true)
+check('document.hidden is no longer believed on its own', /setTucked\(document\.hidden\)/.test(app), false)
+
+const panelSrc = readFileSync('src/main/panel.ts', 'utf8')
+check('hide() says so before it hides', panelSrc.indexOf('IPC.panelTucked') < panelSrc.indexOf('this.window.hide()'), true)
+check('and main can be asked outright', /get onScreen\(\): boolean/.test(panelSrc), true)
 
 rmSync(dir, { recursive: true, force: true })
 console.log(`${NL}${count - failed}/${count} chat-store checks correct`)

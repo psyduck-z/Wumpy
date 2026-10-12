@@ -473,6 +473,20 @@ export const IPC = {
   panelDock: 'panel:dock',
   panelShown: 'panel:shown',
   /**
+   * The panel has gone back into the tray.
+   *
+   * There is no way for the page to work this out for itself. The window
+   * disables backgroundThrottling - deliberately, so the focus retry and the
+   * open animation survive a hidden window - and Chromium then keeps
+   * reporting document.visibilityState as 'visible' for the life of the
+   * page. Measured on a window that had never been shown at all: 'visible',
+   * hasFocus false. Anything that waits for "nobody is looking" has to be
+   * told, which is what this is.
+   */
+  panelTucked: 'panel:tucked',
+  /** Is the panel on screen right now? Asked once, by a page just loaded. */
+  panelVisible: 'panel:visible',
+  /**
    * The renderer reporting that it still does not hold the keyboard.
    *
    * Sent only when the page has given up trying: document.hasFocus() is the
@@ -549,6 +563,15 @@ export interface UsageReport {
   /** The model currently answering, so the report names what it is counting. */
   model: string
   date: string
+  /**
+   * The key pool behind the current model: how many can still answer, what
+   * they have spent and when the rest come back. Null for a local model, or
+   * before any key exists.
+   *
+   * Positions and counts only. A key is never named here, or anywhere else
+   * the renderer can see.
+   */
+  pool: import('./pool').PoolView | null
 }
 
 export interface KeyStatus {

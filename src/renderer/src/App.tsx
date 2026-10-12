@@ -17,6 +17,7 @@ import type {
   DesktopResult
 } from '@shared/types'
 import { isTall } from '@shared/types'
+import type { PoolView } from '@shared/pool'
 import { looksLikeUrl, SEARCH_ENGINES, type LinkApproval } from '@shared/links'
 import { clippedOutput, commandFeedback } from '@shared/parsefail'
 import { CONTEXT_TOKENS, DEFAULT_MODEL } from '@shared/assistant'
@@ -34,6 +35,7 @@ import {
 import { newestPending } from './pending'
 import { forgetClaims } from './once'
 import { forgetAllLive } from './live'
+import { poolLines } from './quota'
 import { Toast } from './components/Toast'
 import { forgetActions, record } from './ledger'
 import { matchIntent } from './intents'
@@ -78,6 +80,17 @@ export default function App(): React.JSX.Element {
    * while someone reads the answer on screen.
    */
   const [tucked, setTucked] = useState(false)
+
+  /**
+   * The key pool behind the current model, for the meter in the status bar.
+   *
+   * Asked for as "make it easier to navigate the quota": the figures existed
+   * but only `/usage` showed them, so the first sign of a spent pool was a
+   * turn that refused. Refreshed when a turn ends and when the panel is
+   * summoned - never on a timer, because it is free to ask main and there is
+   * nothing to watch while nothing is happening.
+   */
+  const [pool, setPool] = useState<PoolView | null>(null)
 
   const activity = useMemo(() => {
     /*
@@ -222,19 +235,42 @@ export default function App(): React.JSX.Element {
   }, [])
 
   /**
-   * Electron marks a hidden window as hidden to the page, which is the only
-   * signal the renderer gets when the hotkey dismisses the panel. Without
-   * resetting here the open animation would play once per launch instead of
-   * once per summon.
+   * Whether the panel is in the tray, asked of the main process.
+   *
+   * document.hidden was the obvious answer and it is wrong here. The window
+   * turns off backgroundThrottling on purpose - the focus retry and the open
+   * animation both have to keep running while it is hidden - and Chromium
+   * then reports the page as 'visible' for as long as it exists. Measured
+   * over the DevTools protocol on a window that had never once been shown:
+   * visibilityState 'visible', hasFocus false.
+   *
+   * So everything that waits for "nobody is looking" was waiting on a flag
+   * that never flipped: idle compaction, asked for by name - "the compaction
+   * while idle should happen while it's hidden inside the tray" - could not
+   * fire at all. Main knows, and now says.
+   *
+   * The visibilitychange listener stays: it costs nothing and would be the
+   * right signal if Electron ever did mark the page hidden.
    */
   useEffect(() => {
     const onVisibility = (): void => {
-      setTucked(document.hidden)
-      if (document.hidden) setVisible(false)
+      if (document.hidden) {
+        setTucked(true)
+        setVisible(false)
+      }
     }
-    setTucked(document.hidden)
+    const offShown = window.wumpy.panel.onShown(() => setTucked(false))
+    const offTucked = window.wumpy.panel.onTucked(() => {
+      setTucked(true)
+      setVisible(false)
+    })
+    void window.wumpy.panel.visible().then((on) => setTucked(!on))
     document.addEventListener('visibilitychange', onVisibility)
-    return () => document.removeEventListener('visibilitychange', onVisibility)
+    return () => {
+      offShown()
+      offTucked()
+      document.removeEventListener('visibilitychange', onVisibility)
+    }
   }, [])
 
   /* ---------------------------------------------------------------- actions */
@@ -958,11 +994,21 @@ function namedControls(shot: Attachment): string[] {
             ? await window.wumpy.usage.reset()
             : await window.wumpy.usage.get()
 
+          /*
+           * Even with nothing spent, the pool is worth printing: "20 keys,
+           * all ready, resets at 08:00" is the answer to "how much have I
+           * got", and before this it took a 429 to find out.
+           */
+          const poolReport = report.pool ? poolLines(report.pool) : []
+
           if (!report.lines.length) {
             chat.note(
-              action.reset
-                ? 'Usage cleared.'
-                : `Nothing used yet today. Answering with \`${report.model}\`.`
+              [
+                action.reset
+                  ? 'Usage cleared.'
+                  : `Nothing used yet today. Answering with \`${report.model}\`.`,
+                ...(poolReport.length ? ['', ...poolReport] : [])
+              ].join(NEWLINE)
             )
             return
           }
@@ -1004,7 +1050,8 @@ function namedControls(shot: Attachment): string[] {
               '| --- | --- | --- | --- | --- | --- |',
               ...rows,
               '',
-              ...report.lines.filter((l) => l.note).map((l) => `_${l.model}: ${l.note}_`)
+              ...report.lines.filter((l) => l.note).map((l) => `_${l.model}: ${l.note}_`),
+              ...(poolReport.length ? ['', ...poolReport] : [])
             ].join(String.fromCharCode(10))
           )
           return
@@ -1473,6 +1520,25 @@ function namedControls(shot: Attachment): string[] {
     }
     wasStreaming.current = streaming
   }, [streaming])
+
+  /**
+   * What the pool looks like now: on arrival, when a turn ends, and when the
+   * panel comes back out of the tray.
+   *
+   * A turn is the only thing that spends quota, and being summoned is the
+   * only moment the number is about to be read, so between them there is
+   * nothing a poll would catch.
+   */
+  useEffect(() => {
+    if (streaming || tucked) return
+    let alive = true
+    void window.wumpy.usage.get().then((r) => {
+      if (alive) setPool(r.pool)
+    })
+    return () => {
+      alive = false
+    }
+  }, [streaming, tucked, model])
 
   const onScroll = (): void => {
     const el = scroller.current
@@ -2070,10 +2136,12 @@ function namedControls(shot: Attachment): string[] {
         streaming={streaming}
         stats={stats}
         usage={usage}
+        pool={pool}
         compact={compact}
         approvalMode={settings?.approvalMode ?? 'manual'}
         onCycleApproval={() => void runCommand({ kind: 'approve', mode: 'cycle' }, '/approve')}
         onCompact={() => void compactHistory()}
+        onQuota={() => void runCommand({ kind: 'usage', reset: false }, '/usage')}
       />
 
       <Toast message={toast} onDone={() => setToast(null)} />
@@ -2084,6 +2152,7 @@ function namedControls(shot: Attachment): string[] {
         streaming={streaming}
         activity={activity}
         focusToken={focusToken}
+        tucked={tucked}
         canSeeMedia={seesMedia(model)}
         onSay={say}
         prefill={prefill}

@@ -1,4 +1,5 @@
 import type { ApprovalMode, ContextUsage } from '@shared/types'
+import type { PoolView } from '@shared/pool'
 import type { ChatStats } from '../hooks/useChat'
 
 /**
@@ -68,6 +69,69 @@ function ContextMeter({
   )
 }
 
+/**
+ * How much of the day's free quota is left, and on how many keys.
+ *
+ * The pool was invisible until it refused something. Twenty keys is twenty
+ * separate free tiers and each one dies on its own, so the number that
+ * matters is not "how much have I used" but "how many of these can still
+ * answer" - which is what this says, in the one place that is always on
+ * screen. Clicking it prints the whole thing, key by key.
+ *
+ * Nothing here is a key or part of one: positions, counts and times only.
+ */
+function QuotaMeter({
+  pool,
+  onReport
+}: {
+  pool: PoolView
+  onReport(): void
+}): React.JSX.Element | null {
+  /* One key and no known cap is the uninteresting case: say nothing. */
+  if (pool.keys <= 0) return null
+
+  const pct = pool.usedFraction === null ? null : Math.round(pool.usedFraction * 100)
+  const dead = pool.spent > 0
+  const level = pool.ready === 0 ? 'is-critical' : pct !== null && pct >= 75 ? 'is-warn' : ''
+
+  const label =
+    pool.ready === 0
+      ? 'no keys'
+      : pct !== null
+        ? `${100 - pct}% left`
+        : `${pool.ready}/${pool.keys} keys`
+
+  const comesBack =
+    pool.nextFreeMs > 0
+      ? `Something frees up in ${Math.ceil(pool.nextFreeMs / 60000)} min.`
+      : `Everything resets at ${new Date(pool.resetAt).toLocaleTimeString(undefined, {
+          hour: '2-digit',
+          minute: '2-digit'
+        })}.`
+
+  return (
+    <button
+      type="button"
+      className={`quota ${level}`}
+      onClick={onReport}
+      title={
+        `${pool.model}: ${pool.requests} request${pool.requests === 1 ? '' : 's'} today ` +
+        `across ${pool.keys} key${pool.keys === 1 ? '' : 's'}.\n` +
+        (pool.remaining !== null
+          ? `About ${pool.remaining.toLocaleString()} left of ${pool.cap.toLocaleString()}.\n`
+          : 'No credible daily cap known for this model yet.\n') +
+        `${pool.ready} ready` +
+        (dead ? `, ${pool.spent} out for the day` : '') +
+        (pool.resting ? `, ${pool.resting} resting a moment` : '') +
+        `.\n${comesBack}\nClick for the full breakdown.`
+      }
+    >
+      <span className="quota-dot" aria-hidden="true" />
+      <span className="quota-label">{label}</span>
+    </button>
+  )
+}
+
 const APPROVAL: Record<ApprovalMode, { label: string; title: string }> = {
   manual: { label: 'manual', title: 'Every command waits for you. Click to change.' },
   auto: {
@@ -87,10 +151,12 @@ export function StatusBar({
   streaming,
   stats,
   usage,
+  pool,
   compact,
   approvalMode,
   onCycleApproval,
-  onCompact
+  onCompact,
+  onQuota
 }: {
   model: string
   /** False when no key is saved for this model's provider. */
@@ -98,11 +164,14 @@ export function StatusBar({
   streaming: boolean
   stats: ChatStats
   usage: ContextUsage
+  /** The key pool behind this model, or null when there is nothing hosted. */
+  pool: PoolView | null
   /** The panel is in its small corner shape, so drop the optional parts. */
   compact: boolean
   approvalMode: ApprovalMode
   onCycleApproval(): void
   onCompact(): void
+  onQuota(): void
 }): React.JSX.Element {
   const elapsed = stats.elapsedMs !== null ? duration(stats.elapsedMs) : null
 
@@ -173,6 +242,9 @@ export function StatusBar({
           )}
         </span>
       )}
+
+      {/* Quota before context: one of them is a wall with a timer on it. */}
+      {pool && !compact && <QuotaMeter pool={pool} onReport={onQuota} />}
 
       <ContextMeter usage={usage} onCompact={onCompact} />
     </footer>

@@ -31,21 +31,38 @@ export interface ModelUsage {
   /** Turns refused because a limit had been reached. */
   limited: number
   /**
-   * Requests made before the model first said it was out, today.
+   * Requests ONE KEY made before this model first said it was out, today.
    *
    * The published caps for these disagreed with each other and with reality -
    * one source had gemini-3.8-flash at 1500 requests a day and another at 20 -
    * so the only figure worth showing is the one this machine observed. When a
    * model reports an exhausted quota, the count at that moment is the cap, as
    * far as anyone here can tell.
+   *
+   * Per key, and that distinction was a bug for as long as it was not made.
+   * This used to be the POOL's request count at the moment one key died, and
+   * was then multiplied by the number of keys to get a ceiling - so with
+   * twenty keys a measured 25-a-day was recorded as 500 and shown as 10,000,
+   * and the meter read 2% on the way into a wall.
    */
   exhaustedAt?: number
 }
 
 /** One day's worth, keyed by model. */
 export interface DayUsage {
-  /** Local calendar date, YYYY-MM-DD. */
+  /** Local calendar date, YYYY-MM-DD: what to call the day when showing it. */
   date: string
+  /**
+   * The Pacific day these counts belong to, which is the day they reset on.
+   *
+   * Two dates, because the two questions are different. "What have I used
+   * today" is asked in the local calendar; "when does it come back" is
+   * answered by Google, at midnight in California. Rolling the counters on
+   * the local day cleared them eight hours early from here: a session past
+   * midnight saw 0% while every key was still spent, which is the exact
+   * failure this file was written to prevent.
+   */
+  quotaDay?: string
   models: Record<string, ModelUsage>
 }
 
@@ -76,6 +93,13 @@ export interface UsageEvent {
   limited?: boolean
   /** The provider said the day's allowance is gone, not merely to slow down. */
   exhausted?: boolean
+  /**
+   * What the key that ran out had spent on this model, when that is known.
+   *
+   * Falls back to the pool's own count, which is right when there is one key
+   * and is the only thing an older caller can supply.
+   */
+  exhaustedAfter?: number
 }
 
 /** Folds one turn into a day. Returns a new object; never mutates the input. */
@@ -94,7 +118,9 @@ export function record(day: DayUsage, event: UsageEvent): DayUsage {
     limited: prev.limited + (event.limited ? 1 : 0),
     // The first one is the honest number. Later refusals are just the same
     // wall being hit again.
-    exhaustedAt: prev.exhaustedAt ?? (event.exhausted ? prev.requests : undefined)
+    exhaustedAt:
+      prev.exhaustedAt ??
+      (event.exhausted ? (event.exhaustedAfter ?? prev.requests) : undefined)
   }
   return { ...day, models: { ...day.models, [key]: next } }
 }
@@ -244,6 +270,20 @@ function noteFor(
   return projects > 1 && allowance.requestsPerDay
     ? `${allowance.note} (x ${projects} keys = ${allowance.requestsPerDay * projects}/day)`
     : allowance.note
+}
+
+/**
+ * What ONE key is allowed on this model in a day, as best anyone here knows.
+ *
+ * The measurement beats the table, because the table is other people's
+ * guesses: one source had gemini-3.8-flash at 1500 a day and another at 20,
+ * and this machine saw about 25. Zero means nothing credible is known, and a
+ * zero must be shown as "cap unknown" rather than as a full meter.
+ */
+export function perKeyCapFor(day: DayUsage, model: string, via = 'google'): number {
+  const measured = day.models[`${via}:${model}`]?.exhaustedAt
+  if (measured !== undefined) return measured
+  return ALLOWANCES[model]?.requestsPerDay ?? 0
 }
 
 /** The local date, which is the day the providers reset on from here. */

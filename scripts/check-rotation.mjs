@@ -203,11 +203,14 @@ check('and no wait to report', new KeyRotation(0).waitMs(T0), 0)
   const at = cloud.indexOf('res.status === 401')
   const auth = cloud.slice(at, at + 1600)
   check('a rejected key is rested', /rotation\.rest\(index/.test(auth), true)
-  check('and the turn tries the next one', /availableCount\(\) > 0\)\s*continue/.test(auth), true)
+  /* availableCount now takes a clock and a model, so the arguments are not
+     spelled out here - only that the count gates the continue. */
+  check('and the turn tries the next one', /availableCount\([\s\S]{0,40}?\) > 0\) continue/.test(auth), true)
   check('the user is told which key it was', /keys\.hint\(provider, index\)/.test(auth), true)
   check(
     'the error only speaks when nothing is left',
-    auth.indexOf('availableCount()') < auth.indexOf('handlers.onError'),
+    auth.indexOf('availableCount(') >= 0 &&
+      auth.indexOf('availableCount(') < auth.indexOf('handlers.onError'),
     true
   )
 }

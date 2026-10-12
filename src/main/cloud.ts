@@ -1,6 +1,7 @@
 import type { ChatMessage } from '@shared/types'
 import type { ProviderId, WireMessage } from '@shared/cloud'
 import { KeyRotation, nextPacificMidnight } from '@shared/rotation'
+import type { PoolDay, PoolView } from '@shared/pool'
 import {
   PROVIDERS,
   classifyLimit,
@@ -106,7 +107,15 @@ async function pace(provider: ProviderId, estimatedTokens = 0): Promise<void> {
 export class CloudClient {
   private inflight = new Map<string, AbortController>()
 
-  constructor(private readonly keys: KeyStore) {}
+  /**
+   * The ledger is optional so a test or a script can build a client without
+   * a userData folder; when it is there, what the pool has spent survives a
+   * restart instead of being re-probed one 429 at a time.
+   */
+  constructor(
+    private readonly keys: KeyStore,
+    private readonly ledger?: { get(p: ProviderId): PoolDay | null; save(p: ProviderId, d: PoolDay): void }
+  ) {}
 
   abort(requestId: string): void {
     this.inflight.get(requestId)?.abort()
@@ -131,10 +140,14 @@ export class CloudClient {
   }
 
   /**
-   * One rotation per provider, kept for the life of the process.
+   * One rotation per provider, kept for the life of the process and written
+   * to disk behind it.
    *
-   * Not persisted: a cooldown is at most a day, and a restart is a
-   * reasonable moment to find out whether a key has recovered.
+   * It used to be deliberately forgotten on restart, on the grounds that a
+   * cooldown is at most a day. That was wrong in the direction that costs
+   * quota: a key out until midnight Pacific is still out after a restart, and
+   * finding that out again costs a request per key. Wumpy restarts several
+   * times an hour while it is being worked on.
    */
   private readonly rotations = new Map<ProviderId, KeyRotation>()
 
@@ -142,13 +155,28 @@ export class CloudClient {
     const count = this.keys.count(provider)
     let r = this.rotations.get(provider)
     if (!r) {
-      r = new KeyRotation(count)
+      r = new KeyRotation(count, this.ledger?.get(provider) ?? null)
       this.rotations.set(provider, r)
     } else {
       // Picks up a key added or cleared since the last turn.
       r.resize(count)
     }
     return r
+  }
+
+  /** Writes the ledger back, debounced by the store. */
+  private remember(provider: ProviderId, rotation: KeyRotation): void {
+    this.ledger?.save(provider, rotation.snapshot())
+  }
+
+  /**
+   * The pool as a report can print it: how many keys can answer with this
+   * model, what they have spent, and when the rest come back.
+   */
+  poolFor(model: string, perKeyCap: number): PoolView | null {
+    const provider = providerFor(model)
+    if (!provider) return null
+    return this.rotation(provider).view(model, perKeyCap, nextPacificMidnight())
   }
 
   private headers(provider: ProviderId, index: number): Record<string, string> {
@@ -267,13 +295,14 @@ export class CloudClient {
     const rotation = this.rotation(provider)
     const keyCount = Math.max(1, this.keys.count(provider))
     for (let attempt = 0; attempt < keyCount + 2; attempt++) {
-      const index = rotation.next()
+      /* By model, because a key out of one model is the right key for another. */
+      const index = rotation.next(Date.now(), model)
       if (index === null) {
         // Every key is resting. Say for how long rather than failing blank.
-        const wait = rotation.waitMs()
+        const wait = rotation.waitMs(Date.now(), model)
+        const until = wait > 0 ? `The soonest frees up in ${friendlyWait(wait)}.` : ''
         handlers.onError(
-          `All ${keyCount} ${PROVIDERS[provider].label} keys are rate limited. ` +
-            `The soonest frees up in ${Math.ceil(wait / 1000)}s.`,
+          `All ${keyCount} ${PROVIDERS[provider].label} keys are out of ${model}. ${until}`.trim(),
           { kind: 'limit', elsewhere: true }
         )
         return null
@@ -285,6 +314,8 @@ export class CloudClient {
         body: JSON.stringify(body),
         signal
       })
+      /* The request is on the ledger either way; a 200 is quota spent too. */
+      this.remember(provider, rotation)
       if (res.ok && res.body) return res
 
       const detail = await res.text().catch(() => '')
@@ -313,7 +344,8 @@ export class CloudClient {
             `(${this.keys.hint(provider, index)}) was REJECTED (${res.status}) and ` +
             'is out of rotation for today. Replace it with /key.'
         )
-        if (rotation.availableCount() > 0) continue
+        this.remember(provider, rotation)
+        if (rotation.availableCount(Date.now(), model) > 0) continue
         handlers.onError(
           keyCount > 1
             ? `All ${keyCount} ${PROVIDERS[provider].label} keys were rejected. Add a working one with /key.`
@@ -336,22 +368,47 @@ export class CloudClient {
       )
 
       /**
-       * A rate limit rests THIS key and moves to the next one.
+       * A rate limit sets THIS key aside and moves to the next one.
        *
        * With one key the only options were to sleep or to give up. With
        * several, a key that is out of quota is simply not the key to use
        * next, and the turn continues immediately on another - which is the
        * entire reason for having them.
+       *
+       * A DAILY cap is per model as well as per project, so it takes out one
+       * model on one key rather than the key itself. Resting the whole key
+       * was quota thrown away: with twenty keys and three Gemini models, an
+       * afternoon of hitting 3.8-flash's daily cap would retire the entire
+       * pool while every key still had its full 3.5-flash allowance. A
+       * per-minute throttle does hold the whole key, because it is over in
+       * seconds and the limit is shared by the project.
        */
       if (verdict.kind === 'exhausted' || verdict.kind === 'throttle') {
         const daily = /PerDay/i.test(detail) || /per day/i.test(verdict.message)
-        const until = daily ? nextPacificMidnight() : Date.now() + Math.max(1000, verdict.waitMs)
-        rotation.rest(index, until, daily ? 'daily quota' : 'per-minute')
+        /* Before the rest, or it reads as zero on the key that just died. */
+        const spentHere = rotation.requests(index, model)
+        if (daily) rotation.out(index, model, nextPacificMidnight())
+        else rotation.rest(index, Date.now() + Math.max(1000, verdict.waitMs), 'per-minute')
+        this.remember(provider, rotation)
         console.log(
           `[wumpy] ${PROVIDERS[provider].label} key ${index + 1}/${keyCount} ` +
-            `(${this.keys.hint(provider, index)}) rested: ${daily ? 'daily quota' : 'rate limit'}`
+            `(${this.keys.hint(provider, index)}) ` +
+            (daily
+              ? `is out of ${model} for the day after ${spentHere} request(s); ` +
+                `${rotation.availableCount(Date.now(), model)} key(s) left on it`
+              : 'rested: rate limit')
         )
-        if (rotation.availableCount() > 0) continue
+        if (rotation.availableCount(Date.now(), model) > 0) continue
+        if (daily) {
+          /* Every key is out of THIS model. Another model may be untouched,
+             which is what elsewhere: true tells the caller to try. */
+          handlers.onError(
+            `All ${keyCount} ${PROVIDERS[provider].label} keys have used up today's ` +
+              `free requests for ${model}. It comes back at ${clockFor(nextPacificMidnight())}.`,
+            { kind: 'limit', elsewhere: true, spent: true, afterRequests: spentHere }
+          )
+          return null
+        }
       }
       if (verdict.kind === 'exhausted') {
         handlers.onError(verdict.message, { kind: 'limit', elsewhere: true })
@@ -511,7 +568,9 @@ export class CloudClient {
        * Falls back to the first key when every one is resting, because a
        * title is not worth refusing outright.
        */
-      const index = this.rotation(provider).next() ?? 0
+      const background = this.rotation(provider)
+      const index = background.next(Date.now(), model) ?? 0
+      this.remember(provider, background)
       const res = await fetch(`${PROVIDERS[provider].base}/chat/completions`, {
         method: 'POST',
         headers: this.headers(provider, index),
@@ -534,6 +593,27 @@ export class CloudClient {
       return null
     }
   }
+}
+
+/**
+ * A wait a person can act on.
+ *
+ * "The soonest frees up in 28800s" was the old line, which is eight hours
+ * written in a unit nobody converts in their head.
+ */
+export function friendlyWait(ms: number): string {
+  const seconds = Math.ceil(Math.max(0, ms) / 1000)
+  if (seconds < 90) return `${seconds}s`
+  const minutes = Math.round(seconds / 60)
+  if (minutes < 90) return `${minutes}m`
+  const hours = Math.floor(minutes / 60)
+  const rest = minutes % 60
+  return rest ? `${hours}h ${rest}m` : `${hours}h`
+}
+
+/** Pacific midnight, said as the time it will be on this clock. */
+export function clockFor(at: number): string {
+  return new Date(at).toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' })
 }
 
 /**

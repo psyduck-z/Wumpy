@@ -240,7 +240,7 @@ check(
 // before you can type undoes most of the point of the hotkey.
 const composer = read('src/renderer/src/components/Composer.tsx')
 
-check('showing the panel focuses the box', composer.includes('[focusToken]'), true)
+check('showing the panel focuses the box', /\[focusToken(, tucked)?\]/.test(composer), true)
 // The hotkey arrives in a background hook, so Windows hands the foreground
 // over asynchronously and a focus() made before that lands is dropped. The
 // retrying now lives in focus.ts, and is checked above by its rules rather
@@ -779,3 +779,31 @@ check(
 
 console.log(failures ? `\n${failures} keyboard checks FAILED` : '\nall keyboard checks')
 process.exitCode = failures ? 1 : 0
+/*
+ * A start in the tray must not report a focus failure.
+ *
+ * `npm run restart` starts hidden now, so the page loads with the window
+ * hidden and the insist loop runs against a window nobody summoned: every
+ * single start logged "gave up waiting for the keyboard" and asked main to
+ * take the foreground by force. The test is made at the deadline rather than
+ * at the start, because a hotkey summon can still read as hidden for a frame
+ * or two after show() and focusing during that gap is the whole point.
+ */
+check(
+  'a hidden panel does not cry about the keyboard',
+  /!state\.yielded && !state\.tucked/.test(focusSrc),
+  true
+)
+check(
+  'and it is still tried while hidden',
+  focusSrc.indexOf('el.focus({ preventScroll: true })') > focusSrc.indexOf('!state.tucked'),
+  true
+)
+/*
+ * And "hidden" is not document.hidden, which this window never reports:
+ * backgroundThrottling is off, so Chromium calls the page visible for as
+ * long as it exists. Main is asked instead.
+ */
+check('the tray state is passed in', /isTucked: \(\) => boolean/.test(focusSrc), true)
+check('and the composer passes it', /\(\) => tucked$/m.test(composer), true)
+

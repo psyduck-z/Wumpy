@@ -64,8 +64,31 @@ if (mine.length) {
   ps(`Stop-Process -Id ${mine.join(',')} -Force -ErrorAction SilentlyContinue`)
 }
 
-const child = spawn(ELECTRON, ['.'], { cwd: ROOT, detached: true, stdio: 'ignore' })
+/**
+ * Started in the tray, not on screen.
+ *
+ * A restart is a developer's errand, and until now it ended with the panel
+ * opening over whatever the user was doing - which they noticed, because it
+ * happens several times an hour while something is being worked on: "you open
+ * up my Wumpy... it's kind of annoying. When you do that, can you just close
+ * Wumpy again?"
+ *
+ * The app already understands --hidden, for the login item. This is the same
+ * situation: a start that nobody asked to see. `npm run restart -- --show`
+ * brings the old behaviour back for the rare time the panel is the thing being
+ * looked at.
+ */
+const wanted = process.argv.slice(2)
+const show = wanted.includes('--show')
+// Anything else is passed straight through, which is how a verification run
+// gets --remote-debugging-port without a second script.
+const extra = wanted.filter((a) => a !== '--show')
+const args = show ? ['.', ...extra] : ['.', '--hidden', ...extra]
+
+const child = spawn(ELECTRON, args, { cwd: ROOT, detached: true, stdio: 'ignore' })
 child.unref()
+
+console.log(show ? 'starting with the panel open (--show)' : 'starting in the tray — Win+C to open')
 
 // The point of restarting is to run the new build, so say whether it is one.
 if (existsSync(BUILT)) {

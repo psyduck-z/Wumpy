@@ -3,6 +3,7 @@ import { readFileSync, writeFileSync, mkdirSync } from 'node:fs'
 import { join, dirname } from 'node:path'
 import type { DayUsage, UsageEvent, UsageLine } from '@shared/usage'
 import { record, summarise, todayKey } from '@shared/usage'
+import { pacificDayKey } from '@shared/pool'
 
 /**
  * Keeps the running total, one file, one day at a time.
@@ -25,20 +26,38 @@ export class UsageStore {
   }
 
   private read(): DayUsage {
-    const today = todayKey(new Date())
     try {
       const raw = JSON.parse(readFileSync(this.file, 'utf8')) as DayUsage
-      if (raw?.date === today && raw.models) return raw
+      if (raw?.models && raw.quotaDay === pacificDayKey()) return raw
+      /* A file written before quotaDay existed: keep it if the local day
+         still matches, which is the old rule and right for most of a day. */
+      if (raw?.models && !raw.quotaDay && raw.date === todayKey(new Date())) {
+        return { ...raw, quotaDay: pacificDayKey() }
+      }
     } catch {
       // No file yet, or it is yesterday's. Either way, start clean.
     }
-    return { date: today, models: {} }
+    return this.blank()
   }
 
-  /** Rolls over at midnight without needing a timer to notice. */
+  private blank(): DayUsage {
+    return { date: todayKey(new Date()), quotaDay: pacificDayKey(), models: {} }
+  }
+
+  /**
+   * Rolls over when the quota does, without needing a timer to notice.
+   *
+   * On the Pacific day, not the local one. The counters exist to measure an
+   * allowance Google resets at midnight in California, so that is the moment
+   * they are allowed to forget anything; the local date is carried alongside
+   * purely so the report can say "today" and mean it.
+   */
   private current(): DayUsage {
-    const today = todayKey(new Date())
-    if (this.day.date !== today) this.day = { date: today, models: {} }
+    if (this.day.quotaDay !== pacificDayKey()) this.day = this.blank()
+    else if (this.day.date !== todayKey(new Date())) {
+      /* Local midnight passed mid-quota-day: rename it, keep the counts. */
+      this.day = { ...this.day, date: todayKey(new Date()) }
+    }
     return this.day
   }
 
@@ -80,7 +99,7 @@ export class UsageStore {
   }
 
   reset(): void {
-    this.day = { date: todayKey(new Date()), models: {} }
+    this.day = this.blank()
     this.dirty = true
     this.flush()
   }

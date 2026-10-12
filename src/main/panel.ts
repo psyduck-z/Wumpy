@@ -473,8 +473,24 @@ export class Panel {
   hide(why = 'unknown'): void {
     if (!this.window?.isVisible()) return
     this.because = why
+    /*
+     * The page is told, because it cannot tell.
+     *
+     * document.hidden looks like the right signal and is not: the window
+     * sets backgroundThrottling to false so that the focus retry and the
+     * open animation keep running, and Chromium then reports the page as
+     * visible for as long as it exists - measured on a window that had
+     * never once been shown. Everything that waits for "nobody is looking"
+     * was therefore waiting forever.
+     */
+    this.window.webContents.send(IPC.panelTucked)
     // hide() hands the foreground back to whatever the user was working in.
     this.window.hide()
+  }
+
+  /** Whether the window is on screen right now, for a page just loading. */
+  get onScreen(): boolean {
+    return Boolean(this.window && !this.window.isDestroyed() && this.window.isVisible())
   }
 
   /**

@@ -26,6 +26,7 @@ export function Composer({
   queued = [],
   onUnqueue,
   focusToken,
+  tucked = false,
   prefill,
   placeholder,
   canSeeMedia = false,
@@ -42,6 +43,15 @@ export function Composer({
   onUnqueue?(): void
   /** Bumped whenever the panel is shown, so the caret lands in the box. */
   focusToken: number
+  /**
+   * The panel is in the tray.
+   *
+   * Only used to keep quiet about the keyboard: a window nobody has summoned
+   * has no business reporting that it was not given focus, and used to do so
+   * on every start. See IPC.panelTucked for why the page cannot work this
+   * out for itself.
+   */
+  tucked?: boolean
   /**
    * Text to drop into the box, with a token so the same text twice still
    * lands. Used by the command menu for commands that take an argument.
@@ -272,9 +282,16 @@ export function Composer({
       () => Boolean(document.querySelector('.picker')),
       // Half a second of trying and the window still has not been given the
       // keyboard. Only the main process can take it by force from here.
-      () => window.wumpy.panel.requestFocus()
+      () => window.wumpy.panel.requestFocus(),
+      /*
+       * Unless the panel is in the tray, in which case nobody asked for the
+       * keyboard and there is nothing to report. Still tried while tucked -
+       * focusing early is what makes the first keystroke after a summon
+       * land - just not complained about.
+       */
+      () => tucked
     )
-  }, [focusToken])
+  }, [focusToken, tucked])
 
   /**
    * Two ways the caret gets back to the box without being asked.

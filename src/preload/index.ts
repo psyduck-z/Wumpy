@@ -139,6 +139,14 @@ const api = {
     setPinned: (pinned: boolean): void => ipcRenderer.send(IPC.panelPin, pinned),
     setDock: (dock: Dock): void => ipcRenderer.send(IPC.panelDock, dock),
     onShown: (cb: () => void) => on(IPC.panelShown, cb),
+    /**
+     * Back in the tray. document.hidden cannot answer this: the window turns
+     * off backgroundThrottling, so Chromium calls the page visible for as
+     * long as it exists.
+     */
+    onTucked: (cb: () => void) => on(IPC.panelTucked, cb),
+    /** Where things stand for a page that has only just loaded. */
+    visible: (): Promise<boolean> => ipcRenderer.invoke(IPC.panelVisible),
     /** "I am visible and the keyboard is still somewhere else." */
     requestFocus: (): void => ipcRenderer.send(IPC.panelRefocus),
     onDock: (cb: (d: Dock) => void) => on(IPC.panelDock, cb)

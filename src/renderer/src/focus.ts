@@ -29,6 +29,8 @@ export interface AttemptState {
   elapsedMs: number
   /** Something else owns the keyboard on purpose - a picker, a dialog. */
   yielded: boolean
+  /** The panel is not on screen, so there is no keyboard to be given. */
+  tucked?: boolean
 }
 
 /**
@@ -93,7 +95,12 @@ export function insistFocus(
    * say true while Windows has handed over nothing, which is how an earlier
    * version of this guard came to do nothing at all.
    */
-  onGaveUp: () => void = () => {}
+  onGaveUp: () => void = () => {},
+  /**
+   * Is the panel in the tray? Asked rather than measured, because the page
+   * cannot see it: see IPC.panelTucked.
+   */
+  isTucked: () => boolean = () => false
 ): () => void {
   const startedAt = Date.now()
   let timer: ReturnType<typeof setTimeout> | null = null
@@ -106,13 +113,29 @@ export function insistFocus(
       hasFocus: document.hasFocus(),
       isActive: Boolean(el) && document.activeElement === el,
       elapsedMs: Date.now() - startedAt,
-      yielded: isYielded()
+      yielded: isYielded(),
+      tucked: isTucked() || document.hidden
     }
     if (!shouldKeepTrying(state)) {
       // Out of time without the keyboard, and nobody else wanted it. Ask for
       // the forceful route. Once only - it is called from a loop, and the
       // flicker it causes is not something to repeat.
-      if (!state.hasFocus && !state.yielded) {
+      /*
+       * A panel nobody has summoned is not a failure.
+       *
+       * `npm run restart` starts Wumpy in the tray now, so the page loads
+       * against a window that was never meant to hold the keyboard - and it
+       * logged an error and asked the main process to take the foreground by
+       * force, on every single start.
+       *
+       * Note that this is checked HERE and not in shouldKeepTrying: trying
+       * while hidden is right, because focusing the element early is what
+       * makes the first keystroke after a summon land in the box. Only the
+       * complaining is wrong. And it cannot be document.hidden, which this
+       * window never reports - backgroundThrottling is off, so Chromium
+       * calls the page visible for as long as it exists.
+       */
+      if (!state.hasFocus && !state.yielded && !state.tucked) {
         /**
          * Says so out loud, because this failure is unreproducible on
          * demand and has come back once already.

@@ -12,6 +12,7 @@ import type {
   HotkeyState,
   Assistant,
   AssistantStatus,
+  UsageReport,
   WumpySettings
 } from '@shared/types'
 import {
@@ -34,6 +35,8 @@ import { InputHistory } from './history'
 import { CloudClient } from './cloud'
 import { KeyStore } from './keys'
 import { UsageStore } from './usage'
+import { PoolStore } from './pool'
+import { perKeyCapFor } from '@shared/usage'
 import { Panel } from './panel'
 import { createTray, resourcePath } from './tray'
 import { registerHotkeys, unregisterHotkeys } from './hotkey'
@@ -123,6 +126,7 @@ let cloud: CloudClient
 let keys: KeyStore
 let notes: ContextStore
 let usage: UsageStore
+let pools: PoolStore
 /**
  * Hosted models that have said they are out for the day.
  *
@@ -446,10 +450,20 @@ function registerIpc(): void {
               // "Out for the day" rather than "slow down": the request count
               // at this moment is the only cap figure anyone here can trust,
               // since the published ones contradict each other.
-              exhausted: failure?.kind === 'limit' && /quota|used up|free quota/i.test(message)
+              exhausted:
+                failure?.kind === 'limit' &&
+                (failure.spent === true || /quota|used up|free quota/i.test(message)),
+              // What the KEY had spent, which is the per-project cap. The
+              // pool's own total is twenty times that with twenty keys.
+              exhaustedAfter: failure?.afterRequests
             })
 
-            if (failure?.kind === 'limit' && /used up its free requests/.test(message)) {
+            /* The flag when the sender set one, the words when it did not:
+               classifyLimit still reports a single key's exhaustion in prose. */
+            if (
+              failure?.kind === 'limit' &&
+              (failure.spent === true || /used up its free requests/.test(message))
+            ) {
               spentToday.add(on)
             }
             // A model the provider will not generate with is worse than
@@ -529,15 +543,30 @@ function registerIpc(): void {
     return provider ? Math.max(1, keys.count(provider)) : 1
   }
 
-  ipcMain.handle(IPC.usageGet, () => ({
-    lines: usage.lines(freeTiers()),
-    model: activeModel(),
-    date: usage.today().date
-  }))
+  /**
+   * The day's report, with the pool behind it.
+   *
+   * The two halves used to be kept apart: the counters knew "forty turns
+   * today" and the rotation knew "three keys are resting", and neither could
+   * answer "how much is left". This joins them for whichever model is
+   * answering, using the cap that model has actually been observed to have.
+   */
+  const report = (): UsageReport => {
+    const model = activeModel()
+    const cap = perKeyCapFor(usage.today(), model, providerFor(model) ?? 'google')
+    return {
+      lines: usage.lines(freeTiers()),
+      model,
+      date: usage.today().date,
+      pool: cloud.poolFor(model, cap)
+    }
+  }
+
+  ipcMain.handle(IPC.usageGet, () => report())
 
   ipcMain.handle(IPC.usageReset, () => {
     usage.reset()
-    return { lines: usage.lines(freeTiers()), model: activeModel(), date: usage.today().date }
+    return report()
   })
 
   /**
@@ -1096,6 +1125,8 @@ ${command}`
   ipcMain.on(IPC.panelHide, () => panel.hide('the close button'))
   ipcMain.on(IPC.panelPin, (_e, pinned: boolean) => panel.setPinned(pinned))
   ipcMain.on(IPC.panelDock, (_e, dock: Dock) => panel.setDock(dock))
+  /* A page that has just loaded has no idea whether it is on screen. */
+  ipcMain.handle(IPC.panelVisible, () => panel.onScreen)
   ipcMain.handle(IPC.hotkeyState, () => hotkeyState)
 
   // ---- what the user typed, for the composer's history ----
@@ -1153,7 +1184,8 @@ void app.whenReady().then(async () => {
   inputHistory = new InputHistory()
   keys = new KeyStore()
   notes = new ContextStore()
-  cloud = new CloudClient(keys)
+  pools = new PoolStore()
+  cloud = new CloudClient(keys, pools)
   usage = new UsageStore()
   panel = new Panel(settings)
 
@@ -1186,11 +1218,23 @@ void app.whenReady().then(async () => {
 
   await refreshModels()
 
-  // Launched by the login item: stay in the tray instead of popping up.
+  // Launched by the login item, or by a restart during development: stay in
+  // the tray instead of opening over whatever the user is doing.
   if (!process.argv.includes('--hidden')) panel.show('launch')
 })
 
-app.on('second-instance', () => panel?.show('a second Wumpy was started'))
+/**
+ * A second launch normally means "I want to see it", so the panel opens.
+ *
+ * Unless that launch said --hidden, which is how a restart starts now. The
+ * primary is the one that decides, and it only sees the newcomer's arguments
+ * here - so the flag has to be read from the event rather than from its own
+ * process.argv, which belongs to a start that happened hours ago.
+ */
+app.on('second-instance', (_event, argv) => {
+  if (argv.includes('--hidden')) return
+  panel?.show('a second Wumpy was started')
+})
 
 app.on('will-quit', () => {
   unregisterHotkeys()

@@ -33,6 +33,26 @@ export interface StreamFailure {
   kind: 'limit' | 'auth' | 'network' | 'unusable' | 'other'
   /** True when the same request somewhere else stands a chance. */
   elsewhere: boolean
+  /**
+   * This model has nothing left today, on any key.
+   *
+   * Said rather than spelled: the caller used to look for the words "used up
+   * its free requests" in the message, which worked until the message was
+   * reworded to mention how many keys were out - and then quietly stopped
+   * marking the model as spent, so the fallback kept choosing it.
+   */
+  spent?: boolean
+  /**
+   * Requests THAT KEY had made on this model when it said it was out.
+   *
+   * The only credible daily cap available, and it has to come from here
+   * because only the sender knows which key was being used. The counter it
+   * replaced was the pool's total, which with twenty keys rotating reads
+   * twenty times too high - and was then multiplied by twenty again to get a
+   * ceiling, so a measured 25-a-day became 10,000 and the meter sat near zero
+   * all the way into the wall.
+   */
+  afterRequests?: number
 }
 
 export interface StreamHandlers {

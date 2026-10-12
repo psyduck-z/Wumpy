@@ -1579,6 +1579,59 @@ body {
   margin-left: 1px;
 }
 
+/* ---- quota meter ---- */
+
+/*
+ * How much of today's free allowance is left, in the one place that is
+ * always visible. Deliberately quieter than the context meter: that one is
+ * about the conversation in front of you, this one is background weather
+ * until a key dies, at which point it colours itself.
+ */
+.quota {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 2px 5px;
+  background: none;
+  border: none;
+  border-radius: 6px;
+  color: rgb(var(--muted));
+  font: inherit;
+  font-size: 10px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.quota:hover {
+  background: rgb(var(--raised));
+  color: rgb(var(--text));
+}
+
+.quota-dot {
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: rgb(var(--text) / 0.35);
+}
+
+.quota-label {
+  font-variant-numeric: tabular-nums;
+}
+
+.quota.is-warn .quota-dot {
+  background: #f59e0b;
+}
+.quota.is-warn .quota-label {
+  color: #f59e0b;
+}
+
+.quota.is-critical .quota-dot {
+  background: rgb(var(--danger));
+}
+.quota.is-critical .quota-label {
+  color: rgb(var(--danger));
+}
+
 .composer-wrap {
   position: relative;
   padding: 0;

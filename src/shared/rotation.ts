@@ -12,30 +12,65 @@
  * rotating between them buys nothing. Five keys from five projects is five
  * times the allowance.
  *
- * This holds no keys and knows nothing about providers. It is a cooldown
- * tracker over N slots, which makes it testable without a network, a
- * provider, or a secret.
+ * This holds no keys and knows nothing about providers. It is a scheduler
+ * over N slots and a ledger of what each slot has spent, which makes it
+ * testable without a network, a provider, or a secret.
+ *
+ * The ledger itself lives in pool.ts, so that it can be written to disk and
+ * read back: a cooldown that is forgotten on restart means every dead key is
+ * tried again, and during development Wumpy restarts several times an hour.
  */
 
-/** A slot that is resting until `until`, with the reason for the record. */
-interface Resting {
-  until: number
-  why: string
-}
+import {
+  emptyPool,
+  isReady,
+  nextFreeMs,
+  outOn,
+  pacificDayKey,
+  poolView,
+  readyCount,
+  requestsOn,
+  restOn,
+  rollPool,
+  spendOn,
+  type PoolDay,
+  type PoolView
+} from './pool'
+
+export { nextPacificMidnight, pacificDayKey } from './pool'
 
 export class KeyRotation {
-  private readonly resting = new Map<number, Resting>()
+  private pool: PoolDay
   private cursor = 0
 
-  constructor(private count: number) {}
+  /**
+   * Picks up where a previous run left off, when it is handed a ledger.
+   *
+   * Without one it starts clean, which is the right default for a test and
+   * for a first run. With one, a key that is out until midnight Pacific stays
+   * out across a restart instead of costing another 429 to rediscover.
+   */
+  constructor(
+    private count: number,
+    saved?: PoolDay | null,
+    now: number = Date.now()
+  ) {
+    const day = pacificDayKey(now)
+    this.pool = rollPool(saved ?? emptyPool(day, count), day, count)
+  }
 
   /** Tells it how many keys there are now, after one was added or removed. */
-  resize(count: number): void {
+  resize(count: number, now: number = Date.now()): void {
     this.count = count
-    for (const index of [...this.resting.keys()]) {
-      if (index >= count) this.resting.delete(index)
-    }
+    this.pool = rollPool(this.pool, pacificDayKey(now), count)
     if (this.cursor >= count) this.cursor = 0
+  }
+
+  /** Rolls the ledger over at midnight Pacific without needing a timer. */
+  private fresh(now: number): PoolDay {
+    const day = pacificDayKey(now)
+    if (this.pool.day !== day) this.pool = rollPool(this.pool, day, this.count)
+    return this.pool
   }
 
   /**
@@ -45,70 +80,67 @@ export class KeyRotation {
    * hammering key one until it dies and then key two. That matters for a
    * per-minute limit: five keys used evenly give five times the rate, five
    * keys used in order give the same rate and five times the duration.
+   *
+   * Takes the model because the allowance is per model as well as per
+   * project: a key that is out of one model is still the right key for
+   * another, and skipping it for everything was quota thrown away.
    */
-  next(now: number = Date.now()): number | null {
+  next(now: number = Date.now(), model = ''): number | null {
     if (this.count <= 0) return null
+    this.fresh(now)
     for (let step = 0; step < this.count; step++) {
       const index = (this.cursor + step) % this.count
-      const rest = this.resting.get(index)
-      if (rest && rest.until > now) continue
-      if (rest) this.resting.delete(index)
+      if (!isReady(this.pool.spend[index], model, now)) continue
       this.cursor = (index + 1) % this.count
+      this.pool = spendOn(this.pool, index, model)
       return index
     }
     return null
   }
 
-  /** Marks a key as spent until a moment, after a 429 that named one. */
+  /**
+   * Marks a key as spent until a moment, for every model.
+   *
+   * For a throttle, or a key the provider rejected. A daily cap is per model
+   * and belongs in `out` instead.
+   */
   rest(index: number, until: number, why = 'rate limited'): void {
     if (index < 0 || index >= this.count) return
-    const current = this.resting.get(index)
-    // Never shorten an existing rest: a daily exhaustion outranks a
-    // per-minute one that arrives afterwards.
-    if (current && current.until >= until) return
-    this.resting.set(index, { until, why })
+    this.pool = restOn(this.pool, index, until, why)
+  }
+
+  /** Marks one model on one key as out until the quota day turns over. */
+  out(index: number, model: string, until: number): void {
+    if (index < 0 || index >= this.count) return
+    this.pool = outOn(this.pool, index, model, until)
   }
 
   /** How long until something is usable again, or 0 if one already is. */
-  waitMs(now: number = Date.now()): number {
+  waitMs(now: number = Date.now(), model = ''): number {
     if (this.count <= 0) return 0
-    if (this.resting.size < this.count) return 0
-    let soonest = Infinity
-    for (const { until } of this.resting.values()) {
-      if (until > now) soonest = Math.min(soonest, until)
-      else return 0
-    }
-    return soonest === Infinity ? 0 : soonest - now
+    return nextFreeMs(this.fresh(now), model, now)
   }
 
   /** For a status line: how many are usable right now. */
-  availableCount(now: number = Date.now()): number {
-    let free = 0
-    for (let i = 0; i < this.count; i++) {
-      const rest = this.resting.get(i)
-      if (!rest || rest.until <= now) free++
-    }
-    return free
+  availableCount(now: number = Date.now(), model = ''): number {
+    if (this.count <= 0) return 0
+    return readyCount(this.fresh(now), model, now)
   }
-}
 
-/**
- * When a daily quota comes back.
- *
- * Google resets requests-per-day at midnight Pacific, which is the one
- * reset time worth hardcoding because the error body never carries it - a
- * daily exhaustion arrives with a retryDelay measured in seconds, and
- * sleeping for that is how a key gets hammered all day.
- */
-export function nextPacificMidnight(now: number = Date.now()): number {
-  const here = new Date(now)
-  // Pacific is UTC-8, or UTC-7 while daylight saving is on. Asking the
-  // runtime avoids getting the changeover wrong twice a year.
-  const pacificNow = new Date(here.toLocaleString('en-US', { timeZone: 'America/Los_Angeles' }))
-  const offsetMs = here.getTime() - pacificNow.getTime()
-  const midnight = new Date(pacificNow)
-  midnight.setHours(24, 0, 0, 0)
-  return midnight.getTime() + offsetMs
+  /** What this key has spent on this model today, for a measured cap. */
+  requests(index: number, model = '', now: number = Date.now()): number {
+    return requestsOn(this.fresh(now), index, model)
+  }
+
+  /** The whole ledger, to be written to disk. */
+  snapshot(now: number = Date.now()): PoolDay {
+    return this.fresh(now)
+  }
+
+  /** The pool as a report can print it. */
+  view(model: string, perKeyCap: number, resetAt: number, now: number = Date.now()): PoolView {
+    return poolView(this.fresh(now), model, perKeyCap, now, resetAt)
+  }
 }
 
 /**

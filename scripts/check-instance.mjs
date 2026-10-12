@@ -95,6 +95,30 @@ check('no show() or hide() in tray.ts without a reason', trayUnlabelled, [])
  */
 check('the hotkey goes through toggle()', /panel\.toggle\(\)/.test(main), true)
 
+/* ------------------------------------------- a restart nobody asked to see */
+
+/*
+ * A restart is a developer's errand and used to end with the panel opening
+ * over whatever the user was doing, several times an hour: "you open up my
+ * Wumpy... it's kind of annoying. When you do that, can you just close Wumpy
+ * again?"
+ *
+ * The app already had --hidden for the login item. Two things have to hold:
+ * the restart script passes it, and the running copy honours it when a second
+ * process arrives - otherwise the primary helpfully shows itself instead.
+ */
+const restart = readFileSync('scripts/restart.mjs', 'utf8')
+check('a restart starts in the tray', /\['\.', '--hidden', \.\.\.extra\]/.test(restart), true)
+check('unless it is asked not to', /includes\('--show'\)/.test(restart), true)
+check('and it says which it did', /starting in the tray/.test(restart), true)
+check(
+  'a hidden second launch does not raise the first',
+  /second-instance', \(_event, argv\) => \{[\s\S]{0,120}argv\.includes\('--hidden'\)\) return/.test(
+    main
+  ),
+  true
+)
+
 /* ------------------------------------------------------------ the trace */
 
 const panel = readFileSync('src/main/panel.ts', 'utf8')
