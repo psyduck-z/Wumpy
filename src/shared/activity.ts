@@ -27,6 +27,7 @@ export type ActivityKind =
   | 'screen'
   | 'reply'
   | 'think'
+  | 'compact'
 
 export interface Activity {
   kind: ActivityKind
@@ -69,7 +70,8 @@ const LABELS: Record<ActivityKind, string> = {
   ask: 'Asking',
   screen: 'Looking at the screen',
   reply: 'Writing a reply',
-  think: 'Thinking'
+  think: 'Thinking',
+  compact: 'Compacting earlier turns'
 }
 
 /** Long enough to be a sentence, short enough for one line in a 440px panel. */

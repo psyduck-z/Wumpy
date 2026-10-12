@@ -16,6 +16,21 @@
     <InvariantGlobalization>true</InvariantGlobalization>
     <!-- No console window should flash when Electron spawns this. -->
     <DisableWinExeOutputInference>true</DisableWinExeOutputInference>
+    <!--
+      UI Automation, for finding a control by its NAME rather than by
+      guessing its pixel.
+
+      Reported: "it keeps on missing the TO fillin box, and keeps clicking
+      the same place every time... don't hardcode it." Estimating a
+      coordinate off a screenshot that was scaled to 1568px is a guess, and a
+      guess that is wrong is wrong the same way every time.
+
+      UseWPF is what brings in System.Windows.Automation. It costs nothing at
+      runtime here - no window is created - and measured against the live
+      Gmail tab it returned 971 elements in 256ms, 673 of them named, each
+      with its exact rectangle in screen coordinates.
+    -->
+    <UseWPF>true</UseWPF>
   </PropertyGroup>
 
 </Project>

@@ -143,7 +143,10 @@ const inputSrc = readFileSync('src/main/input.ts', 'utf8')
 check('a plan that types without clicking is refused', /typingIsAimed/.test(inputSrc), true)
 check('and the refusal runs before any step does', inputSrc.indexOf('typingIsAimed(plan.steps)') < inputSrc.indexOf('for (const step of plan.steps)'), true)
 check('a key press counts as typing too', /s\.kind === 'type' \|\| s\.kind === 'key'/.test(inputSrc), true)
-check('only a click satisfies it', /some\(\(s\) => s\.kind === 'click'\)/.test(inputSrc), true)
+check('a click satisfies it', /s\.kind === 'click' \|\| s\.kind === 'press'/.test(inputSrc), true)
+/* Pressing by name focuses the control, so it aims the keyboard too - and
+   it is the route the model should prefer, so it must not be refused. */
+check('and so does pressing a named control', /s\.kind === 'press'/.test(inputSrc), true)
 
 /* ------------------------------------------------------------ the wiring */
 
@@ -175,7 +178,44 @@ check('it says to look again between steps', /LOOK AGAIN BETWEEN STEPS/.test(des
 check('it says coordinates are the screenshot you saw', /pixels in the SCREENSHOT/.test(desktop), true)
 check('it stops at passwords', /password/i.test(desktop), true)
 check('and forbids the old refusal outright', /Never say you cannot reach their browser/.test(desktop), true)
-check('and the prompt says to click before typing', /CLICK THE FIELD BEFORE YOU TYPE/.test(desktop), true)
+check('and the prompt says to aim before typing', /AIM BEFORE YOU TYPE/.test(desktop), true)
+check('the prompt leads on pressing by name', /PRESS BY NAME\. NOT BY PIXEL\./.test(desktop), true)
+check('it explains why a repeated miss repeats', /SAME way every time/.test(desktop), true)
+check('and forbids re-clicking a coordinate that did nothing', /do NOT[\s\S]{0,20}click it again/.test(desktop), true)
+check('coordinates are demoted to last resort', /last resort/.test(desktop), true)
+
+/* ------------------------------------------- pressing by name, not pixel */
+
+/*
+ * The whole answer to "it keeps on missing the TO fillin box, and keeps
+ * clicking the same place every time... don't hardcode it". A coordinate
+ * estimated off a scaled screenshot is wrong identically every time the
+ * same picture is read, so a pixel loop cannot correct itself.
+ */
+check('press is a step', kinds(plan('press "Compose"')), ['press'])
+check('and keeps the name', plan('press "Compose"').steps[0].name, 'Compose')
+check('quotes are optional', plan('press Compose').steps[0].name, 'Compose')
+check('focus is press, aimed at a field', plan('focus "To recipients"').steps[0].focusOnly, true)
+check('press is not focus-only', plan('press "Send"').steps[0].focusOnly, false)
+check('a nameless press is dropped', plan('press ').steps, [])
+check('a name with spaces survives', plan('press "To recipients, Press Delete"').steps[0].name, 'To recipients, Press Delete')
+
+check('a name plan needs no screenshot', /needsFrame/.test(inputSrc), true)
+check('press sends no coordinate', /PRESS.*toBase64|Buffer\.from\(step\.name/.test(inputSrc), true)
+check('the element list is read from the helper', /visibleElements/.test(inputSrc), true)
+check('and attached to every screenshot', /visibleElements\(/.test(main), true)
+
+const app = readFileSync('src/renderer/src/App.tsx', 'utf8')
+check('the model is given the names', /namedControls/.test(app), true)
+check('and told to press rather than guess', /rather than guessing a pixel/.test(app), true)
+
+/* ------------------------------------------- the app speaking, not the user */
+
+check('auto-sent turns are marked', /automatic: true/.test(readFileSync('src/renderer/src/hooks/useChat.ts', 'utf8')), true)
+check('and are not drawn in the transcript', /filter\(\(m\) => !m\.automatic\)/.test(app), true)
+check('the screenshot turn says it was automatic', /taken automatically/.test(app), true)
+check('and tells the model the user did not speak', /not sent[\s\S]{0,40}by the user/.test(app), true)
+check('the plan report is passive too', /carried out automatically/.test(app), true)
 
 console.log(`${NL}${count - failed}/${count} desktop checks passed`)
 if (failed) process.exit(1)

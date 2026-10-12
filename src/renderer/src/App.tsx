@@ -66,11 +66,29 @@ export default function App(): React.JSX.Element {
    * Only while streaming - once the turn lands the cards say everything this
    * line was standing in for.
    */
+  /** Set while a compaction is running, so the user is not left guessing. */
+  const [compacting, setCompacting] = useState(false)
+
   const activity = useMemo(() => {
+    /*
+     * Compaction outranks the reply, because it is the thing that looks
+     * like a hang: the panel sits there, nothing streams, and a request to
+     * another model is quietly running. Asked for by name - "add a progress
+     * bar when compacting and so far so i know that its compacting".
+     */
+    if (compacting) {
+      return {
+        kind: 'compact' as const,
+        label: 'Compacting earlier turns',
+        detail: 'making room in the context',
+        count: 1,
+        open: true
+      }
+    }
     if (!streaming || !streamingId) return null
     const live = messages.find((m) => m.id === streamingId)
     return live ? activityFor(live.content, live.thinking ?? '') : null
-  }, [streaming, streamingId, messages])
+  }, [compacting, streaming, streamingId, messages])
 
   const [settings, setSettings] = useState<WumpySettings | null>(null)
   const [assistant, setAssistant] = useState<AssistantStatus | null>(null)
@@ -408,14 +426,37 @@ export default function App(): React.JSX.Element {
   const onScreenCaptured = useCallback((shot: Attachment) => {
     chatRef.current.send(
       [
-        'This is a photograph of my screen, taken just now.',
-        'Answer from what you can actually see on it. If something is too small',
-        'or cut off to read, say so rather than guessing.'
+        'A screenshot was taken automatically and is attached. This was not sent',
+        'by the user and they have not said anything - do not thank them for it',
+        'or answer as though they spoke.',
+        'Answer from what is actually visible. If something is too small or cut',
+        'off to read, say so rather than guessing.',
+        ...namedControls(shot)
       ].join(String.fromCharCode(10)),
       'Shared my screen',
-      [shot]
+      [shot],
+      true
     )
   }, [])
+
+/**
+ * The names of what is on screen, for the model to press instead of guess.
+ *
+ * Reported: "it keeps on missing the TO fillin box, and keeps clicking the
+ * same place every time." Estimating a coordinate from a scaled screenshot
+ * is wrong the same way every time the same picture is looked at, so the
+ * loop cannot break itself. A list of names breaks it.
+ */
+function namedControls(shot: Attachment): string[] {
+  const list = shot.elements ?? []
+  if (list.length === 0) return []
+  return [
+    '',
+    `These ${list.length} controls are on screen right now, with their real`,
+    'centres. PRESS one by name rather than guessing a pixel from the picture:',
+    ...list.map((e) => `  ${e.role}: ${JSON.stringify(e.name)}`)
+  ]
+}
 
   /* ---------------------------------------------------- acting on the screen */
 
@@ -441,14 +482,17 @@ export default function App(): React.JSX.Element {
     }
     chatRef.current.send(
       [
-        'I ran that on my screen. Here is what each step did:',
+        'The plan was carried out automatically. This is a report, not the user',
+        'speaking - they have said nothing. What each step did:',
         ...lines,
-        after ? 'The picture is my screen as it is now. Look before deciding what next.' : ''
+        after ? 'The attached screenshot is the screen as it is now.' : '',
+        ...(after ? namedControls(after) : [])
       ]
         .filter(Boolean)
         .join(String.fromCharCode(10)),
       'Ran it on my screen',
-      after ? [after] : undefined
+      after ? [after] : undefined,
+      true
     )
   }, [])
 
@@ -670,14 +714,26 @@ export default function App(): React.JSX.Element {
 
       const older = msgs.slice(0, msgs.length - keep)
       const recent = msgs.slice(msgs.length - keep)
-      if (!opts.silent) chat.note('Compacting earlier turns…')
 
-      const summary = await window.wumpy.chat.compact({
-        messages: older.map((m) => ({
-          role: m.summary ? 'system' : m.role,
-          content: m.content
-        }))
-      })
+      /*
+       * Shown for every compaction, including the silent ones. "Silent"
+       * meant no chat message, and it also meant no sign at all - so an
+       * automatic compaction before a send looked exactly like the app
+       * having stopped. The indicator is the one thing that should never
+       * be silent.
+       */
+      setCompacting(true)
+      let summary: string | null = null
+      try {
+        summary = await window.wumpy.chat.compact({
+          messages: older.map((m) => ({
+            role: m.summary ? 'system' : m.role,
+            content: m.content
+          }))
+        })
+      } finally {
+        setCompacting(false)
+      }
 
       if (!summary) {
         if (!opts.silent) chat.note('Could not compact this conversation.', true)
@@ -1106,6 +1162,36 @@ export default function App(): React.JSX.Element {
   )
 
   /**
+   * Compacting while nothing is happening, instead of in the user's way.
+   *
+   * Asked for: "sometimes when context is above 60%, compact while its not
+   * used, when it's idle." The send-time compaction it supplements fires at
+   * the worst possible moment - the user has just pressed Enter and the
+   * first thing that happens is a wait on a different model. In a gap it
+   * costs the same request and nobody is waiting on it.
+   *
+   * 60%, under the 65% the send-time path uses, so the idle attempt gets
+   * there first and that one becomes the fallback it was meant to be.
+   */
+  useEffect(() => {
+    if (!(settings?.autoCompact ?? true)) return
+    if (streaming || compacting) return
+    if (usage.used <= CONTEXT_TOKENS * 0.6) return
+    /* Long enough to be a pause rather than a gap between keystrokes. */
+    const timer = setTimeout(() => {
+      void (async () => {
+        /* Re-checked on the way in: twenty seconds is long enough for a turn
+           to have begun, and compacting under a live request would cut the
+           history out from under it. */
+        if (chatRef.current.streaming) return
+        const done = await compactHistory({ silent: true })
+        if (done) chatRef.current.note('Compacted earlier turns while idle, to make room.')
+      })()
+    }, 20_000)
+    return () => clearTimeout(timer)
+  }, [settings, streaming, compacting, usage.used, compactHistory])
+
+  /**
    * How much of a long transcript is in the page.
    *
    * Reset on a new or reopened chat, so switching conversations does not
@@ -1113,8 +1199,21 @@ export default function App(): React.JSX.Element {
    */
   const hidden = hiddenCount(messages.length, revealed)
   const folded = foldsTranscript(messages.length, revealed)
+  /**
+   * What the transcript draws.
+   *
+   * Turns the app sent on the user's behalf are left out. They still go to
+   * the model and are still in `messages`, so nothing about the conversation
+   * changes - they simply are not drawn as something the user said, because
+   * they did not say it: "I notice that I auto-send something to it, which
+   * is how it probably works, but it makes it look funky, so don't show
+   * things like that."
+   *
+   * Filtered after the fold is computed, so hiding one does not quietly
+   * change how much of the history is on screen.
+   */
   const shown = useMemo(
-    () => messages.slice(firstShown(messages.length, revealed)),
+    () => messages.slice(firstShown(messages.length, revealed)).filter((m) => !m.automatic),
     [messages, revealed]
   )
   const revealMore = useCallback(() => setRevealed((r) => r + REVEAL_STEP), [])

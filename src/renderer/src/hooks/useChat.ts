@@ -36,7 +36,7 @@ export interface ChatState {
   streamingId: string | null
   stats: ChatStats
   /** False when a turn is already in flight and the message was not sent. */
-  send(text: string, displayText?: string, images?: Attachment[]): boolean
+  send(text: string, displayText?: string, images?: Attachment[], automatic?: boolean): boolean
   /** Live facts handed to the model each turn; set by the app. */
   setContext(ctx: { chatTitle: string | null }): void
   /** Messages as the model would see them, for size estimates and compaction. */
@@ -175,7 +175,12 @@ export function useChat(): ChatState {
   }, [patchActive])
 
   const send = useCallback(
-    (text: string, displayText?: string, images?: Attachment[]): boolean => {
+    (
+      text: string,
+      displayText?: string,
+      images?: Attachment[],
+      automatic = false
+    ): boolean => {
     const trimmed = text.trim()
     // Refused rather than queued: the caller knows what to do with the message
     // it could not send, and silently dropping a command's output left the
@@ -190,7 +195,8 @@ export function useChat(): ChatState {
       // A command such as /plan sends a wrapped prompt but shows what was typed.
       content: displayText ?? trimmed,
       createdAt: Date.now(),
-      ...(images?.length ? { images } : {})
+      ...(images?.length ? { images } : {}),
+      ...(automatic ? { automatic: true } : {})
     }
     const assistantMessage: ChatMessage = {
       id: nextId(),

@@ -582,13 +582,16 @@ export function Composer({
         takes and then goes, and anything louder than the answer itself
         would be the wrong way round.
       */}
-      {streaming && activity && (
-        <div className="activity" role="status" aria-live="polite">
+      {activity && (
+        <div className={`activity ${activity.kind === 'compact' ? 'is-working' : ''}`} role="status" aria-live="polite">
           <span className="activity-dot" aria-hidden="true" />
           <span className="activity-label">{activity.label}</span>
           {activity.count > 1 && <span className="activity-count">{activity.count}</span>}
           {activity.detail && <span className="activity-detail">{activity.detail}</span>}
-          <span className="activity-stop">Esc to stop</span>
+          {streaming && <span className="activity-stop">Esc to stop</span>}
+          {/* Indeterminate on purpose: compaction is one request to a model
+              and there is no honest fraction to show, only that it is going. */}
+          {activity.kind === 'compact' && <span className="activity-bar" aria-hidden="true" />}
         </div>
       )}
 

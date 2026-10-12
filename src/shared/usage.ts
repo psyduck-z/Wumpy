@@ -172,7 +172,24 @@ export interface UsageLine {
   exhaustedAt?: number
 }
 
-export function summarise(day: DayUsage): UsageLine[] {
+/**
+ * The day's usage, against a ceiling that knows how many keys there are.
+ *
+ * A free-tier cap is per PROJECT, and each key is its own project - which is
+ * the entire reason there are twenty of them. Measuring against one key's
+ * allowance while rotating across twenty said the day was spent when a
+ * twentieth of it was, and the user had been collecting keys specifically
+ * because they were worried about running out: "update my usage based on
+ * the amount of API keys i have".
+ *
+ * Rested keys are not subtracted. A key that returned 429 today is out, so
+ * the true remaining allowance is lower than this - but the rotation already
+ * refuses to use it, and a meter that jumped backwards as keys dropped out
+ * would be harder to read than one that is honestly the optimistic bound.
+ */
+export function summarise(day: DayUsage, keys = 1): UsageLine[] {
+  /* At least one: zero keys is not a zero allowance, it is no provider. */
+  const projects = Math.max(1, Math.floor(keys))
   return Object.values(day.models)
     .map((u) => {
       const billed = u.promptTokens + u.completionTokens + u.thinkingTokens - u.cachedTokens
@@ -181,10 +198,17 @@ export function summarise(day: DayUsage): UsageLine[] {
 
       // What this machine saw beats what anyone published. If the model has
       // already said it is out today, the count at that moment is the cap.
-      const cap = u.exhaustedAt ?? allowance?.requestsPerDay ?? 0
-      if (cap || allowance?.tokensPerDay) {
+      /*
+       * exhaustedAt is one key running out, not the pool. It is still the
+       * best evidence of what ONE project allows, so it is multiplied like
+       * the published figure rather than treated as the total.
+       */
+      const perKey = u.exhaustedAt ?? allowance?.requestsPerDay ?? 0
+      const cap = perKey * (u.via === 'local' ? 1 : projects)
+      const tokenCap = (allowance?.tokensPerDay ?? 0) * (u.via === 'local' ? 1 : projects)
+      if (cap || tokenCap) {
         const byRequests = cap ? u.requests / cap : 0
-        const byTokens = allowance?.tokensPerDay ? billed / allowance.tokensPerDay : 0
+        const byTokens = tokenCap ? billed / tokenCap : 0
         const worst = Math.max(byRequests, byTokens)
         if (worst > 0) usedFraction = Math.min(1, worst)
       }
@@ -199,13 +223,27 @@ export function summarise(day: DayUsage): UsageLine[] {
         limited: u.limited,
         usedFraction,
         exhaustedAt: u.exhaustedAt,
-        note:
-          u.exhaustedAt !== undefined
-            ? `ran out after ${u.exhaustedAt} requests today — measured here`
-            : (allowance?.note ?? (u.via === 'local' ? 'no limit — runs on this PC' : ''))
+        note: noteFor(u, allowance, projects)
       }
     })
     .sort((a, b) => b.requests - a.requests)
+}
+
+/** Says what the ceiling is and that it was multiplied, so it can be checked. */
+function noteFor(
+  u: { exhaustedAt?: number; via: string },
+  allowance: Allowance | undefined,
+  projects: number
+): string {
+  const across = projects > 1 ? ` x ${projects} keys` : ''
+  if (u.exhaustedAt !== undefined) {
+    return `one key ran out after ${u.exhaustedAt} requests — measured here${across}`
+  }
+  if (u.via === 'local') return 'no limit — runs on this PC'
+  if (!allowance) return ''
+  return projects > 1 && allowance.requestsPerDay
+    ? `${allowance.note} (x ${projects} keys = ${allowance.requestsPerDay * projects}/day)`
+    : allowance.note
 }
 
 /** The local date, which is the day the providers reset on from here. */

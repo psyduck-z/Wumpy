@@ -47,7 +47,7 @@ import { ContextStore } from './context'
 import { Speech } from './speech'
 import { openLink, openSearch } from './browser'
 import { inspectWriteTarget, writeProposedFile } from './writefile'
-import { runPlan } from './input'
+import { runPlan, visibleElements } from './input'
 import { readPlan } from '@shared/steps'
 import {
   PROVIDERS,
@@ -517,15 +517,27 @@ function registerIpc(): void {
     priority.restore()
   })
 
+  /**
+   * How many separate free tiers this machine actually has.
+   *
+   * One per key, because each is its own Google Cloud project. Counted at
+   * read time rather than remembered, so adding ten more keys widens the
+   * meter immediately instead of after a restart.
+   */
+  const freeTiers = (): number => {
+    const provider = providerFor(activeModel())
+    return provider ? Math.max(1, keys.count(provider)) : 1
+  }
+
   ipcMain.handle(IPC.usageGet, () => ({
-    lines: usage.lines(),
+    lines: usage.lines(freeTiers()),
     model: activeModel(),
     date: usage.today().date
   }))
 
   ipcMain.handle(IPC.usageReset, () => {
     usage.reset()
-    return { lines: usage.lines(), model: activeModel(), date: usage.today().date }
+    return { lines: usage.lines(freeTiers()), model: activeModel(), date: usage.today().date }
   })
 
   /**
@@ -776,7 +788,24 @@ function registerIpc(): void {
   ipcMain.handle(IPC.screenCapture, async () => {
     const shot = await captureScreen(panel.liveWindow())
     console.log(`[wumpy] screen captured: ${shot.width}x${shot.height}, ${shot.bytes} bytes`)
-    return shot
+    /*
+     * And what everything on it is CALLED.
+     *
+     * A picture alone makes the model estimate pixels, and an estimate off a
+     * scaled image is wrong identically every time - which is exactly what
+     * "keeps clicking the same place every time" looked like. The names come
+     * from the accessibility tree with real rectangles, so the model can
+     * point at a control instead of a coordinate.
+     */
+    const elements = settings.get('browserEnabled')
+      ? await visibleElements((cmd, ms) =>
+          lowLevelHook
+            ? lowLevelHook.send(cmd, ms)
+            : Promise.resolve('ELEMENTS FAILED helper-not-running')
+        )
+      : []
+    if (elements.length) console.log(`[wumpy] ${elements.length} named controls on screen`)
+    return { ...shot, elements }
   })
 
   /**

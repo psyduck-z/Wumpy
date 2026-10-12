@@ -15,6 +15,7 @@
  * Run with: npm run check:activity
  */
 import { build } from 'esbuild'
+import { readFileSync } from 'node:fs'
 import { rmSync } from 'node:fs'
 import { pathToFileURL } from 'node:url'
 
@@ -251,6 +252,32 @@ for (let i = 1; i <= real.length; i++) {
 }
 check(`no prefix of a ${real.length}-char reply throws`, threw, 0)
 check('and the note never reverts to "writing a reply"', reverted, 0)
+
+/* --------------------------------------------------------- compacting */
+
+/*
+ * Asked for: "add a progress bar when compacting and so far so i know that
+ * its compacting". It is the one wait that looks like a hang - nothing
+ * streams and a request to another model is quietly running - so it has to
+ * outrank whatever else the line would say.
+ */
+check('compacting has a label', A.activityLine({ kind: 'compact', label: 'Compacting earlier turns', detail: null, count: 1, open: true }), 'Compacting earlier turns')
+
+const app = readFileSync('src/renderer/src/App.tsx', 'utf8')
+check('it outranks the streaming reply', app.indexOf('if (compacting)') < app.indexOf('if (!streaming || !streamingId)'), true)
+check('and is set on every compaction, silent included', /setCompacting\(true\)/.test(app), true)
+check('and always cleared', /finally \{\s*setCompacting\(false\)/.test(app), true)
+
+const composer = readFileSync('src/renderer/src/components/Composer.tsx', 'utf8')
+check('the row shows without streaming', /\{activity && \(/.test(composer), true)
+check('compaction gets a bar', /activity-bar/.test(composer), true)
+check('"Esc to stop" only while streaming', /\{streaming && <span className="activity-stop"/.test(composer), true)
+
+/* Idle compaction, under the send-time threshold so it gets there first. */
+check('there is an idle compaction', /Compacting while nothing is happening/.test(app), true)
+check('it triggers above 60%', /CONTEXT_TOKENS \* 0\.6\b/.test(app), true)
+check('below the send-time 65%', /CONTEXT_TOKENS \* 0\.65/.test(app), true)
+check('it will not run during a turn', /if \(chatRef\.current\.streaming\) return/.test(app), true)
 
 console.log(`${NL}${count - failed}/${count} activity checks passed`)
 if (failed) process.exit(1)

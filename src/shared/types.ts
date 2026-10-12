@@ -24,6 +24,22 @@ export interface ChatMessage {
   /** A notice the user wrote with /also while a turn was still running. */
   aside?: boolean
   /**
+   * Sent by the app on the user's behalf, not typed by them.
+   *
+   * A screenshot coming back, or the result of a plan of clicks. It has to
+   * go to the model - the model asked for it and cannot continue without it
+   * - but it is not something the user said, and showing it as their own
+   * message was the thing they objected to: "I notice that I auto-send
+   * something to it... but it makes it look funky, so don't show things
+   * like that."
+   *
+   * So it is sent and not shown. The MODEL is also told, in the text
+   * itself, that it arrived automatically rather than from the person - a
+   * model that thinks the user is narrating their own screenshots will
+   * thank them for it.
+   */
+  automatic?: boolean
+  /**
    * A compaction summary standing in for earlier turns. Sent to the model as a
    * system message so it reads as context rather than as something it said.
    */
@@ -196,6 +212,14 @@ export interface Attachment {
    * ChatStore ever sees this.
    */
   file?: string
+  /**
+   * What is on screen and what it is called, when the shot is a screenshot.
+   *
+   * From the accessibility tree, not from the image. The model points at a
+   * name instead of estimating a pixel, which is the difference between a
+   * mistake it can correct and the same wrong click forever.
+   */
+  elements?: Array<{ name: string; role: string; x: number; y: number }>
 }
 
 export interface SearchResult {

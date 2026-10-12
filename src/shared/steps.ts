@@ -28,6 +28,18 @@ export type Step =
   | { kind: 'type'; text: string }
   | { kind: 'key'; chord: string }
   | { kind: 'wait'; ms: number }
+  /*
+   * Pressing a control by its NAME rather than its pixel.
+   *
+   * The reason this exists: "it keeps on missing the TO fillin box, and
+   * keeps clicking the same place every time... don't hardcode it." An
+   * estimate off a scaled screenshot is wrong the same way every time the
+   * model looks at the same picture, so a pixel loop cannot correct itself.
+   * A name is a lookup, and a miss is a wrong choice the model can change.
+   *
+   * It also leaves the pointer alone, which was the other request.
+   */
+  | { kind: 'press'; name: string; focusOnly: boolean }
 
 export interface Plan {
   /** The `# why` line, for the card. */
@@ -109,6 +121,22 @@ export function readPlan(raw: string): Plan {
       continue
     }
 
+    if (verb === 'press' || verb === 'focus') {
+      /* Quotes optional: `press "Compose"` and `press Compose` both work,
+         because a model told to quote will sometimes not. */
+      const name = rest.replace(/^["']|["']$/g, '').trim()
+      if (!name) {
+        problems.push(`${verb} needs the name of something on screen: ${text}`)
+        continue
+      }
+      if (name.length > MAX_TYPE) {
+        problems.push(`${verb} name is absurdly long; dropped`)
+        continue
+      }
+      steps.push({ kind: 'press', name, focusOnly: verb === 'focus' })
+      continue
+    }
+
     if (verb === 'type') {
       /* Not trimmed beyond the line's own edges: a trailing space in a typed
          string is sometimes the point, and leading indentation never is. */
@@ -162,6 +190,8 @@ export function describe(step: Step): string {
       return `Press ${step.chord}`
     case 'wait':
       return `Wait ${step.ms}ms`
+    case 'press':
+      return `${step.focusOnly ? 'Put the cursor in' : 'Press'} ${JSON.stringify(step.name)}`
   }
 }
 

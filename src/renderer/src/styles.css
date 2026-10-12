@@ -1154,6 +1154,11 @@ body {
   replaced was perfectly legible, so that is what reduced motion gets back.
 */
 @media (prefers-reduced-motion: reduce) {
+  .activity-bar::after {
+    animation: none;
+    width: 100%;
+    opacity: 0.5;
+  }
   /* Still visible, just not moving: the dot is the "alive" signal. */
   .activity-dot {
     animation: none;
@@ -2160,6 +2165,46 @@ body {
   color: rgb(var(--muted) / 0.42);
   font-size: 10px;
   letter-spacing: 0.3px;
+}
+
+/*
+  Compaction is the one wait that looks like a hang: nothing streams, the
+  panel sits still, and a request to another model is quietly running. So it
+  gets a bar - indeterminate, because there is no honest fraction to show,
+  only that it is going.
+*/
+.activity.is-working .activity-label {
+  color: rgb(var(--text) / 0.72);
+}
+
+.activity-bar {
+  flex: none;
+  position: relative;
+  width: 58px;
+  height: 2px;
+  margin-left: auto;
+  border-radius: 2px;
+  background: rgb(var(--muted) / 0.18);
+  overflow: hidden;
+}
+
+.activity-bar::after {
+  content: "";
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: 40%;
+  border-radius: 2px;
+  background: rgb(var(--accent) / 0.75);
+  animation: activity-sweep 1.25s ease-in-out infinite;
+}
+
+@keyframes activity-sweep {
+  0% {
+    transform: translateX(-100%);
+  }
+  100% {
+    transform: translateX(250%);
+  }
 }
 
 @keyframes activity-breathe {

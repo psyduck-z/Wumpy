@@ -49,7 +49,9 @@ const SETTLE_MS = 180
 function typingIsAimed(steps: readonly Step[]): string | null {
   const firstType = steps.findIndex((s) => s.kind === 'type' || s.kind === 'key')
   if (firstType === -1) return null
-  const clickedFirst = steps.slice(0, firstType).some((s) => s.kind === 'click')
+  const clickedFirst = steps
+    .slice(0, firstType)
+    .some((s) => s.kind === 'click' || s.kind === 'press')
   if (clickedFirst) return null
   return (
     'This types without clicking anything first, and typed characters go to ' +
@@ -96,6 +98,36 @@ async function throughThePanel<T>(panel: BrowserWindow | null, run: () => Promis
 const wait = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms))
 
 /**
+ * What is on screen and what it is called, from the accessibility tree.
+ *
+ * This is the actual fix for "it keeps on missing the TO fillin box, and
+ * keeps clicking the same place every time". A model estimating a
+ * coordinate off a 1568px screenshot is wrong the same way every time it
+ * looks at the same picture, so the loop cannot break itself. Handed a list
+ * of names with real rectangles, it stops estimating: a miss becomes a
+ * wrong choice, which is the kind of mistake that can be corrected.
+ *
+ * Read from the FOREGROUND window, which is what the user is looking at and
+ * what a click would land on. Returns an empty list rather than failing: an
+ * app with no accessibility tree is a reason to fall back to coordinates,
+ * not a reason for the whole plan to stop.
+ */
+export async function visibleElements(
+  send: (command: string, timeoutMs?: number) => Promise<string>,
+  limit = 60,
+  filter = ''
+): Promise<Array<{ name: string; role: string; x: number; y: number }>> {
+  const reply = await send(`ELEMENTS ${limit}${filter ? ' ' + filter : ''}`, 8000)
+  const at = reply.indexOf('[')
+  if (!reply.startsWith('ELEMENTS ok') || at < 0) return []
+  try {
+    return JSON.parse(reply.slice(at))
+  } catch {
+    return []
+  }
+}
+
+/**
  * Runs a plan, step by step, stopping at the first failure.
  *
  * Stopping rather than pressing on: the steps are a sequence - click the
@@ -110,7 +142,13 @@ export async function runPlan(
   send: (command: string, timeoutMs?: number) => Promise<string>
 ): Promise<PlanResult> {
   const frame = lastShot()
-  if (!frame) {
+  /*
+   * A plan made entirely of names needs no picture: UI Automation finds the
+   * control wherever it is. Only coordinates need a frame to be measured
+   * against, so only they require one.
+   */
+  const needsFrame = plan.steps.some((s) => s.kind === 'click' || s.kind === 'move')
+  if (!frame && needsFrame) {
     return {
       ran: [],
       refused:
@@ -128,7 +166,7 @@ export async function runPlan(
   /* Checked before anything runs, so a plan that would wander off the screen
      half way through does not leave the first half done. */
   for (const step of plan.steps) {
-    if ((step.kind === 'click' || step.kind === 'move') && !onShot(frame, step.x, step.y)) {
+    if ((step.kind === 'click' || step.kind === 'move') && frame && !onShot(frame, step.x, step.y)) {
       return {
         ran: [],
         refused:
@@ -153,7 +191,7 @@ export async function runPlan(
 
 async function oneStep(
   step: Step,
-  frame: ReturnType<typeof lastShot> & object,
+  frame: ReturnType<typeof lastShot>,
   panel: BrowserWindow | null,
   send: (command: string, timeoutMs?: number) => Promise<string>
 ): Promise<string> {
@@ -162,10 +200,15 @@ async function oneStep(
       await wait(step.ms)
       return 'waited'
     case 'move': {
+      /* Unreachable without a frame: runPlan refuses a coordinate plan
+         before it gets here. Narrowed rather than asserted, so a future
+         caller that skips that check fails loudly instead of at 0,0. */
+      if (!frame) return 'MOVE FAILED no-screenshot'
       const at = toScreen(frame, step.x, step.y)
       return send(`MOVE ${at.x} ${at.y}`)
     }
     case 'click': {
+      if (!frame) return 'CLICK FAILED no-screenshot'
       const at = toScreen(frame, step.x, step.y)
       return throughThePanel(panel, () =>
         send(`CLICK ${at.x} ${at.y} ${step.button} ${step.times}`)
@@ -177,5 +220,18 @@ async function oneStep(
       return send(`TYPE ${Buffer.from(step.text, 'utf8').toString('base64')}`)
     case 'key':
       return send(`KEY ${step.chord}`)
+    case 'press':
+      /*
+       * No coordinate and no pointer. UI Automation presses the control
+       * itself, so nothing is taken from the user's hand - which was the
+       * request - and nothing depends on an estimate off a scaled image,
+       * which was the bug. Base64 because controls are named things like
+       * "To recipients, Press Delete to remove".
+       */
+      return send(
+        `${step.focusOnly ? 'FOCUS' : 'PRESS'} ` +
+          Buffer.from(step.name, 'utf8').toString('base64'),
+        6000
+      )
   }
 }

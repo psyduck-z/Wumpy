@@ -67,8 +67,12 @@ export class UsageStore {
     }
   }
 
-  lines(): UsageLine[] {
-    return summarise(this.current())
+  /**
+   * The day so far, measured against the allowance this machine actually
+   * has - which is one free tier per key, not one in total.
+   */
+  lines(keys = 1): UsageLine[] {
+    return summarise(this.current(), keys)
   }
 
   today(): DayUsage {

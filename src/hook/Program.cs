@@ -13,6 +13,7 @@
 // per trigger and exits when its stdin closes, so it can never outlive its parent.
 
 using System.Diagnostics;
+using System.IO;
 using System.Runtime.InteropServices;
 
 internal static class Program
@@ -767,6 +768,30 @@ internal static class Program
             case "KEY":
                 Key(rest);
                 return;
+            case "ELEMENTS":
+            {
+                /* "[limit] [filter words]" - the filter narrows a busy page. */
+                var bits = rest.Split(' ', 2, StringSplitOptions.RemoveEmptyEntries);
+                var limit = bits.Length > 0 && int.TryParse(bits[0], out var n) ? Math.Clamp(n, 1, 200) : 60;
+                UiTree.Elements(bits.Length > 1 ? bits[1].Trim() : string.Empty, limit);
+                return;
+            }
+            case "PRESS":
+            case "FOCUS":
+            {
+                /* Base64, because a control is named things like
+                   "To recipients, Press Delete to remove". */
+                try
+                {
+                    var name = System.Text.Encoding.UTF8.GetString(Convert.FromBase64String(rest));
+                    UiTree.Press(name, verb == "FOCUS", verb);
+                }
+                catch (FormatException)
+                {
+                    Console.WriteLine($"{verb} FAILED not-base64");
+                }
+                return;
+            }
             case "":
                 return;
             default:
@@ -791,6 +816,18 @@ internal static class Program
 
     private static void Click(int x, int y, bool right, int times)
     {
+        /*
+         * Where the pointer was, so it can be put back.
+         *
+         * "don't make it use MY cursor". PRESS by name does not touch it at
+         * all and is what the model is told to prefer; a coordinate click
+         * genuinely has to move it, because a synthesised button press lands
+         * wherever the pointer is. The next best thing is to leave it where
+         * it was found, so the user's pointer is borrowed for a moment
+         * rather than taken.
+         */
+        var had = GetCursorPos(out var before);
+
         if (!SetCursorPos(x, y))
         {
             Console.WriteLine($"CLICK FAILED cursor err={Marshal.GetLastWin32Error()}");
@@ -819,10 +856,20 @@ internal static class Program
             sent += SendInput((uint)inputs.Length, inputs, Marshal.SizeOf<INPUT>());
         }
         var want = (uint)(times * 2);
+        var err = sent == want ? 0 : Marshal.GetLastWin32Error();
+
+        /*
+         * Put back after the button events, not before: moving the pointer
+         * away first would make the click land where the pointer ended up.
+         * Whatever happened above, including a failure.
+         */
+        var restored = had && SetCursorPos(before.x, before.y);
+
         Console.WriteLine(
             sent == want
-                ? $"CLICK ok at={x},{y} button={(right ? "right" : "left")} times={times}"
-                : $"CLICK FAILED sent={sent}/{want} err={Marshal.GetLastWin32Error()}");
+                ? $"CLICK ok at={x},{y} button={(right ? "right" : "left")} times={times} " +
+                  $"pointer={(restored ? "restored" : "left-there")}"
+                : $"CLICK FAILED sent={sent}/{want} err={err}");
     }
 
     /*
