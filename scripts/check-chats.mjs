@@ -172,6 +172,42 @@ check('with the right media type, not image/mp4', clipBack.messages[0].images[0]
 check('and keeps its length', clipBack.messages[0].images[0].seconds, 3)
 check('and its kind', clipBack.messages[0].images[0].kind, 'video')
 
+/* ------------------------------------------- getting around the chats */
+
+/*
+ * Reported together, because they are the same complaint: moving between
+ * chats takes more steps than it should. "just slash delete means you
+ * delete the current chat. You don't have to go to the UI page thing"; and
+ * "when you resume a chat, yeah, you should auto go there".
+ */
+const app = readFileSync('src/renderer/src/App.tsx', 'utf8')
+const commands = readFileSync('src/renderer/src/commands.ts', 'utf8')
+
+check('/delete carries whether to show the list', /kind: 'delete'; pick: boolean/.test(commands), true)
+check('and defaults to not showing it', /pick: \/\^\(pick\|list\|other\|choose\)/.test(commands), true)
+check('the handler deletes the open chat first', /if \(!action\.pick\)/.test(app), true)
+/* A new chat before the delete, so the panel is never left with none. */
+check('it starts a fresh one rather than leaving none', /newChat\(\)[\s\S]{0,40}if \(saved\) await window\.wumpy\.chats\.delete/.test(app), true)
+check('and names what it deleted', /Deleted "\$\{name\}"/.test(app), true)
+check('an unsaved chat is not reported as deleted', /nothing saved yet/.test(app), true)
+
+check('the delete list closes when it empties', /refreshChats\(\)\)\.length === 0\) close\(\)/.test(app), true)
+
+/* Opening a chat lands at the end of it, not where the last one was. */
+const openChat = app.slice(app.indexOf('const openChat'), app.indexOf('/* ------', app.indexOf('const openChat')))
+check('opening a chat re-arms the scroll', /stickToBottom\.current = true/.test(openChat), true)
+check('and scrolls after the layout settles', /requestAnimationFrame/.test(openChat), true)
+check('and closes the picker', /setPicker\(null\)/.test(openChat), true)
+
+/* A new answer brings you to it, wherever you had scrolled to. */
+check('a starting turn re-arms the scroll', /streaming && !wasStreaming\.current/.test(app), true)
+check('once, on the edge, not continuously', /wasStreaming\.current = streaming/.test(app), true)
+
+/* Compaction waits until the panel is away. */
+check('idle compaction needs the panel hidden', /if \(!tucked\) return/.test(app), true)
+check('tucked follows document.hidden', /setTucked\(document\.hidden\)/.test(app), true)
+check('and it waits a few seconds, not twenty', /\}, 5_000\)/.test(app), true)
+
 rmSync(dir, { recursive: true, force: true })
 console.log(`${NL}${count - failed}/${count} chat-store checks correct`)
 process.exit(failed === 0 ? 0 : 1)

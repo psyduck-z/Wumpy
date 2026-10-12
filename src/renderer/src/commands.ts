@@ -13,7 +13,8 @@ export type CommandAction =
   | { kind: 'new' }
   | { kind: 'chats' }
   | { kind: 'resume' }
-  | { kind: 'delete' }
+  /** No argument deletes the chat you are in; `/delete pick` opens the list. */
+  | { kind: 'delete'; pick: boolean }
   | { kind: 'rename'; title: string }
   | { kind: 'renameChoice'; question: string; options: string[] }
   | { kind: 'model'; name: string }
@@ -150,9 +151,19 @@ export const COMMANDS: CommandSpec[] = [
   {
     name: 'delete',
     aliases: ['rm'],
-    // Same picker as /resume: searching by typing a name is what the list is for.
-    hint: 'Delete a saved chat',
-    run: () => ({ kind: 'delete' })
+    /*
+     * The chat you are in, with no list in the way.
+     *
+     * It used to open the same picker as /resume, so deleting the thing in
+     * front of you meant opening a list, finding it among the others and
+     * picking it - "just slash delete means you delete the current chat.
+     * You don't have to go to the UI page thing to make it easier."
+     *
+     * The list is still there for deleting a different one, behind an
+     * argument rather than in the way of the common case.
+     */
+    hint: 'Delete this chat  (/delete pick for the list)',
+    run: (arg) => ({ kind: 'delete', pick: /^(pick|list|other|choose)$/i.test((arg ?? '').trim()) })
   },
   {
     name: 'rename',

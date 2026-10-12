@@ -69,6 +69,16 @@ export default function App(): React.JSX.Element {
   /** Set while a compaction is running, so the user is not left guessing. */
   const [compacting, setCompacting] = useState(false)
 
+  /**
+   * True while the panel is hidden in the tray.
+   *
+   * Electron marks a hidden window as hidden to the page, so this is the
+   * same signal the open animation already uses - and it is the real
+   * "nobody is here", as opposed to twenty seconds without a keystroke
+   * while someone reads the answer on screen.
+   */
+  const [tucked, setTucked] = useState(false)
+
   const activity = useMemo(() => {
     /*
      * Compaction outranks the reply, because it is the thing that looks
@@ -219,8 +229,10 @@ export default function App(): React.JSX.Element {
    */
   useEffect(() => {
     const onVisibility = (): void => {
+      setTucked(document.hidden)
       if (document.hidden) setVisible(false)
     }
+    setTucked(document.hidden)
     document.addEventListener('visibilitychange', onVisibility)
     return () => document.removeEventListener('visibilitychange', onVisibility)
   }, [])
@@ -345,6 +357,19 @@ export default function App(): React.JSX.Element {
       }
       setPicker(null)
       setFocusToken((n) => n + 1)
+      /*
+       * And land at the end of it. "when you resume a chat, yeah, you should
+       * auto go there" - opening one used to leave the view wherever the
+       * previous chat had been scrolled to, which on a long conversation is
+       * the middle of someone else's sentence. After the layout effect has
+       * run on the new messages, so scrollHeight is the new chat's.
+       */
+      stickToBottom.current = true
+      setAtBottom(true)
+      requestAnimationFrame(() => {
+        const el = scroller.current
+        if (el) el.scrollTop = el.scrollHeight
+      })
     },
     [chat]
   )
@@ -787,6 +812,26 @@ function namedControls(shot: Attachment): string[] {
           return
         }
         case 'delete': {
+          /*
+           * The one in front of you, unless asked for the list.
+           *
+           * No confirmation. This is the same answer the user has given
+           * three times about accept-all - they own the machine and would
+           * rather have the thing happen than be asked - and unlike a
+           * command on the filesystem, the cost of being wrong here is one
+           * conversation. The chat is named in the confirmation so it is at
+           * least obvious WHICH one went.
+           */
+          if (!action.pick) {
+            const name = chatTitle ?? 'this chat'
+            const id = chatId
+            const saved = (await refreshChats()).some((c) => c.id === id)
+            newChat()
+            if (saved) await window.wumpy.chats.delete(id)
+            await refreshChats()
+            say(saved ? `Deleted "${name}".` : 'Started a new chat; there was nothing saved yet.')
+            return
+          }
           if ((await refreshChats()).length === 0) {
             say('No saved chats to delete.')
             return
@@ -1176,8 +1221,19 @@ function namedControls(shot: Attachment): string[] {
   useEffect(() => {
     if (!(settings?.autoCompact ?? true)) return
     if (streaming || compacting) return
+    /*
+     * Only while it is away in the tray.
+     *
+     * "The compaction while idle should happen while it's hidden inside the
+     * tray." Twenty seconds without a keystroke is not idle - it is someone
+     * reading the answer - and rewriting the history underneath them while
+     * they read it is the opposite of out of the way. Hidden is the only
+     * state where nobody is looking.
+     */
+    if (!tucked) return
     if (usage.used <= CONTEXT_TOKENS * 0.6) return
-    /* Long enough to be a pause rather than a gap between keystrokes. */
+    /* A few seconds after it goes away, not twenty: the panel being gone
+       is already the evidence that nobody is waiting. */
     const timer = setTimeout(() => {
       void (async () => {
         /* Re-checked on the way in: twenty seconds is long enough for a turn
@@ -1185,11 +1241,11 @@ function namedControls(shot: Attachment): string[] {
            history out from under it. */
         if (chatRef.current.streaming) return
         const done = await compactHistory({ silent: true })
-        if (done) chatRef.current.note('Compacted earlier turns while idle, to make room.')
+        if (done) chatRef.current.note('Compacted earlier turns while away, to make room.')
       })()
-    }, 20_000)
+    }, 5_000)
     return () => clearTimeout(timer)
-  }, [settings, streaming, compacting, usage.used, compactHistory])
+  }, [settings, streaming, compacting, tucked, usage.used, compactHistory])
 
   /**
    * How much of a long transcript is in the page.
@@ -1355,6 +1411,30 @@ function namedControls(shot: Attachment): string[] {
   }, [])
 
   useLayoutEffect(pinToBottom, [messages, pinToBottom])
+
+  /**
+   * A new answer brings you to it, wherever you had scrolled to.
+   *
+   * pinToBottom only moves the view while you are already at the bottom,
+   * which is right during a reply - it stops the page yanking itself about
+   * while you read back through one. It is wrong at the START of a reply:
+   * you asked a question, the answer is arriving somewhere below the fold,
+   * and the panel is showing you the middle of an older turn.
+   *
+   * So the stick is re-armed once, on the edge where a turn begins, rather
+   * than continuously. Scrolling up during the answer still detaches, and
+   * stays detached until the next one.
+   */
+  const wasStreaming = useRef(false)
+  useEffect(() => {
+    if (streaming && !wasStreaming.current) {
+      stickToBottom.current = true
+      setAtBottom(true)
+      const el = scroller.current
+      if (el) el.scrollTop = el.scrollHeight
+    }
+    wasStreaming.current = streaming
+  }, [streaming])
 
   const onScroll = (): void => {
     const el = scroller.current
@@ -1775,12 +1855,17 @@ function namedControls(shot: Attachment): string[] {
       onClose: close,
       onPick: (id) => void openChat(id),
       onRemove: (id) => {
-        void window.wumpy.chats.delete(id).then(() => {
+        void window.wumpy.chats.delete(id).then(async () => {
           // Deleting the chat that is open only removed the file: the next
           // autosave wrote it straight back under the same id, so it vanished
           // from the list and quietly returned on the following message.
           if (id === chatId) newChat()
-          void refreshChats()
+          /*
+           * Close once there is nothing left to delete, rather than leaving
+           * a list of nothing with a search box over it. The count comes
+           * from the refresh, not from state, which has not re-rendered.
+           */
+          if ((await refreshChats()).length === 0) close()
         })
       },
       items: savedChats.map((c) => ({
