@@ -213,6 +213,44 @@ export const DROPPED_PICTURE =
   '(The screenshot that was attached here is no longer being sent, to leave room. Look again if you need it.)'
 
 /**
+ * Where the list of on-screen controls begins, so it can go with its picture.
+ *
+ * The same quadratic cost as the screenshots, in text, and missed on the
+ * first pass because it does not look like an attachment. Every screenshot
+ * carries up to sixty named controls - about 580 tokens - written into the
+ * message body, and those were never trimmed: ten steps of a desktop plan
+ * re-sent 5,790 tokens of control lists on every turn after the tenth.
+ *
+ * It is also wrong, which matters more. The list says these controls are on
+ * screen RIGHT NOW. For every list but the newest that is false - the window
+ * has been clicked, typed into and scrolled since - so the model was being
+ * handed nine stale descriptions of a window, each asserting it was current,
+ * while the picture they described had already been dropped for being out of
+ * date. Nothing marked them as past.
+ *
+ * Matched by its own first line rather than by a marker, so chats saved
+ * before this existed are trimmed too.
+ */
+export const CONTROLS_LINE = /^\s*These \d+ controls are on screen right now/m
+
+/** What is said in place of a control list that has been superseded. */
+export const DROPPED_CONTROLS =
+  '(The list of what was on screen at that point is no longer being sent: the window has changed since. Look again to get the current one.)'
+
+/**
+ * Cuts the control list off the end of a message, leaving the rest.
+ *
+ * The list is always written last, so everything from its first line to the
+ * end of the message is the list. Returns the text unchanged when there is
+ * none, which is every message that is not a screenshot.
+ */
+export function withoutControls(content: string): { text: string; cut: boolean } {
+  const at = content.search(CONTROLS_LINE)
+  if (at < 0) return { text: content, cut: false }
+  return { text: content.slice(0, at).trimEnd(), cut: true }
+}
+
+/**
  * The conversation as it should go out: only the newest pictures attached.
  *
  * Pure, and returns new objects rather than editing them, because the
@@ -242,9 +280,16 @@ export function trimPictures<T extends { content: string; images?: Array<{ kind?
     if (!heavy(m) || kept.has(i)) return m
     /* The light attachments stay; only the bytes go. */
     const rest = (m.images ?? []).filter((a) => !sendsBytes((a.kind ?? 'image') as never))
-    const note = m.content.trim()
-      ? `${m.content}${String.fromCharCode(10)}${DROPPED_PICTURE}`
-      : DROPPED_PICTURE
+    /* The control list describes the picture, so it goes when the picture
+       does - and says it went, because an absent list is a model looking
+       again while a stale one is a model pressing something that moved. */
+    const trimmed = withoutControls(m.content)
+    const notes = [DROPPED_PICTURE, trimmed.cut ? DROPPED_CONTROLS : '']
+      .filter(Boolean)
+      .join(String.fromCharCode(10))
+    const note = trimmed.text.trim()
+      ? `${trimmed.text}${String.fromCharCode(10)}${notes}`
+      : notes
     const next = { ...m, content: note } as T
     if (rest.length) return { ...next, images: rest }
     const { images: _dropped, ...bare } = next

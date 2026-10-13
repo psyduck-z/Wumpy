@@ -207,6 +207,71 @@ check(
   check('and nothing is mutated', convo[0].images?.length, 1)
 }
 
+/* ------------------------------- the control list, which is the same bug */
+
+/*
+ * Every screenshot carries up to sixty named controls written into the
+ * message body - about 580 tokens - and those were never trimmed, so ten
+ * steps of a desktop plan re-sent 5,790 tokens of them on every turn.
+ *
+ * Worse than the cost: each one says the controls are on screen RIGHT NOW,
+ * which is true only of the newest. The model was being handed nine stale
+ * descriptions of a window, every one asserting it was current, while the
+ * pictures they described had already been dropped for being out of date.
+ */
+{
+  const list =
+    'These 60 controls are on screen right now in "Inbox", with their' +
+    NL +
+    'real centres. PRESS one by name rather than guessing a pixel:' +
+    NL +
+    Array.from({ length: 60 }, (_, i) => `  Button: "control ${i}"`).join(NL)
+  const body = `DONE step 1: CLICK ok at=735,465${NL}${list}`
+
+  check('a list is found and cut', P.withoutControls(body).cut, true)
+  check('and what came before it is kept', P.withoutControls(body).text, 'DONE step 1: CLICK ok at=735,465')
+  check('a message with no list is untouched', P.withoutControls('just a reply').cut, false)
+  check('and comes back unchanged', P.withoutControls('just a reply').text, 'just a reply')
+
+  const convo = Array.from({ length: 10 }, () => ({
+    role: 'user',
+    content: body,
+    images: [{ kind: 'image' }]
+  }))
+  const out = P.trimPictures(convo)
+  const still = out.filter((m) => /controls are on screen/.test(m.content)).length
+  check('only the newest lists are still sent', still, P.KEEP_PICTURES)
+  check('the stale ones say they went', /no longer being sent: the window has changed/.test(out[0].content), true)
+  check('with the step report left intact', out[0].content.startsWith('DONE step 1: CLICK ok'), true)
+  const before = convo.map((m) => m.content).join('').length
+  const after = out.map((m) => m.content).join('').length
+  /* 2,506 on this fixture, whose control names are shorter than real ones.
+     With names of the length Gmail actually reports it measured 3,756. */
+  check('and it is thousands of tokens', Math.ceil((before - after) / 4) > 2000, true)
+  /* The newest two keep everything, because those are the ones being acted on. */
+  check('the newest keeps its list', /controls are on screen/.test(out[9].content), true)
+  check('and is not annotated', /no longer being sent/.test(out[9].content), false)
+}
+
+/*
+ * The cut takes everything from the list's first line to the END of the
+ * message, which is exact only while the list is written last. It is, at all
+ * three places that write one - so this fails the day something is appended
+ * after it, rather than silently throwing that something away.
+ */
+{
+  const lines = readFileSync('src/renderer/src/App.tsx', 'utf8').split(NL)
+  const calls = lines
+    .map((line, i) => ({ line, i }))
+    .filter(({ line }) => line.includes('namedControls(') && !line.includes('function namedControls'))
+  check('every control list is written', calls.length, 3)
+  const trailing = calls.filter(({ i }) => {
+    const next = lines.slice(i + 1).find((l) => l.trim())
+    return (next ?? '').trim().startsWith(']')
+  })
+  check('and every one of them is written last', trailing.length, calls.length)
+}
+
 check('main trims before it sends', /trimPictures\(/.test(readFileSync('src/main/index.ts', 'utf8')), true)
 /* The transcript keeps them: it is the user's record of what was sent on
    their behalf, and that must not be edited to save tokens. */
