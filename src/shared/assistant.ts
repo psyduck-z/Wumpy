@@ -1185,6 +1185,84 @@ export interface PromptShape {
   needs?: readonly Capability[]
 }
 
+/**
+ * Stretches of the shell rules that only some turns need.
+ *
+ * The shell section is 3,503 tokens and goes out on every request, because a
+ * model that has not been told it can look at the machine answers from
+ * memory instead. Most of it earns that. Three stretches do not:
+ *
+ *   206  what winget prints, and that exit code 0 is not "installed"
+ *   242  that a picture in a message is a screenshot, and that Wumpy
+ *        cannot produce one
+ *   470  the format of a wumpy-write block
+ *
+ * 918 tokens, on every turn, for three subjects a given turn is almost never
+ * about. They are picked out by their own first lines rather than by cutting
+ * up the literal, so the text itself is untouched and `shellFor` with
+ * everything on is the same string character for character - which is a
+ * check, not a hope.
+ */
+const SHELL_PARTS = SHELL_PROMPT.split(String.fromCharCode(10, 10))
+
+const STARTS: Record<'install' | 'picture', readonly string[]> = {
+  install: ['AND AN INSTALL IS NOT FINISHED UNTIL SOMETHING SAYS IT IS.', 'Do not call that done'],
+  picture: ['THEY CAN SHOW YOU THINGS.', 'You cannot MAKE one.']
+}
+
+/*
+ * The write rules are matched by membership rather than by their first line,
+ * because WRITE_PROMPT is itself several paragraphs: matching the heading
+ * caught the first of them and left the other 470 tokens behind, which was
+ * the whole saving.
+ */
+const WRITE_PARTS = new Set(
+  WRITE_PROMPT.split(String.fromCharCode(10, 10))
+    .map((p) => p.trim())
+    .filter((p) => p.length > 20)
+)
+
+function topicOf(paragraph: string): 'install' | 'picture' | 'write' | null {
+  const head = paragraph.trimStart()
+  if (WRITE_PARTS.has(head.trim())) return 'write'
+  for (const [topic, heads] of Object.entries(STARTS)) {
+    if (heads.some((start) => head.startsWith(start))) return topic as keyof typeof STARTS
+  }
+  return null
+}
+
+/**
+ * The rule that must survive its own section being left out.
+ *
+ * The first line of WRITE_PROMPT is "never use a shell command - use a
+ * wumpy-write block", so dropping the block drops the prohibition with it,
+ * and a model that has not been told would reach for Set-Content. One line
+ * keeps the rule while the 470 tokens of format stay behind.
+ */
+const WRITE_STUB =
+  'To create or replace a FILE, never use a shell command — use a wumpy-write block. ' +
+  'Its exact format is given whenever the request is about files, writing or saving.'
+
+/** The shell rules, with the stretches this turn is not about left out. */
+export function shellFor(needs?: readonly Capability[]): string {
+  if (needs === undefined) return SHELL_PROMPT
+  let stubbed = false
+  const kept: string[] = []
+  for (const paragraph of SHELL_PARTS) {
+    const topic = topicOf(paragraph)
+    if (topic === null || needs.includes(topic)) {
+      kept.push(paragraph)
+      continue
+    }
+    /* Once, in the place the real one would have been. */
+    if (topic === 'write' && !stubbed) {
+      stubbed = true
+      kept.push(WRITE_STUB)
+    }
+  }
+  return kept.join(String.fromCharCode(10, 10))
+}
+
 /** The sections, in the order they are sent, with the empties dropped. */
 export function promptSections(shape: PromptShape): string[] {
   const { scope, search, screen, browser, quota } = shape
@@ -1199,7 +1277,7 @@ export function promptSections(shape: PromptShape): string[] {
   return [
     shape.base ?? VOICE_PROMPT,
     APP_PROMPT,
-    scope === 'full' ? SHELL_PROMPT : scope === 'read' ? READ_SHELL_PROMPT : NO_SHELL_PROMPT,
+    scope === 'full' ? shellFor(shape.needs) : scope === 'read' ? READ_SHELL_PROMPT : NO_SHELL_PROMPT,
     /* Same condition as SHELL_PROMPT: there is nothing to close without it. */
     scope === 'full' ? CLOSE_PROMPT : '',
     scope !== 'none' && search ? SEARCH_PROMPT : '',

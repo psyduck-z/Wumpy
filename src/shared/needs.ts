@@ -44,8 +44,15 @@
  * Pure, so the whole decision can be run over real transcripts in a check.
  */
 
-/** A section that can arrive in full or as a line saying it exists. */
-export type Capability = 'open' | 'desktop'
+/**
+ * A section that can arrive in full or not at all.
+ *
+ * The first two are whole sections with a stub to stand in for them. The
+ * other three are stretches INSIDE the shell rules, which stay otherwise: a
+ * paragraph about what winget prints is not needed to answer a question
+ * about a file, and 918 tokens of it went out on every turn.
+ */
+export type Capability = 'open' | 'desktop' | 'install' | 'picture' | 'write'
 
 /** The message shape this needs: role, what was said, whether it has pictures. */
 export interface Turn {
@@ -77,10 +84,44 @@ const OPEN_WORDS =
 const DESKTOP_WORDS =
   /\b(click|clicks|clicked|press|presses|pressed|type|types|typed|typing|fill|fills|filled|enter|select|selects|choose|tick|check ?box|drag|drop|scroll|hover|button|menu|dialog|field|text ?box|form|dropdown|drop-?down|toolbar|ribbon|window|windows|tab|tabs|screen|desktop|keyboard|mouse|cursor|caret|sign ?in|sign ?up|log ?in|login|compose|reply|forward|send (?:it|this|the|an? )?(?:email|message|mail)|inbox|gmail|outlook|account|password|username|submit|save as|copy|paste|cut|undo|redo|minimi[sz]e|maximi[sz]e|close (?:the|that|this)|switch to|alt ?tab|shortcut|hotkey|keystroke|automate|do it for me|for me on)\b/i
 
+/**
+ * Putting something on the machine, and knowing when it finished.
+ *
+ * The paragraph this gates is about reading winget's narration - "Exit code
+ * 0 means the command returned, not that the program is on the machine".
+ * Useless to a question about anything else, and the words that bring it on
+ * are the plainest in the list.
+ */
+const INSTALL_WORDS =
+  /\b(install|installs|installed|installing|installation|uninstall|reinstall|winget|choco|chocolatey|scoop|msi|npm i\b|npm install|pip install|cargo install|apt|brew|download|downloads|downloading|set ?up|setup|update|updates|upgrade|upgrades|package|packages)\b/i
+
+/**
+ * Pictures, in either direction: one they attached, or one they want made.
+ *
+ * Both paragraphs are here because they are two halves of the same subject -
+ * that Wumpy can read a picture and cannot produce one - and a request about
+ * either needs both, so that "no, but here is what I can do" is available in
+ * the same breath as the refusal.
+ */
+const PICTURE_WORDS =
+  /\b(picture|pictures|image|images|photo|photos|screenshot|screenshots|draw|drawing|sketch|render|diagram|chart|graph|logo|icon|wallpaper|video|videos|clip|recording|attached|attachment)\b/i
+
+/**
+ * Putting text into a file, which is the one thing with its own block.
+ *
+ * Generous to the point of bluntness: "file" alone brings it on. The format
+ * of a wumpy-write block is 470 tokens and a model that guesses at it wastes
+ * a whole turn, so the trigger is set to fire on anything in the
+ * neighbourhood rather than to be clever.
+ */
+const WRITE_WORDS =
+  /\b(write|writes|writing|wrote|save|saves|saving|create|creates|creating|make|makes|edit|edits|editing|append|appends|overwrite|rename|file|files|script|scripts|note|notes|document|readme|config|\.py|\.txt|\.md|\.json|\.ts|\.js|\.ps1|\.csv|\.html|\.css)\b/i
+
 /** The fences, so a sequence keeps its instructions while it is running. */
-const FENCES: Record<Capability, RegExp> = {
+const FENCES: Partial<Record<Capability, RegExp>> = {
   open: /```wumpy-open/,
-  desktop: /```wumpy-do/
+  desktop: /```wumpy-do/,
+  write: /```wumpy-write/
 }
 
 /**
@@ -103,9 +144,13 @@ export function needsFor(messages: readonly Turn[]): Capability[] {
   const recent = messages.slice(-LOOKBACK)
   const needs = new Set<Capability>()
 
-  /* A picture in the window means the screen is the subject. Desktop rules
-     only - looking at a photograph is not a reason to explain browsers. */
-  if (recent.some((m) => m.images?.length)) needs.add('desktop')
+  /* A picture in the window means the screen is the subject, and that an
+     attachment is being read - which is the other half of the picture
+     rules. Not a reason to explain browsers. */
+  if (recent.some((m) => m.images?.length)) {
+    needs.add('desktop')
+    needs.add('picture')
+  }
 
   for (const message of recent) {
     const text = message.content ?? ''
@@ -124,6 +169,9 @@ export function needsFor(messages: readonly Turn[]): Capability[] {
 
     if (OPEN_WORDS.test(text)) needs.add('open')
     if (DESKTOP_WORDS.test(text)) needs.add('desktop')
+    if (INSTALL_WORDS.test(text)) needs.add('install')
+    if (PICTURE_WORDS.test(text)) needs.add('picture')
+    if (WRITE_WORDS.test(text)) needs.add('write')
   }
 
   return [...needs]
@@ -137,7 +185,7 @@ export function needsFor(messages: readonly Turn[]): Capability[] {
  * decides to, the words it used to decide will have expanded the real section
  * on this same turn, because those words are what `needsFor` reads.
  */
-export const STUBS: Record<Capability, string> = {
+export const STUBS: Record<'open' | 'desktop', string> = {
   open: [
     'You can open a web page or an app in front of the user with a ```wumpy-open',
     'block, and you can check whether something is installed. The full rules for',
