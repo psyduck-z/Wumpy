@@ -215,5 +215,100 @@ check('and no wait to report', new KeyRotation(0).waitMs(T0), 0)
   )
 }
 
+/* ------------------------------------ the restart that killed three projects */
+
+/*
+ * Round-robin walked an in-memory cursor that started at zero on every
+ * launch, and `npm run restart` is Stop-Process -Force. A short session is a
+ * handful of requests, so key one served the first of them EVERY TIME, key
+ * two the second, and the back of the list saw traffic only in sessions long
+ * enough to wrap around.
+ *
+ * Google then restricted three projects for heavy free-tier use. They were
+ * Wumpy1, Wumpy2 and Wumpy3 - positions one, two and three, the only three
+ * that have ever returned 401 in this machine's logs.
+ *
+ * So: twenty short sessions of five requests each, with a restart between
+ * every one, which is an ordinary week here. The ledger is what carries
+ * across, exactly as it does on disk.
+ */
+{
+  const KEYS = 17
+  const SESSIONS = 20
+  const PER_SESSION = 5
+  let saved = null
+  let at = T0
+  for (let s = 0; s < SESSIONS; s++) {
+    /* A new KeyRotation is a new launch: the cursor is back at zero and the
+       only thing it knows is the ledger it is handed. */
+    const r = new KeyRotation(KEYS, saved, at)
+    for (let i = 0; i < PER_SESSION; i++) {
+      r.next(at, 'gemini-3.5-flash')
+      at += 20_000
+    }
+    saved = r.snapshot(at)
+  }
+  const used = saved.spend.map((s) => s.models['gemini-3.5-flash'] ?? 0)
+  const total = used.reduce((a, b) => a + b, 0)
+  check('every request is accounted for', total, SESSIONS * PER_SESSION)
+  /* 100 requests over 17 keys is 5.88 each, so 5 or 6 everywhere. */
+  check('the busiest key and the quietest differ by one', Math.max(...used) - Math.min(...used), 1)
+  check('no key is left unused', used.filter((n) => n === 0).length, 0)
+  /* The old behaviour, stated so the regression is unmistakable: with a
+     cursor that resets, the first five keys take all one hundred. */
+  check('the front of the list is not hammered', used[0] <= 6, true)
+  check('and the back of it is not idle', used[KEYS - 1] >= 5, true)
+}
+
+/* A long single session should still spread, which the cursor already did. */
+{
+  const r = new KeyRotation(5, null, T0)
+  let at = T0
+  for (let i = 0; i < 20; i++) {
+    r.next(at, 'm')
+    at += 20_000
+  }
+  check('an even spread within one session', r.snapshot(at).spend.map((s) => s.models.m), [4, 4, 4, 4, 4])
+}
+
+/* A key added mid-day is behind on count, and catching it up must not mean
+   handing it everything at once: the limit being avoided is per minute. */
+{
+  const r = new KeyRotation(3, null, T0)
+  let at = T0
+  for (let i = 0; i < 9; i++) {
+    r.next(at, 'm')
+    at += 60_000
+  }
+  r.resize(4, at)
+  const picks = []
+  for (let i = 0; i < 4; i++) {
+    picks.push(r.next(at, 'm'))
+    at += 1000
+  }
+  check('a new key catches up', picks[0], 3)
+  check('but not all at once', picks.filter((p) => p === 3).length <= 3, true)
+  check('and the others still get a turn', new Set(picks).size > 1, true)
+}
+
+/* Resting still beats being least-used: a key that cannot answer is not a
+   candidate however little it has done. */
+{
+  const r = new KeyRotation(3, null, T0)
+  r.rest(0, T0 + 60_000, 'rate limited')
+  const picks = [r.next(T0, 'm'), r.next(T0, 'm'), r.next(T0, 'm')]
+  check('a resting key is never the least-used choice', picks.includes(0), false)
+  check('and the others share it', picks.filter((p) => p === 1).length, 2)
+}
+
+/* Time is the last word between two equally-used keys, so a burst does not
+   land twice on the same project. */
+{
+  const r = new KeyRotation(2, null, T0)
+  check('the first goes somewhere', r.next(T0, 'm'), 0)
+  check('and the second goes elsewhere', r.next(T0 + 100, 'm'), 1)
+  check('then back again', r.next(T0 + 200, 'm'), 0)
+}
+
 console.log(`\n${count - failed}/${count} rotation checks correct`)
 process.exit(failed === 0 ? 0 : 1)

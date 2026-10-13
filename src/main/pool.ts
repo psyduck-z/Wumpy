@@ -62,7 +62,11 @@ export class PoolStore {
             models: typeof s?.models === 'object' && s.models ? s.models : {},
             restUntil: Number(s?.restUntil) || 0,
             why: typeof s?.why === 'string' ? s.why : '',
-            outOf: typeof s?.outOf === 'object' && s.outOf ? s.outOf : {}
+            outOf: typeof s?.outOf === 'object' && s.outOf ? s.outOf : {},
+            /* Absent in ledgers written before the rotation spread the load
+               by time as well as by count. Zero reads as "not for a long
+               time", which is the safe direction. */
+            lastAt: Number(s?.lastAt) || 0
           }))
         }
       }

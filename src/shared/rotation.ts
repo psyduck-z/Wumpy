@@ -22,8 +22,8 @@
  */
 
 import {
+  chooseKey,
   emptyPool,
-  isReady,
   nextFreeMs,
   outOn,
   pacificDayKey,
@@ -76,10 +76,14 @@ export class KeyRotation {
   /**
    * The next key to try, or null when every one of them is resting.
    *
-   * Round-robin rather than always-the-first, so the load spreads instead of
-   * hammering key one until it dies and then key two. That matters for a
-   * per-minute limit: five keys used evenly give five times the rate, five
-   * keys used in order give the same rate and five times the duration.
+   * The decision is `chooseKey`, in pool.ts, made from the ledger on disk
+   * rather than from the in-memory cursor this used to walk. The cursor did
+   * not survive a restart - it starts at zero every launch - so every short
+   * session spent its requests on the first few keys, and the three projects
+   * Google went on to restrict were Wumpy1, Wumpy2 and Wumpy3.
+   *
+   * The cursor is still here, as the last tie-break on a pool where nothing
+   * distinguishes one key from another.
    *
    * Takes the model because the allowance is per model as well as per
    * project: a key that is out of one model is still the right key for
@@ -88,14 +92,11 @@ export class KeyRotation {
   next(now: number = Date.now(), model = ''): number | null {
     if (this.count <= 0) return null
     this.fresh(now)
-    for (let step = 0; step < this.count; step++) {
-      const index = (this.cursor + step) % this.count
-      if (!isReady(this.pool.spend[index], model, now)) continue
-      this.cursor = (index + 1) % this.count
-      this.pool = spendOn(this.pool, index, model)
-      return index
-    }
-    return null
+    const index = chooseKey(this.pool, model, now, this.cursor)
+    if (index === null) return null
+    this.cursor = (index + 1) % this.count
+    this.pool = spendOn(this.pool, index, model, now)
+    return index
   }
 
   /**

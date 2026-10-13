@@ -46,6 +46,19 @@ export interface KeySpend {
    * model must not take the other models on that key down with it.
    */
   outOf: Record<string, number>
+  /**
+   * When this key was last handed a request.
+   *
+   * For spreading the load in TIME as well as in total. Two keys that have
+   * each served forty requests today are equally used by the count, and the
+   * one that served its fortieth ten seconds ago is the wrong one to pick
+   * next when the limit being avoided is five a minute.
+   *
+   * Optional because ledgers written before it exists load without it, and
+   * a missing timestamp reads as "not for a long time", which is the safe
+   * direction: a key nobody has a record of using is a fine key to use.
+   */
+  lastAt?: number
 }
 
 /** One quota day for one provider's pool of keys. */
@@ -124,13 +137,14 @@ function withSpend(pool: PoolDay, index: number, next: KeySpend): PoolDay {
 }
 
 /** One request, about to be sent on this key for this model. */
-export function spendOn(pool: PoolDay, index: number, model: string): PoolDay {
+export function spendOn(pool: PoolDay, index: number, model: string, now = 0): PoolDay {
   const prev = pool.spend[index]
   if (!prev) return pool
   const key = model || 'unknown'
   return withSpend(pool, index, {
     ...prev,
-    models: { ...prev.models, [key]: (prev.models[key] ?? 0) + 1 }
+    models: { ...prev.models, [key]: (prev.models[key] ?? 0) + 1 },
+    lastAt: now || prev.lastAt
   })
 }
 
@@ -184,6 +198,79 @@ export function nextFreeMs(pool: PoolDay, model: string, now: number): number {
 
 export function requestsOn(pool: PoolDay, index: number, model: string): number {
   return pool.spend[index]?.models[model || 'unknown'] ?? 0
+}
+
+/** Everything this key has served today, whichever model it was for. */
+export function requestsTotalOn(pool: PoolDay, index: number): number {
+  const models = pool.spend[index]?.models ?? {}
+  let total = 0
+  for (const count of Object.values(models)) total += count
+  return total
+}
+
+/**
+ * Which key should serve the next request.
+ *
+ * Round-robin from a counter was the old answer, and it had a hole big enough
+ * to lose three projects through: THE COUNTER DID NOT SURVIVE A RESTART. It
+ * lives in memory, starts at zero, and `npm run restart` is Stop-Process
+ * -Force - so every launch began the rotation at key one again. A short
+ * session is a handful of requests, which means key one served the first of
+ * them every single time, key two the second, and keys twelve to twenty saw
+ * traffic only in sessions long enough to wrap around.
+ *
+ * Then Google restricted three projects for heavy free-tier use, and the
+ * three were Wumpy1, Wumpy2 and Wumpy3. The first three in the list.
+ *
+ * So the choice is made from the LEDGER, which is written to disk, instead of
+ * from a counter that forgets. Fewest requests on this model wins, because
+ * that is the allowance being spent; ties go to the key that has served least
+ * in total, because that is the project being noticed; then to the one used
+ * longest ago, which spreads the five-a-minute limit across time as well as
+ * across keys; and last to the cursor, so a cold pool with nothing to choose
+ * between still walks rather than sticking.
+ *
+ * Pure, and takes `now` rather than reading a clock, so a day of traffic can
+ * be run through it and the spread measured.
+ */
+export function chooseKey(
+  pool: PoolDay,
+  model: string,
+  now: number,
+  cursor = 0
+): number | null {
+  const slots = pool.spend.length
+  if (slots <= 0) return null
+  const key = model || 'unknown'
+
+  let best: number | null = null
+  let bestRank: [number, number, number, number] | null = null
+
+  for (let step = 0; step < slots; step++) {
+    /* Walked from the cursor so that the final tie-break is "whichever came
+       up next", not "whichever is lowest-numbered" - the bias being fixed. */
+    const index = (cursor + step) % slots
+    const spend = pool.spend[index]
+    if (!isReady(spend, key, now)) continue
+    const rank: [number, number, number, number] = [
+      spend?.models[key] ?? 0,
+      requestsTotalOn(pool, index),
+      spend?.lastAt ?? 0,
+      step
+    ]
+    if (!bestRank || less(rank, bestRank)) {
+      best = index
+      bestRank = rank
+    }
+  }
+  return best
+}
+
+function less(a: [number, number, number, number], b: [number, number, number, number]): boolean {
+  for (let i = 0; i < a.length; i++) {
+    if (a[i] !== b[i]) return a[i] < b[i]
+  }
+  return false
 }
 
 /** Every request today on this model, across the pool. */
