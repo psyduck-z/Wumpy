@@ -1,5 +1,6 @@
 import type { Assistant } from './types'
 import { WRITE_PROMPT } from './writefile'
+import { STUBS, type Capability } from './needs'
 
 /**
  * Appended when Wumpy may act. The model never runs anything itself: it
@@ -1172,11 +1173,29 @@ export interface PromptShape {
   quota: boolean
   /** The voice, normally VOICE_PROMPT. Passed in so a benchmark can vary it. */
   base?: string
+  /**
+   * The optional sections this turn is actually about.
+   *
+   * Omitted means all of them, which is what a benchmark and every existing
+   * caller want. Supplied, the ones left out arrive as a line saying the
+   * capability exists - 4,728 tokens of browser and aiming rules that a
+   * question about the weather was paying for on every turn. @shared/needs
+   * decides, and says there why the guess is made the way round it is.
+   */
+  needs?: readonly Capability[]
 }
 
 /** The sections, in the order they are sent, with the empties dropped. */
 export function promptSections(shape: PromptShape): string[] {
   const { scope, search, screen, browser, quota } = shape
+  /*
+   * Undefined means "everything", which is what every caller meant before
+   * this existed and what a benchmark still means. An empty list is a real
+   * answer - this turn needs neither - and must not be read as "all".
+   */
+  const wants = (capability: Capability): boolean =>
+    shape.needs === undefined || shape.needs.includes(capability)
+
   return [
     shape.base ?? VOICE_PROMPT,
     APP_PROMPT,
@@ -1184,11 +1203,15 @@ export function promptSections(shape: PromptShape): string[] {
     /* Same condition as SHELL_PROMPT: there is nothing to close without it. */
     scope === 'full' ? CLOSE_PROMPT : '',
     scope !== 'none' && search ? SEARCH_PROMPT : '',
-    scope !== 'none' && browser ? OPEN_PROMPT : '',
+    scope !== 'none' && browser ? (wants('open') ? OPEN_PROMPT : STUBS.open) : '',
     screen ? SCREEN_PROMPT : '',
     quota ? QUOTA_PROMPT : '',
     /* Both, because driving the screen without seeing it is aiming blind. */
-    screen && browser && scope === 'full' ? DESKTOP_PROMPT : '',
+    screen && browser && scope === 'full'
+      ? wants('desktop')
+        ? DESKTOP_PROMPT
+        : STUBS.desktop
+      : '',
     ASK_PROMPT
   ].filter(Boolean)
 }

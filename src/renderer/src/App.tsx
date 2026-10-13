@@ -30,6 +30,7 @@ import {
   tooBig
 } from '@shared/pressure'
 import { refusedAttachment, sendsBytes, withoutBytes } from '@shared/attach'
+import { needsFor } from '@shared/needs'
 import { shouldRetitle } from '@shared/titles'
 import { CLOUD_MODELS, PROVIDERS, seesMedia } from '@shared/cloud'
 import { useChat, nextId, type ChatStats } from './hooks/useChat'
@@ -843,6 +844,13 @@ function namedControls(shot: Attachment): string[] {
    * emptier than it was. Measured from the same assembly the main process
    * sends, by the same settings, so the two cannot disagree.
    */
+  /*
+   * The same `needs` the sender works out, from the same messages, so the
+   * meter follows the preamble up and down instead of always quoting the
+   * biggest it could be. A turn about the screen costs 4,700 tokens more
+   * than a turn about anything else, and that is now visible rather than
+   * averaged away.
+   */
   const preamble = useMemo(
     () =>
       preambleTokens({
@@ -850,9 +858,10 @@ function namedControls(shot: Attachment): string[] {
         search: settings?.searchEnabled ?? true,
         screen: settings?.screenEnabled ?? true,
         browser: settings?.browserEnabled ?? false,
-        quota: (keyStatus?.counts?.google ?? 0) > 0
+        quota: (keyStatus?.counts?.google ?? 0) > 0,
+        needs: needsFor(messages.filter((m) => !m.error && !m.local))
       }),
-    [settings, keyStatus]
+    [settings, keyStatus, messages]
   )
 
   const guessed = useMemo(() => {

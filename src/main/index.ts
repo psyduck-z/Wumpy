@@ -25,6 +25,7 @@ import { KeyStore } from './keys'
 import { UsageStore } from './usage'
 import { PoolStore } from './pool'
 import { perKeyCapFor } from '@shared/usage'
+import { needsFor, type Capability } from '@shared/needs'
 import { trimPictures } from '@shared/pressure'
 import { Panel } from './panel'
 import { createTray, resourcePath } from './tray'
@@ -278,7 +279,11 @@ function factsFor(chatTitle: string | null, actions: string[] = []): string {
  * mapping from settings to that shape - which is the part that belongs here,
  * because settings do.
  */
-function promptShape(assistant: Assistant, scope: 'none' | 'read' | 'full'): PromptShape {
+function promptShape(
+  assistant: Assistant,
+  scope: 'none' | 'read' | 'full',
+  needs?: readonly Capability[]
+): PromptShape {
   return {
     scope,
     base: assistant.systemPrompt,
@@ -287,12 +292,25 @@ function promptShape(assistant: Assistant, scope: 'none' | 'read' | 'full'): Pro
     browser: settings.get('browserEnabled'),
     /* Only when there is a pool to talk about: a local-only install has no
        quota and a sentence about keys would be noise. */
-    quota: keys.count('google') > 0
+    quota: keys.count('google') > 0,
+    needs
   }
 }
 
-function systemPromptFor(assistant: Assistant, scope: 'none' | 'read' | 'full'): string {
-  return assemblePrompt(promptShape(assistant, scope))
+/**
+ * The preamble for this turn.
+ *
+ * `needs` is worked out from the messages as they will be SENT - after the
+ * picture trimming, so a screenshot that is no longer going out is not a
+ * reason to send 1,546 tokens of aiming rules. Without messages it falls back
+ * to everything, which is what the benchmarks and the first-run path want.
+ */
+function systemPromptFor(
+  assistant: Assistant,
+  scope: 'none' | 'read' | 'full',
+  sent?: ReturnType<typeof withContext>
+): string {
+  return assemblePrompt(promptShape(assistant, scope, sent ? needsFor(sent) : undefined))
 }
 
 /**
@@ -417,7 +435,11 @@ function registerIpc(): void {
     // prefill per turn with volatile text first, 1.2-1.6s with it last, and
     // 165ms when the prefix is untouched. The facts now go in just ahead of the
     // latest question, so only they and that question are reprocessed.
-    const systemPrompt = systemPromptFor(assistant, scope)
+    /* Built once, from the messages that are actually going out, and reused
+       for every attempt including the fallback - so a retry cannot quietly
+       send a different preamble from the one the meter counted. */
+    const sending = withContext(req)
+    const systemPrompt = systemPromptFor(assistant, scope, sending)
 
     // Stand aside for the duration of the turn: tokens matter more than UI.
     priority.yieldToModel()
@@ -444,7 +466,7 @@ function registerIpc(): void {
       await cloud.chat(
         req.requestId,
         on,
-        withContext(req),
+        sending,
         {
           thinking: assistant.thinking,
           options: assistant.options,
