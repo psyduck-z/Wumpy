@@ -169,7 +169,18 @@ check('and is zero padded', U.todayKey(new Date(2026, 10, 1)), '2026-11-01')
  *
  * Asserted so the default cannot drift back to a name someone remembers.
  */
-check('there is one model, and it is the chosen one', T.DEFAULT_MODEL, 'gemini-3.5-flash')
+/*
+ * Changed on 13 October, from 3.5 Flash to 3.1 Flash-Lite, on the strength of
+ * that morning's ledger: every Flash model - 3.5, 3.6 and 3.8 - refused on all
+ * eighteen live keys and returned ZERO prompt tokens across six attempts,
+ * while Flash-Lite answered six requests with no throttle at all. The measured
+ * allowance behind that is ~25 requests a day per project on Flash, then an
+ * 18-hour lockout.
+ *
+ * 3.5 is the better model and is one /model away. It is not the better
+ * DEFAULT, because the best default is the one that answers.
+ */
+check('there is one model, and it is the chosen one', T.DEFAULT_MODEL, 'gemini-3.1-flash-lite')
 check('it is a model the cloud layer can route', C.providerFor(T.DEFAULT_MODEL), 'google')
 check(
   'and one the picker offers',

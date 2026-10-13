@@ -257,32 +257,42 @@ export const CLOUD_MODELS: CloudModel[] = [
   // Google only. Everything else was measured and removed on purpose;
   // see the note above CLOUD_MODELS.
   // --- Google, in the order worth trying them -----------------------------
-  {
-    id: 'gemini-3.5-flash',
-    provider: 'google',
-    label: 'Gemini 3.5 Flash',
-    blurb: 'Measured 8/8 writing files that compile. The one to start with.',
-    looseFences: true
-  },
+  /*
+   * Lite first, and the blurbs say what each one COSTS.
+   *
+   * They used to be ordered by how well they answered, which is the right
+   * order only if you can get an answer. On 13 October every Flash model
+   * refused on all eighteen live keys and returned zero prompt tokens, while
+   * Lite answered six requests untroubled - and the picker was still saying
+   * 3.5 was "the one to start with", which is how four Flash models get tried
+   * in a row on a morning when none of them will answer.
+   */
   {
     id: 'gemini-3.1-flash-lite',
     provider: 'google',
     label: 'Gemini 3.1 Flash Lite',
-    blurb: 'Quickest and lightest. Also scored 4/4 here. Good for lookups.',
+    blurb: 'Scored 4/4 here, and the only one with a real free allowance. Start here.',
+    looseFences: true
+  },
+  {
+    id: 'gemini-3.5-flash',
+    provider: 'google',
+    label: 'Gemini 3.5 Flash',
+    blurb: 'Measured 8/8 writing files that compile. Smarter, but ~25 a day per key.',
     looseFences: true
   },
   {
     id: 'gemini-3.6-flash',
     provider: 'google',
     label: 'Gemini 3.6 Flash',
-    blurb: 'Between 3.5 and 3.8. Untested here.',
+    blurb: 'Between 3.5 and 3.8. Same small daily allowance as the other Flashes.',
     looseFences: true
   },
   {
     id: 'gemini-3.7-flash',
     provider: 'google',
     label: 'Gemini 3.7 Flash',
-    blurb: 'Newer Flash. Untested here, and the newer ones have small quotas.',
+    blurb: 'Newer Flash. Untested here, and the newer ones have the smallest quotas.',
     looseFences: true
   },
   {

@@ -1136,7 +1136,20 @@ export const VOICE_PROMPT = [
  * Its free tier is five requests a minute PER PROJECT, which is why Wumpy
  * rotates across every key it is given.
  */
-export const DEFAULT_MODEL = 'gemini-3.5-flash'
+/**
+ * Flash-Lite, because the Flash models have almost no free allowance.
+ *
+ * Measured on this machine: gemini-3.8-flash gave about 25 requests and then
+ * asked for 18 hours, and on 13 October every Flash model - 3.5, 3.6 and 3.8 -
+ * refused on all eighteen live keys in turn, returning zero prompt tokens for
+ * six attempts. Flash-Lite answered six requests on the same morning with no
+ * throttle at all.
+ *
+ * So the one to start with is the one that answers. Flash is a /model away
+ * for a turn that needs it, and 25 a day per project is plenty when it is the
+ * exception rather than the default.
+ */
+export const DEFAULT_MODEL = 'gemini-3.1-flash-lite'
 
 /**
  * What the assistant may propose, and how much room it gets to say it.
