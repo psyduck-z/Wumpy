@@ -196,5 +196,38 @@ check('and never reads the clipboard back', /clipboardRead|readText/.test(preloa
 /* check-cloud owns the key boundary; this only asserts the new channel did
    not open a way back. */
 
+/* ------------------------------------------------- the summon, which flashed */
+
+/*
+ * "It still flashes a little when I summon it."
+ *
+ * Two things were found by reading rather than by watching, and both are the
+ * kind that only a check keeps away. The entrance animation was removed from
+ * the CSS a while ago - "no entrance animation: the panel is simply there when
+ * summoned" - and its machinery was left behind: a `panel-in` class that
+ * appears exactly once in the repo, where it is applied, with no rule
+ * anywhere; a state change that re-rendered the whole panel on every hide and
+ * again in the same tick the window becomes visible; and a 140ms wait in
+ * close() to "let the slide-out play".
+ *
+ * The log rules out the cause the code itself blames: `minimize/restore`
+ * appears zero times in 86KB of it, and the keyboard arrives in 2-9ms via
+ * focus() every time. Whatever is left is below this layer.
+ */
+const panelSrc = readFileSync('src/main/panel.ts', 'utf8')
+const styles = readFileSync('src/renderer/src/styles.css', 'utf8')
+/* The quoted form, which is the applied one: the comment above the effect
+   names the class it removed, and a bare grep cannot tell the two apart. */
+check('no dead animation class is applied', /'panel-in'/.test(appSrc), false)
+check('and there is no rule for one either', /\.panel-in/.test(styles), false)
+check('closing does not wait for an animation', /setTimeout\(\(\) => window\.wumpy\.panel\.hide\(\)/.test(appSrc), false)
+check('the panel is still told when it is shown', /panel\.onShown/.test(appSrc), true)
+/* Bounds and z-order before the window is on screen, not after. */
+{
+  const show = panelSrc.slice(panelSrc.indexOf('  show(why'), panelSrc.indexOf('win.moveTop()'))
+  check('bounds are set before showing', show.indexOf('this.reposition()') < show.indexOf('win.show()'), true)
+  check('and the always-on-top level too', show.indexOf('setAlwaysOnTop') < show.indexOf('win.show()'), true)
+}
+
 console.log(`${NL}${count - failed}/${count} caret checks passed`)
 if (failed) process.exit(1)

@@ -135,7 +135,6 @@ export default function App(): React.JSX.Element {
   // "Pinned" is the inverse of hideOnBlur, and persists: the panel is meant to
   // stay on top of whatever you are working in until you dismiss it.
   const pinned = !(settings?.hideOnBlur ?? false)
-  const [visible, setVisible] = useState(false)
   const [focusToken, setFocusToken] = useState(0)
 
   /**
@@ -209,11 +208,21 @@ export default function App(): React.JSX.Element {
     []
   )
 
-  // Trigger the slide-in on mount and on every hotkey press.
+  /**
+   * The caret, on every summon.
+   *
+   * There was a `visible` state here driving a slide-in, and the animation it
+   * drove was deleted - the CSS says "no entrance animation: the panel is
+   * simply there when summoned" and sets opacity to 1. What was left was a
+   * class, `panel-in`, with no rule anywhere in the repo, and a state change
+   * that re-rendered the whole panel twice per summon: once on hide and once
+   * in the same tick the window becomes visible, which is the worst possible
+   * moment to be laying out two thousand lines of component for no reason.
+   *
+   * Only the focus token is left, which does something.
+   */
   useEffect(() => {
-    const raf = requestAnimationFrame(() => setVisible(true))
     const off = window.wumpy.panel.onShown(() => {
-      setVisible(true)
       setFocusToken((n) => n + 1)
     })
 
@@ -238,7 +247,6 @@ export default function App(): React.JSX.Element {
     window.addEventListener('focus', onWindowFocus)
 
     return () => {
-      cancelAnimationFrame(raf)
       window.removeEventListener('focus', onWindowFocus)
       off()
     }
@@ -264,16 +272,10 @@ export default function App(): React.JSX.Element {
    */
   useEffect(() => {
     const onVisibility = (): void => {
-      if (document.hidden) {
-        setTucked(true)
-        setVisible(false)
-      }
+      if (document.hidden) setTucked(true)
     }
     const offShown = window.wumpy.panel.onShown(() => setTucked(false))
-    const offTucked = window.wumpy.panel.onTucked(() => {
-      setTucked(true)
-      setVisible(false)
-    })
+    const offTucked = window.wumpy.panel.onTucked(() => setTucked(true))
     void window.wumpy.panel.visible().then((on) => setTucked(!on))
     document.addEventListener('visibilitychange', onVisibility)
     return () => {
@@ -297,10 +299,16 @@ export default function App(): React.JSX.Element {
     chat.setContext({ chatTitle })
   }, [chat, chatTitle])
 
+  /**
+   * Close, immediately.
+   *
+   * This waited 140ms to "let the slide-out play", and there has been no
+   * slide-out to play since the animation was removed - so clicking close
+   * left the panel sitting on screen for a seventh of a second doing
+   * nothing, which is long enough to see.
+   */
   const close = useCallback(() => {
-    setVisible(false)
-    // Let the slide-out play before the window actually disappears.
-    setTimeout(() => window.wumpy.panel.hide(), 140)
+    window.wumpy.panel.hide()
   }, [])
 
   /** Returns the list as well as storing it: the caller needs it this turn. */
@@ -2297,9 +2305,7 @@ function namedControls(shot: Attachment): string[] {
 
   return (
     <div
-      className={`panel dock-${dock} ${compact ? 'is-compact' : 'is-tall'} ${
-        visible ? 'panel-in' : ''
-      }`}
+      className={`panel dock-${dock} ${compact ? 'is-compact' : 'is-tall'}`}
       data-theme="dark"
     >
       <Header

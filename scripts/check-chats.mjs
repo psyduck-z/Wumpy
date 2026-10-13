@@ -217,7 +217,10 @@ check('and it waits a few seconds, not twenty', /\}, 5_000\)/.test(app), true)
  * that had never been shown at all: visibilityState 'visible'. So the flag
  * never flipped and this feature could not fire once.
  */
-check('tucked is told, not guessed', /panel\.onTucked\(\(\) => \{/.test(app), true)
+/* The handler lost its second line when the dead slide-out was removed, so
+   this matches the same shape as the onShown check below it rather than a
+   brace that was only there to hold a setVisible(false). */
+check('tucked is told, not guessed', /panel\.onTucked\(\(\) => setTucked\(true\)\)/.test(app), true)
 check('and asked for on arrival', /panel\.visible\(\)\.then/.test(app), true)
 check('a shown panel is not tucked', /panel\.onShown\(\(\) => setTucked\(false\)\)/.test(app), true)
 check('document.hidden is no longer believed on its own', /setTucked\(document\.hidden\)/.test(app), false)

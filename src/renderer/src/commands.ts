@@ -1,5 +1,6 @@
 import type { Dock, ProviderName } from '@shared/types'
 import { PROVIDER_IDS, isProviderId } from '@shared/cloud'
+import { nearest } from '@shared/nearest'
 
 /**
  * What a command asks the app to do. Commands are parsed in the renderer and
@@ -512,7 +513,24 @@ export function parseCommand(input: string): CommandAction | null {
   const [, name, arg] = match
   const spec = findCommand(name)
   if (!spec) {
-    return { kind: 'error', message: `Unknown command /${name}. Type /help to see them all.` }
+    /*
+     * The one the user was trying to type, when there is one.
+     *
+     * "Unknown command /mdoel. Type /help to see them all." is true and
+     * sends you to a table of twenty-seven to find the command you were
+     * already typing. It is nearly always one keystroke away and this file
+     * is holding the list. Nothing is offered when nothing is close - see
+     * @shared/nearest for why a wrong guess is worse than none.
+     */
+    /* The SPELLING that matched, not the canonical name: someone who typed
+       "/qouta" meant "/quota", which is a real alias of /usage and works -
+       answering "/usage" sends them to a word they did not reach for. */
+    const did = nearest(name, COMMANDS)
+    const hint = did ? ` Did you mean /${did.via}?` : ''
+    return {
+      kind: 'error',
+      message: `Unknown command /${name}.${hint} Type /help to see them all.`
+    }
   }
   return spec.run(arg ?? '')
 }

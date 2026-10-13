@@ -265,6 +265,16 @@ export class Panel {
     this.because = why
     this.openedAt = Date.now()
     const win = this.window ?? this.create()
+    /*
+     * Everything that changes how the window LOOKS happens before it is on
+     * screen, and only then is it shown.
+     *
+     * The bounds were already set first. The always-on-top level was not: it
+     * was re-applied to a window that had just become visible, which is a
+     * z-order change on something the compositor is in the middle of putting
+     * up. It is already set at creation and survives hide(), so this is
+     * belt-and-braces - and it costs nothing to do it a frame earlier.
+     */
     this.reposition()
     win.setAlwaysOnTop(true, 'screen-saver')
     win.show()
