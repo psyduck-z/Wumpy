@@ -25,6 +25,8 @@ export type CommandAction =
   | { kind: 'reasoning'; show: boolean | 'toggle' }
   | { kind: 'pin'; pinned: boolean | 'toggle' }
   | { kind: 'voice'; setting: 'on' | 'polish' | 'autostop'; on: boolean | 'toggle' }
+  /** A plain boolean in the settings file, with no machinery behind it. */
+  | { kind: 'setting'; setting: 'leanPrompt'; on: boolean | 'toggle' }
   | { kind: 'open'; what: string }
   | { kind: 'engine' }
   | {
@@ -371,6 +373,19 @@ export const COMMANDS: CommandSpec[] = [
     hint: 'Tidy dictated punctuation with the local model',
     arg: 'on|off',
     run: (arg) => ({ kind: 'voice', setting: 'polish', on: bool(arg) })
+  },
+  {
+    /*
+     * The instructions are the largest fixed cost of every turn, and most of
+     * what made them large was remediation for a weak local model. This sends
+     * the short form: 4,553 tokens instead of 7,059, with the thirteen rules
+     * that were measured to carry the benchmark kept intact.
+     */
+    name: 'lean',
+    aliases: ['short', 'brief'],
+    hint: 'Send the short instructions: ~2,500 fewer tokens every turn',
+    arg: 'on|off',
+    run: (arg) => ({ kind: 'setting', setting: 'leanPrompt', on: bool(arg) })
   },
   {
     name: 'autostop',

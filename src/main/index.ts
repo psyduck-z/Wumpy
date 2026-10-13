@@ -293,7 +293,10 @@ function promptShape(
     /* Only when there is a pool to talk about: a local-only install has no
        quota and a sentence about keys would be noise. */
     quota: keys.count('google') > 0,
-    needs
+    needs,
+    /* An environment variable as well, because the benchmarks set it and a
+       bench should not have to write the user's settings file to run. */
+    lean: settings.get('leanPrompt') || process.env.WUMPY_LEAN === '1'
   }
 }
 

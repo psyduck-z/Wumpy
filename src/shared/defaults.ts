@@ -56,6 +56,10 @@ export const DEFAULT_SETTINGS: WumpySettings = {
   voicePolish: false,
   voiceAutoStop: true,
 
+  // Off: the saving is large and measured, the shorter wording is not. The
+  // full text is what is known to work on this model. See WumpySettings.
+  leanPrompt: false,
+
   // Opening a page is allowed to be proposed; whether it happens without a click
   // depends on the approval mode, the same way a command does.
   browserEnabled: true,

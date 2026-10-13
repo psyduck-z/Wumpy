@@ -431,6 +431,23 @@ export interface WumpySettings {
   voicePolish: boolean
   /** Stop recording by itself once you stop talking. */
   voiceAutoStop: boolean
+  /**
+   * Send the short form of the instructions.
+   *
+   * The preamble is the largest single cost of every turn, and most of what
+   * made it large is remediation for one weak local model: worked wrong/right
+   * pairs, the same rule written three ways, and accounts of past failures.
+   * @shared/lean states the same contract once each and keeps the thirteen
+   * rules that were measured to carry the benchmark - 4,553 tokens against
+   * 7,059, which takes a plain turn from 7,841 to 5,335.
+   *
+   * Off by default, because what is verified about it is structural: every
+   * load-bearing rule survives and every block is still named, both checked
+   * across all thirty-two combinations. Whether the SHORTER WORDING holds up
+   * on this model has not been measured, and the full text is what is known
+   * to work. It is a setting rather than a silent default for that reason.
+   */
+  leanPrompt: boolean
   /** Let the model propose opening a page in the real browser. */
   browserEnabled: boolean
   /**

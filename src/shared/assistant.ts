@@ -1,6 +1,7 @@
 import type { Assistant } from './types'
 import { WRITE_PROMPT } from './writefile'
 import { STUBS, type Capability } from './needs'
+import { middlePrompt } from './lean'
 
 /**
  * Appended when Wumpy may act. The model never runs anything itself: it
@@ -1183,6 +1184,14 @@ export interface PromptShape {
    * decides, and says there why the guess is made the way round it is.
    */
   needs?: readonly Capability[]
+  /**
+   * Send the short form of the three always-sent sections.
+   *
+   * 4,553 tokens against 7,059, with all thirteen measured rules kept and
+   * every block still named. Off unless the user asks for it: see
+   * WumpySettings.leanPrompt for why that is not a default.
+   */
+  lean?: boolean
 }
 
 /**
@@ -1274,10 +1283,33 @@ export function promptSections(shape: PromptShape): string[] {
   const wants = (capability: Capability): boolean =>
     shape.needs === undefined || shape.needs.includes(capability)
 
+  /*
+   * The short form replaces the three sections that always go out, as one
+   * piece - they are rewritten together in @shared/lean, and taking the
+   * short voice with the long shell would state half the contract twice.
+   */
+  const shell = scope === 'full' ? shellFor(shape.needs) : scope === 'read' ? READ_SHELL_PROMPT : NO_SHELL_PROMPT
+  if (shape.lean && shape.base === undefined) {
+    return [
+      middlePrompt(VOICE_PROMPT, shell, ASK_PROMPT),
+      APP_PROMPT,
+      scope === 'full' ? CLOSE_PROMPT : '',
+      scope !== 'none' && search ? SEARCH_PROMPT : '',
+      scope !== 'none' && browser ? (wants('open') ? OPEN_PROMPT : STUBS.open) : '',
+      screen ? SCREEN_PROMPT : '',
+      quota ? QUOTA_PROMPT : '',
+      screen && browser && scope === 'full'
+        ? wants('desktop')
+          ? DESKTOP_PROMPT
+          : STUBS.desktop
+        : ''
+    ].filter(Boolean)
+  }
+
   return [
     shape.base ?? VOICE_PROMPT,
     APP_PROMPT,
-    scope === 'full' ? shellFor(shape.needs) : scope === 'read' ? READ_SHELL_PROMPT : NO_SHELL_PROMPT,
+    shell,
     /* Same condition as SHELL_PROMPT: there is nothing to close without it. */
     scope === 'full' ? CLOSE_PROMPT : '',
     scope !== 'none' && search ? SEARCH_PROMPT : '',

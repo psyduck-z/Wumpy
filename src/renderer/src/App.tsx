@@ -859,6 +859,7 @@ function namedControls(shot: Attachment): string[] {
         screen: settings?.screenEnabled ?? true,
         browser: settings?.browserEnabled ?? false,
         quota: (keyStatus?.counts?.google ?? 0) > 0,
+        lean: settings?.leanPrompt ?? false,
         needs: needsFor(messages.filter((m) => !m.error && !m.local))
       }),
     [settings, keyStatus, messages]
@@ -1444,6 +1445,19 @@ function namedControls(shot: Attachment): string[] {
                   (total > 1 ? ', used in turn so each limit counts separately. ' : '. ') +
                   'Pick a model with `/model`.'
               : result.why
+          )
+          return
+        }
+        case 'setting': {
+          /* The only one so far, and it says what it costs rather than just
+             reporting a flag: the whole point of it is the number. */
+          const next = action.on === 'toggle' ? !settings?.leanPrompt : action.on
+          await patch({ leanPrompt: next })
+          chat.note(
+            next
+              ? 'Short instructions on. About 2,500 fewer tokens every turn — the thirteen ' +
+                  'rules measured to carry the benchmark are kept, the worked examples are not.'
+              : 'Full instructions on. Every rule, every example, about 2,500 tokens more a turn.'
           )
           return
         }
