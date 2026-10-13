@@ -23,12 +23,13 @@ import { clippedOutput, commandFeedback } from '@shared/parsefail'
 import { CONTEXT_TOKENS, DEFAULT_MODEL, preambleTokens } from '@shared/assistant'
 import {
   COMPACT_COOLDOWN_MS,
-  estimateTokens,
+  estimateWithFiles,
   KEEP_PICTURES,
   needsRoom,
   roomNote,
   tooBig
 } from '@shared/pressure'
+import { refusedAttachment, sendsBytes, withoutBytes } from '@shared/attach'
 import { shouldRetitle } from '@shared/titles'
 import { CLOUD_MODELS, PROVIDERS, seesMedia } from '@shared/cloud'
 import { useChat, nextId, type ChatStats } from './hooks/useChat'
@@ -846,21 +847,20 @@ function namedControls(shot: Attachment): string[] {
     [settings, keyStatus]
   )
 
-  const guessed = useMemo(
-    () =>
-      preamble +
-      estimateTokens(
-        messages.reduce((n, m) => (m.error || m.local ? n : n + m.content.length), 0),
-        /* Capped at what actually goes out: main sends only the newest
-           pictures, so counting all of them would have the meter reporting a
-           conversation nobody is paying for. */
-        Math.min(
-          KEEP_PICTURES,
-          messages.reduce((n, m) => (m.error || m.local ? n : n + (m.images?.length ?? 0)), 0)
-        )
-      ),
-    [messages, preamble]
-  )
+  const guessed = useMemo(() => {
+    const counted = messages.filter((m) => !m.error && !m.local)
+    /*
+     * Every attachment, in the order they were sent, charged for what it
+     * actually is. A flat 1,100 each was right while an attachment could only
+     * be a picture; a 16,000-character text file is four thousand tokens and
+     * a .docx that could not be read is one sentence. estimateWithFiles also
+     * applies the same "only the newest pictures go out" cap that the wire
+     * does, so the meter reports the conversation that is being paid for.
+     */
+    const files = counted.flatMap((m) => m.images ?? [])
+    const chars = counted.reduce((n, m) => n + m.content.length, 0)
+    return preamble + estimateWithFiles(chars, files, KEEP_PICTURES)
+  }, [messages, preamble])
 
   /**
    * What the context meter shows. The provider's counts are exact but only
@@ -1024,6 +1024,35 @@ function namedControls(shot: Attachment): string[] {
       live.send(asked.content, undefined, asked.images)
     })()
   }, [messages, streaming, compactHistory])
+
+  /**
+   * An attachment the endpoint would not take, sent again without it.
+   *
+   * Images and video are measured as working here. A PDF and a sound file go
+   * the same way on the strength of the same finding - the endpoint reads the
+   * type off the data URL - and that could not be confirmed, because the API
+   * answered 503 and then timed out across four keys while this was written.
+   *
+   * So rather than claim it works or refuse to send it, the failure is made
+   * cheap: the turn goes again with the bytes replaced by a line naming the
+   * file, which is what an unreadable attachment gets anyway. One wasted
+   * request, an honest answer, and the user is told which it was.
+   */
+  const retriedBytes = useRef(new Set<string>())
+  useEffect(() => {
+    if (streaming) return
+    const failed = messages.findLast((m) => m.error && refusedAttachment(m.error))
+    if (!failed || retriedBytes.current.has(failed.id)) return
+    const asked = messages[messages.indexOf(failed) - 1]
+    if (!asked || asked.role !== 'user' || !asked.images?.some((a) => sendsBytes(a.kind))) return
+    retriedBytes.current.add(failed.id)
+    const live = chatRef.current
+    const kinds = [...new Set(asked.images.filter((a) => sendsBytes(a.kind)).map((a) => a.kind))]
+    live.note(
+      `This model would not take ${kinds.join(' or ')} like that. Asking again with the file named but not sent.`
+    )
+    live.send(asked.content, undefined, withoutBytes(asked.images) as typeof asked.images)
+  }, [messages, streaming])
 
   /* --------------------------------------------------------------- commands */
 

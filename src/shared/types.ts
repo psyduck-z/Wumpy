@@ -1,5 +1,9 @@
 /** Shared contracts between the main process, preload bridge and renderer. */
 
+import type { AttachKind } from './attach'
+
+export type { AttachKind }
+
 export type Role = 'user' | 'assistant' | 'system'
 
 export interface ChatMessage {
@@ -195,14 +199,23 @@ export interface ShellProgress {
  */
 export interface Attachment {
   /**
-   * Which it is, because the two behave differently everywhere.
+   * Which it is, because they behave differently everywhere.
    *
    * An image is shrunk and costs a flat ~1,100 tokens. A video is passed
    * through whole and costs about 105 tokens a second, so a one-minute clip
-   * is six thousand - the one number worth showing before it is sent.
+   * is six thousand - the one number worth showing before it is sent. A text
+   * file costs its own length over four and goes up as characters rather than
+   * as bytes. An `opaque` file goes up as a sentence saying what it is: see
+   * @shared/attach for why a .docx is attached and not sent.
    */
-  kind: 'image' | 'video'
-  /** `data:image/jpeg;base64,…` or `data:video/mp4;base64,…`. */
+  kind: AttachKind
+  /**
+   * `data:image/jpeg;base64,…`, `data:video/mp4;base64,…`, and so on.
+   *
+   * Empty for `text` and `opaque`: one carries its characters instead and the
+   * other carries nothing at all. Nothing should read this without checking
+   * the kind first - `sendsBytes(kind)` is the question being asked.
+   */
   dataUrl: string
   /** The file it came from, when it came from one. Pasted images have none. */
   name?: string
@@ -212,6 +225,20 @@ export interface Attachment {
   bytes: number
   /** How long a video runs, rounded. Zero when the header did not say. */
   seconds?: number
+  /**
+   * The characters of a text file, already cut to the per-file cap.
+   *
+   * Held here rather than pasted into the message so the transcript keeps
+   * showing what the user typed, with the file as a chip beside it. The wire
+   * folds the two together at the last moment - see `foldAttachments`.
+   */
+  text?: string
+  /** How long the file was, which is not `text.length` when it was cut. */
+  chars?: number
+  /** True when only the first part of the file is in `text`. */
+  truncated?: boolean
+  /** The media type, for the data URL and for naming the thing in the UI. */
+  mime?: string
   /**
    * Where the bytes live once the chat has been saved.
    *

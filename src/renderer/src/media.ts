@@ -25,6 +25,15 @@
  * case where the file was never the problem.
  */
 import type { Attachment } from '@shared/types'
+import {
+  encodingOf,
+  kindFor,
+  MAX_SEND_BYTES,
+  mimeFor,
+  sizeLabel,
+  TEXT_READ_BYTES,
+  trimForSend
+} from '@shared/attach'
 
 /** The long edge, past which more pixels are not more information. */
 export const MAX_EDGE = 1568
@@ -157,6 +166,104 @@ export function mediaIn(list: DataTransferItemList | FileList | null | undefined
 }
 
 /**
+ * Every file on a clipboard or drop event, whatever it is.
+ *
+ * `mediaIn` filters to things with pixels in them, which is what the picker
+ * used to accept. This one filters nothing: deciding what a file IS happens
+ * in @shared/attach once the bytes can be looked at, and a file nobody can
+ * read is still attached as a line saying what it was. Dropping a file and
+ * having nothing at all happen was the behaviour being fixed.
+ */
+export function filesIn(list: DataTransferItemList | FileList | null | undefined): File[] {
+  if (!list) return []
+  const files: File[] = []
+  for (let i = 0; i < list.length; i++) {
+    const entry = list[i] as DataTransferItem | File
+    if ('kind' in entry && entry.kind === 'string') continue
+    const file = 'getAsFile' in entry ? entry.getAsFile() : entry
+    if (file) files.push(file)
+  }
+  return files
+}
+
+/**
+ * Turns any file into an attachment.
+ *
+ * Four routes, and which one a file takes is @shared/attach's decision from
+ * its name and its first few kilobytes:
+ *
+ *   - an image is shrunk, as it always was
+ *   - a video or sound file or PDF is read whole as a data URL
+ *   - anything whose bytes are characters is read as characters, and only
+ *     TEXT_READ_BYTES of them, so a 400MB log attaches instantly
+ *   - anything else keeps its name, size and type, and no bytes at all
+ */
+export async function readAnyFile(file: File): Promise<Attachment> {
+  const sample = new Uint8Array(await file.slice(0, 4096).arrayBuffer())
+  const kind = kindFor({ name: file.name, type: file.type }, sample)
+  const mime = mimeFor({ name: file.name, type: file.type }, kind)
+
+  if (kind === 'image') return shrinkImage(file, file.name)
+  if (kind === 'video') return readMedia(file)
+
+  if (kind === 'audio' || kind === 'document') {
+    if (file.size > MAX_SEND_BYTES) {
+      throw new Error(
+        `${file.name} is ${sizeLabel(file.size)}. ${sizeLabel(MAX_SEND_BYTES)} is the limit for a file sent whole.`
+      )
+    }
+    const dataUrl = await readAsDataUrl(file)
+    return {
+      kind,
+      dataUrl,
+      name: file.name,
+      mime,
+      width: 0,
+      height: 0,
+      bytes: file.size,
+      seconds: kind === 'audio' ? await durationOf(file).catch(() => 0) : undefined
+    }
+  }
+
+  if (kind === 'text') {
+    const head = file.slice(0, TEXT_READ_BYTES)
+    const encoding = encodingOf(sample)
+    const raw = new TextDecoder(encoding, { fatal: false }).decode(await head.arrayBuffer())
+    /* A sliced read can stop mid-character, which decodes to one replacement
+       character at the very end. It is not part of the file. */
+    const whole = raw.replace(/�$/, '').replace(/^﻿/, '')
+    const cut = trimForSend(whole)
+    /* `chars` is what the FILE has, which a sliced read cannot know: if the
+       slice filled up, the byte count stands in for it. Exact for ASCII,
+       slightly high for anything multibyte, and only ever used to say "first
+       16,000 of about this many" - which is the honest shape of the claim. */
+    const readEverything = file.size <= TEXT_READ_BYTES
+    return {
+      kind: 'text',
+      dataUrl: '',
+      name: file.name,
+      mime,
+      width: 0,
+      height: 0,
+      bytes: file.size,
+      text: cut.text,
+      chars: readEverything ? whole.length : Math.max(whole.length, file.size),
+      truncated: cut.truncated || !readEverything
+    }
+  }
+
+  return {
+    kind: 'opaque',
+    dataUrl: '',
+    name: file.name,
+    mime,
+    width: 0,
+    height: 0,
+    bytes: file.size
+  }
+}
+
+/**
  * How many tokens a clip will cost, near enough to warn with.
  *
  * Measured by countTokens against gemini-3.5-flash: a 3-second 320x240 clip
@@ -214,6 +321,28 @@ function measureVideo(
     el.onerror = () => resolve({ width: 0, height: 0, seconds: 0 })
     el.src = dataUrl
   })
+}
+
+/**
+ * How long a sound file runs, for the chip and the token estimate.
+ *
+ * The browser's own decoder again, through an <audio> element: nothing here
+ * parses a container by hand, and a header it cannot read costs the length on
+ * the chip rather than the attachment.
+ */
+async function durationOf(file: File): Promise<number> {
+  const url = URL.createObjectURL(file)
+  try {
+    return await new Promise<number>((resolve) => {
+      const el = document.createElement('audio')
+      el.preload = 'metadata'
+      el.onloadedmetadata = () => resolve(Number.isFinite(el.duration) ? Math.round(el.duration) : 0)
+      el.onerror = () => resolve(0)
+      el.src = url
+    })
+  } finally {
+    URL.revokeObjectURL(url)
+  }
 }
 
 /** Reads whichever kind it is. */

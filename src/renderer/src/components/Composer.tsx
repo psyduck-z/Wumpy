@@ -8,7 +8,8 @@ import { adoptsKeystroke } from '../keyboard'
 import { useDictation } from '../hooks/useDictation'
 import { HOLD_MS, HoldToTalk, isPlainSpace, type HoldAction } from '../holdtotalk'
 import { Mic } from './Mic'
-import { mediaIn, readMedia, TOKENS_PER_SECOND } from '../media'
+import { filesIn, readAnyFile, TOKENS_PER_SECOND } from '../media'
+import { attachmentTokens, sendsBytes, sizeLabel } from '@shared/attach'
 import type { Attachment } from '@shared/types'
 import { expandPastes, foldsPaste, pasteMarker, summarise } from '@shared/bulk'
 import type { Activity } from '@shared/activity'
@@ -95,27 +96,44 @@ export function Composer({
   const [dragging, setDragging] = useState(false)
   const fileInput = useRef<HTMLInputElement>(null)
 
+  /**
+   * Takes any file at all.
+   *
+   * The media check moved INSIDE the loop and onto the attachment rather than
+   * the model: a text file is characters and reaches a model that cannot see,
+   * so refusing the whole drop because the model has no vision would have
+   * refused the one kind of file that always works. Only an attachment whose
+   * bytes have to go up needs eyes at the other end.
+   */
   const attach = async (files: File[]): Promise<void> => {
     if (!files.length) return
-    if (!canSeeMedia) {
-      onSay?.('This model cannot read images or video. Switch with /model.')
-      return
-    }
+    let refusedForVision = 0
     for (const file of files) {
       try {
-        const attachment = await readMedia(file)
+        const attachment = await readAnyFile(file)
+        if (sendsBytes(attachment.kind) && !canSeeMedia) {
+          refusedForVision++
+          continue
+        }
         setImages((list) => [...list, attachment])
       } catch (err) {
-        onSay?.((err as Error)?.message ?? 'Could not read that file.')
+        onSay?.((err as Error)?.message ?? `Could not read ${file.name}.`)
       }
+    }
+    if (refusedForVision > 0) {
+      onSay?.(
+        refusedForVision === 1
+          ? 'This model cannot read images, sound or PDFs. Switch with /model, or attach a text file.'
+          : `${refusedForVision} files need a model that can see them. Switch with /model.`
+      )
     }
     ref.current?.focus({ preventScroll: true })
   }
 
   const drop = (e: React.DragEvent): void => {
-    const files = mediaIn(e.dataTransfer?.files)
-    // Only swallow the event when there was actually an image in it; a file
-    // dragged in by mistake should land wherever it would have landed.
+    const files = filesIn(e.dataTransfer?.files)
+    // Only swallow the event when there was actually a file in it; a drag of
+    // selected text should land wherever it would have landed.
     if (!files.length) return
     e.preventDefault()
     setDragging(false)
@@ -533,8 +551,32 @@ export function Composer({
                 // Muted, no controls: it is a thumbnail, not a player. The
                 // first frame is what tells you which clip this is.
                 <video src={img.dataUrl} muted preload="metadata" />
-              ) : (
+              ) : img.kind === 'image' ? (
                 <img src={img.dataUrl} alt={img.name ?? 'Pasted image'} />
+              ) : (
+                /*
+                 * No pixels, so no thumbnail: the name IS the thumbnail.
+                 *
+                 * The extension gets its own line because at this size it is
+                 * the only part of "quarterly-report-final-v3.csv" that can be
+                 * read at a glance, and a strikethrough says the file is
+                 * attached but its contents are not being sent.
+                 */
+                <span
+                  className={`attachment-file${img.kind === 'opaque' ? ' is-unread' : ''}`}
+                  title={
+                    img.kind === 'opaque'
+                      ? `${img.name ?? 'file'} — attached, but this format cannot be read. The model is told it exists.`
+                      : `${img.name ?? 'file'} — ${(img.chars ?? 0).toLocaleString()} characters${
+                          img.truncated ? `, first ${(img.text?.length ?? 0).toLocaleString()} being sent` : ''
+                        }`
+                  }
+                >
+                  <span className="attachment-ext">
+                    {(/\.([a-z0-9]+)$/i.exec(img.name ?? '')?.[1] ?? '?').toUpperCase().slice(0, 4)}
+                  </span>
+                  <span className="attachment-name">{img.name ?? 'file'}</span>
+                </span>
               )}
               <button
                 type="button"
@@ -547,10 +589,17 @@ export function Composer({
               {/* Length rather than size for a clip: seconds are what it
                   costs. About 105 tokens each, measured, so a minute is six
                   thousand and that is worth knowing before sending it. */}
+              {/* What it costs, in whichever unit is the honest one: seconds
+                  for a clip, characters for a file, bytes for a picture. A
+                  trimmed file says so here rather than only in the tooltip. */}
               <span className="attachment-size">
                 {img.kind === 'video' && img.seconds
                   ? `${clockOf(img.seconds)} · ~${Math.round((img.seconds * TOKENS_PER_SECOND) / 100) / 10}k`
-                  : `${Math.round(img.bytes / 1024)}KB`}
+                  : img.kind === 'text'
+                    ? `${sizeLabel(img.bytes)} · ~${Math.round(attachmentTokens(img) / 100) / 10}k${img.truncated ? ' · part' : ''}`
+                    : img.kind === 'opaque'
+                      ? `${sizeLabel(img.bytes)} · not read`
+                      : `${sizeLabel(img.bytes)}`}
               </span>
             </div>
           ))}
@@ -652,7 +701,7 @@ export function Composer({
           }}
           onBlur={abandonHold}
           onPaste={(e) => {
-            const files = mediaIn(e.clipboardData?.items)
+            const files = filesIn(e.clipboardData?.items)
             // Text pasted alongside an image still pastes; only an event
             // that is nothing but images is taken over.
             const pasted = e.clipboardData?.getData('text/plain') ?? ''
@@ -691,7 +740,8 @@ export function Composer({
         <input
           ref={fileInput}
           type="file"
-          accept="image/*,video/*"
+          /* Anything. What a file IS gets decided from its bytes, not from
+             a filter that used to make a dropped .ts file vanish. */
           multiple
           hidden
           onChange={(e) => {
@@ -704,10 +754,13 @@ export function Composer({
           type="button"
           className="btn-attach"
           onClick={() => fileInput.current?.click()}
+          /* The button no longer has a type to name: anything can be attached,
+             and what happens to it depends on what it turns out to be. The
+             second line is the one difference the model still makes. */
           title={
             canSeeMedia
-              ? 'Attach an image or a video (or just paste one)'
-              : 'This model cannot read images'
+              ? 'Attach a file of any sort (or just drop or paste one)'
+              : 'Attach a file. This model cannot see pictures, sound or PDFs, but text files work'
           }
         >
           <svg viewBox="0 0 24 24" width="15" height="15" aria-hidden="true">

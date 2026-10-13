@@ -30,6 +30,8 @@
  */
 
 /** While the panel is away and nobody is waiting. The cheapest moment. */
+import { attachmentTokens, sendsBytes, type Attached } from './attach'
+
 export const IDLE_AT = 0.6
 
 /** The user has pressed Enter and will wait for the summary first. */
@@ -158,6 +160,34 @@ export function estimateTokens(chars: number, images = 0): number {
 }
 
 /**
+ * The same estimate when the attachments are not all pictures.
+ *
+ * `estimateTokens` charges a flat 1,100 per attachment, which was right while
+ * an attachment could only be an image or a clip. A text file costs its own
+ * length over four - a 16,000-character file is 4,000 tokens, not 1,100 - and
+ * a file that could not be read at all costs one sentence. Charging those as
+ * photographs made the meter wrong in both directions at once.
+ */
+export function estimateWithFiles(
+  chars: number,
+  files: readonly Attached[],
+  keepBytes = KEEP_PICTURES
+): number {
+  let total = Math.ceil(Math.max(0, chars) / 4)
+  /* Only the newest few byte-carrying attachments are actually sent, so only
+     those are charged: see trimPictures. Text is always sent. */
+  let budget = Math.max(0, Math.floor(keepBytes))
+  for (const file of [...files].reverse()) {
+    if (sendsBytes(file.kind)) {
+      if (budget <= 0) continue
+      budget--
+    }
+    total += attachmentTokens(file)
+  }
+  return total
+}
+
+/**
  * How many screenshots the model is actually sent.
  *
  * Every image in the conversation was re-sent on every turn. That was a
@@ -189,21 +219,35 @@ export const DROPPED_PICTURE =
  * transcript the user is looking at keeps every picture it ever showed. This
  * is only what crosses the wire.
  */
-export function trimPictures<T extends { content: string; images?: unknown[] }>(
+export function trimPictures<T extends { content: string; images?: Array<{ kind?: string }> }>(
   messages: readonly T[],
   keep: number = KEEP_PICTURES
 ): T[] {
-  const withPictures = messages
-    .map((m, i) => (m.images?.length ? i : -1))
-    .filter((i) => i >= 0)
+  /*
+   * Only what is MADE of bytes counts as a picture here.
+   *
+   * A text file attached eight turns ago is characters in the prompt like any
+   * other characters: dropping it would take away the file the conversation
+   * has been about, to save nothing that a summary would not save better. An
+   * image, a clip or a PDF is the expensive, re-sent, supersedable thing this
+   * function exists for.
+   */
+  const heavy = (m: T): boolean => (m.images ?? []).some((a) => sendsBytes((a.kind ?? 'image') as never))
+  const withPictures = messages.map((m, i) => (heavy(m) ? i : -1)).filter((i) => i >= 0)
   /* slice(-0) is slice(0), which keeps the whole array: asking for none
      would have kept every picture. Caught by the check that asked for none. */
   const wanted = Math.max(0, Math.floor(keep))
   const kept = new Set(wanted === 0 ? [] : withPictures.slice(-wanted))
   return messages.map((m, i) => {
-    if (!m.images?.length || kept.has(i)) return m
-    const { images: _dropped, ...rest } = m
-    const note = m.content.trim() ? `${m.content}${String.fromCharCode(10)}${DROPPED_PICTURE}` : DROPPED_PICTURE
-    return { ...(rest as T), content: note }
+    if (!heavy(m) || kept.has(i)) return m
+    /* The light attachments stay; only the bytes go. */
+    const rest = (m.images ?? []).filter((a) => !sendsBytes((a.kind ?? 'image') as never))
+    const note = m.content.trim()
+      ? `${m.content}${String.fromCharCode(10)}${DROPPED_PICTURE}`
+      : DROPPED_PICTURE
+    const next = { ...m, content: note } as T
+    if (rest.length) return { ...next, images: rest }
+    const { images: _dropped, ...bare } = next
+    return bare as T
   })
 }

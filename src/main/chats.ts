@@ -9,6 +9,7 @@ import {
 } from 'node:fs'
 import { join } from 'node:path'
 import type { Attachment, ChatMessage, ChatSummary, SavedChat } from '@shared/types'
+import { sendsBytes } from '@shared/attach'
 
 /**
  * Saved conversations, one JSON file per chat under the user data directory.
@@ -81,7 +82,21 @@ export class ChatStore {
           return img
         }
       })
-      return { ...m, images: images.filter((img): img is Attachment => Boolean(img.dataUrl)) }
+      /*
+       * An attachment with no bytes is not a broken attachment.
+       *
+       * This dropped anything without a data URL, which was right while every
+       * attachment was a picture whose file might have gone missing. A text
+       * file carries characters instead of bytes and a .docx carries neither
+       * by design, so both were being deleted from the chat the moment it was
+       * reopened - the one place where losing the file is silent.
+       */
+      return {
+        ...m,
+        images: images.filter((img): img is Attachment =>
+          sendsBytes(img.kind ?? 'image') ? Boolean(img.dataUrl) : true
+        )
+      }
     })
   }
 
@@ -207,11 +222,20 @@ function safeId(id: string): string {
   return id.replace(/[^a-zA-Z0-9_-]/g, '')
 }
 
-/** The file extension for a data URL's type, defaulting to jpg. */
+/**
+ * The file extension for a data URL's type, defaulting to jpg.
+ *
+ * The family is matched as well as the subtype, because a PDF written out as
+ * `.pdf` has to come back as `application/pdf` rather than as an image of
+ * that name - see `mimeFor`, which reads the extension in the other direction.
+ */
 function extFor(dataUrl: string): string {
-  const m = /^data:(image|video)\/([a-z0-9.+-]+)/i.exec(dataUrl)
+  const m = /^data:(image|video|audio|application)\/([a-z0-9.+-]+)/i.exec(dataUrl)
   const kind = (m?.[2] ?? 'jpeg').toLowerCase()
-  return kind === 'jpeg' ? 'jpg' : kind.replace(/[^a-z0-9]/g, '')
+  if (kind === 'jpeg') return 'jpg'
+  if (kind === 'pdf') return 'pdf'
+  if (kind === 'mpeg' && /^data:audio/i.test(dataUrl)) return 'mp3'
+  return kind.replace(/[^a-z0-9]/g, '')
 }
 
 /**
@@ -222,10 +246,13 @@ function extFor(dataUrl: string): string {
  * failure is a chat that reopens with a dead player in it.
  */
 const VIDEO_EXT = /^(mp4|m4v|mov|webm|mkv|avi|mpeg|mpg|wmv|3gp)$/
+const AUDIO_EXT = /^(mp3|wav|m4a|aac|ogg|oga|opus|flac|wma|aiff?)$/
 
 function mimeFor(file: string): string {
   const ext = (/\.([a-z0-9]+)$/i.exec(file)?.[1] ?? 'jpg').toLowerCase()
+  if (ext === 'pdf') return 'application/pdf'
   if (VIDEO_EXT.test(ext)) return `video/${ext === 'm4v' ? 'mp4' : ext}`
+  if (AUDIO_EXT.test(ext)) return `audio/${ext === 'mp3' ? 'mpeg' : ext}`
   return `image/${ext === 'jpg' ? 'jpeg' : ext}`
 }
 

@@ -211,7 +211,36 @@ check('main trims before it sends', /trimPictures\(/.test(readFileSync('src/main
 /* The transcript keeps them: it is the user's record of what was sent on
    their behalf, and that must not be edited to save tokens. */
 check('the renderer does not trim its own transcript', /trimPictures/.test(app), false)
-check('but the meter counts only what goes out', /Math\.min\(\s*KEEP_PICTURES/.test(app), true)
+/*
+ * The meter counts only what goes out, which is now asserted on the function
+ * rather than on the expression: the cap moved into estimateWithFiles when an
+ * attachment stopped always being a picture. A grep for the old
+ * `Math.min(KEEP_PICTURES` passed for a week and then failed on a refactor
+ * that changed nothing about the behaviour.
+ */
+check('but the meter counts only what goes out', /estimateWithFiles\(chars, files, KEEP_PICTURES\)/.test(app), true)
+{
+  const picture = (n) => ({ kind: 'image', bytes: n })
+  const two = P.estimateWithFiles(0, [picture(1), picture(2)])
+  check('two pictures cost two', two, P.IMAGE_TOKENS * 2)
+  check('and five still cost two', P.estimateWithFiles(0, [1, 2, 3, 4, 5].map(picture)), two)
+  /* Text is not a picture: it is never dropped and never charged as one. */
+  check(
+    'a text file is charged by its length',
+    P.estimateWithFiles(0, [{ kind: 'text', bytes: 1, text: 'x'.repeat(4000) }]),
+    1000
+  )
+  check(
+    'and is counted however old it is',
+    P.estimateWithFiles(0, [
+      { kind: 'text', bytes: 1, text: 'x'.repeat(4000) },
+      picture(1),
+      picture(2),
+      picture(3)
+    ]),
+    1000 + P.IMAGE_TOKENS * 2
+  )
+}
 
 /* ------------------------------------------ the instructions, which are not free */
 
@@ -237,7 +266,7 @@ const A = await load('src/shared/assistant.ts', 'assistant')
   check('read-only shell gets its own section', A.assemblePrompt({ ...full, scope: 'read' }).includes('may only READ') || A.assemblePrompt({ ...full, scope: 'read' }).includes('only look'), true)
 }
 check('main no longer assembles its own', /assemblePrompt\(promptShape\(/.test(readFileSync('src/main/index.ts', 'utf8')), true)
-check('and the meter adds it to the estimate', /preamble \+\s*estimateTokens/.test(app), true)
+check('and the meter adds it to the estimate', /preamble \+ estimateWithFiles/.test(app), true)
 check('the tooltip says what cannot be compacted', /Instructions, re-sent every turn/.test(bar), true)
 
 /* ------------------------------ what a summary cannot fix, it must not try */

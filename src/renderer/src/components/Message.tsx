@@ -11,6 +11,7 @@ import type {
   WriteTarget
 } from '@shared/types'
 import type { LinkApproval } from '@shared/links'
+import { sizeLabel } from '@shared/attach'
 import { Markdown } from './Markdown'
 import { AskCard } from './AskCard'
 import { useSmoothText } from '../hooks/useSmoothText'
@@ -174,8 +175,30 @@ export const Message = memo(function Message({
                 // Controls, unlike the composer chip: once it is sent this
                 // is the record of what was asked, and worth replaying.
                 <video key={i} src={img.dataUrl} controls preload="metadata" />
-              ) : (
+              ) : img.kind === 'audio' ? (
+                <audio key={i} src={img.dataUrl} controls preload="metadata" />
+              ) : img.kind === 'image' ? (
                 <img key={i} src={img.dataUrl} alt={img.name ?? 'Attached image'} />
+              ) : (
+                /*
+                 * A file that went up as characters, or as a line saying it
+                 * could not. It is in the record because what was attached is
+                 * part of what was asked - and because "why did it answer
+                 * about the wrong file" is unanswerable without it.
+                 */
+                <span
+                  key={i}
+                  className={`msg-file${img.kind === 'opaque' ? ' is-unread' : ''}`}
+                  title={
+                    img.kind === 'opaque'
+                      ? `${sizeLabel(img.bytes)} — attached, but this format could not be read`
+                      : `${(img.chars ?? 0).toLocaleString()} characters${img.truncated ? ', partly sent' : ''}`
+                  }
+                >
+                  {img.name ?? 'attached file'}
+                  {img.kind === 'text' && img.truncated ? ' (part)' : ''}
+                  {img.kind === 'opaque' ? ' (not read)' : ''}
+                </span>
               )
             )}
           </div>

@@ -1712,6 +1712,81 @@ body {
   letter-spacing: 0.2px;
 }
 
+/*
+ * A file with no pixels in it.
+ *
+ * Wider than a thumbnail because the name is the content: at 62px square a
+ * filename is unreadable, and which file this is is the only thing worth
+ * knowing about a .csv. The extension sits above the name in the accent
+ * colour, since that is the part that identifies it at a glance.
+ */
+.attachment.is-text,
+.attachment.is-document,
+.attachment.is-audio,
+.attachment.is-opaque {
+  width: 118px;
+}
+
+.attachment-file {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 2px;
+  height: 100%;
+  padding: 4px 6px 12px;
+  box-sizing: border-box;
+}
+
+.attachment-ext {
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.6px;
+  color: rgb(var(--accent));
+}
+
+.attachment-name {
+  font-size: 10px;
+  line-height: 1.25;
+  color: rgb(var(--text));
+  /* Two lines and then an ellipsis: a long name is still recognisable from
+     its start, and a chip that grows to fit one would push the box around. */
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  word-break: break-all;
+}
+
+/* Attached, but its contents are not going anywhere. */
+.attachment-file.is-unread .attachment-ext {
+  color: rgb(var(--muted));
+  text-decoration: line-through;
+}
+
+/* The same thing in the transcript, where it is a record rather than a
+   control: no thumbnail to remove, just what was attached. */
+.msg-file {
+  display: inline-block;
+  max-width: 100%;
+  padding: 3px 8px;
+  border: 1px solid rgb(var(--border));
+  border-radius: 8px;
+  background: rgb(var(--raised));
+  font-size: 11px;
+  color: rgb(var(--text));
+  word-break: break-all;
+}
+
+.msg-file.is-unread {
+  color: rgb(var(--muted));
+  border-style: dashed;
+}
+
+.msg-images audio {
+  width: 100%;
+  max-width: 320px;
+}
+
 /* A file dragged over the panel, before it is let go. */
 .composer-wrap.is-dropping .composer {
   background: rgb(var(--accent-soft));

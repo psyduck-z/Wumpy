@@ -25,6 +25,8 @@ export type ProviderId = 'google' | 'groq' | 'mistral' | 'nvidia'
  * would not fail to compile: it would accept the key, encrypt it, and then
  * drop it on the next read as an unrecognised provider name.
  */
+import { foldAttachments, type Attached } from './attach'
+
 export const PROVIDER_IDS = ['google', 'groq', 'mistral', 'nvidia'] as const
 
 /** Whether a string off the wire or out of a settings file names a provider. */
@@ -546,14 +548,38 @@ export function foldSystemMessages(messages: WireMessage[]): WireMessage[] {
  * refuses to attach them in the first place; this is the second line.
  */
 export function wireMessage(
-  m: { role: string; content: string; images?: { dataUrl: string }[] },
+  m: {
+    role: string
+    content: string
+    images?: Array<{ dataUrl: string } & Partial<Attached>>
+  },
   vision: boolean
 ): WireMessage {
   const role = m.role as WireMessage['role']
-  if (!vision || !m.images?.length || role !== 'user') return { role, content: m.content }
+  if (!m.images?.length || role !== 'user') return { role, content: m.content }
+
+  /*
+   * A text file is characters, so it goes into the text part and reaches
+   * every model - including one that cannot see, where the old code dropped
+   * the whole attachment. A file whose bytes are no use to anyone becomes a
+   * line saying so. @shared/attach decides which is which.
+   */
+  const folded = foldAttachments(
+    m.content,
+    m.images.map((a) => ({ ...a, kind: a.kind ?? 'image', bytes: a.bytes ?? 0 }))
+  )
+
+  /* Attachments whose BYTES go up are still dropped on a model that cannot
+     read them, because the alternative is a 400 that costs the whole turn. */
+  const sendable = vision ? folded.bytes : []
+  if (!sendable.length) return { role, content: folded.text }
+
   const parts: WirePart[] = []
-  if (m.content) parts.push({ type: 'text', text: m.content })
-  for (const img of m.images) parts.push({ type: 'image_url', image_url: { url: img.dataUrl } })
+  if (folded.text) parts.push({ type: 'text', text: folded.text })
+  for (const file of sendable) {
+    const url = (file as { dataUrl?: string }).dataUrl
+    if (url) parts.push({ type: 'image_url', image_url: { url } })
+  }
   return { role, content: parts }
 }
 
