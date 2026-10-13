@@ -1,7 +1,15 @@
 import { clipboard, type BrowserWindow } from 'electron'
 import { log } from './log'
 import { lastShot } from './screen'
-import { describe, onShot, toScreen, type Plan, type Step } from '@shared/steps'
+import {
+  describe,
+  HIDDEN,
+  isSecretField,
+  onShot,
+  toScreen,
+  type Plan,
+  type Step
+} from '@shared/steps'
 import { interference, parseGuard, rebase, windowMoved, type Guard } from '@shared/guard'
 import { aimNote, remember, repeats, type Aim } from '@shared/aim'
 
@@ -502,6 +510,8 @@ async function oneStep(
        * be mistaken for success - which is what ten "CLICK ok / TYPE ok"
        * pairs were.
        */
+      /* Whether the value belongs in the report at all. See isSecretField. */
+      const secret = isSecretField(step.name)
       const named = Buffer.from(step.name, 'utf8').toString('base64')
       const focus = await send(`FOCUS ${named}`, 6000)
       if (!OK.test(focus)) return `FILL FAILED could not put the cursor in ${JSON.stringify(step.name)}: ${focus}`
@@ -559,7 +569,21 @@ async function oneStep(
            that came from the box itself, and the difference should not be
            invisible. */
         const weak = back.exact ? '' : ' (warning: read from another control with the same name)'
-        return `FILL ok ${JSON.stringify(step.name)} now says ${JSON.stringify(back.text)} (via ${back.via})${weak} ${put.note}`
+        /*
+         * A password box is checked the same way and reported differently.
+         * The read-back goes into the report, the report goes into the
+         * transcript and the log, and "it worked" is the whole of what
+         * anyone needs to know about a field called Password.
+         */
+        const shown = secret ? HIDDEN : JSON.stringify(back.text)
+        return `FILL ok ${JSON.stringify(step.name)} now says ${shown} (via ${back.via})${weak} ${put.note}`
+      }
+      if (secret) {
+        return (
+          `FILL FAILED the text did not land in ${JSON.stringify(step.name)} (read via ${back.via}). ` +
+          'The characters went somewhere else. Do not repeat this step blindly - look at ' +
+          'the screen and find the right box by name. The value is not repeated here.'
+        )
       }
       return (
         `FILL FAILED the text did not land: ${JSON.stringify(step.name)} says ` +

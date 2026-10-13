@@ -347,6 +347,29 @@ body {
  * Appears on hover, in the gutter above the answer. Always-visible would put a
  * button over every message in the transcript.
  */
+/*
+ * Room for the Copy button, so it never lands on a word.
+ *
+ * It is absolutely positioned over the top-right of the answer, and the
+ * first line runs straight underneath it: reported as a thing that "popped
+ * out" while typing, with a screenshot of it sitting on top of "as I ca" and
+ * hiding the rest. Hover made it appear over text that was already there.
+ *
+ * The gap is reserved on the first block only, and permanently rather than
+ * on hover - a layout that reflows when the pointer crosses it is a worse
+ * answer than a slightly shorter first line.
+ */
+.msg-assistant .msg-body > :first-child {
+  padding-right: 52px;
+}
+
+/* A code fence has its own box and its own copy button; it does not want a
+   bite taken out of its right-hand side as well. */
+.msg-assistant .msg-body > pre:first-child,
+.msg-assistant .msg-body > .code:first-child {
+  padding-right: 0;
+}
+
 .msg-copy {
   position: absolute;
   top: -4px;

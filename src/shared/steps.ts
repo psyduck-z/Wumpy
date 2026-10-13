@@ -366,6 +366,29 @@ export function readPlan(raw: string): Plan {
 }
 
 /** One line per step, for the card. What is about to happen to their desktop. */
+/**
+ * Field names that mean the value is nobody's business, including ours.
+ *
+ * Every step is written to wumpy.log by name and value, which was harmless
+ * while a fill was somebody's email address. The instructions now allow a
+ * password the user handed over to be typed into the form they asked for -
+ * and a password typed into a form has no business being written to a log
+ * file in plain text afterwards.
+ *
+ * Matched on the FIELD, not on the value: there is no way to look at
+ * "123456ASDF" and know, and a rule that tries will redact half the
+ * transcript and still miss the one that mattered.
+ */
+const SECRET_FIELD = /pass ?(word|code|phrase)?\b|^pw$|\bpin\b|secret|security code|cvv|cvc|card number|otp|one.?time|2fa|token|api ?key/i
+
+/** What goes in the log and the report in place of a secret. */
+export const HIDDEN = '********'
+
+/** True when a value typed into this field should not be written down. */
+export function isSecretField(name: string): boolean {
+  return SECRET_FIELD.test(name ?? '')
+}
+
 export function describe(step: Step): string {
   switch (step.kind) {
     case 'click':
@@ -387,6 +410,10 @@ export function describe(step: Step): string {
       }`
     }
     case 'fill': {
+      /* The value goes to the field; it does not go to the log. */
+      if (isSecretField(step.name)) {
+        return `Put ${HIDDEN} in ${JSON.stringify(step.name)} and check it`
+      }
       const short = step.text.length > 60 ? `${step.text.slice(0, 60)}…` : step.text
       return `Put ${JSON.stringify(short)} in ${JSON.stringify(step.name)} and check it`
     }

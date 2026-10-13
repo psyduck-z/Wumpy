@@ -60,7 +60,10 @@ const tokensFor = (list) => A.preambleTokens({ ...FULL, needs: list })
 
 /* ------------------------------------------------------------ what it saves */
 
-check('everything, as it was', A.preambleTokens(FULL), 13341)
+/* 13,341 until the credential rules were rewritten to allow typing a value
+   the user handed over; that added 236 tokens, all of it inside the two
+   gated sections, so a plain turn is unchanged at 7,841. */
+check('everything, as it was', A.preambleTokens(FULL), 13577)
 check('a turn about nothing in particular', tokensFor([]), 7841)
 check('which is a third of it gone', A.preambleTokens(FULL) - tokensFor([]) > 4500, true)
 check('a turn about the screen', tokensFor(['desktop']) < A.preambleTokens(FULL), true)
@@ -208,10 +211,10 @@ check('nor one about opening a site', needs(said('I opened vocabulary.com for yo
 
 /* ------------------------------------------------------- the shape contract */
 
-check('no list at all means everything', A.preambleTokens({ ...FULL }), 13341)
-check('an empty list is a real answer, not everything', tokensFor([]) < 13341, true)
+check('no list at all means everything', A.preambleTokens({ ...FULL }), 13577)
+check('an empty list is a real answer, not everything', tokensFor([]) < 13577, true)
 check('one capability is not the other', tokensFor(['open']) !== tokensFor(['desktop']), true)
-check('every topic together is everything', tokensFor(ALL), 13341)
+check('every topic together is everything', tokensFor(ALL), 13577)
 
 /* --------------------------------------------------------------- the wiring */
 

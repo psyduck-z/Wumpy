@@ -484,27 +484,39 @@ check(
   true
 )
 check('not to lecture about it', T.OPEN_PROMPT.includes('do not lecture'), true)
+/*
+ * The line moved on 13 October, and these say where it is now.
+ *
+ * It used to stop at any screen wanting a username or a password, which read
+ * as "I cannot create accounts or handle passwords for you" to someone who
+ * had just written the username and the password into the message. That is
+ * not caution; it is refusing the thing they asked for on their own machine.
+ *
+ * What did NOT move: inventing one, hunting for a saved one, a code sent to
+ * their phone, and anything that spends money.
+ */
 check(
-  'there is exactly one place to stop',
-  T.OPEN_PROMPT.includes('exactly one place to stop'),
+  'it may never invent or hunt for a credential',
+  T.OPEN_PROMPT.includes('INVENT or go looking for a credential'),
   true
 )
-check('and it is named precisely', T.OPEN_PROMPT.includes('one-time code or a card'), true)
-check(
-  'it may never invent a credential',
-  T.OPEN_PROMPT.includes('never type, guess or invent'),
-  true
-)
+check('nor read one out of a manager', T.OPEN_PROMPT.includes('a file') && T.OPEN_PROMPT.includes('manager'), true)
+check('a code to their phone is still the end', T.OPEN_PROMPT.includes('code sent to their'), true)
+check('but a value they typed may be typed', T.OPEN_PROMPT.includes('A VALUE THEY TYPED AT YOU'), true)
+check('and the refusal is named as the wrong answer', T.OPEN_PROMPT.includes('is not caution, it is refusing'), true)
+check('payment is still a stop', T.OPEN_PROMPT.includes('PAYMENT details'), true)
+/* Said once and briefly: the warning is information, not a lecture. */
+check('the transcript is mentioned, in a clause', T.OPEN_PROMPT.includes('saved transcript'), true)
+check('and only once', T.OPEN_PROMPT.includes('not a paragraph'), true)
 // Stopping is an answer, not a failure - the previous refusal read as one.
 check('stopping reads as a finished answer', T.OPEN_PROMPT.includes('finished answer'), true)
 // The transcript is saved to disk and commands are logged, so a password the
-// user types at it must not be echoed into either.
+// user types at it goes into the form and nowhere else.
 check(
   'a password the user supplies is not echoed back',
-  T.OPEN_PROMPT.includes('do not repeat it back'),
+  T.OPEN_PROMPT.includes('never repeat the value back'),
   true
 )
-check('nor put in a command', T.OPEN_PROMPT.includes('never'), true)
 /**
  * Not installed means say so, not open something else instead.
  *
