@@ -47,6 +47,26 @@ export interface KeySpend {
    */
   outOf: Record<string, number>
   /**
+   * The provider refused this key outright: a deleted or disabled service
+   * account, a project Google restricted for heavy free-tier use.
+   *
+   * A STATE, not a wait, and that distinction is the whole of this field.
+   * It used to be a 24-hour rest tagged `rejected`, which made a permanent
+   * fact expire twice over: once when the day advanced and `rollPool` threw
+   * the ledger away, and once when the 24 hours were up. Measured here on
+   * 14 October: three keys refused at 16:14 the day before read `ready`
+   * again at 15:00, because midnight Pacific had wiped them - so the meter
+   * promised twenty keys' allowance on a pool of seventeen, and the
+   * rotation, which prefers the keys with the fewest requests, reached for
+   * the three dead ones FIRST every morning.
+   *
+   * Nothing about a restricted project changes at midnight. So this survives
+   * the roll, and the only things that clear it are a key list that changed
+   * and `/key <provider> check`, which asks the provider and costs nothing
+   * from the day's allowance.
+   */
+  rejected?: boolean
+  /**
    * When this key was last handed a request.
    *
    * For spreading the load in TIME as well as in total. Two keys that have
@@ -88,12 +108,19 @@ export function emptySpend(): KeySpend {
  * happens a handful of times a day, against a file of two kilobytes.
  */
 export function restsChanged(before: PoolDay | null, after: PoolDay): boolean {
-  if (!before) return after.spend.some((s) => s.restUntil > 0 || Object.keys(s.outOf).length > 0)
+  if (!before)
+    return after.spend.some(
+      (s) => s.restUntil > 0 || s.rejected === true || Object.keys(s.outOf).length > 0
+    )
   if (before.spend.length !== after.spend.length || before.day !== after.day) return true
   return after.spend.some((now, i) => {
     const was = before.spend[i]
     if (!was) return true
     if (was.restUntil !== now.restUntil || was.why !== now.why) return true
+    /* A refusal is the most expensive fact in here to rediscover, and the
+       one most likely to be lost: it arrives mid-turn, and the next thing
+       that happens to this process is usually Stop-Process -Force. */
+    if ((was.rejected === true) !== (now.rejected === true)) return true
     const models = new Set([...Object.keys(was.outOf), ...Object.keys(now.outOf)])
     for (const m of models) if (was.outOf[m] !== now.outOf[m]) return true
     return false
@@ -118,15 +145,36 @@ export function emptyPool(day: string, keys: number): PoolDay {
  * and none of those are a reason to forget that eight keys are out until
  * midnight - which is exactly what a plain inequality did: it wiped the
  * ledger every time it was asked about a moment in the past.
+ *
+ * A new day clears the counts and the rests, because that is what the quota
+ * day means, and keeps the REFUSALS, because that is not. See `rejected`.
  */
 export function rollPool(pool: PoolDay, day: string, keys: number): PoolDay {
   const want = Math.max(0, Math.floor(keys))
-  if (day > pool.day) return emptyPool(day, want)
+  if (day > pool.day) return nextDay(pool, day, want)
   if (want === pool.spend.length) return { ...pool, keys: want }
   if (want < pool.spend.length) return emptyPool(pool.day, want)
   const spend = pool.spend.slice(0, want)
   while (spend.length < want) spend.push(emptySpend())
   return { ...pool, keys: want, spend }
+}
+
+/**
+ * The same keys, a clean day, and the refusals still refused.
+ *
+ * Only the positions that exist in both ledgers carry anything over, and the
+ * only thing they carry is the flag. A key appended since yesterday is new
+ * and gets a blank slot, and nothing here can turn a working key into a
+ * refused one.
+ */
+function nextDay(pool: PoolDay, day: string, keys: number): PoolDay {
+  const fresh = emptyPool(day, keys)
+  return {
+    ...fresh,
+    spend: fresh.spend.map((blank, index) =>
+      isRejected(pool.spend[index]) ? { ...blank, rejected: true } : blank
+    )
+  }
 }
 
 function withSpend(pool: PoolDay, index: number, next: KeySpend): PoolDay {
@@ -162,6 +210,61 @@ export function restOn(pool: PoolDay, index: number, until: number, why: string)
   return withSpend(pool, index, { ...prev, restUntil: until, why })
 }
 
+/**
+ * Sets a key aside until someone does something about it.
+ *
+ * No `until`, on purpose. The provider has said this key does not work, and
+ * the pool has no way to find out that it does again except by asking -
+ * which `/key <provider> check` does for nothing.
+ */
+export function rejectOn(pool: PoolDay, index: number): PoolDay {
+  const prev = pool.spend[index]
+  if (!prev || prev.rejected === true) return pool
+  return withSpend(pool, index, { ...prev, rejected: true })
+}
+
+/**
+ * Takes it back: this key just authenticated.
+ *
+ * The way out of `rejected`, and the reason a sticky flag is safe to have.
+ * A 401 is not always permanent - billing that has not propagated, a project
+ * suspended and restored - so there has to be a path back that does not
+ * involve the user retyping twenty keys. It also clears the legacy timed
+ * form, so a key refused by an older build is properly revived rather than
+ * flagged again the moment its rest is read.
+ */
+export function reviveOn(pool: PoolDay, index: number): PoolDay {
+  const prev = pool.spend[index]
+  if (!prev) return pool
+  if (prev.rejected !== true && prev.why !== REJECTED) return pool
+  const { rejected: _was, ...rest } = prev
+  return withSpend(pool, index, {
+    ...rest,
+    restUntil: prev.why === REJECTED ? 0 : prev.restUntil,
+    why: prev.why === REJECTED ? '' : prev.why
+  })
+}
+
+/**
+ * Has the provider refused this key?
+ *
+ * Reads the legacy form too - a 24-hour rest whose reason was `rejected` -
+ * because ledgers written before the flag existed are on disk right now,
+ * with three of them in exactly that state. Whether that rest has expired
+ * is not consulted: it expiring is the bug.
+ */
+export function isRejected(spend: KeySpend | undefined): boolean {
+  if (!spend) return false
+  return spend.rejected === true || spend.why === REJECTED
+}
+
+/** How many keys the provider has refused. */
+export function rejectedCount(pool: PoolDay): number {
+  let dead = 0
+  for (const spend of pool.spend) if (isRejected(spend)) dead++
+  return dead
+}
+
 /** Takes one model out on one key until `until`, leaving its other models alone. */
 export function outOn(pool: PoolDay, index: number, model: string, until: number): PoolDay {
   const prev = pool.spend[index]
@@ -174,6 +277,8 @@ export function outOn(pool: PoolDay, index: number, model: string, until: number
 /** Can this key serve this model right now? */
 export function isReady(spend: KeySpend | undefined, model: string, now: number): boolean {
   if (!spend) return false
+  /* Before the clock, because this one is not a matter of waiting. */
+  if (isRejected(spend)) return false
   if (spend.restUntil > now) return false
   return (spend.outOf[model || 'unknown'] ?? 0) <= now
 }
@@ -190,6 +295,9 @@ export function nextFreeMs(pool: PoolDay, model: string, now: number): number {
   let soonest = Infinity
   for (const spend of pool.spend) {
     if (isReady(spend, model, now)) return 0
+    /* A refused key never "comes back", and offering its rest as the answer
+       is how "the soonest is back in 2h" came to mean "never". */
+    if (isRejected(spend)) continue
     const mine = Math.max(spend.restUntil, spend.outOf[model || 'unknown'] ?? 0)
     if (mine > now) soonest = Math.min(soonest, mine)
   }
@@ -376,7 +484,10 @@ export function poolView(
     requests += mine
     const out = (spend.outOf[key] ?? 0) > now
     const held = spend.restUntil > now
-    const dead = held && spend.why === REJECTED
+    /* From the flag, not from a rest that is still running: the refusal used
+       to disappear from this report the moment its 24 hours were up, while
+       the key behind it was as dead as ever. */
+    const dead = isRejected(spend)
     const state: KeyState = dead ? 'rejected' : out ? 'out' : held ? 'resting' : 'ready'
     if (state === 'ready') ready++
     else if (state === 'out') spent++
@@ -393,7 +504,8 @@ export function poolView(
       number: index + 1,
       requests: mine,
       state,
-      untilMs: out ? (spend.outOf[key] ?? 0) : held ? spend.restUntil : 0,
+      /* 0 for a refusal: there is no moment at which it comes back. */
+      untilMs: dead ? 0 : out ? (spend.outOf[key] ?? 0) : held ? spend.restUntil : 0,
       why: dead ? REJECTED : out ? 'daily quota' : held ? spend.why : ''
     })
   })

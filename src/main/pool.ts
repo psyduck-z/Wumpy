@@ -1,7 +1,7 @@
 import { app } from 'electron'
 import { readFileSync, writeFileSync, mkdirSync } from 'node:fs'
 import { join, dirname } from 'node:path'
-import { restsChanged, type PoolDay } from '@shared/pool'
+import { isRejected, restsChanged, type PoolDay } from '@shared/pool'
 import { PROVIDER_IDS, type ProviderId } from '@shared/cloud'
 
 /**
@@ -36,11 +36,16 @@ export class PoolStore {
       const day = this.data[id]
       if (!day) continue
       const now = Date.now()
-      const resting = day.spend.filter((s) => s.restUntil > now).length
+      const resting = day.spend.filter((s) => s.restUntil > now && !isRejected(s)).length
       const out = day.spend.filter((s) => Object.keys(s.outOf).length > 0).length
+      /* Named, and by position, because this is the one state nothing else
+         will ever report: it does not change, so it never shows up as an
+         event. It sat unsaid for weeks. */
+      const dead = day.spend.map((s, i) => (isRejected(s) ? i + 1 : 0)).filter(Boolean)
       console.log(
         `[wumpy] key pool restored for ${id}: ${day.spend.length} keys, ` +
-          `${resting} resting, ${out} out of a model (day ${day.day})`
+          `${resting} resting, ${out} out of a model (day ${day.day})` +
+          (dead.length ? `; key ${dead.join(', ')} REFUSED - /key ${id} check retries them free` : '')
       )
     }
   }
@@ -62,6 +67,9 @@ export class PoolStore {
             models: typeof s?.models === 'object' && s.models ? s.models : {},
             restUntil: Number(s?.restUntil) || 0,
             why: typeof s?.why === 'string' ? s.why : '',
+            /* Strictly true, so a hand-edited file cannot retire a key with
+               a stray string. The way back is `/key <provider> check`. */
+            rejected: s?.rejected === true,
             outOf: typeof s?.outOf === 'object' && s.outOf ? s.outOf : {},
             /* Absent in ledgers written before the rotation spread the load
                by time as well as by count. Zero reads as "not for a long

@@ -29,8 +29,11 @@ import {
   pacificDayKey,
   poolView,
   readyCount,
+  rejectOn,
+  rejectedCount,
   requestsOn,
   restOn,
+  reviveOn,
   rollPool,
   spendOn,
   type PoolDay,
@@ -114,6 +117,40 @@ export class KeyRotation {
   out(index: number, model: string, until: number): void {
     if (index < 0 || index >= this.count) return
     this.pool = outOn(this.pool, index, model, until)
+  }
+
+  /**
+   * The provider refused this key. Set it aside until that changes.
+   *
+   * Not a rest with a long `until`, which is what this was: a refusal has to
+   * outlive both the day roll and any timer, because a restricted project is
+   * still restricted tomorrow.
+   */
+  reject(index: number, now: number = Date.now()): void {
+    if (index < 0 || index >= this.count) return
+    this.fresh(now)
+    this.pool = rejectOn(this.pool, index)
+  }
+
+  /** It authenticated after all - the only way back out of `reject`. */
+  revive(index: number, now: number = Date.now()): void {
+    if (index < 0 || index >= this.count) return
+    this.fresh(now)
+    this.pool = reviveOn(this.pool, index)
+  }
+
+  /**
+   * How many the provider has refused.
+   *
+   * So that "nothing can answer" can tell the two reasons apart. Waiting
+   * fixes a pool that is out of quota and will never fix this one, and the
+   * message that said "all 20 keys are out of gemini-3.1-flash-lite" when
+   * the truth was "all 20 need replacing" sent the user to wait for a
+   * midnight that was not going to help.
+   */
+  rejectedCount(now: number = Date.now()): number {
+    if (this.count <= 0) return 0
+    return rejectedCount(this.fresh(now))
   }
 
   /** How long until something is usable again, or 0 if one already is. */

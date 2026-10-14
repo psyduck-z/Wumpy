@@ -76,8 +76,10 @@ export function poolLines(pool: PoolView, now: number = Date.now()): string[] {
   if (dead.length) {
     lines.push(
       `**${dead.length === 1 ? 'Key' : 'Keys'} ${keyList(dead)} ${dead.length === 1 ? 'was' : 'were'} refused** ` +
-        '(deleted project or revoked key). Waiting will not fix those — replace the list ' +
-        'with `/key google <key…>`. They are left out of the figures above.'
+        '(deleted project, revoked key, or a project Google restricted). Waiting will not fix ' +
+        `those and neither will tomorrow — drop them with \`/key google drop ${dead.join(' ')}\`. ` +
+        'They are left out of the figures above. ' +
+        '`/key google check` re-asks the provider for nothing, if you think one has come back.'
     )
   }
 
@@ -94,8 +96,14 @@ export function poolLines(pool: PoolView, now: number = Date.now()): string[] {
         `(back ${untilText(soonest - now)}).`
     )
   }
-  if (!out.length && !resting.length) {
+  /* "Every key can answer" with three of them refused was the old reading,
+     and it is the sentence this whole fix exists to stop. */
+  if (!out.length && !resting.length && !dead.length) {
     lines.push(`Every key can answer. The day's allowance resets at ${clock(pool.resetAt)}.`)
+  } else if (!out.length && !resting.length) {
+    lines.push(
+      `The other ${pool.ready} can answer. The day's allowance resets at ${clock(pool.resetAt)}.`
+    )
   }
   if (pool.ready === 0) {
     lines.push(

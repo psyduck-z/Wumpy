@@ -2,7 +2,6 @@ import type { ChatMessage } from '@shared/types'
 import type { ProviderId, WireMessage } from '@shared/cloud'
 import { KeyRotation, nextPacificMidnight } from '@shared/rotation'
 import type { PoolDay, PoolView } from '@shared/pool'
-import { REJECTED } from '@shared/pool'
 import {
   PROVIDERS,
   classifyLimit,
@@ -202,15 +201,19 @@ export class CloudClient {
           signal: AbortSignal.timeout(15_000)
         })
         if (res.ok) {
+          /* The way back. A refusal is kept until something disproves it,
+             and this listing is the only thing that ever does - which is
+             why it has to clear the flag and not merely report green. */
+          rotation.revive(index)
           out.push({ number: index + 1, ok: true, status: res.status, why: '' })
           continue
         }
         const body = stripKey(await res.text().catch(() => ''))
         const why = /"message":\s*"([^"]{0,160})/.exec(body)?.[1] ?? `HTTP ${res.status}`
-        /* A 429 means the key works and is busy, which is not a dead key. */
-        if (res.status !== 429) {
-          rotation.rest(index, Date.now() + 24 * 60 * 60 * 1000, REJECTED)
-        }
+        /* A 429 means the key works and is busy, which is not a dead key -
+           and it is proof of life, so it clears a refusal too. */
+        if (res.status === 429) rotation.revive(index)
+        else rotation.reject(index)
         out.push({ number: index + 1, ok: res.status === 429, status: res.status, why })
       } catch (err) {
         /* A network failure says nothing about the key, so it is not rested. */
@@ -353,8 +356,22 @@ export class CloudClient {
         // Every key is resting. Say for how long rather than failing blank.
         const wait = rotation.waitMs(Date.now(), model)
         const until = wait > 0 ? `The soonest frees up in ${friendlyWait(wait)}.` : ''
+        /*
+         * "Out of quota" and "refused" are the same blank wall from in here
+         * and opposite problems to the user: one ends by itself and the
+         * other never does. Telling someone to wait for a midnight that
+         * will not help them is the worse of the two mistakes.
+         */
+        const dead = rotation.rejectedCount(Date.now())
         handlers.onError(
-          `All ${keyCount} ${PROVIDERS[provider].label} keys are out of ${model}. ${until}`.trim(),
+          dead >= keyCount
+            ? `All ${keyCount} ${PROVIDERS[provider].label} key(s) have been refused by the ` +
+              'provider — waiting will not fix those. Replace them with /key, or run ' +
+              `\`/key ${provider} check\` to retry them for free.`
+            : dead > 0
+              ? `No ${PROVIDERS[provider].label} key can answer: ${dead} refused, ` +
+                `the other ${keyCount - dead} out of ${model}. ${until}`.trim()
+              : `All ${keyCount} ${PROVIDERS[provider].label} keys are out of ${model}. ${until}`.trim(),
           { kind: 'limit', elsewhere: true }
         )
         return null
@@ -389,18 +406,27 @@ export class CloudClient {
        * only time it is actually true.
        */
       if (res.status === 401 || res.status === 403) {
-        const A_DAY = 24 * 60 * 60 * 1000
-        rotation.rest(index, Date.now() + A_DAY, REJECTED)
+        /*
+         * Out of the rotation until something disproves it, not until
+         * tomorrow. Tomorrow was the bug: this was a 24-hour rest, and the
+         * day roll cleared it even sooner, so every morning the three
+         * restricted projects came back as the LEAST-used keys in the pool
+         * and were therefore the first ones tried.
+         */
+        rotation.reject(index)
         console.warn(
           `[wumpy] ${PROVIDERS[provider].label} key ${index + 1}/${keyCount} ` +
             `(${this.keys.hint(provider, index)}) was REJECTED (${res.status}) and ` +
-            'is out of rotation for today. Replace it with /key.'
+            `is out of rotation. Drop it with /key ${provider} drop ${index + 1}, ` +
+            `or /key ${provider} check to retry it for free.`
         )
         this.remember(provider, rotation)
         if (rotation.availableCount(Date.now(), model) > 0) continue
         handlers.onError(
           keyCount > 1
-            ? `All ${keyCount} ${PROVIDERS[provider].label} keys were rejected. Add a working one with /key.`
+            ? `All ${keyCount} ${PROVIDERS[provider].label} keys were refused. ` +
+              `Add a working one with /key, or run \`/key ${provider} check\` — ` +
+              'it re-asks the provider and costs nothing from today.'
             : `${PROVIDERS[provider].label} rejected the key. Add a new one with /key.`,
           {
             kind: 'auth',

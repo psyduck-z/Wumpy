@@ -202,7 +202,10 @@ check('and no wait to report', new KeyRotation(0).waitMs(T0), 0)
   const cloud = readFileSync('src/main/cloud.ts', 'utf8')
   const at = cloud.indexOf('res.status === 401')
   const auth = cloud.slice(at, at + 1600)
-  check('a rejected key is rested', /rotation\.rest\(index/.test(auth), true)
+  /* `reject`, not `rest`: it was a 24-hour rest, which expired, and the day
+     roll cleared it even sooner. A refusal has to outlive both. */
+  check('a rejected key is set aside', /rotation\.reject\(index\)/.test(auth), true)
+  check('not merely rested for a day', /rotation\.rest\(index/.test(auth), false)
   /* availableCount now takes a clock and a model, so the arguments are not
      spelled out here - only that the count gates the continue. */
   check('and the turn tries the next one', /availableCount\([\s\S]{0,40}?\) > 0\) continue/.test(auth), true)

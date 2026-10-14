@@ -243,6 +243,112 @@ const LITE = 'gemini-3.1-flash-lite'
   check('an earlier day changes nothing', backwards.spend[1].outOf[FLASH], MIDNIGHT)
 }
 
+/* ------------------------------------------- what a new day does NOT clear */
+
+/**
+ * A refusal is not a quota.
+ *
+ * Measured, from this machine's own pool.json on 14 October: keys 1, 2 and 3
+ * refused at 16:14 the previous day, and at 15:26 the next - twenty-six
+ * minutes after midnight Pacific - all twenty read ready, because the roll
+ * had thrown the whole ledger away. Two costs, and the second is the nastier
+ * one:
+ *
+ *   the meter measured the day against twenty keys' allowance when
+ *   seventeen existed, which is the figure the user is shown;
+ *
+ *   and chooseKey ranks by fewest requests FIRST, so three keys sitting at
+ *   zero were the three most attractive in the pool. Every morning the
+ *   rotation went straight for the dead ones.
+ *
+ * Google restricted those projects. Midnight does not unrestrict them.
+ */
+{
+  let pool = P.emptyPool('2026-10-13', 20)
+  for (const i of [0, 1, 2]) pool = P.rejectOn(pool, i)
+  pool = P.spendOn(pool, 5, FLASH)
+  pool = P.restOn(pool, 6, NOW + 30_000, 'per-minute')
+  pool = P.outOn(pool, 7, FLASH, MIDNIGHT)
+
+  const rolled = P.rollPool(pool, '2026-10-14', 20)
+  check('a new day keeps the refusals', P.rejectedCount(rolled), 3)
+  check('and they still cannot be chosen', P.isReady(rolled.spend[0], FLASH, NOW), false)
+  check('while the counts start again', P.requestsOn(rolled, 5, FLASH), 0)
+  check('and a throttle is over', P.isReady(rolled.spend[6], FLASH, NOW), true)
+  check('and so is a daily cap', P.isReady(rolled.spend[7], FLASH, NOW), true)
+  check('seventeen can answer, not twenty', P.readyCount(rolled, FLASH, NOW), 17)
+  /* The number the user is actually shown. */
+  const view = P.poolView(rolled, FLASH, 25, NOW, MIDNIGHT)
+  check('the ceiling is still seventeen keys wide', view.cap, 425)
+  check('and the refusal is still reported', view.rejected, 3)
+
+  /* The ranking bug, directly: zero requests must not make a dead key the
+     most attractive one in the pool. */
+  check('and the rotation does not reach for them', P.chooseKey(rolled, FLASH, NOW, 0), 3)
+
+  /* A key added since yesterday is new, and nothing carries onto it. */
+  const grown = P.rollPool(pool, '2026-10-14', 21)
+  check('a key added overnight is not born refused', P.isReady(grown.spend[20], FLASH, NOW), true)
+  check('and the old refusals are still there', P.rejectedCount(grown), 3)
+}
+
+/*
+ * The way back out, which is what makes a sticky flag safe to have: a 401
+ * is not always permanent - billing that has not propagated, a project
+ * suspended and restored - and the user must not have to retype twenty keys
+ * to find out. `/key <provider> check` asks the provider with a models
+ * listing, which costs nothing from the day's allowance.
+ */
+{
+  let pool = P.emptyPool('2026-10-14', 3)
+  pool = P.rejectOn(pool, 1)
+  check('refused', P.isReady(pool.spend[1], FLASH, NOW), false)
+  pool = P.reviveOn(pool, 1)
+  check('and taken back when it authenticates', P.isReady(pool.spend[1], FLASH, NOW), true)
+  check('with nothing left behind', P.rejectedCount(pool), 0)
+
+  /* Ledgers on disk right now hold the old form: a 24-hour rest whose
+     reason was 'rejected'. It has to read as refused - expired or not,
+     since it expiring is the bug - and revive has to clear it. */
+  let legacy = P.emptyPool('2026-10-14', 3)
+  legacy = P.restOn(legacy, 0, NOW - HOUR, P.REJECTED)
+  check('an expired old-style refusal still counts', P.rejectedCount(legacy), 1)
+  check('and cannot be chosen', P.isReady(legacy.spend[0], FLASH, NOW), false)
+  check('and survives the roll as the new form', P.rollPool(legacy, '2026-10-15', 3).spend[0].rejected, true)
+  legacy = P.reviveOn(legacy, 0)
+  check('and the free check clears it too', P.isReady(legacy.spend[0], FLASH, NOW), true)
+  check('rest and all', legacy.spend[0].restUntil, 0)
+}
+
+/*
+ * A refused key has no "back at". Offering its rest as the soonest is how
+ * "nothing can answer, the soonest is back in 2h" came to mean never.
+ */
+{
+  let pool = P.emptyPool('2026-10-14', 2)
+  pool = P.rejectOn(pool, 0)
+  pool = P.restOn(pool, 1, NOW + 5 * 60_000, 'per-minute')
+  check('the wait skips the refused key', P.nextFreeMs(pool, FLASH, NOW), 5 * 60_000)
+  let both = P.emptyPool('2026-10-14', 2)
+  both = P.rejectOn(both, 0)
+  both = P.rejectOn(both, 1)
+  check('and a wholly refused pool has no wait at all', P.nextFreeMs(both, FLASH, NOW), 0)
+  check('nor anything to choose', P.chooseKey(both, FLASH, NOW, 0), null)
+}
+
+/*
+ * The ledger is written at once for a rest, because the next thing to happen
+ * to this process is usually Stop-Process -Force. A refusal is the most
+ * expensive fact in the file to rediscover, so it has to be in that set.
+ */
+{
+  const before = P.emptyPool('2026-10-14', 3)
+  check('a refusal is written immediately', P.restsChanged(before, P.rejectOn(before, 0)), true)
+  check('and so is taking it back', P.restsChanged(P.rejectOn(before, 0), before), true)
+  check('a plain request still waits for the debounce', P.restsChanged(before, P.spendOn(before, 0, FLASH)), false)
+  check('and a first ledger with a refusal is urgent', P.restsChanged(null, P.rejectOn(before, 0)), true)
+}
+
 /* ------------------------------------------------- keys added and taken */
 
 {
@@ -376,7 +482,14 @@ const LITE = 'gemini-3.1-flash-lite'
   const text = Q.poolLines(view, NOW).join(NL)
   check('the report leads with the refusal', /\*\*Keys 1, 2 and 3 were refused\*\*/.test(text), true)
   check('and says waiting will not help', /Waiting will not fix those/.test(text), true)
-  check('and what to do instead', /\/key google <key/.test(text), true)
+  /* Nor will tomorrow, which is the half that was missing: the refusal used
+     to vanish at midnight Pacific and the user was never told it had. */
+  check('nor tomorrow', /neither will tomorrow/.test(text), true)
+  /* By number, so it can be typed. "Replace the whole list" risks the
+     seventeen that work for the sake of the three that do not. */
+  check('and what to do instead', /\/key google drop 1 2 3/.test(text), true)
+  check('and how to undo it if one comes back', /\/key google check/.test(text), true)
+  check('it does not claim every key can answer', /Every key can answer/.test(text), false)
   check('the headline counts them apart', /17 of 20 keys ready, 3 refused/.test(text), true)
   check('and the table calls it refused', text.includes('refused — replace it'), true)
 }
@@ -400,9 +513,13 @@ const LITE = 'gemini-3.1-flash-lite'
 const cloudSrc = readFileSync('src/main/cloud.ts', 'utf8')
 check('the check uses a models listing, not a generation', /\/models`, \{[\s\S]{0,80}Authorization/.test(cloudSrc), true)
 check('which is said out loud', /is not a generation/.test(cloudSrc), true)
-check('a 429 is not treated as a dead key', /res\.status !== 429/.test(cloudSrc), true)
+check('a 429 is not treated as a dead key', /res\.status === 429\) rotation\.revive/.test(cloudSrc), true)
 check('a network failure is not either', /says nothing about the key/.test(cloudSrc), true)
-check('dead keys leave the rotation at once', /rotation\.rest\(index, Date\.now\(\) \+ 24 \* 60 \* 60 \* 1000, REJECTED\)/.test(cloudSrc), true)
+check('dead keys leave the rotation at once', /else rotation\.reject\(index\)/.test(cloudSrc), true)
+/* The free listing is the ONLY way back out of a refusal, so it has to clear
+   the flag rather than just report green - otherwise a key that recovered
+   stays dead until the user retypes twenty keys. */
+check('and a key that answers is taken back', /rotation\.revive\(index\)/.test(cloudSrc), true)
 check('and the result carries no key', /POSITIONS ONLY/.test(cloudSrc), true)
 check('the reply is numbers and reasons only', /number: index \+ 1, ok: true/.test(cloudSrc), true)
 

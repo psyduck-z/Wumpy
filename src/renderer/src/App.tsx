@@ -1375,7 +1375,8 @@ function namedControls(shot: Attachment): string[] {
                 `Refused: key ${dead.map((k) => k.number).join(', ')}.`,
                 ...reasons.map((r) => `_${r}_`),
                 '',
-                'They are out of the rotation now, so nothing waits on them.',
+                'They are out of the rotation now, and stay out across restarts and across ' +
+                  'midnight — a refused key is not something waiting fixes.',
                 `Drop them with \`/key ${provider} drop ${dead.map((k) => k.number).join(' ')}\`, ` +
                   `or replace the whole list with \`/key ${provider} <key…>\`.`
               ].join(NEWLINE)
