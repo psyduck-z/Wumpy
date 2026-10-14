@@ -123,5 +123,32 @@ const panel = readFileSync('src/main/panel.ts', 'utf8')
 const toggle = panel.slice(panel.indexOf('toggle(): void'), panel.indexOf('setPinned'))
 check(/lastToggle/.test(toggle), 'toggle() ignores a repeat arriving on its heels')
 
+/**
+ * Losing the helper for the session is not a small thing.
+ *
+ * When the restart budget is spent it falls back to globalShortcut, which
+ * cannot grant the foreground - the one job the helper exists to do. So the
+ * budget must not be spendable by accident, and it was: three exits at any
+ * three moments of a run, reset only by a READY that arrived. The log has
+ * two thirds of it going to a machine falling asleep, 0x40010004 and
+ * 0xC0000142 one second apart at 05:29, with the transcriber dying between
+ * them. Failures now expire, so the budget means three CLOSE TOGETHER.
+ */
+check(/lastExitAt/.test(driver), 'an old helper failure stops counting against the budget')
+check(/this\.restarts = 0\s*$/m.test(driver.replace(/\r/g, '')), 'the counter is actually reset')
+check(/falling back to globalShortcut/.test(driver), 'and giving up is said out loud')
+
+/**
+ * The log is the first thing consulted before theorising, so it must not cry
+ * wolf. Every renderer level above info went to console.error, which made
+ * `gave up waiting for the keyboard` - a warning, and benign when
+ * caretHere=true - read as `ERROR [renderer]` and look like the autofocus
+ * bug returning. The positional arguments were deprecated too, and said so
+ * in the log once per message.
+ */
+check(/details\.level === 'error' \? console\.error : console\.warn/.test(panel), 'a renderer warning is logged as a warning')
+check(/on\('console-message', \(details\) =>/.test(panel), 'through the signature that is not deprecated')
+check(/details\.sourceId/.test(panel), 'and the source still names the file')
+
 console.log(`\n${failed === 0 ? 'all' : `${failed} FAILED of`} hotkey checks`)
 process.exit(failed === 0 ? 0 : 1)

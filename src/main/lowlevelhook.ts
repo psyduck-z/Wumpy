@@ -15,6 +15,8 @@ import { resourcePath } from './tray'
 export class LowLevelHook {
   private child: ChildProcess | null = null
   private restarts = 0
+  /** When the helper last died, so that old failures stop counting. */
+  private lastExitAt = 0
   private stopping = false
   private ready = false
 
@@ -94,8 +96,33 @@ export class LowLevelHook {
         this.ready = false
         if (this.stopping) return
 
-        // Three attempts is enough to ride out a transient failure without
-        // spinning forever against something genuinely broken.
+        /*
+         * The budget is three failures CLOSE TOGETHER, not three in a
+         * session.
+         *
+         * It used to be a lifetime count, reset only by a READY that
+         * arrived - so three exits at any three moments of a long run spent
+         * it for good, and the hotkey ran the rest of the day on
+         * globalShortcut, which cannot grant foreground. That is the whole
+         * reason this helper exists, so losing it is not a small
+         * degradation, and nothing tells the user it happened.
+         *
+         * It is cheap to spend, too. From the log, 05:28:59 and 05:29:00:
+         *   hook helper exited (1073807364); restart 1/3   <- terminated
+         *   hook helper exited (3221225794); restart 2/3   <- DLL init failed
+         * 0x40010004 and 0xC0000142 one second apart, with the transcriber
+         * going down between them: a machine going to sleep. Two thirds of
+         * the budget to an event that says nothing whatever about whether
+         * the helper works.
+         *
+         * So failures expire. Three within five minutes is the thing the
+         * old comment meant by "something genuinely broken"; anything
+         * further apart is two unrelated accidents.
+         */
+        const now = Date.now()
+        if (now - this.lastExitAt > 5 * 60_000) this.restarts = 0
+        this.lastExitAt = now
+
         if (this.restarts < 3) {
           this.restarts += 1
           console.warn(`[wumpy] hook helper exited (${code}); restart ${this.restarts}/3`)

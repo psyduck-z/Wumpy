@@ -169,10 +169,31 @@ export class Panel {
     // Surface renderer errors in the dev terminal; without this they are only
     // visible in devtools, which an overlay window rarely has open.
     if (!app.isPackaged) {
-      this.window.webContents.on('console-message', (_e, level, message, line, source) => {
-        if (level < 2) return // warnings and errors only
-        const where = source ? ` (${source.split('/').pop()}:${line})` : ''
-        console.error(`[renderer] ${message}${where}`)
+      /*
+       * A warning is logged as a warning.
+       *
+       * Both halves of this were wrong, and the cost was paid reading the
+       * log rather than running the app. Every level above info went to
+       * console.error, so the renderer's `gave up waiting for the keyboard`
+       * - a console.warn, and in those two cases a benign one, since
+       * `caretHere=true` means the keystrokes were landing - appeared as
+       * `ERROR [renderer]` and read like the autofocus bug coming back for
+       * a sixth time. A log that cries wolf is worse than a quiet one: this
+       * file is the first thing consulted before theorising.
+       *
+       * And the positional arguments it used to take are deprecated, which
+       * Electron says in the log on every single message:
+       *   WARN (electron) 'console-message' arguments are deprecated
+       * One line of noise per renderer warning, from the logger itself.
+       * `details` carries the level as a word, so the mapping is no longer
+       * a guess about which integer Chromium means by "warning" either.
+       */
+      this.window.webContents.on('console-message', (details) => {
+        if (details.level !== 'warning' && details.level !== 'error') return
+        const file = details.sourceId ? details.sourceId.split('/').pop() : ''
+        const where = file ? ` (${file}:${details.lineNumber})` : ''
+        const say = details.level === 'error' ? console.error : console.warn
+        say(`[renderer] ${details.message}${where}`)
       })
       this.window.webContents.on('render-process-gone', (_e, details) =>
         console.error('[renderer] process gone:', details.reason)

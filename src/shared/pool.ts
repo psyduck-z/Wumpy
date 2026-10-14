@@ -166,9 +166,21 @@ export function rollPool(pool: PoolDay, day: string, keys: number): PoolDay {
  * only thing they carry is the flag. A key appended since yesterday is new
  * and gets a blank slot, and nothing here can turn a working key into a
  * refused one.
+ *
+ * UNLESS THE LIST GOT SHORTER, in which case nothing carries at all. This is
+ * the same rule the shrink branch of rollPool has, for the same reason: the
+ * only way to shrink is to replace the list, and after that no index means
+ * what it did. It is reachable from here and not only from a resize, because
+ * KeyStore.drop writes keys.bin immediately while the ledger flush can still
+ * be sitting in a four-second timer when Stop-Process -Force arrives. Launch
+ * the next day with seventeen keys and a twenty-key ledger and carrying by
+ * position would mark the old keys 4, 5 and 6 as refused - three working
+ * projects retired, by the mechanism meant to retire dead ones. Starting
+ * clean costs one 401 per genuinely dead key, once.
  */
 function nextDay(pool: PoolDay, day: string, keys: number): PoolDay {
   const fresh = emptyPool(day, keys)
+  if (keys < pool.spend.length) return fresh
   return {
     ...fresh,
     spend: fresh.spend.map((blank, index) =>

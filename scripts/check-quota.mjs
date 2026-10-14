@@ -290,6 +290,20 @@ const LITE = 'gemini-3.1-flash-lite'
   const grown = P.rollPool(pool, '2026-10-14', 21)
   check('a key added overnight is not born refused', P.isReady(grown.spend[20], FLASH, NOW), true)
   check('and the old refusals are still there', P.rejectedCount(grown), 3)
+
+  /*
+   * But a SHORTER list carries nothing, which is the hazard in carrying
+   * anything by position at all. keys.bin is written the moment /key drop
+   * runs; the ledger flush can still be in its four-second timer when
+   * Stop-Process -Force arrives. Launch the next day with seventeen keys
+   * against a twenty-key ledger and position 0 is no longer the same key -
+   * so carrying would retire the old keys 4, 5 and 6, three working
+   * projects, by the mechanism meant to retire dead ones.
+   */
+  const shrunk = P.rollPool(pool, '2026-10-14', 17)
+  check('a shorter list carries nothing', P.rejectedCount(shrunk), 0)
+  check('so no working key inherits a refusal', P.readyCount(shrunk, FLASH, NOW), 17)
+  check('and the day is the new one', shrunk.day, '2026-10-14')
 }
 
 /*
