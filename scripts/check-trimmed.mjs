@@ -149,9 +149,9 @@ check('every combination is covered', COMBINATIONS.length, 32)
 
 {
   const plain = (lean) => A.preambleTokens({ ...FULL, lean, needs: [] })
-  check('the full instructions, plain turn', plain(false), 7841)
-  check('the short ones', plain(true), 5335)
-  check('which is about 2,500 a turn', plain(false) - plain(true), 2506)
+  check('the full instructions, plain turn', plain(false), 8075)
+  check('the short ones', plain(true), 5223)
+  check('which is about 2,850 a turn', plain(false) - plain(true), 2852)
   /* It only replaces the three always-sent sections; the gated ones still
      come and go on the same rules. */
   const withScreen = (lean) => A.preambleTokens({ ...FULL, lean, needs: ['desktop'] })
@@ -202,10 +202,10 @@ check('every combination is covered', COMBINATIONS.length, 32)
 {
   const whole = A.assemblePrompt(FULL)
   check('with every topic it is the original', A.assemblePrompt({ ...FULL, needs: TOPICS }) === whole, true)
-  check('and with none it is the shortest', A.preambleTokens({ ...FULL, needs: [] }), 7841)
+  check('and with none it is the shortest', A.preambleTokens({ ...FULL, needs: [] }), 8075)
   const sizes = COMBINATIONS.map((c) => A.preambleTokens({ ...FULL, needs: c }))
   check('nothing is longer than everything', Math.max(...sizes), A.preambleTokens(FULL))
-  check('and nothing is shorter than nothing', Math.min(...sizes), 7841)
+  check('and nothing is shorter than nothing', Math.min(...sizes), 8075)
   /* Adding a topic may never shorten the prompt. */
   const notMonotonic = []
   for (const combination of COMBINATIONS) {
@@ -227,8 +227,8 @@ check('every combination is covered', COMBINATIONS.length, 32)
  */
 {
   const turn = (content, images) => A.preambleTokens({ ...FULL, needs: N.needsFor([{ role: 'user', content, images }]) })
-  check('a question about the app', turn('what is my key percentage'), 7841)
-  check('an explanation', turn('why does this throw a TypeError'), 7841)
+  check('a question about the app', turn('what is my key percentage'), 8075)
+  check('an explanation', turn('why does this throw a TypeError'), 8075)
   check('a screenshot', turn('what is this', [1]) > 9000, true)
   check('a desktop request', turn('click the compose button') > 9000, true)
   check('and the whole thing is never sent by accident', turn('hello') < 13341, true)

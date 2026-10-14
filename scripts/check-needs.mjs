@@ -62,9 +62,18 @@ const tokensFor = (list) => A.preambleTokens({ ...FULL, needs: list })
 
 /* 13,341 until the credential rules were rewritten to allow typing a value
    the user handed over; that added 236 tokens, all of it inside the two
-   gated sections, so a plain turn is unchanged at 7,841. */
-check('everything, as it was', A.preambleTokens(FULL), 13577)
-check('a turn about nothing in particular', tokensFor([]), 7841)
+   gated sections, so a plain turn stayed at 7,841.
+
+   Then the fast-route rules - ask the index before walking the disk - which
+   are in the shell section and so go out on every turn: 305 added, 71
+   recovered by dropping the "search my whole computer" example and the
+   folder-picking advice the new rule supersedes, for a net 7,841 -> 8,075.
+   Bought deliberately: a turn that spends two minutes scanning C: for a
+   filename Everything already has indexed costs more than 234 tokens of
+   anybody's day, and the rule has to be present on the turn the question is
+   asked - which is any turn, so it cannot be gated. */
+check('everything, as it was', A.preambleTokens(FULL), 13811)
+check('a turn about nothing in particular', tokensFor([]), 8075)
 check('which is a third of it gone', A.preambleTokens(FULL) - tokensFor([]) > 4500, true)
 check('a turn about the screen', tokensFor(['desktop']) < A.preambleTokens(FULL), true)
 check('a turn about a website', tokensFor(['open']) < A.preambleTokens(FULL), true)
@@ -82,6 +91,22 @@ check('a turn about a website', tokensFor(['open']) < A.preambleTokens(FULL), tr
   check('so does how to take a screenshot', /wumpy-screen/.test(lean), true)
   check('and the voice', /You are Wumpy/.test(lean), true)
   check('and when to ask instead of guessing', /genuinely ambiguous/.test(lean), true)
+  /*
+   * The fast route is in the always-sent half on purpose. "Where is this
+   * file on my C:" is a plain shell turn - it expands no capability - so a
+   * rule that only arrived with the browser or desktop sections would be
+   * absent on exactly the question it exists for.
+   */
+  check('the fast route is never gated away', /A FASTER ROUTE TO THE SAME ANSWER/.test(lean), true)
+  check('with the index named', /Get-Command es -EA SilentlyContinue/.test(lean), true)
+  /* Guarded, because es is NOT on PATH on this machine: Everything is
+     installed and its service is running, but the CLI ships separately.
+     An unguarded `es notes.txt` is a command that fails for nothing. */
+  check('and guarded, not assumed', /It may not be/.test(lean), true)
+  check('and a fallback in the same block', /else \{ Get-ChildItem/.test(lean), true)
+  /* The limit that keeps it honest. A shortcut that returns something else
+     is not a shortcut, it is a wrong answer arriving sooner. */
+  check('the same answer, or it is not a shortcut', /faster and nearly right is just/.test(lean), true)
   /* The stub has to NAME the capability. This is the whole safety argument:
      the model may be short of detail, never short of knowing it can. */
   check('the browser capability is still named', /wumpy-open/.test(lean), true)
@@ -116,12 +141,15 @@ check('with everything on it is the same string', A.shellFor(ALL) === A.SHELL_PR
 check('and so is no list at all', A.shellFor(undefined) === A.SHELL_PROMPT, true)
 {
   const tok = (s) => Math.ceil(s.length / 4)
+  /* These drifted by one each when the fast-route rules landed, because the
+     estimate is ceil(chars / 4) and the difference of two ceilings moves
+     with the absolute length. The text of the three topics did not change. */
   const cost = (topic) => tok(A.shellFor(ALL)) - tok(A.shellFor(ALL.filter((t) => t !== topic)))
-  check('the install rules cost 207', cost('install'), 207)
-  check('the picture rules cost 243', cost('picture'), 243)
+  check('the install rules cost 206', cost('install'), 206)
+  check('the picture rules cost 242', cost('picture'), 242)
   /* 471 of format, less the one line of rule that stays behind in its place. */
-  check('the write format costs 430', cost('write'), 430)
-  check('all three together', cost('install') + cost('picture') + cost('write'), 880)
+  check('the write format costs 429', cost('write'), 429)
+  check('all three together', cost('install') + cost('picture') + cost('write'), 877)
 }
 {
   /* The prohibition has to outlive the section it starts: dropping the write
@@ -211,10 +239,10 @@ check('nor one about opening a site', needs(said('I opened vocabulary.com for yo
 
 /* ------------------------------------------------------- the shape contract */
 
-check('no list at all means everything', A.preambleTokens({ ...FULL }), 13577)
-check('an empty list is a real answer, not everything', tokensFor([]) < 13577, true)
+check('no list at all means everything', A.preambleTokens({ ...FULL }), 13811)
+check('an empty list is a real answer, not everything', tokensFor([]) < 13811, true)
 check('one capability is not the other', tokensFor(['open']) !== tokensFor(['desktop']), true)
-check('every topic together is everything', tokensFor(ALL), 13577)
+check('every topic together is everything', tokensFor(ALL), 13811)
 
 /* --------------------------------------------------------------- the wiring */
 

@@ -339,9 +339,25 @@ check('because guessed options are still guessing', /still guessing/.test(prompt
  *
  * Every one of those rules was earned by a failing measurement, so this is
  * not a ban on growth. It is a ceiling that makes the next addition a
- * decision rather than a surprise: a third of the window is the most the
- * instructions may take, and tripping this means trimming something or
- * raising it on purpose.
+ * decision rather than a surprise, and tripping it means trimming something
+ * or raising it on purpose. This has now been raised on purpose, once, and
+ * what follows is the reason - because a raised ceiling with no argument
+ * behind it is not a ceiling.
+ *
+ * A flat sum of the section literals was the right measure when every one
+ * of them went out on every turn. They do not any more: `needs` gates the
+ * browser and desktop rules behind a turn that is about browsing or
+ * clicking, so the number that matters is what `preambleTokens` returns for
+ * a given turn, not what the file adds up to. Those come out as:
+ *
+ *   a plain turn           8,075   24.6%   <- what most turns pay
+ *   every capability on   13,811   42.1%   <- a turn about all of it
+ *
+ * So the common case is comfortably inside the old third, and the worst
+ * case is a turn that really is about browsing and the desktop and
+ * installing at once, which is the one turn that cannot do without any of
+ * it. The flat sum is kept as a trend line with a looser bound, since it is
+ * still the thing that grows when nobody is looking.
  *
  * Four characters per token is the rough rate for English prose with code
  * fragments in it. Exactness is not the point; the trend is.
@@ -358,10 +374,33 @@ check('because guessed options are still guessing', /still guessing/.test(prompt
   const tokens = Math.round(sections.join(' ').length / 4)
   const share = tokens / T.CONTEXT_TOKENS
   check(
-    `the preamble is ~${tokens} tokens, ${(share * 100).toFixed(0)}% of the window`,
-    share <= 0.35,
+    `the literals add up to ~${tokens} tokens, ${(share * 100).toFixed(0)}% of the window`,
+    share <= 0.4,
     true
   )
+
+  /*
+   * What a turn actually pays, which is the figure the old flat sum was
+   * standing in for. The plain-turn bound is deliberately tight: it is the
+   * one most turns pay, so anything added to the always-sent half has to be
+   * argued for here rather than absorbed.
+   */
+  const FULL = { scope: 'full', search: true, screen: true, browser: true, quota: true }
+  const plain = T.preambleTokens({ ...FULL, needs: [] })
+  const everything = T.preambleTokens(FULL)
+  check(
+    `a plain turn pays ~${plain}, ${((plain / T.CONTEXT_TOKENS) * 100).toFixed(0)}% of the window`,
+    plain / T.CONTEXT_TOKENS <= 0.25,
+    true
+  )
+  check(
+    `every capability on pays ~${everything}, ${((everything / T.CONTEXT_TOKENS) * 100).toFixed(0)}%`,
+    everything / T.CONTEXT_TOKENS <= 0.45,
+    true
+  )
+  /* And the gating has to be worth having, or the two numbers above are the
+     same number and this suite is measuring nothing. */
+  check('gating saves a third of it', everything - plain > everything * 0.3, true)
   // And the optional half really is optional, since /browser off is the
   // lever a user has if they want the room back.
   const withoutBrowser = Math.round(
