@@ -1,4 +1,4 @@
-import type { ChatMessage, DesktopResult, ShellResult } from './types'
+import type { ChatMessage, DesktopResult, LinkResult, ShellResult, WriteResult } from './types'
 import { shorten } from './activity'
 import { needsElevation, neverRan, notOnPath } from './parsefail'
 
@@ -157,6 +157,42 @@ export function desktopLine(result: DesktopResult): string {
   const failed = result.ran.filter((s) => !s.ok).length
   if (failed) return `Did ${steps} on your screen, ${failed} of them failed`
   return `Did ${steps} on your screen`
+}
+
+/**
+ * The other three things Wumpy does on its own.
+ *
+ * A write and a link already said this much, as a note - a bubble in the
+ * assistant's own style, which is Wumpy's voice but not Wumpy's receipt, and
+ * which never collapsed. They say it as a chip now for one reason: these are
+ * the actions that repeat. A link that opens three times is three identical
+ * bubbles, and that is the thing being fixed.
+ *
+ * A path is left whole rather than shortened. It is the one detail somebody
+ * might want to copy, and the chip wraps.
+ */
+export function wroteLine(result: WriteResult): string {
+  if (!result.written) {
+    return `Could not write \`${result.path}\` — ${result.error ?? 'unknown error'}`
+  }
+  return `${result.overwrote ? 'Replaced' : 'Created'} \`${result.path}\` (${result.bytes} bytes)`
+}
+
+export function openedLine(result: LinkResult): string {
+  if (!result.opened) return `Could not open that — ${result.error ?? 'unknown error'}`
+  return `Opened \`${result.host}\` in your browser`
+}
+
+/**
+ * Looking is an action too.
+ *
+ * The capture goes to the model as a hand-back that is sent and not shown,
+ * so without this the transcript says nothing about a screenshot having been
+ * taken of whatever was in front of the panel at the time. A photograph of
+ * the user's screen is the last thing in this app that should happen quietly.
+ */
+export function screenLine(): string {
+  return 'Looked at your screen'
 }
 
 /**

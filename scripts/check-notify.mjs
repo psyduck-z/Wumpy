@@ -150,6 +150,45 @@ check(
   'Left your screen alone'
 )
 
+/* ---------------------------------------------- writes, links and the screen */
+
+/**
+ * The actions that used to be notes.
+ *
+ * A note is an assistant-styled bubble: Wumpy's voice, but not Wumpy's
+ * receipt, and it never collapsed. A link opened three times was three
+ * identical bubbles - the same spam, in the one category where repeating is
+ * most likely.
+ */
+check(
+  'a file created',
+  N.wroteLine({ written: true, path: 'C:\\Users\\z\\notes.txt', bytes: 120, overwrote: false }),
+  'Created `C:\\Users\\z\\notes.txt` (120 bytes)'
+)
+check(
+  'one that replaced something',
+  N.wroteLine({ written: true, path: 'C:\\a.txt', bytes: 4, overwrote: true }),
+  'Replaced `C:\\a.txt` (4 bytes)'
+)
+check(
+  'and one that could not be written',
+  N.wroteLine({ written: false, path: 'C:\\a.txt', bytes: 0, overwrote: false, error: 'EACCES' }),
+  'Could not write `C:\\a.txt` — EACCES'
+)
+check(
+  'a link opened',
+  N.openedLine({ opened: true, url: 'https://example.com/', host: 'example.com' }),
+  'Opened `example.com` in your browser'
+)
+check(
+  'one that did not open',
+  N.openedLine({ opened: false, url: '', host: '', error: 'no browser' }),
+  'Could not open that — no browser'
+)
+/* A photograph of the user's screen is the last thing that should happen
+   quietly, and its hand-back is sent without being shown. */
+check('and a look at the screen', N.screenLine(), 'Looked at your screen')
+
 /* --------------------------------------------------- the same thing, again */
 
 const chip = (id, content, over = {}) => ({
@@ -305,6 +344,14 @@ ok('a run says so in the transcript', /notify\(ranLine\(result\)\)/.test(app))
 ok('a search too', /notify\(searchedLine\(query\)\)/.test(app))
 ok('and the results are sent the same way', /`Searched: \$\{query\}`,\s*undefined,\s*true/.test(app))
 ok('a plan of clicks too', /notify\(desktopLine\(result\)\)/.test(app))
+ok('a write, a link and a screenshot as well', /notify\(wroteLine\(result\)\)/.test(app) && /notify\(openedLine\(result\)\)/.test(app) && /notify\(screenLine\(\)\)/.test(app))
+/* Every receipt goes through the same door, so none of them can quietly stop
+   collapsing. A note stays what it was: Wumpy answering something the user
+   typed, which is also what starts a count again. */
+ok(
+  'and no receipt is left as a note',
+  !/note\((ranLine|wroteLine|openedLine|desktopLine|screenLine)/.test(app)
+)
 
 const chat = readFileSync('src/renderer/src/hooks/useChat.ts', 'utf8')
 ok('the hook offers notify', /notify\(content: string\): void/.test(chat))

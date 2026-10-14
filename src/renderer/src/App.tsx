@@ -20,7 +20,14 @@ import { isTall } from '@shared/types'
 import type { PoolView } from '@shared/pool'
 import { looksLikeUrl, SEARCH_ENGINES, type LinkApproval } from '@shared/links'
 import { clippedOutput, commandFeedback } from '@shared/parsefail'
-import { desktopLine, ranLine, searchedLine } from '@shared/notify'
+import {
+  desktopLine,
+  openedLine,
+  ranLine,
+  screenLine,
+  searchedLine,
+  wroteLine
+} from '@shared/notify'
 import { CONTEXT_TOKENS, DEFAULT_MODEL, preambleTokens } from '@shared/assistant'
 import {
   COMPACT_COOLDOWN_MS,
@@ -535,6 +542,7 @@ export default function App(): React.JSX.Element {
        roughly 1,100 tokens of it - so this is the hand-back most worth
        making room for first. */
     await makeRoom()
+    chatRef.current.notify(screenLine())
     chatRef.current.send(
       [
         'A screenshot was taken automatically and is attached. This was not sent',
@@ -672,19 +680,18 @@ function namedControls(shot: Attachment): string[] {
   const checkWrite = useCallback((path: string) => window.wumpy.files.check(path), [])
 
   /**
-   * Notes what was written, without telling the model the contents back.
+   * Says what was written, without telling the model the contents back.
    *
    * It just wrote them. Feeding a file's text back as a result invited it to
    * review its own output and "correct" it, which is the loop these cards exist
    * to break.
+   *
+   * A chip rather than a note since the receipts were unified: the same file
+   * written twice in a row is now one line with a two on it.
    */
   const onWritten = useCallback((result: WriteResult) => {
     if (result.written) record('write', result.path)
-    chatRef.current.note(
-      result.written
-        ? `${result.overwrote ? 'Replaced' : 'Created'} \`${result.path}\` (${result.bytes} bytes).`
-        : `Could not write that file: ${result.error ?? 'unknown error'}`
-    )
+    chatRef.current.notify(wroteLine(result))
   }, [])
 
   /* ----------------------------------------------------------------- browser */
@@ -713,11 +720,7 @@ function namedControls(shot: Attachment): string[] {
    */
   const onOpened = useCallback((result: LinkResult) => {
     if (result.opened) record('open', result.host)
-    chatRef.current.note(
-      result.opened
-        ? `Opened **${result.host}** in your browser.`
-        : `Could not open that: ${result.error ?? 'unknown error'}`
-    )
+    chatRef.current.notify(openedLine(result))
   }, [])
 
   /**
