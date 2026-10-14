@@ -12,6 +12,7 @@ import type {
 } from '@shared/types'
 import type { LinkApproval } from '@shared/links'
 import { sizeLabel } from '@shared/attach'
+import { inlineCode } from '@shared/notify'
 import { Markdown } from './Markdown'
 import { AskCard } from './AskCard'
 import { useSmoothText } from '../hooks/useSmoothText'
@@ -136,11 +137,31 @@ export const Message = memo(function Message({
     )
   }
 
+  /*
+   * What Wumpy just did, in its own voice.
+   *
+   * The hand-back it belongs to is sent and not shown, so this is the only
+   * line in the transcript for a command that ran - and the only place the
+   * repeat count can go. Quieter than a notice: a notice is something the
+   * model must act on, this is a receipt.
+   */
+  if (message.notification) {
+    return (
+      <div className="msg msg-notice">
+        <span className="notice-chip is-receipt">
+          <Chip text={message.content} repeat={message.repeat} />
+        </span>
+      </div>
+    )
+  }
+
   // An app-generated fact, e.g. "you can now run commands".
   if (message.notice) {
     return (
       <div className="msg msg-notice">
-        <span className={`notice-chip ${message.aside ? 'is-aside' : ''}`}>{message.content}</span>
+        <span className={`notice-chip ${message.aside ? 'is-aside' : ''}`}>
+          <Chip text={message.content} repeat={message.repeat} />
+        </span>
       </div>
     )
   }
@@ -275,3 +296,31 @@ export const Message = memo(function Message({
     </div>
   )
 })
+
+/**
+ * A chip's text, with `a command` set as code and a count on the end.
+ *
+ * The chips were plain text, so every backtick Wumpy wrote was a backtick on
+ * screen - "Ran `x` - succeeded, no output" has been saying that since the
+ * day it was added. Not the markdown renderer: that is a react-markdown tree
+ * per chip for one span of code inside a 10px line.
+ *
+ * The count appears only on a repeat, and it is the whole point of the chip
+ * being one message rather than six: the same command running four times is
+ * one line reading four, not four lines reading one.
+ */
+function Chip({ text, repeat }: { text: string; repeat?: number }): React.JSX.Element {
+  const times = repeat ?? 1
+  return (
+    <>
+      {inlineCode(text).map((part, i) =>
+        part.code ? <code key={i}>{part.text}</code> : <span key={i}>{part.text}</span>
+      )}
+      {times > 1 && (
+        <span className="chip-count" title={`This happened ${times} times`}>
+          &#215;{times}
+        </span>
+      )}
+    </>
+  )
+}

@@ -20,6 +20,7 @@ import { isTall } from '@shared/types'
 import type { PoolView } from '@shared/pool'
 import { looksLikeUrl, SEARCH_ENGINES, type LinkApproval } from '@shared/links'
 import { clippedOutput, commandFeedback } from '@shared/parsefail'
+import { desktopLine, ranLine, searchedLine } from '@shared/notify'
 import { CONTEXT_TOKENS, DEFAULT_MODEL, preambleTokens } from '@shared/assistant'
 import {
   COMPACT_COOLDOWN_MS,
@@ -496,6 +497,9 @@ export default function App(): React.JSX.Element {
         : results
             .map((r, i) => [`${i + 1}. ${r.title}`, `   ${r.url}`, `   ${r.snippet}`].join('\n'))
             .join('\n')
+      chatRef.current.notify(searchedLine(query))
+      /* Sent and not shown, for the same reason as a command's output: the
+         user did not type "Searched: pacific midnight", Wumpy did. */
       chatRef.current.send(
         [
           `Results for "${query}" (via ${provider}):`,
@@ -504,7 +508,9 @@ export default function App(): React.JSX.Element {
           '',
           'Answer the original question from these. Cite the sources you used.'
         ].join('\n'),
-        `Searched: ${query}`
+        `Searched: ${query}`,
+        undefined,
+        true
       )
     },
     [makeRoom]
@@ -644,6 +650,11 @@ function namedControls(shot: Attachment): string[] {
     ]
       .filter(Boolean)
       .join(String.fromCharCode(10))
+    /* This hand-back was already sent without being shown, so until now a
+       plan of clicks left nothing in the transcript at all once its card had
+       scrolled: the model's answer, and no line saying the screen had been
+       touched. A plan that half worked is the case that needs it. */
+    chatRef.current.notify(desktopLine(result))
     const sent = chatRef.current.send(report, 'Ran it on my screen', after ? [after] : undefined, true)
     /* A turn had started in the meantime, so the report would have vanished -
        and a model that is never told what its own plan did will propose the
@@ -801,15 +812,28 @@ function namedControls(shot: Attachment): string[] {
      * app never has.
      */
     const feedback = commandFeedback(result)
+    /* A silent success is already one chip saying exactly this, and that one
+       has to go to the model as well - a change that printed nothing is
+       still a change it needs to know about. Two chips in a row saying the
+       same thing is the spam this is here to remove, so there is only ever
+       one. Both kinds collapse on a repeat; see shared/notify.ts. */
     if (feedback.kind === 'notice') {
       chatRef.current.notice(feedback.text)
       return
     }
+    chatRef.current.notify(ranLine(result))
     const report = feedback.text
 
-    // Sent as a user turn because that is the role the model expects a tool
-    // result to arrive in, but shown as the short line instead of the dump.
-    const sent = chatRef.current.send(report, `Ran: \`${result.command}\``)
+    /*
+     * Sent as a user turn because that is the role the model expects a tool
+     * result to arrive in - and sent without being shown, which is the new
+     * part. The output used to appear on the user's own side of the panel as
+     * a bubble reading "Ran: `dir`", which is Wumpy putting words in their
+     * mouth: the same thing they objected to for screenshots, "it makes it
+     * look funky, so don't show things like that". The chip above says what
+     * happened, in Wumpy's voice, and counts a repeat instead of repeating.
+     */
+    const sent = chatRef.current.send(report, `Ran: \`${result.command}\``, undefined, true)
     // A turn was already in flight, so the output would otherwise vanish.
     // It still reaches the model, just as a fact rather than a question.
     if (!sent) {

@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { actionFacts } from '../ledger'
 import type { Attachment, ChatMessage } from '@shared/types'
 import { BAIL_WINDOW_MS, hasBlock, returnsThePrompt } from '../abort'
+import { collapsed, repeatOf, type ChipKind } from '@shared/notify'
 
 let counter = 0
 export const nextId = (): string => `m${Date.now().toString(36)}${(counter++).toString(36)}`
@@ -45,6 +46,14 @@ export interface ChatState {
   note(content: string, error?: boolean): void
   /** Adds a line the model will see as context, shown as a chip. */
   notice(content: string): void
+  /**
+   * Says what Wumpy just did, in one line the model never reads.
+   *
+   * The same line arriving again with nothing but Wumpy's own turns in
+   * between updates the one already there instead of adding another. See
+   * shared/notify.ts for what "again" means and why.
+   */
+  notify(content: string): void
   /**
    * Something the user says while a turn is still running.
    *
@@ -310,12 +319,56 @@ export function useChat(): ChatState {
     setMessages((prev) => prev.map((m) => (m.id === messageId ? { ...m, answered: option } : m)))
   }, [])
 
-  const notice = useCallback((content: string) => {
-    setMessages((prev) => [
-      ...prev,
-      { id: nextId(), role: 'system', content, createdAt: Date.now(), notice: true }
-    ])
+  /**
+   * Adds a chip, or counts up the one it repeats.
+   *
+   * Decided inside the state updater on purpose: `prev` is the only version
+   * of the transcript that cannot be stale, and two cards finishing in the
+   * same tick would otherwise both read it as it was before either of them
+   * landed - which is how the unattended-run de-duplication managed to be
+   * there and never see itself. The decision is a pure function of `prev`,
+   * so StrictMode replaying the updater reaches the same answer.
+   */
+  const chip = useCallback((kind: ChipKind, fresh: ChatMessage) => {
+    setMessages((prev) => {
+      const again = repeatOf(prev, kind, fresh.content)
+      return again ? collapsed(prev, again, fresh.createdAt) : [...prev, fresh]
+    })
   }, [])
+
+  const notice = useCallback(
+    (content: string) => {
+      chip('notice', {
+        id: nextId(),
+        role: 'system',
+        content,
+        createdAt: Date.now(),
+        notice: true
+      })
+    },
+    [chip]
+  )
+
+  /**
+   * Local, so it never reaches the model.
+   *
+   * What it is a receipt for went to the model as its own hand-back, and
+   * saying it twice would cost the window a line per command for nothing.
+   * The model is told what Wumpy did by the ledger, in the facts block.
+   */
+  const notify = useCallback(
+    (content: string) => {
+      chip('notification', {
+        id: nextId(),
+        role: 'system',
+        content,
+        createdAt: Date.now(),
+        local: true,
+        notification: true
+      })
+    },
+    [chip]
+  )
 
   const aside = useCallback((content: string) => {
     setMessages((prev) => [
@@ -425,6 +478,7 @@ export function useChat(): ChatState {
     history,
     note,
     notice,
+    notify,
     aside,
     askLocal,
     recordAnswer,

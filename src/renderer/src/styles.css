@@ -1010,6 +1010,33 @@ body {
   text-align: center;
 }
 
+.notice-chip code {
+  font-family: var(--mono);
+  font-size: 10px;
+  word-break: break-all;
+}
+
+/* A receipt for something Wumpy did, rather than a fact the model must act
+   on: same shape, none of the accent. The transcript gets one of these per
+   command, so it has to sit quietly behind the answer it belongs to. */
+.notice-chip.is-receipt {
+  background: rgb(var(--raised));
+  border-color: rgb(var(--border));
+  color: rgb(var(--muted));
+}
+
+/* The same thing, again. Deliberately legible rather than subtle: the count
+   is what replaces the four identical lines that used to be here. */
+.chip-count {
+  margin-left: 6px;
+  padding: 0 4px;
+  border-radius: 5px;
+  background: rgb(var(--accent) / 0.16);
+  color: rgb(var(--accent-text));
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+}
+
 /* ---------------------------------------------------- compaction summary */
 
 .msg-summary {

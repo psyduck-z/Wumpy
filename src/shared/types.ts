@@ -67,6 +67,23 @@ export interface ChatMessage {
    * guess — or deliberate for minutes without reaching an answer.
    */
   localAsk?: { question: string; options: string[]; kind: 'rename' }
+  /**
+   * A line saying what Wumpy just did — ran this, searched for that.
+   *
+   * Local, so the model never reads it: it is the person's receipt, not
+   * context. The thing it is a receipt FOR has already gone to the model as
+   * a hand-back, which is sent and not shown. See shared/notify.ts.
+   */
+  notification?: boolean
+  /**
+   * How many times this chip has happened, counting the first.
+   *
+   * Set only on a repeat, so an ordinary message carries nothing. A model
+   * that re-proposes a command it has already run is this app's commonest
+   * loop, and six identical lines in the transcript is the spam the count
+   * exists to replace.
+   */
+  repeat?: number
 }
 
 /* -------------------------------------------------------- the one assistant */
