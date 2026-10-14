@@ -548,5 +548,115 @@ check('and an uninstall that completed counts too', P.startedButUnfinished({
   readOnly: false
 }), false)
 
+/* ------------------------------------- a search that came back with nothing */
+
+/**
+ * The same bug a week later, with no error in it anywhere.
+ *
+ * Asked "find the exact file path to a file called PD.cap", Wumpy searched
+ * Downloads, Documents and the Desktop, got no output, and answered that the
+ * file was not in those folders. It was in C:\DRIVERS\WIN.
+ *
+ * Every word of that is true and it is still the wrong answer to the
+ * question asked, and the report is what asked for it: "answer the original
+ * question from this output" on an empty output is an instruction to
+ * conclude something from nothing. So an empty search is told what empty
+ * means, and handed the command that covers everywhere.
+ */
+const searched = (command, over = {}) =>
+  P.commandFeedback({
+    command,
+    shell: 'powershell',
+    cwd: 'C:/Users/zecha',
+    stdout: '',
+    stderr: '',
+    exitCode: 0,
+    durationMs: 900,
+    timedOut: false,
+    truncated: false,
+    readOnly: true,
+    ...over
+  })
+
+/* The command from the screenshot, shortened. */
+const THREE_FOLDERS =
+  '$folders = @("C:\\Users\\zecha\\Downloads", "C:\\Users\\zecha\\OneDrive\\Documents");' +
+  ' Get-ChildItem -Path $folders -Recurse -Filter "PD.cap" -File -ErrorAction SilentlyContinue'
+const DRIVE = 'cmd /c "dir C:\\PD.cap /s /b"'
+
+check('the real one: three folders, no output', searched(THREE_FOLDERS).kind, 'report')
+check(
+  'is told that is about the folders, not the file',
+  /fact about the folders/.test(searched(THREE_FOLDERS).text),
+  true
+)
+check(
+  'and handed the search that covers the drive',
+  searched(THREE_FOLDERS).text.includes('dir C:\\PD.cap /s /b'),
+  true
+)
+check(
+  'not the ending that says answer from this output',
+  /Answer the original/.test(searched(THREE_FOLDERS).text),
+  false
+)
+
+/* dir says it in words and exits 1. Without this the report would tell the
+   model the command FAILED and to find another way, when it did exactly what
+   was asked and the answer is no — which is the retry loop NOT_FOUND_ENDING
+   was written to stop in the docker case. */
+const missed = searched(DRIVE, { stderr: 'File Not Found', exitCode: 1, readOnly: false })
+check('a whole-drive search that missed is an answer', /covered the whole drive/.test(missed.text), true)
+check('and is never reported as a failure', /ran and FAILED/.test(missed.text), false)
+check(
+  'where.exe saying the same thing counts too',
+  P.searchedNothing({
+    command: 'where /r C:\\ PD.cap',
+    stdout: '',
+    stderr: 'INFO: Could not find files for the given pattern(s).',
+    exitCode: 1,
+    timedOut: false
+  }),
+  true
+)
+
+/* The narrow one must not claim to have covered everywhere, and the wide one
+   must not be told to go wider: that is the loop, not the fix. */
+check('three folders is not the whole drive', P.searchedWholeDrive({ command: THREE_FOLDERS }), false)
+check('a filename at the root of C: is', P.searchedWholeDrive({ command: DRIVE }), true)
+
+/* A lookup whose empty answer IS the answer keeps the ordinary ending.
+   Get-Command printing nothing means the tool is not there - a result, not a
+   place nobody looked - which is why the recursive marker is required. */
+check(
+  'a lookup that found nothing is left alone',
+  P.searchedNothing({
+    command: 'Get-Command docker -ErrorAction SilentlyContinue',
+    stdout: '',
+    stderr: '',
+    exitCode: 0,
+    timedOut: false
+  }),
+  false
+)
+check(
+  'and a search that DID find something is left alone',
+  P.searchedNothing({
+    command: DRIVE,
+    stdout: 'C:\\DRIVERS\\WIN\\PD\\20261707.18422281\\PD.cap',
+    stderr: '',
+    exitCode: 0,
+    timedOut: false
+  }),
+  false
+)
+/* One Wumpy stopped has not finished searching, so it says nothing about
+   what is or is not there. */
+check(
+  'nor is one that hit the time limit',
+  P.searchedNothing({ command: DRIVE, stdout: '', stderr: '', exitCode: 1, timedOut: true }),
+  false
+)
+
 console.log(failures ? `\n${failures} parse-failure checks FAILED` : '\nall parse-failure checks')
 process.exitCode = failures ? 1 : 0

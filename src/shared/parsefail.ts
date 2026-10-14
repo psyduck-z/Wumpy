@@ -237,6 +237,105 @@ export function startedButUnfinished(result: ShellResult): boolean {
   return STARTED_MARKS.test(out) && !FINISHED_MARKS.test(out)
 }
 
+/**
+ * A search that matched nothing, in folders somebody picked.
+ *
+ * The case that wrote this one, in full. Asked "find the exact file path to
+ * a file called PD.cap", Wumpy searched Downloads, Documents and the
+ * Desktop, got no output, and answered "The file PD.cap was not found in
+ * your Downloads, Documents, or Desktop folders." The file was in
+ * C:\DRIVERS\WIN\PD.
+ *
+ * Nothing in that is a lie - it even named its scope - and it is still the
+ * wrong answer to the question that was asked. The user wanted a path.
+ *
+ * The ordinary ending is what pushed it there: "That command is done. Do
+ * not propose it again. Answer the original question from this output, in
+ * words" is an instruction to turn an empty result into a conclusion, and
+ * an empty result from three guessed folders supports no conclusion at all.
+ * So an empty search gets its own ending, which says what the emptiness
+ * means and hands over the command that actually answers it.
+ */
+export const FOUND_NOTHING_ENDING = [
+  'That search matched NOTHING, which is a fact about the folders you',
+  'looked in and not about the thing you were looking for.',
+  'Do NOT report it as missing. It is somewhere you did not look.',
+  'This exact mistake: asked for the path of PD.cap, Wumpy searched',
+  'Downloads, Documents and the Desktop, found nothing and said the file',
+  'was not in those folders. It was in C:\\DRIVERS\\WIN. A near miss reads',
+  'exactly like an answer, which is worse than no answer at all.',
+  'So say which folders you actually searched, and in the SAME reply send',
+  'the search that covers the whole drive. One command does it:',
+  '  cmd /c "dir C:\\PD.cap /s /b"',
+  'with their filename in place of PD.cap. Every folder on C:, full paths',
+  'and nothing else, 74 seconds on this machine — say the minute is coming.',
+  'If that prints File Not Found, THEN it is not on that drive.',
+  'If you were searching inside files rather than for a filename, the rule',
+  'is the same: widen the scope in one more command, and say what you did.'
+]
+
+/**
+ * The same search, over a whole drive, which really did look everywhere.
+ *
+ * dir reports this as "File Not Found" on stderr with a non-zero exit, and
+ * without this it reads as a failure - FAILED_ENDING would tell the model
+ * the command did not do what was asked and to find another way, when in
+ * fact it did exactly what was asked and the answer is no. That would turn
+ * a finished search into a retry, which is the loop NOT_FOUND_ENDING was
+ * written to stop in the docker case.
+ */
+export const NOT_ON_THIS_DRIVE_ENDING = [
+  'That search covered the whole drive and found nothing.',
+  'It did NOT fail: "File Not Found" is dir saying it looked everywhere it',
+  'was pointed at, and the non-zero exit means that and nothing more.',
+  'So this IS the answer. Say it plainly, and name the drive you searched.',
+  'Do not run it again, and do not fall back to guessing folders — you',
+  'have already covered every folder there is.',
+  'Two things are worth ONE more command each, if they apply: another',
+  'drive, and a different spelling or extension if the name you were given',
+  'may not be exact. Say which of those you are doing, or ask.'
+]
+
+/** The tools that search rather than report. */
+const SEARCHES = /\b(Get-ChildItem|gci|ls|dir|where(\.exe)?|Select-String|sls|findstr)\b/i
+
+/** Looking below the folder it was given, rather than at it. */
+const EVERY_SUBFOLDER = /-Recurse\b|\s\/s\b|\s\/r\b/i
+
+/** dir and where.exe saying they looked and there was nothing. */
+const NOTHING_MATCHED = /^\s*File Not Found\s*$|Could not find files for the given pattern/im
+
+/**
+ * Rooted at a drive rather than at a folder inside one.
+ *
+ * `C:\` and `C:\PD.cap` match; `C:\Users\zecha\Downloads` does not. The
+ * difference is the whole point: one of them has looked everywhere and the
+ * other has looked in one place.
+ */
+const FROM_DRIVE_ROOT = /(?:^|\s)["']?[A-Za-z]:[\\/][^\\/\s"']*["']?(?=\s|"|$)/
+
+/**
+ * Whether this was a search, and whether it came back with nothing.
+ *
+ * Narrow on purpose. `Get-Command docker` printing nothing IS the answer -
+ * it is a lookup, not a search - so the recursive marker is required. And a
+ * command that failed for some other reason still has its own ending: the
+ * emptiness has to be the SEARCH's emptiness, either an exit-0 run with no
+ * output at all or one of the two messages that say so in words.
+ */
+export function searchedNothing(result: ShellResult): boolean {
+  if (result.timedOut) return false
+  if (!SEARCHES.test(result.command) || !EVERY_SUBFOLDER.test(result.command)) return false
+  const out = `${result.stdout}${result.stderr}`
+  if (!out.trim()) return result.exitCode === 0
+  return NOTHING_MATCHED.test(out)
+}
+
+/** And whether it had covered everywhere by the time it found nothing. */
+export function searchedWholeDrive(result: ShellResult): boolean {
+  return FROM_DRIVE_ROOT.test(result.command)
+}
+
 /** How much command output the model is shown before it is clipped. */
 export const MAX_REPORT_OUTPUT = 3000
 
@@ -288,22 +387,30 @@ export function commandFeedback(result: ShellResult): CommandFeedback {
         // what it asked for.
         needsElevation(result)
         ? NEEDS_ADMIN_ENDING
-        : result.exitCode !== 0 && !result.timedOut
-          ? FAILED_ENDING
-          : result.timedOut
-            ? [
-                'Wumpy STOPPED that command before it finished — it hit the time limit.',
-                'Whatever it was doing may still be running in the background, and the',
-                'output above is only what it had printed so far.',
-                'Do NOT say it succeeded, and do not say it failed. Say it was still',
-                'going, then propose ONE command that checks the real state.'
-              ]
-            : startedButUnfinished(result)
-              ? UNFINISHED_ENDING
-              : [
-                  'That command is done. Do not propose it again. Answer the original',
-                  'question from this output, in words.'
+        : // Ahead of the failure ending because a drive-wide dir that found
+          // nothing exits non-zero, and that exit code is the answer rather
+          // than a fault. Behind the three above because a search that could
+          // not parse, could not run or was denied has not searched at all.
+          searchedNothing(result)
+          ? searchedWholeDrive(result)
+            ? NOT_ON_THIS_DRIVE_ENDING
+            : FOUND_NOTHING_ENDING
+          : result.exitCode !== 0 && !result.timedOut
+            ? FAILED_ENDING
+            : result.timedOut
+              ? [
+                  'Wumpy STOPPED that command before it finished — it hit the time limit.',
+                  'Whatever it was doing may still be running in the background, and the',
+                  'output above is only what it had printed so far.',
+                  'Do NOT say it succeeded, and do not say it failed. Say it was still',
+                  'going, then propose ONE command that checks the real state.'
                 ]
+              : startedButUnfinished(result)
+                ? UNFINISHED_ENDING
+                : [
+                    'That command is done. Do not propose it again. Answer the original',
+                    'question from this output, in words.'
+                  ]
 
   const NL = String.fromCharCode(10)
 

@@ -74,6 +74,14 @@ check(
   verb(`Get-ChildItem C:${BACKSLASH}Users -Recurse`),
   'searching'
 )
+/* The whole-drive search by name, which is a minute of silence and the
+   reason this file exists. The pattern wanted `dir /s` adjacent and this
+   form puts the filename in between, so it used to read as "running". */
+check(
+  'and so is a whole-drive dir',
+  verb(`cmd /c "dir C:${BACKSLASH}PD.cap /s /b"`),
+  'searching'
+)
 check('a delete says delete', verb(`Remove-Item C:${BACKSLASH}tmp.txt`), 'deleting')
 check('a copy says copy', verb('Copy-Item a b'), 'copying')
 check('a version probe is checking', verb('node --version'), 'checking')

@@ -74,7 +74,11 @@ const FROM_COMMAND: ReadonlyArray<{ re: RegExp; verb: string }> = [
   { re: /\b(Copy-Item|robocopy|xcopy)\b/i, verb: 'copying' },
   { re: /\bMove-Item\b/i, verb: 'moving' },
   {
-    re: /-Recurse\b|\bdir\s+\/s\b|\b(Select-String|findstr|where\.exe)\b|\bGet-ChildItem\b/i,
+    /* `dir /s` with the thing it is looking for in between, because the
+       whole-drive search by name is written `dir C:\that.name /s /b` and
+       spends about 74 seconds on this machine saying nothing. A minute of
+       "running…" is the exact case this file exists for. */
+    re: /-Recurse\b|\bdir\b[^|]*?\s\/s\b|\b(Select-String|findstr|where\.exe)\b|\bGet-ChildItem\b/i,
     verb: 'searching'
   },
   { re: /\bStart-Process\b/i, verb: 'starting it' },
