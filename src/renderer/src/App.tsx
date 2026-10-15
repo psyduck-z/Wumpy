@@ -1281,7 +1281,13 @@ function namedControls(shot: Attachment): string[] {
           )
           const id = hosted?.id ?? wanted
 
-          if (hosted && !(keyStatus?.configured.includes(hosted.provider) ?? false)) {
+          /* Keyless providers are exempt: Ollama is this machine, and there
+             is no key for the user to add however often they are told to. */
+          if (
+            hosted &&
+            !PROVIDERS[hosted.provider].keyless &&
+            !(keyStatus?.configured.includes(hosted.provider) ?? false)
+          ) {
             chat.note(
               `**${hosted.label}** needs a ${PROVIDERS[hosted.provider].label} key. ` +
                 `Add one with \`/key ${hosted.provider} <key>\`.`
@@ -2287,8 +2293,14 @@ function namedControls(shot: Attachment): string[] {
        * one without a key explains how to get a key - which is more use than
        * hiding it and leaving them to guess.
        */
+      /* A keyless provider is ready as soon as it is listed: Ollama runs on
+         this machine and is authorised at the daemon, so "needs a key" would
+         be advice nobody can follow and the model would never be pickable. */
+      const usable = (p: (typeof CLOUD_MODELS)[number]['provider']): boolean =>
+        PROVIDERS[p].keyless || (keyStatus?.configured.includes(p) ?? false)
+
       const cloudItems = CLOUD_MODELS.map((m) => {
-        const ready = keyStatus?.configured.includes(m.provider) ?? false
+        const ready = usable(m.provider)
         return {
           id: m.id,
           title: m.label,
@@ -2304,7 +2316,7 @@ function namedControls(shot: Attachment): string[] {
         onClose: close,
         onPick: (name) => {
           const hosted = CLOUD_MODELS.find((m) => m.id === name)
-          if (hosted && !(keyStatus?.configured.includes(hosted.provider) ?? false)) {
+          if (hosted && !usable(hosted.provider)) {
             // Not set, because setting it would leave the tier pointing at
             // something that cannot answer and the next question would fail
             // instead of explaining itself.

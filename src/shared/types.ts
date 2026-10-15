@@ -748,7 +748,7 @@ export interface KeyStatus {
  * fail to compile if they drifted - a provider missing from this copy would be
  * accepted by the key command and rejected by the IPC handler.
  */
-export type ProviderName = 'google' | 'groq' | 'mistral' | 'nvidia'
+export type ProviderName = 'google' | 'groq' | 'mistral' | 'nvidia' | 'ollama'
 
 /* --------------------------------------------------------------------- voice */
 

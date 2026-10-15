@@ -1,5 +1,5 @@
 import type { Dock, ProviderName } from '@shared/types'
-import { PROVIDER_IDS, isProviderId } from '@shared/cloud'
+import { PROVIDER_IDS, PROVIDERS, isProviderId } from '@shared/cloud'
 import { nearest } from '@shared/nearest'
 
 /**
@@ -314,6 +314,20 @@ export const COMMANDS: CommandSpec[] = [
             'Say which one: ' +
             PROVIDER_IDS.map((id) => `\`/key ${id} <key>\``).join(', ') +
             '. Use `/key google clear` to remove it.'
+        }
+      }
+      /*
+       * Ollama is in PROVIDER_IDS so it routes and so the picker can offer
+       * it, but it has no key: the daemon is on localhost and a cloud model
+       * there is authorised by whoever ran `ollama signin`. Without this the
+       * command would cheerfully encrypt a key that is never read.
+       */
+      if (PROVIDERS[provider].keyless) {
+        return {
+          kind: 'error',
+          message:
+            `${PROVIDERS[provider].label} needs no key here — it runs on your own machine. ` +
+            'Sign in with `ollama signin` if a cloud model asks you to.'
         }
       }
       let rest = parts.slice(1).join(' ')

@@ -14,7 +14,7 @@
  * the live API, and three of the four fail silently.
  */
 
-export type ProviderId = 'google' | 'groq' | 'mistral' | 'nvidia'
+export type ProviderId = 'google' | 'groq' | 'mistral' | 'nvidia' | 'ollama'
 
 /**
  * Every provider, once, so adding one is a single edit.
@@ -27,7 +27,7 @@ export type ProviderId = 'google' | 'groq' | 'mistral' | 'nvidia'
  */
 import { foldAttachments, type Attached } from './attach'
 
-export const PROVIDER_IDS = ['google', 'groq', 'mistral', 'nvidia'] as const
+export const PROVIDER_IDS = ['google', 'groq', 'mistral', 'nvidia', 'ollama'] as const
 
 /** Whether a string off the wire or out of a settings file names a provider. */
 export function isProviderId(value: unknown): value is ProviderId {
@@ -40,6 +40,15 @@ export interface Provider {
   base: string
   /** Where the user gets a key, shown when one is missing. */
   keyUrl: string
+  /**
+   * No key, because the endpoint is the user's own machine.
+   *
+   * Ollama listens on localhost and authorises by whoever signed in at the
+   * daemon, so there is nothing for /key to hold and nothing to rotate. Every
+   * other gate in here assumes a missing key means "not set up yet", which
+   * for this one would be permanently true.
+   */
+  keyless?: boolean
   /**
    * Google keeps only the LAST system message and silently drops every earlier
    * one. Not a 400, not a warning - they simply never reach the model.
@@ -198,6 +207,38 @@ export const PROVIDERS: Record<ProviderId, Provider> = {
     tokensPerMinute: 0,
     alwaysReasons: true
   },
+  /**
+   * The user's own Ollama, which is how a cloud model on their account is
+   * reached without a key of Wumpy's.
+   *
+   * Wumpy used to have an OllamaClient and lost it when it went cloud-only;
+   * this is the same daemon through its OpenAI-compatible endpoint, so it
+   * costs a provider row rather than a second client. What it serves is
+   * whatever the user has: a `-cloud` name runs on Ollama's servers against
+   * their account, a plain tag runs on this laptop.
+   *
+   * Measured on gemma4:31b-cloud at Wumpy's real 14,212-token preamble: 967ms
+   * median of three, and 14,304 of 14,322 input tokens came back cached -
+   * 99.9%, the highest of any provider tested. No rate-limit header of any
+   * kind, so the ceiling is Ollama's account policy and is found by hitting
+   * it.
+   */
+  ollama: {
+    id: 'ollama',
+    label: 'Ollama',
+    base: 'http://127.0.0.1:11434/v1',
+    keyUrl: 'https://ollama.com/settings/keys',
+    keyless: true,
+    foldSystem: false,
+    /* Observed cached=14304 on a 14322-token prefix, so the block is small
+       enough not to matter. Zero means "do not plan around a block size". */
+    cacheBlockTokens: 0,
+    /* A local daemon with no published limit. The pacing that exists for
+       hosted free tiers is not what is binding here. */
+    minGapMs: 0,
+    tokensPerMinute: 0,
+    alwaysReasons: false
+  },
   groq: {
     id: 'groq',
     label: 'Groq',
@@ -300,7 +341,16 @@ export const CLOUD_MODELS: CloudModel[] = [
     provider: 'google',
     label: 'Gemini 3.8 Flash',
     // Measured the hard way: roughly 25 requests and it asked for 18 hours.
-    blurb: 'Newest Flash — but it ran out after about 25 requests in a day.',
+    /*
+     * And it is not only scarce, it is the worst of the Geminis at this job.
+     * Ten rungs at two runs each: 5/10, with 0/2 on five of them and the
+     * reason nearly always "no command proposed" - it answers in prose where
+     * the rung needs a wumpy-run block. Checked for a harness fault first,
+     * because one was found the same evening: the fence promotion is applied
+     * for Google here, and it still answers in prose. 11.0s median, against
+     * 2.3s for Lite, with 531 invisible thinking tokens on top.
+     */
+    blurb: '5/10 here and 11s a turn — answers in prose instead of commands. ~25/day.',
     looseFences: true
   },
   {
@@ -337,6 +387,60 @@ export const CLOUD_MODELS: CloudModel[] = [
     label: 'Gemini Flash (latest)',
     blurb: 'Whatever Google currently points "latest" at. Moves without warning.',
     looseFences: true
+  },
+
+  /* --- NVIDIA, measured 15 October 2026 ----------------------------------
+   *
+   * The list was Google-only because the others had been measured and found
+   * wanting. These were measured again, on ten rungs of bench-ceiling at two
+   * runs each, and three of them beat every Gemini in the picker on both
+   * correctness and speed - on a budget counted per MINUTE rather than per
+   * day, which is the part that matters when every desktop step is a turn.
+   *
+   * None of them can see. `seesMedia` is Google-only, so a screenshot is
+   * dropped on the way out and a look comes back as the control list
+   * instead. That is enough to drive the desktop by name and not enough to
+   * answer "what does this look like".
+   */
+  {
+    id: 'nvidia/nemotron-3-super-120b-a12b',
+    provider: 'nvidia',
+    label: 'Nemotron 3 Super 120B',
+    blurb: '9/10 on the ladder and 907ms — faster than Flash Lite, no daily cap. Start here.'
+  },
+  {
+    id: 'deepseek-ai/deepseek-v4.1-flash',
+    provider: 'nvidia',
+    label: 'DeepSeek V4.1 Flash',
+    blurb: '9/10, 1.3s, and it cached 99.8% of the preamble. The other one to try.'
+  },
+  {
+    id: 'nvidia/nemotron-3-ultra-550b-a55b',
+    provider: 'nvidia',
+    label: 'Nemotron 3 Ultra 550B',
+    blurb: 'Biggest here, 9/10 and 2.5s. No measured advantage over Super.'
+  },
+  {
+    id: 'z-ai/glm-5.3-flash',
+    provider: 'nvidia',
+    label: 'GLM 5.3 Flash',
+    blurb: 'Scores with the best at 9/10, but 15s a turn.'
+  },
+  {
+    id: 'z-ai/glm-5.3',
+    provider: 'nvidia',
+    label: 'GLM 5.3',
+    // The index said it was the best free model there is. Measured here it
+    // is second to last, and 88 seconds is not a turn anyone sits through.
+    blurb: '5/10 and 88 SECONDS a turn. Listed so the measurement is visible.'
+  },
+
+  /* --- the user's own Ollama account ------------------------------------- */
+  {
+    id: 'gemma4:31b-cloud',
+    provider: 'ollama',
+    label: 'Gemma 4 31B (Ollama cloud)',
+    blurb: '8/10 and 967ms, on your Ollama account. No key and no Wumpy quota.'
   }
 ]
 
@@ -356,6 +460,16 @@ export function providerFor(model: string): ProviderId | null {
   if (known) return known.provider
 
   if (name.startsWith('gemini-') || name.startsWith('models/gemini-')) return 'google'
+
+  /**
+   * An Ollama CLOUD model, which is `name:tag-cloud` by their convention.
+   *
+   * Only the -cloud suffix, deliberately. A plain `phi4-mini:3.8b` is a model
+   * on this laptop, and Wumpy has had no local client since it went
+   * cloud-only - so routing those here would turn "not a hosted model" into a
+   * connection attempt that fails later and less clearly.
+   */
+  if (!name.includes('/') && /:.*-cloud$/.test(name)) return 'ollama'
 
   /**
    * The vendor-prefixed forms are decided before the bare ones, because the

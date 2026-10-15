@@ -336,11 +336,39 @@ check('a model no longer shipped has no sibling', C.siblingModel('codestral-late
  * working. What is gone is the choice, and these checks make sure it stays
  * gone rather than creeping back one convenient entry at a time.
  */
+/*
+ * REOPENED, 15 October 2026, by the person whose app it is: "implement them
+ * all (all the models) and allow me to switch via /model".
+ *
+ * The paragraph above is kept because its reasoning was sound at the time
+ * and is the argument for narrowing again. What changed is the evidence.
+ * Ten rungs of bench-ceiling at two runs each, measured that evening at
+ * Wumpy's real 14,212-token preamble:
+ *
+ *   nemotron-3-super-120b   9/10   907ms     no daily cap
+ *   deepseek-v4.1-flash     9/10   1,256ms   no daily cap
+ *   nemotron-3-ultra-550b   9/10   2,495ms   no daily cap
+ *   gemma4:31b-cloud        8/10     967ms   the user's own Ollama account
+ *   gemini-3.1-flash-lite   8/10   2,278ms   the previous default
+ *   gemini-3.8-flash        5/10  11,023ms   ~25 requests a day
+ *
+ * So the top of the picker is no longer Google, the fastest thing in it is
+ * not Google, and Google's quota is the only one counted per day. "One
+ * provider is simpler" was the right trade when the others were merely
+ * equal; it is not when three of them are better on both axes at once.
+ *
+ * What these checks defend now is that every entry is REACHABLE and
+ * HONEST, rather than that every entry is Gemini.
+ */
 for (const m of C.CLOUD_MODELS) {
-  check(`${m.id} is a Gemini model`, m.provider, 'google')
+  check(`${m.id} names a real provider`, C.PROVIDER_IDS.includes(m.provider), true)
+  check(`${m.id} says what it costs`, m.blurb.length > 20, true)
+  /* The catalogue is the authority on routing, so a model in it must route
+     to the provider it claims - a typo here is a request to the wrong host. */
+  check(`${m.id} routes to its own provider`, C.providerFor(m.id), m.provider)
 }
-check('the picker offers only Gemini', new Set(C.CLOUD_MODELS.map((m) => m.provider)), new Set(['google']))
 check('and offers something', C.CLOUD_MODELS.length > 0, true)
+check('the picker is no longer one provider', new Set(C.CLOUD_MODELS.map((m) => m.provider)).size > 1, true)
 
 /**
  * Several variants rather than literally one, because the flash models
@@ -355,7 +383,13 @@ check('with a fallback or two', C.CLOUD_MODELS.length >= 3, true)
  * its commands render as grey text with no button - which is how it scored
  * 1 of 38 before anyone noticed.
  */
-for (const m of C.CLOUD_MODELS) {
+/*
+ * Gemini only, because the flag is a measurement and not a default. The
+ * NVIDIA models scored 9/10 on a ladder that promotes fences for Google
+ * alone, so they are writing wumpy-run themselves; flagging them would put
+ * a Run button under an illustrative snippet for no reason.
+ */
+for (const m of C.CLOUD_MODELS.filter((m) => m.provider === 'google')) {
   check(`${m.id} is flagged looseFences`, Boolean(m.looseFences), true)
 }
 
@@ -460,12 +494,21 @@ check(
   'groq'
 )
 /**
- * The NVIDIA rotation ordered its models by score. With none of them in
- * the catalogue there is nothing to rotate to, which is the correct answer
- * rather than an error - a sibling is only ever offered from models the
- * app actually ships.
+ * The NVIDIA rotation orders its models by score, and now has somewhere to
+ * go: with five of them catalogued, a model that is refused or busy can
+ * step sideways instead of ending the turn. That stopped working when the
+ * catalogue was narrowed to Gemini and works again now.
+ *
+ * A sibling is still only ever offered from models the app actually ships,
+ * which is the invariant worth holding: codestral routes to Mistral and is
+ * not in the catalogue, so there is nothing to step to.
  */
-check('an uncatalogued model has no sibling', C.siblingModel('z-ai/glm-5.3', new Set()), null)
+check('a catalogued NVIDIA model can step sideways', typeof C.siblingModel('z-ai/glm-5.3', new Set()), 'string')
+check('and it stays on its own provider', C.providerFor(C.siblingModel('z-ai/glm-5.3', new Set())), 'nvidia')
+check('a model the app does not ship has no sibling', C.siblingModel('codestral-latest', new Set()), null)
+/* One Ollama model, so nowhere to go - and that is the right answer rather
+   than a hop onto a hosted provider the user did not choose. */
+check('nor does the only model on its provider', C.siblingModel('gemma4:31b-cloud', new Set()), null)
 check('nor does a Kimi', C.siblingModel('moonshotai/kimi-k3', new Set()), null)
 // And a model that IS shipped still finds one.
 check(
@@ -492,7 +535,7 @@ check(
 // This was written out by hand in six places, and a provider missing from any
 // one of them would not fail to compile: the key command would accept it, the
 // store would encrypt it, and the next read would drop it as unrecognised.
-check('there are four providers', C.PROVIDER_IDS.length, 4)
+check('there are five providers', C.PROVIDER_IDS.length, 5)
 check(
   'and every one has a table entry',
   C.PROVIDER_IDS.every((id) => Boolean(C.PROVIDERS[id])),

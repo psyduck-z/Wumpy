@@ -162,6 +162,15 @@ export class CloudClient {
   ready(model: string): { ok: boolean; why: string; provider: ProviderId | null } {
     const provider = providerFor(model)
     if (!provider) return { ok: false, why: 'Not a hosted model.', provider: null }
+    /*
+     * A keyless provider is ready as soon as it is named.
+     *
+     * Ollama is the user's own daemon on localhost, authorised by whoever
+     * signed in there. There is no key to store, so the two checks below -
+     * both of which read "you have not set this up yet" - would be
+     * permanently true and the model permanently unreachable.
+     */
+    if (PROVIDERS[provider].keyless) return { ok: true, why: '', provider }
     if (!this.keys.available()) {
       return { ok: false, why: 'This PC cannot store a key securely.', provider }
     }
@@ -185,7 +194,10 @@ export class CloudClient {
   private readonly rotations = new Map<ProviderId, KeyRotation>()
 
   private rotation(provider: ProviderId): KeyRotation {
-    const count = this.keys.count(provider)
+    /* One slot for a keyless provider: there is nothing to rotate, and a
+       rotation of size zero hands back null, which reads downstream as
+       "every key is resting" for a provider that has none. */
+    const count = PROVIDERS[provider].keyless ? 1 : this.keys.count(provider)
     let r = this.rotations.get(provider)
     if (!r) {
       r = new KeyRotation(count, this.ledger?.get(provider) ?? null)
