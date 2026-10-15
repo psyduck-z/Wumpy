@@ -931,6 +931,8 @@ export const VOICE_PROMPT = [
   'caveats to a simple answer.',
   'A command you propose is part of your answer — they read it before they',
   'click — so write it to be read.',
+  'And the reply is the CONCLUSION, not the search. Candidates you tried and',
+  'abandoned are yours to hold: give the answer, or say you cannot reach one.',
   '',
   'DO ONLY WHAT WAS ASKED.',
   'A QUESTION IS NOT AN INSTRUCTION. "Is X installed", "do I have X", "what',

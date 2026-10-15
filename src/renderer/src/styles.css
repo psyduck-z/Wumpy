@@ -1016,6 +1016,37 @@ body {
   word-break: break-all;
 }
 
+/* A run of attempts, folded behind one line. Shaped like the reasoning
+   disclosure because it is the same thing: working, not an answer. */
+.working {
+  margin: 4px 0;
+}
+
+.working > button {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 2px 8px 2px 4px;
+  background: rgb(var(--raised));
+  border: 1px dashed rgb(var(--border));
+  border-radius: 20px;
+  color: rgb(var(--muted));
+  font: inherit;
+  font-size: 10.5px;
+  cursor: pointer;
+}
+
+.working > button:hover {
+  color: rgb(var(--text));
+}
+
+.working-body {
+  margin-top: 4px;
+  padding-left: 9px;
+  border-left: 2px solid rgb(var(--border));
+  color: rgb(var(--muted));
+}
+
 /* An answer that stopped rather than finished. Warm rather than red: the
    text above it is real and worth reading, it is just not all of it. */
 .msg-cutoff {

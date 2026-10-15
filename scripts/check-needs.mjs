@@ -89,9 +89,16 @@ const tokensFor = (list) => A.preambleTokens({ ...FULL, needs: list })
    token of it. It went in as a third picture paragraph rather than with the
    voice rules, because the turn it was written for had a photograph of the
    question in it, and a photograph is what brings that topic in. Written
-   where it is cheap, it can afford to carry the whole observed failure. */
-check('everything, as it was', A.preambleTokens(FULL), 14138)
-check('a turn about nothing in particular', tokensFor([]), 8145)
+   where it is cheap, it can afford to carry the whole observed failure.
+
+   8,145 -> 8,182 for two lines of it that could not be gated: the reply is
+   the conclusion, not the search. The quiz arrived as a photograph, but the
+   analogy question that did the same thing was typed, so the general half
+   has to be present on turns with no picture in them. Two lines is what the
+   25% ceiling in check-ask had room for, and the worked example stays in
+   the gated paragraph where it is free. */
+check('everything, as it was', A.preambleTokens(FULL), 14175)
+check('a turn about nothing in particular', tokensFor([]), 8182)
 check('which is a third of it gone', A.preambleTokens(FULL) - tokensFor([]) > 4500, true)
 check('a turn about the screen', tokensFor(['desktop']) < A.preambleTokens(FULL), true)
 check('a turn about a website', tokensFor(['open']) < A.preambleTokens(FULL), true)
@@ -268,10 +275,10 @@ check('nor one about opening a site', needs(said('I opened vocabulary.com for yo
 
 /* ------------------------------------------------------- the shape contract */
 
-check('no list at all means everything', A.preambleTokens({ ...FULL }), 14138)
-check('an empty list is a real answer, not everything', tokensFor([]) < 14138, true)
+check('no list at all means everything', A.preambleTokens({ ...FULL }), 14175)
+check('an empty list is a real answer, not everything', tokensFor([]) < 14175, true)
 check('one capability is not the other', tokensFor(['open']) !== tokensFor(['desktop']), true)
-check('every topic together is everything', tokensFor(ALL), 14138)
+check('every topic together is everything', tokensFor(ALL), 14175)
 
 /* --------------------------------------------------------------- the wiring */
 

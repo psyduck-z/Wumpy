@@ -1,4 +1,4 @@
-import { memo, useEffect, useState } from 'react'
+import { memo, useEffect, useState, type ReactNode } from 'react'
 import type {
   Attachment,
   DesktopResult,
@@ -13,6 +13,7 @@ import type {
 import type { LinkApproval } from '@shared/links'
 import { sizeLabel } from '@shared/attach'
 import { inlineCode } from '@shared/notify'
+import { foldLabel, foldWorking } from '@shared/working'
 import { Markdown } from './Markdown'
 import { AskCard } from './AskCard'
 import { useSmoothText } from '../hooks/useSmoothText'
@@ -258,32 +259,45 @@ export const Message = memo(function Message({
         <div className="msg-error">{message.error}</div>
       ) : (
         <div className={`msg-body ${animating && !waiting ? 'is-streaming' : ''}`}>
-          <Markdown
-            text={shown}
-            complete={!animating}
-            canAutoRun={canAutoRun}
-            messageId={message.id}
-            onRunCommand={onRunCommand}
-            onCommandResult={onCommandResult}
-            onAnswer={onAnswer ? (option) => onAnswer(message.id, option) : undefined}
-            answered={message.answered ?? null}
-            onSearch={onSearch}
-            onSearchResults={onSearchResults}
-            onWriteFile={onWriteFile}
-            onCheckWrite={onCheckWrite}
-            onWritten={onWritten}
-            autoWrite={autoWrite}
-            onCaptureScreen={onCaptureScreen}
-            onScreenCaptured={onScreenCaptured}
-            onDesktop={onDesktop}
-            onDesktopDone={onDesktopDone}
-            onOpenLink={onOpenLink}
-            onOpenSearch={onOpenSearch}
-            onOpened={onOpened}
-            linkMode={linkMode}
-            searchEngine={searchEngine}
-            looseFences={looseFences}
-          />
+          {/* One <Markdown> per segment, which is one segment unless the
+              answer turned into a search. See shared/working.ts. */}
+          {foldWorking(shown).map((segment, i) => {
+            const body = (
+              <Markdown
+                text={segment.body}
+                complete={!animating}
+                canAutoRun={canAutoRun}
+                messageId={message.id}
+                onRunCommand={onRunCommand}
+                onCommandResult={onCommandResult}
+                onAnswer={onAnswer ? (option) => onAnswer(message.id, option) : undefined}
+                answered={message.answered ?? null}
+                onSearch={onSearch}
+                onSearchResults={onSearchResults}
+                onWriteFile={onWriteFile}
+                onCheckWrite={onCheckWrite}
+                onWritten={onWritten}
+                autoWrite={autoWrite}
+                onCaptureScreen={onCaptureScreen}
+                onScreenCaptured={onScreenCaptured}
+                onDesktop={onDesktop}
+                onDesktopDone={onDesktopDone}
+                onOpenLink={onOpenLink}
+                onOpenSearch={onOpenSearch}
+                onOpened={onOpened}
+                linkMode={linkMode}
+                searchEngine={searchEngine}
+                looseFences={looseFences}
+              />
+            )
+            return segment.working ? (
+              <Working key={i} lines={segment.lines}>
+                {body}
+              </Working>
+            ) : (
+              <div key={i}>{body}</div>
+            )
+          })}
           {waiting && !message.thinking && (
             <span className="dots" role="status" aria-label="Thinking">
               <i />
@@ -334,5 +348,32 @@ function Chip({ text, repeat }: { text: string; repeat?: number }): React.JSX.El
         </span>
       )}
     </>
+  )
+}
+
+/**
+ * A run of attempts, behind one line.
+ *
+ * Asked an analogy question and then an anagram, Wumpy listed out every
+ * possibility it could think of and then hit the output cap part-way
+ * through the list, so what arrived was the search and not the answer.
+ * "At least compact it, saying like searching patterns."
+ *
+ * Shut by default and shut again each time the run grows, because the
+ * point is not to watch it: the summary says how much is behind it, and
+ * opening it is a decision rather than the default.
+ */
+function Working({ lines, children }: { lines: number; children: ReactNode }): React.JSX.Element {
+  const [open, setOpen] = useState(false)
+  return (
+    <div className={`working ${open ? 'is-open' : ''}`}>
+      <button type="button" onClick={() => setOpen((v) => !v)}>
+        <span className={`caret-glyph ${open ? 'is-open' : ''}`} aria-hidden="true">
+          &#9656;
+        </span>
+        {foldLabel(lines)}
+      </button>
+      {open && <div className="working-body">{children}</div>}
+    </div>
   )
 }
