@@ -146,7 +146,37 @@ export interface Allowance {
   note: string
 }
 
+/**
+ * How Google counts, in its own words.
+ *
+ * A 429 from the free tier names the meters it tripped, and there are four
+ * of them rather than the one "requests a day" everybody quotes:
+ *
+ *   GenerateRequestsPerMinutePerProjectPerModel-FreeTier
+ *   GenerateRequestsPerDayPerProjectPerModel-FreeTier
+ *   GenerateContentInputTokensPerModelPerMinute-FreeTier
+ *   GenerateContentInputTokensPerModelPerDay-FreeTier
+ *
+ * Two things in those names decide how Wumpy should behave. They are keyed
+ * PerProjectPerModel, so a second key is a second project and multiplies all
+ * four - which is why rotation works at all. And the token meters count
+ * INPUT tokens: the preamble, the transcript and every screenshot are what
+ * spend the day's allowance, while the model's own answer is not metered
+ * this way. A long preamble is not only slower and dearer, it is less of the
+ * day.
+ */
 export const ALLOWANCES: Record<string, Allowance> = {
+  /**
+   * Measured 15 Oct 2026: all four meters answer limit: 0 on a fresh key,
+   * with retryDelay 8650s, for a two-token request. A ten-rung ladder across
+   * rotated keys returned 429 on every rung. Zero does not multiply.
+   */
+  'gemini-3.1-pro-preview': {
+    requestsPerDay: 0,
+    tokensPerDay: 0,
+    requestsPerMinute: 0,
+    note: 'measured — free tier reports limit 0 on all four meters; needs billing'
+  },
   'gemini-3.8-flash': {
     requestsPerDay: 25,
     tokensPerDay: 0,

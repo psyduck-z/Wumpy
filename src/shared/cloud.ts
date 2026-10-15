@@ -314,7 +314,21 @@ export const CLOUD_MODELS: CloudModel[] = [
     // two-token request, so it is reachable but the free input allowance is
     // too small to be worth routing to. Not "paid only", which is what this
     // said before measuring it.
-    blurb: 'Most capable Gemini — but its free input allowance is far too small to use.',
+    /*
+     * Measured again, and it is worse than "too small". A two-token request
+     * on a fresh key is refused by all FOUR free-tier meters at once, each
+     * reporting limit: 0 -
+     *
+     *   GenerateRequestsPerMinutePerProjectPerModel-FreeTier
+     *   GenerateRequestsPerDayPerProjectPerModel-FreeTier
+     *   GenerateContentInputTokensPerModelPerMinute-FreeTier
+     *   GenerateContentInputTokensPerModelPerDay-FreeTier
+     *
+     * with retryDelay 8650s. A ten-rung ladder across rotated keys scored
+     * 0/10, every rung a 429, so nothing about the model itself was
+     * measured. Zero is not an allowance that rotation multiplies.
+     */
+    blurb: 'Most capable Gemini — but every free-tier meter reports limit 0, so it refuses.',
     looseFences: true
   },
   {
