@@ -293,6 +293,18 @@ export const Message = memo(function Message({
           )}
         </div>
       )}
+
+      {/* An answer that stopped rather than finished. Said here, under the
+          text it belongs to, because everything else about the end of a turn
+          is identical either way — the dots go, the runtime prints, and half
+          a sentence reads as all there was to say. */}
+      {message.cutOff && !message.error && !animating && (
+        <div className="msg-cutoff">
+          {message.cutOff === 'content_filter'
+            ? 'The provider stopped this answer part-way.'
+            : 'This hit the length limit and stopped part-way. Say “carry on” for the rest.'}
+        </div>
+      )}
     </div>
   )
 })

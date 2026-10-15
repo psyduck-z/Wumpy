@@ -794,5 +794,70 @@ check('a local model has no sibling', C.siblingModel('phi4-mini:3.8b', new Set()
   check('a missing header changes nothing', silent.kind, busy.kind)
 }
 
+/* ------------------------------------------- waiting, and knowing you waited */
+
+/**
+ * The gap between requests is per KEY, and it has to stay that way.
+ *
+ * Google's entry says "10 requests a minute on the free tier, so 6s plus a
+ * margin" — ten per PROJECT, and every key in the pool is its own project.
+ * Keyed on the provider it was one queue for all twenty: a follow-up asked
+ * within seven seconds of the last answer sat there doing nothing before it
+ * was sent, and a turn is rarely one request. A command's output is
+ * another, a compaction is another, the title is another, so a three-step
+ * sequence paid twenty-one seconds of nothing while nineteen keys were idle.
+ */
+{
+  const main = read('src/main/cloud.ts')
+  check('the gap is kept per key', /const slot = `\$\{provider\}:\$\{key\}`/.test(main), true)
+  check('and the sender paces the key it picked', /await pace\(provider, index\)/.test(main), true)
+  check(
+    'including the background work',
+    main.indexOf('const index = background.next') < main.lastIndexOf('await pace(provider, index)'),
+    true
+  )
+  check('and a wait long enough to notice is logged', /holding key \$\{key \+ 1\}/.test(main), true)
+
+  /* "A bit slow" had nowhere to be answered from: the log timed the hotkey
+     to the millisecond and said nothing about how long an answer took. */
+  check('every turn reports what it cost', /turn done: \$\{stats\.loadMs/.test(main), true)
+  check('with the reason it stopped', /finish=\$\{finish \|\| 'none'\}/.test(main), true)
+
+  /**
+   * And an answer that stopped is not an answer that finished. Unread, a
+   * reply that hit the output cap ended the turn exactly like a complete
+   * one - dots gone, runtime printed, half a sentence on screen.
+   */
+  check('the finish reason is read at all', /finish_reason/.test(main), true)
+  check(
+    'only the two that say it stopped short',
+    /finish === 'length' \|\| finish === 'content_filter'/.test(main),
+    true
+  )
+  const chat = read('src/renderer/src/hooks/useChat.ts')
+  check('the message is marked before the turn clears', /if \(d\.cutOff\)/.test(chat), true)
+  check(
+    'and the transcript says so',
+    /hit the length limit/.test(read('src/renderer/src/components/Message.tsx')),
+    true
+  )
+}
+
+/**
+ * Highlighting waits for the end of the answer.
+ *
+ * The whole message is re-parsed on every commit of the reveal, about
+ * thirty a second, and rehype-highlight re-tokenises every code block each
+ * time: 0.45ms a commit at 4,000 characters, 0.76ms at 8,000, so 14-23ms of
+ * every second spent colouring text that is still being written.
+ */
+check(
+  'code is coloured once the answer lands, not while it arrives',
+  /rehypePlugins=\{complete \? HIGHLIGHT : NO_HIGHLIGHT\}/.test(
+    read('src/renderer/src/components/Markdown.tsx')
+  ),
+  true
+)
+
 console.log(failures ? `\n${failures} cloud checks FAILED` : '\nall cloud checks')
 process.exitCode = failures ? 1 : 0

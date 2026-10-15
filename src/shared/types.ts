@@ -84,6 +84,15 @@ export interface ChatMessage {
    * exists to replace.
    */
   repeat?: number
+  /**
+   * This answer stopped rather than finished — the output cap, or a block.
+   *
+   * Shown under the message, because the one thing the transcript did was
+   * make a truncated reply look complete: the dots go, the runtime is
+   * printed, and half a sentence sits there as though it were all there was
+   * to say.
+   */
+  cutOff?: string
 }
 
 /* -------------------------------------------------------- the one assistant */
@@ -524,6 +533,8 @@ export interface ChatDone {
    */
   promptTokens?: number
   completionTokens?: number
+  /** 'length' or 'content_filter' when the answer stopped short. */
+  cutOff?: string
 }
 
 /** What the context meter displays. */

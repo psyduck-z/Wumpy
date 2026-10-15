@@ -1016,6 +1016,20 @@ body {
   word-break: break-all;
 }
 
+/* An answer that stopped rather than finished. Warm rather than red: the
+   text above it is real and worth reading, it is just not all of it. */
+.msg-cutoff {
+  align-self: flex-start;
+  margin-top: 6px;
+  padding: 4px 9px;
+  border-left: 2px solid rgb(var(--accent) / 0.5);
+  background: rgb(var(--raised));
+  border-radius: 0 7px 7px 0;
+  color: rgb(var(--muted));
+  font-size: 10.5px;
+  line-height: 1.45;
+}
+
 /* A receipt for something Wumpy did, rather than a fact the model must act
    on: same shape, none of the accent. The transcript gets one of these per
    command, so it has to sit quietly behind the answer it belongs to. */

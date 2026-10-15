@@ -143,6 +143,10 @@ export function useChat(): ChatState {
 
     const offDone = window.wumpy.chat.onDone((d) => {
       if (d.requestId !== activeRequest.current) return
+      /* Marked before the message stops being the active one. An answer that
+         hit the cap has to say so: everything else about the end of a turn
+         looks identical whether it finished or merely stopped. */
+      if (d.cutOff) patchActive((m) => ({ ...m, cutOff: d.cutOff }))
       setStats((s) => ({
         speed: d.tokensPerSecond ?? s.speed,
         loadMs: d.loadMs ?? null,

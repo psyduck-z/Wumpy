@@ -37,7 +37,18 @@ import { tokensPerSecond } from '@shared/speed'
  */
 
 interface Delta {
-  choices?: Array<{ delta?: { content?: string; reasoning?: string; reasoning_content?: string } }>
+  choices?: Array<{
+    delta?: { content?: string; reasoning?: string; reasoning_content?: string }
+    /**
+     * Why generation stopped: 'stop' when the model finished, 'length' when
+     * it ran into the output cap, 'content_filter' when it was blocked.
+     *
+     * Nobody read this until now, so an answer that hit the cap ended the
+     * turn exactly like one that finished: dots gone, runtime printed, half
+     * a sentence on screen looking complete.
+     */
+    finish_reason?: string | null
+  }>
   usage?: {
     prompt_tokens?: number
     completion_tokens?: number
@@ -47,8 +58,23 @@ interface Delta {
   error?: { message?: string }
 }
 
-/** Per-provider pacing, so two tiers on one key do not race each other. */
-const lastRequestAt = new Map<ProviderId, number>()
+/**
+ * When each KEY was last used, so two requests do not race each other.
+ *
+ * Per key, because the limit this models is per key. "10 requests a minute
+ * on the free tier" is ten per project, and every key in the pool is its own
+ * project — so one queue for all twenty of them spent the whole gap on every
+ * request however many keys were idle.
+ *
+ * It is not a small wait. Google's gap is seven seconds, and a turn is
+ * rarely one request: a command's output is another, a compaction is
+ * another, the chat title is another. A three-step sequence paid twenty-one
+ * seconds of sitting still, and the panel has nothing to show while it does.
+ *
+ * The rotation hands out the least-used key each time, so consecutive
+ * requests land on different keys and the gap is one nobody reaches.
+ */
+const lastRequestAt = new Map<string, number>()
 
 /**
  * Tokens spent in the last minute, per provider, as a list of stamped
@@ -83,11 +109,18 @@ export function recordSpend(provider: ProviderId, tokens: number): void {
  * a retry, which already works; being late costs the user a wait they did
  * not need.
  */
-async function pace(provider: ProviderId, estimatedTokens = 0): Promise<void> {
+async function pace(provider: ProviderId, key: number, estimatedTokens = 0): Promise<void> {
   const gap = PROVIDERS[provider].minGapMs
-  const wait = (lastRequestAt.get(provider) ?? 0) + gap - Date.now()
-  if (wait > 0) await new Promise((r) => setTimeout(r, wait))
+  const slot = `${provider}:${key}`
+  const wait = (lastRequestAt.get(slot) ?? 0) + gap - Date.now()
+  if (wait > 0) {
+    console.log(`[wumpy] holding key ${key + 1} for ${wait}ms before asking ${provider}`)
+    await new Promise((r) => setTimeout(r, wait))
+  }
 
+  /* The token ceiling stays per provider. It is per account like the gap is,
+     but the spend is recorded where the key index is not known, and the one
+     provider it applies to is a one-key account anyway. */
   const perMinute = PROVIDERS[provider].tokensPerMinute
   if (perMinute > 0 && estimatedTokens > 0) {
     const list = recentTokens.get(provider) ?? []
@@ -101,7 +134,7 @@ async function pace(provider: ProviderId, estimatedTokens = 0): Promise<void> {
     }
   }
 
-  lastRequestAt.set(provider, Date.now())
+  lastRequestAt.set(slot, Date.now())
 }
 
 export class CloudClient {
@@ -376,7 +409,7 @@ export class CloudClient {
         )
         return null
       }
-      await pace(provider)
+      await pace(provider, index)
       const res = await fetch(`${PROVIDERS[provider].base}/chat/completions`, {
         method: 'POST',
         headers: this.headers(provider, index),
@@ -547,6 +580,8 @@ export class CloudClient {
     let stats: StreamStats = {}
     let firstTokenAt = 0
     let completion = 0
+    /** The last finish_reason seen, or '' if the stream never gave one. */
+    let finish = ''
 
     for (;;) {
       const { done, value } = await reader.read()
@@ -586,6 +621,9 @@ export class CloudClient {
           }
         }
 
+        const why = chunk.choices?.[0]?.finish_reason
+        if (why) finish = why
+
         const delta = chunk.choices?.[0]?.delta
         const content = delta?.content
         // Groq reports reasoning on gpt-oss; Google does not expose it at all,
@@ -612,6 +650,27 @@ export class CloudClient {
       if (rate !== null) stats.tokensPerSecond = rate
       stats.loadMs = firstTokenAt - startedAt
     }
+
+    /**
+     * An answer that stopped early is not a finished answer.
+     *
+     * Only the reasons that say so outright. A stream that ends without one
+     * at all is left alone: it is the ordinary shape on some providers, and
+     * a warning on every turn is a warning nobody reads.
+     */
+    if (finish === 'length' || finish === 'content_filter') stats.cutOff = finish
+
+    /**
+     * One line per turn, because "it is a bit slow" had nowhere to be
+     * answered from. The log had the hotkey timed to the millisecond and
+     * not one word about how long an answer took.
+     */
+    console.log(
+      `[wumpy] turn done: ${stats.loadMs ?? '?'}ms to first token, ${elapsed}ms total, ` +
+        `${stats.promptTokens ?? '?'} in / ${stats.completionTokens ?? '?'} out` +
+        `${stats.tokensPerSecond ? ` at ${stats.tokensPerSecond.toFixed(1)}/s` : ''}` +
+        `, finish=${finish || 'none'}`
+    )
     handlers.onDone(stats)
   }
 
@@ -638,7 +697,6 @@ export class CloudClient {
     const provider = check.provider
 
     try {
-      await pace(provider)
       /**
        * Background work rotates as well. Titles are small but frequent, and
        * on a five-requests-a-minute tier a chat title spent out of the same
@@ -649,6 +707,10 @@ export class CloudClient {
       const background = this.rotation(provider)
       const index = background.next(Date.now(), model) ?? 0
       this.remember(provider, background)
+      /* Chosen before the wait, not after: pacing a key nobody had picked
+         yet is what made a compaction block the answer it was making room
+         for, which is the one moment the user is already waiting. */
+      await pace(provider, index)
       const res = await fetch(`${PROVIDERS[provider].base}/chat/completions`, {
         method: 'POST',
         headers: this.headers(provider, index),

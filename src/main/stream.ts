@@ -18,6 +18,15 @@ export interface StreamStats {
   loadMs?: number
   promptTokens?: number
   completionTokens?: number
+  /**
+   * Set when the model STOPPED rather than finished: 'length' for the output
+   * cap, 'content_filter' for a block.
+   *
+   * Absent on an ordinary answer, so everything downstream can treat its
+   * presence as the whole message. Without it a truncated reply looked
+   * exactly like a complete one — same vanished dots, same runtime under it.
+   */
+  cutOff?: string
 }
 
 /**
