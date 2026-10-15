@@ -54,7 +54,36 @@ const PROVIDERS = {
   mistral: { base: 'https://api.mistral.ai/v1', key: () => process.env.MISTRAL_API_KEY },
   nvidia: {
     base: 'https://integrate.api.nvidia.com/v1',
-    key: () => process.env.NVIDIA_API_KEY ?? process.env.NIM_API_KEY
+    key: () => process.env.NVIDIA_API_KEY ?? process.env.NIM_API_KEY,
+    /*
+     * The thinking switch that reaches the model there, as the app sends it
+     * - see thinkingKwargsFor. Without it these models reason first, and
+     * then the ladder's 700-token cap ends the reply before the command
+     * arrives: measured, nemotron-3-super spent 213 tokens to answer "ok".
+     * That is the harness failing a rung, not the model.
+     */
+    extraBody: { chat_template_kwargs: { enable_thinking: false, force_nonempty_content: true } },
+    /*
+     * And a cap that survives the ones which reason anyway. GLM is reported
+     * to ignore the switch entirely, so the allowance is the app's own for
+     * an alwaysReasons provider rather than the shared 700.
+     */
+    maxTokens: 3000
+  },
+  /**
+   * Ollama, so a model running on the user's own account sits on the same
+   * ladder as the hosted ones.
+   *
+   * There is no key: the daemon is local and a cloud model is authorised by
+   * whoever ran `ollama signin`, so the gate is simply whether it answers.
+   * `wireAs` borrows Groq's wire shape, which is the plain OpenAI one -
+   * system messages are left where they are. Only Google needs the fold,
+   * and pretending to be Google here would silently merge the preamble.
+   */
+  ollama: {
+    base: (process.env.OLLAMA_HOST ?? 'http://127.0.0.1:11434') + '/v1',
+    key: () => 'ollama',
+    wireAs: 'groq'
   },
   groq: { base: 'https://api.groq.com/openai/v1', key: () => process.env.GROQ_API_KEY },
   google: {
@@ -83,7 +112,10 @@ const PROVIDERS = {
 /* ------------------------------------------------- the app's own prompt and gate */
 
 async function bundled(entry, name, external = []) {
-  const out = join(process.cwd(), `.ceil-${name}.mjs`)
+  /* Per process, so several models can be measured at once: the name used
+     to be shared, and two parallel runs overwrote each other's bundle
+     halfway through importing it. */
+  const out = join(process.cwd(), `.ceil-${name}-${process.pid}.mjs`)
   await build({
     entryPoints: [entry],
     bundle: true,
@@ -1497,9 +1529,10 @@ async function ask(provider, model, turns, attempt = 0) {
        * into user for Google all along; the ladder did not, so it was
        * grading a model that had never been told what Wumpy is.
        */
-      messages: CLOUD.wireMessagesFor(provider, [...PREAMBLE, ...turns]),
+      messages: CLOUD.wireMessagesFor(p.wireAs ?? provider, [...PREAMBLE, ...turns]),
       temperature: 0.2,
-      max_tokens: 700
+      max_tokens: p.maxTokens ?? 700,
+      ...(p.extraBody ?? {})
     })
   })
   const body = await res.json().catch(() => null)

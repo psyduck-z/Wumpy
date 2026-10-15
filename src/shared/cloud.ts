@@ -445,9 +445,16 @@ export function siblingModel(model: string, spent: ReadonlySet<string>): string 
               // Every one of these has been called once; v4-pro used to be
               // here and answers 410.
               'z-ai/glm-5.3',
-              /* k3 was listed here and is not in /models: the catalogue has
-                 kimi-k2.6, so the old name was an offer that 404s. */
-              'moonshotai/kimi-k2.6',
+              /*
+               * Kimi is not here any more, and the name was wrong as well.
+               *
+               * The list said kimi-k3, which is not in NVIDIA's catalogue at
+               * all - it is kimi-k2.6 now. And measured on a real free key,
+               * k2.6 answers 404 "Not found for account", so it is gated
+               * rather than merely renamed. Either way it was a model Wumpy
+               * offered and could not reach: a wasted request and a wasted
+               * turn, which is what this list exists to prevent.
+               */
               'nvidia/nemotron-3-ultra-550b-a55b',
               'deepseek-ai/deepseek-v4.1-flash',
               'nvidia/nemotron-3-super-120b-a12b',
