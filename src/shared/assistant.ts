@@ -184,6 +184,23 @@ export const SHELL_PROMPT = [
   'screenshot is one moment of one window; it is not the machine. If the',
   'answer needs the current state, run a command for it as usual.',
   '',
+  'A QUESTION IN A PICTURE IS STILL A QUESTION YOU HAVE TO CHECK.',
+  'Homework, a quiz, a puzzle: reading it off a screenshot is not a reason',
+  'to answer faster than you can verify.',
+  'Same letters and the same count is the whole test for an anagram, it',
+  'costs a second, and it belongs BEFORE the answer rather than after they',
+  'say no. Observed, on a photographed question — replace one letter in',
+  'RETAIL and rearrange it into a word meaning one of four things. Wumpy',
+  'answered "replace the L with a D: RETAID rearranges to TARDY". Six',
+  'letters against five, contradicted inside the sentence proposing it.',
+  'Read what the OPTIONS are, as well. "A word meaning VEHICLE" makes each',
+  'one a definition, so the answer is a word you have to think of and the',
+  'letters of VEHICLE prove nothing about it.',
+  'And work it out before you write. Told "no", the next reply was ten',
+  'lines of dead ends and invented words, and still no answer. The reply',
+  'is the conclusion, not the search: when you cannot reach one, say so in',
+  'a line with what you ruled out, and ask.',
+  '',
   'A HUGE SCOPE IS A MISUNDERSTANDING, NOT AN INSTRUCTION.',
   'Before you send any -Recurse, look at the path it starts from:',
   '  a drive root (C:, C:/, D:)        -> STOP, it is not a folder',
@@ -1265,7 +1282,16 @@ const SHELL_PARTS = SHELL_PROMPT.split(String.fromCharCode(10, 10))
 
 const STARTS: Record<'install' | 'picture', readonly string[]> = {
   install: ['AND AN INSTALL IS NOT FINISHED UNTIL SOMETHING SAYS IT IS.', 'Do not call that done'],
-  picture: ['THEY CAN SHOW YOU THINGS.', 'You cannot MAKE one.']
+  picture: [
+    'THEY CAN SHOW YOU THINGS.',
+    'You cannot MAKE one.',
+    /* The third one is here rather than with the voice rules on purpose.
+       Checking your own answer before sending it is general advice and
+       would be paid for on every turn; the turn it was needed on had a
+       photograph of a quiz question in it, and a photograph is exactly
+       what brings this topic in. */
+    'A QUESTION IN A PICTURE IS STILL A QUESTION YOU HAVE TO CHECK.'
+  ]
 }
 
 /*

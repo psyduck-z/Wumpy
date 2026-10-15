@@ -82,8 +82,15 @@ const tokensFor = (list) => A.preambleTokens({ ...FULL, needs: list })
    table and once with what it costs (74 seconds, measured). Paid for in
    part by deleting the claim that Wumpy raises a native dialog on any
    drive-wide scan, which is not true of this one - the risk pattern wants a
-   bare drive root, and `dir C:\PD.cap /s /b` has a filename after it. */
-check('everything, as it was', A.preambleTokens(FULL), 13881)
+   bare drive root, and `dir C:\PD.cap /s /b` has a filename after it.
+
+   The quiz rule - check an anagram before you answer, and read whether the
+   options are words or meanings - cost 256 and a plain turn did not pay a
+   token of it. It went in as a third picture paragraph rather than with the
+   voice rules, because the turn it was written for had a photograph of the
+   question in it, and a photograph is what brings that topic in. Written
+   where it is cheap, it can afford to carry the whole observed failure. */
+check('everything, as it was', A.preambleTokens(FULL), 14138)
 check('a turn about nothing in particular', tokensFor([]), 8145)
 check('which is a third of it gone', A.preambleTokens(FULL) - tokensFor([]) > 4500, true)
 check('a turn about the screen', tokensFor(['desktop']) < A.preambleTokens(FULL), true)
@@ -157,11 +164,11 @@ check('and so is no list at all', A.shellFor(undefined) === A.SHELL_PROMPT, true
      ceilings moves with the absolute length. The text of the three topics
      has not changed since they were written. */
   const cost = (topic) => tok(A.shellFor(ALL)) - tok(A.shellFor(ALL.filter((t) => t !== topic)))
-  check('the install rules cost 207', cost('install'), 207)
-  check('the picture rules cost 243', cost('picture'), 243)
+  check('the install rules cost 206', cost('install'), 206)
+  check('the picture rules cost 499', cost('picture'), 499)
   /* 471 of format, less the one line of rule that stays behind in its place. */
-  check('the write format costs 430', cost('write'), 430)
-  check('all three together', cost('install') + cost('picture') + cost('write'), 880)
+  check('the write format costs 429', cost('write'), 429)
+  check('all three together', cost('install') + cost('picture') + cost('write'), 1134)
 }
 {
   /* The prohibition has to outlive the section it starts: dropping the write
@@ -172,6 +179,8 @@ check('and so is no list at all', A.shellFor(undefined) === A.SHELL_PROMPT, true
   check('and it is said only once', lean.split('never use a shell command').length - 1, 1)
   check('winget narration is gone', /Successfully verified installer hash/.test(lean), false)
   check('and so is the picture pair', /THEY CAN SHOW YOU THINGS/.test(lean), false)
+  /* And the third of them, which is the one that costs the most. */
+  check('and the quiz rule with them', /A QUESTION IN A PICTURE/.test(lean), false)
   /* What must never go, however little the turn looks like it needs it. */
   check('but proposing is still not doing', /NEVER SAY IT IS DONE IN THE SAME BREATH/.test(lean), true)
   check('and a huge scope is still a misunderstanding', /A HUGE SCOPE IS A MISUNDERSTANDING/.test(lean), true)
@@ -184,6 +193,14 @@ check('downloading', needs('download the latest node').includes('install'), true
 check('updating', needs('update winget packages').includes('install'), true)
 check('a picture they sent', needs(said('what is this', 'user', [1])).includes('picture'), true)
 check('a picture they want', needs('draw me a diagram of this').includes('picture'), true)
+/* Which is the whole argument for where the quiz rule lives: a photographed
+   question carries its own instructions in, and a turn without a picture
+   pays nothing for them. */
+check(
+  'and a photographed question brings the quiz rule with it',
+  A.shellFor(needs(said('which of these is it', 'user', [1]))).includes('A QUESTION IN A PICTURE'),
+  true
+)
 check('saving a file', needs('save that as notes.txt').includes('write'), true)
 check('making one', needs('make a python script that prints the time').includes('write'), true)
 check('a plain question needs none of the three', needs('what is my key percentage'), [])
@@ -251,10 +268,10 @@ check('nor one about opening a site', needs(said('I opened vocabulary.com for yo
 
 /* ------------------------------------------------------- the shape contract */
 
-check('no list at all means everything', A.preambleTokens({ ...FULL }), 13881)
-check('an empty list is a real answer, not everything', tokensFor([]) < 13881, true)
+check('no list at all means everything', A.preambleTokens({ ...FULL }), 14138)
+check('an empty list is a real answer, not everything', tokensFor([]) < 14138, true)
 check('one capability is not the other', tokensFor(['open']) !== tokensFor(['desktop']), true)
-check('every topic together is everything', tokensFor(ALL), 13881)
+check('every topic together is everything', tokensFor(ALL), 14138)
 
 /* --------------------------------------------------------------- the wiring */
 
