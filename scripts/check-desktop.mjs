@@ -501,6 +501,45 @@ check('REVEAL uses ScrollItem', /ScrollItemPattern/.test(uia), true)
 check('and looks at offscreen elements, unlike the list', /includeOffscreen/.test(uia), true)
 check('all three choose the same element', (uia.match(/Best\(root, want/g) ?? []).length >= 3, true)
 
+/*
+ * A TAB IS SELECTED, NOT INVOKED - AND A FOCUS IS NOT A PRESS.
+ *
+ * "I asked her to go to Gmail. I managed to go to Gmail. The annoying thing
+ * is that it uses, like, tabs. What the hell?" From the log of that attempt,
+ * three times in eighteen seconds:
+ *
+ *   Press "Inbox - ... - Gmail" -> PRESS ok via=focus-fallback role=TabItem
+ *   the foreground window is now "Online GA Test for Scholarship and 9 more
+ *     pages" (ours, carrying on)
+ *   Press "Compose" -> PRESS FAILED nothing-named
+ *
+ * A TabItem supports SelectionItem and not Invoke, so every press fell
+ * through to a focus, which does not pick a tab - and said ok. Compose was
+ * then looked for in a page that was still behind another tab.
+ *
+ * The regression this guards is the reappearance of ANY path that reports ok
+ * for a focus that was asked to be a press.
+ */
+check('a tab is selected rather than invoked', /SelectionItemPattern\.Pattern/.test(uia), true)
+check('and the selection is read back', /IsSelected/.test(uia), true)
+check('a checkbox is toggled', /TogglePattern\.Pattern/.test(uia), true)
+/* The printing path, not the string: the comment above the fix quotes the
+   log line that caused it, and the quote is the explanation. */
+check('a focus is never reported as a press', /\$"\{verb\} ok via=focus-fallback/.test(uia), false)
+check('and what cannot be pressed says so', /FAILED cannot-press/.test(uia), true)
+
+/*
+ * The other half of the same attempt:
+ *
+ *   FOCUS ok name="To recipients" role=ComboBox focused=yes
+ *   FILL FAILED the text did not land: "To recipients" says "" (via value)
+ *
+ * Gmail's recipient box is a wrapper whose own value reads empty whatever is
+ * typed into it, so the proof failed on a fill that had worked.
+ */
+check('an empty wrapper is read one level in', /Inner\(el, out var innerVia\)/.test(uia), true)
+check('and the look inside is bounded', /seen > 8/.test(uia), true)
+
 /* ------------------------------------------------- pasting instead of typing */
 
 /*

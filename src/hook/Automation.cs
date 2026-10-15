@@ -376,7 +376,65 @@ internal static class UiTree
                 Console.WriteLine($"{verb} ok via=invoke {what}");
                 return;
             }
-            Console.WriteLine($"{verb} ok via=focus-fallback {what} focused={TakeFocus(el)}");
+            /*
+             * A BROWSER TAB IS NOT INVOKED, IT IS SELECTED.
+             *
+             * This is the bug behind "I asked her to go to Gmail... the
+             * annoying thing is that it uses tabs. What the hell?". From the
+             * log, three times in eighteen seconds:
+             *
+             *   Press "Inbox - ... - Gmail" -> PRESS ok via=focus-fallback
+             *     role=TabItem at=158,20 matched=spot focused=yes
+             *   the foreground window is now "Online GA Test for Scholarship
+             *     and 9 more pages" (ours, carrying on)
+             *
+             * The tab never changed. A TabItem supports SelectionItem and not
+             * Invoke, so it fell through to the focus fallback, which moves
+             * the UIA focus to the tab and does not pick it - and that was
+             * reported as ok. The model believed it, pressed "Compose", and
+             * got nothing-named, because Compose is in a page that was still
+             * behind another tab. Every step after this one was aimed at a
+             * screen that had not changed.
+             *
+             * Select is what a screen reader uses to switch a tab, and it is
+             * the same pattern for a list row and a radio button.
+             */
+            if (el.TryGetCurrentPattern(SelectionItemPattern.Pattern, out var selection))
+            {
+                var item = (SelectionItemPattern)selection;
+                item.Select();
+                /* Selected is a STATE, so unlike a press it can be read back
+                   - and a select that did not take must say so rather than
+                   send the next step at the old screen. */
+                var took = false;
+                try { took = item.Current.IsSelected; }
+                catch { /* an element that moved under us is not a yes */ }
+                Console.WriteLine(took
+                    ? $"{verb} ok via=select {what}"
+                    : $"{verb} FAILED select-did-not-take {what}");
+                return;
+            }
+            /* A checkbox is toggled, for the same reason: no Invoke on it. */
+            if (el.TryGetCurrentPattern(TogglePattern.Pattern, out var toggle))
+            {
+                var box = (TogglePattern)toggle;
+                box.Toggle();
+                var state = "unknown";
+                try { state = box.Current.ToggleState.ToString(); }
+                catch { /* as above */ }
+                Console.WriteLine($"{verb} ok via=toggle {what} now={state}");
+                return;
+            }
+            /*
+             * Nothing left that presses it, so say that instead of "ok".
+             *
+             * The fallback used to focus the element and report success,
+             * which is the one thing this file exists to prevent: a step
+             * that did nothing and said it worked. The role and the point
+             * are in the report, so a click is still available to a plan
+             * that decides it wants one.
+             */
+            Console.WriteLine($"{verb} FAILED cannot-press {what} - nothing in it answers a press");
         }
         catch (Exception ex)
         {
@@ -498,6 +556,36 @@ internal static class UiTree
             return;
         }
 
+        /*
+         * AN EMPTY ANSWER FROM A WRAPPER IS NOT AN EMPTY BOX.
+         *
+         * The other half of the Gmail attempt, twice in ten seconds:
+         *
+         *   FOCUS ok via=focus name="To recipients" role=ComboBox
+         *     at=1448,437 matched=spot focused=yes
+         *   FILL FAILED the text did not land: "To recipients" says ""
+         *     (via value), not "stanley"
+         *
+         * The focus landed, the paste went in, and then the proof failed:
+         * Gmail's recipient field is a ComboBox whose own ValuePattern reads
+         * empty however much text is in it, because the characters live in an
+         * <input> inside it. So a fill that may well have worked reported
+         * that the characters "went somewhere else", and the plan stopped.
+         *
+         * When the control itself says nothing, look one level in before
+         * believing it. Only when it is empty, so a box that answers for
+         * itself is read exactly as it was.
+         */
+        if (text.Length == 0 && best.Role is not "Document")
+        {
+            var inner = Inner(el, out var innerVia);
+            if (inner.Length > 0)
+            {
+                text = inner;
+                via = innerVia;
+            }
+        }
+
         /* Trimmed, because a Document can hold the whole page and the caller
            is checking a field, not reading a book. */
         if (text.Length > 600) text = text[..600];
@@ -505,6 +593,62 @@ internal static class UiTree
             $"VALUE ok via={via} name={Encode(best.Name)} role={best.Role} " +
             $"matched={(exact ? "spot" : "name-only")} " +
             $"len={text.Length} text={Encode(text)}");
+    }
+
+    /// <summary>
+    /// The text inside a control whose own value is empty.
+    ///
+    /// A web field is often a wrapper: the name and the role belong to the
+    /// outer element and the characters belong to an Edit inside it. Reading
+    /// the outer one gives "" and reading the inner one gives the answer, and
+    /// which it is cannot be known from the role - Gmail's recipient box is a
+    /// ComboBox either way.
+    ///
+    /// Bounded on purpose. The caller is checking a field it just typed into,
+    /// so the text is at the top of a small subtree; eight is more than any
+    /// field holds, and the ceiling is what stops this becoming a walk of a
+    /// page with a thousand nodes when the match was something large.
+    /// </summary>
+    private static string Inner(AutomationElement el, out string via)
+    {
+        via = "none";
+        try
+        {
+            var inside = el.FindAll(
+                TreeScope.Descendants,
+                new OrCondition(
+                    new PropertyCondition(AutomationElement.ControlTypeProperty, ControlType.Edit),
+                    new PropertyCondition(AutomationElement.ControlTypeProperty, ControlType.Document)));
+            var seen = 0;
+            foreach (AutomationElement child in inside)
+            {
+                if (++seen > 8) break;
+                if (child.TryGetCurrentPattern(ValuePattern.Pattern, out var value))
+                {
+                    var held = ((ValuePattern)value).Current.Value ?? string.Empty;
+                    if (held.Length > 0)
+                    {
+                        via = "inner-value";
+                        return held;
+                    }
+                }
+                if (child.TryGetCurrentPattern(TextPattern.Pattern, out var text))
+                {
+                    var held = ((TextPattern)text).DocumentRange.GetText(600) ?? string.Empty;
+                    if (held.Trim().Length > 0)
+                    {
+                        via = "inner-text";
+                        return held;
+                    }
+                }
+            }
+        }
+        catch
+        {
+            /* A tree that moved under us is not an answer. The caller keeps
+               the empty read it already had, which is the honest one. */
+        }
+        return string.Empty;
     }
 
     /// <summary>
