@@ -49,6 +49,7 @@ import {
   looksLikeKey,
   PROVIDER_IDS,
   providerFor,
+  seesMedia,
   siblingModel
 } from '@shared/cloud'
 import type { ProviderId } from '@shared/cloud'
@@ -296,7 +297,11 @@ function promptShape(
     needs,
     /* An environment variable as well, because the benchmarks set it and a
        bench should not have to write the user's settings file to run. */
-    lean: settings.get('leanPrompt') || process.env.WUMPY_LEAN === '1'
+    lean: settings.get('leanPrompt') || process.env.WUMPY_LEAN === '1',
+    /* Which of the two screen sections is true for this model. The bytes are
+       dropped for the ones that cannot read them, so promising a photograph
+       would describe a turn that cannot happen. */
+    sees: seesMedia(activeModel())
   }
 }
 
@@ -884,15 +889,53 @@ function registerIpc(): void {
    * "keeps clicking the same place every time" looked like.
    */
   async function shotWithNames(): Promise<Attachment> {
+    /*
+     * A model that cannot read a picture is not photographed.
+     *
+     * The bytes were being captured, encoded, attached, and then dropped by
+     * wireMessage on the way out - because sending an image to a text-only
+     * model is a 400 that costs the whole turn. So the cost was paid on this
+     * machine and the model still got nothing, while the message it received
+     * said a screenshot was attached and to answer from what was visible.
+     *
+     * The control list is the half that was always text, and it is the half
+     * the acting steps use. So that is what a look returns here: names,
+     * roles and centres, and `picture: false` so everything downstream knows
+     * no image exists rather than finding an empty one.
+     */
+    /** What is on screen, by name. The half of a look that is text. */
+    const visibleNames = async (): Promise<Awaited<ReturnType<typeof visibleElements>>> =>
+      settings.get('browserEnabled')
+        ? await visibleElements((cmd, ms) =>
+            lowLevelHook
+              ? lowLevelHook.send(cmd, ms)
+              : Promise.resolve('ELEMENTS FAILED helper-not-running')
+          )
+        : { elements: [], window: '', total: 0 }
+
+    const blind = !seesMedia(activeModel())
+    if (blind) {
+      const named = await visibleNames()
+      console.log(
+        `[wumpy] looked by name (${activeModel()} cannot read a picture): ` +
+          `${named.elements.length} of ${named.total} controls in ` +
+          JSON.stringify(named.window || 'an unnamed window')
+      )
+      return {
+        kind: 'image',
+        dataUrl: '',
+        width: 0,
+        height: 0,
+        bytes: 0,
+        picture: false,
+        elements: named.elements,
+        window: named.window,
+        elementTotal: named.total
+      }
+    }
     const shot = await captureScreen(panel.liveWindow())
     console.log(`[wumpy] screen captured: ${shot.width}x${shot.height}, ${shot.bytes} bytes`)
-    const named = settings.get('browserEnabled')
-      ? await visibleElements((cmd, ms) =>
-          lowLevelHook
-            ? lowLevelHook.send(cmd, ms)
-            : Promise.resolve('ELEMENTS FAILED helper-not-running')
-        )
-      : { elements: [], window: '', total: 0 }
+    const named = await visibleNames()
     if (named.elements.length) {
       console.log(
         `[wumpy] ${named.elements.length} named controls in ${JSON.stringify(named.window || 'an unnamed window')}`

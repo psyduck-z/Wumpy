@@ -626,6 +626,47 @@ export const SCREEN_PROMPT = [
 ].join(String.fromCharCode(10))
 
 /**
+ * The same capability, for a model that cannot read a picture.
+ *
+ * Every model but Google's is text-only here, and the old section told all of
+ * them a photograph would arrive. It would not: `wireMessage` drops the bytes
+ * on a model without vision, because sending them is a 400 that costs the
+ * whole turn. So the model was promised an image, given a message that said
+ * one was attached, and had to answer from nothing - which reads as a model
+ * hallucinating a screen, and was really the app lying to it.
+ *
+ * What it does get is the thing the acting steps actually use. The control
+ * list is text: sixty names, roles and centres, about 580 tokens. press,
+ * focus, fill, read and reveal are all lookups BY NAME, and runPlan requires
+ * a screenshot only for `click` and `move`, the two steps whose arguments are
+ * pixels. So a text-only model is not blind here in any way that matters -
+ * it is driving with the better instrument and none of the picture's cost.
+ *
+ * Deliberately the same length as the section it replaces, so swapping it in
+ * does not move the token pins.
+ */
+export const NAMES_PROMPT = [
+  'You can ask WHAT IS ON SCREEN: a wumpy-screen block with a # line saying what',
+  'you are looking for, and nothing else in it. You cannot read pictures, so what',
+  'comes back is the LIST OF CONTROLS - names, roles and centres - not an image.',
+  '',
+  '```wumpy-screen',
+  '# See which buttons the dialog is offering',
+  '```',
+  '',
+  'That list is what you act on, and it is better than a picture for it: every',
+  'press, focus, fill, read and reveal finds a control BY NAME wherever it is,',
+  'so you never estimate a pixel. What it cannot tell you is how something',
+  'LOOKS - a colour, a photograph, an error drawn as an image, the wording of',
+  'something that is not a named control. Say that plainly when it is what you',
+  'were asked, rather than describing a screen you have not seen.',
+  'Do NOT ask when a command would answer better: a version, a path, what is',
+  'installed, whether something is running. Never ask twice in a row for the',
+  'same question, and never just to check your own work - `read "<name>"` answers',
+  'that directly and costs a line.'
+].join(String.fromCharCode(10))
+
+/**
  * Clicking and typing, and the refusal that made it necessary.
  *
  * Asked to open a Gmail tab that was open in front of it, Wumpy replied "I
@@ -704,8 +745,10 @@ export const DESKTOP_PROMPT = [
   'top-left. Not screen coordinates, not percentages — the picture you are',
   'looking at. Wumpy converts them.',
   '',
-  'SO YOU MUST LOOK FIRST. With no screenshot there is nothing to aim at and the',
-  'block is refused. Ask for wumpy-screen, wait for the picture, then act.',
+  'SO YOU MUST LOOK FIRST. Ask for wumpy-screen, wait for what comes back, then',
+  'act. A step aimed at a PIXEL is refused until something has been looked at,',
+  'because there is nothing for it to be measured against. A step aimed at a',
+  'NAME is not refused - but a name you have not seen in a list is a guess.',
   '',
   'PASTE ANYTHING LONG. `type` sends one keystroke per character, which an',
   'editor that debounces its input handler drops some of, and a block is read',
@@ -1260,6 +1303,17 @@ export interface PromptShape {
    * WumpySettings.leanPrompt for why that is not a default.
    */
   lean?: boolean
+  /**
+   * Whether this model can read a picture at all.
+   *
+   * Only Google's can - see `seesMedia`. On the other three the bytes are
+   * dropped on the way out, so a section promising a photograph described a
+   * turn that cannot happen; NAMES_PROMPT describes the one that does.
+   *
+   * Undefined means yes, because every caller before this was on Google and
+   * a benchmark measuring the prompt is measuring that one.
+   */
+  sees?: boolean
 }
 
 /**
@@ -1360,6 +1414,10 @@ export function promptSections(shape: PromptShape): string[] {
   const wants = (capability: Capability): boolean =>
     shape.needs === undefined || shape.needs.includes(capability)
 
+  /* A photograph on a model that cannot read one is a promise the wire
+     breaks: see NAMES_PROMPT. Same capability, described as it works. */
+  const looking = shape.sees === false ? NAMES_PROMPT : SCREEN_PROMPT
+
   /*
    * The short form replaces the three sections that always go out, as one
    * piece - they are rewritten together in @shared/lean, and taking the
@@ -1373,7 +1431,7 @@ export function promptSections(shape: PromptShape): string[] {
       scope === 'full' ? CLOSE_PROMPT : '',
       scope !== 'none' && search ? SEARCH_PROMPT : '',
       scope !== 'none' && browser ? (wants('open') ? OPEN_PROMPT : STUBS.open) : '',
-      screen ? SCREEN_PROMPT : '',
+      screen ? looking : '',
       quota ? QUOTA_PROMPT : '',
       screen && browser && scope === 'full'
         ? wants('desktop')
@@ -1391,7 +1449,7 @@ export function promptSections(shape: PromptShape): string[] {
     scope === 'full' ? CLOSE_PROMPT : '',
     scope !== 'none' && search ? SEARCH_PROMPT : '',
     scope !== 'none' && browser ? (wants('open') ? OPEN_PROMPT : STUBS.open) : '',
-    screen ? SCREEN_PROMPT : '',
+    screen ? looking : '',
     quota ? QUOTA_PROMPT : '',
     /* Both, because driving the screen without seeing it is aiming blind. */
     screen && browser && scope === 'full'

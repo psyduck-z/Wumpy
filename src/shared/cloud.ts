@@ -445,7 +445,9 @@ export function siblingModel(model: string, spent: ReadonlySet<string>): string 
               // Every one of these has been called once; v4-pro used to be
               // here and answers 410.
               'z-ai/glm-5.3',
-              'moonshotai/kimi-k3',
+              /* k3 was listed here and is not in /models: the catalogue has
+                 kimi-k2.6, so the old name was an offer that 404s. */
+              'moonshotai/kimi-k2.6',
               'nvidia/nemotron-3-ultra-550b-a55b',
               'deepseek-ai/deepseek-v4.1-flash',
               'nvidia/nemotron-3-super-120b-a12b',

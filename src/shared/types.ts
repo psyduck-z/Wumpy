@@ -249,6 +249,20 @@ export interface Attachment {
   height: number
   /** Size of the encoded file, for the "too big" guard and the UI. */
   bytes: number
+  /**
+   * False when a LOOK at the screen sent no picture, only names.
+   *
+   * A screenshot is about 1,100 tokens and only a model with vision can read
+   * one. Every model can read the control list, which is what the acting
+   * steps work from anyway - press, focus, fill, read and reveal are lookups
+   * by name, and `runPlan` only requires a frame for the two steps measured
+   * in pixels. So a look can come back as names alone: free on the models
+   * that cannot see at all, and 1,100 tokens a step cheaper on the ones that
+   * can but do not need to.
+   *
+   * Absent means a picture, because every attachment before this was one.
+   */
+  picture?: boolean
   /** How long a video runs, rounded. Zero when the header did not say. */
   seconds?: number
   /**

@@ -132,7 +132,12 @@ export function ScreenCard({
         {state === 'skipped' && <span className="cmd-status">declined</span>}
         {state === 'done' && shot && (
           <span className="cmd-status">
-            {shot.width}×{shot.height} sent
+            {/* What actually left the machine. On a model without vision no
+                picture is taken at all, and "0×0 sent" would be the card
+                reporting a photograph that does not exist. */}
+            {shot.picture === false
+              ? `${(shot.elements ?? []).length} controls read, no picture sent`
+              : `${shot.width}×${shot.height} sent`}
           </span>
         )}
       </div>
@@ -140,7 +145,10 @@ export function ScreenCard({
       {reason && <p className="cmd-reason">{reason}</p>}
       {waiting && (
         <p className="cmd-body screen-warning">
-          This takes a picture of your screen and sends it to the model. Close anything
+          {/* True whichever a look turns out to be: a model with vision gets a
+              photograph, one without gets the names of what is on screen.
+              Both leave the machine, so both are worth warning about. */}
+          This looks at your screen and sends what it finds to the model. Close anything
           you would rather it did not see.
         </p>
       )}

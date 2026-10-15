@@ -97,7 +97,7 @@ const tokensFor = (list) => A.preambleTokens({ ...FULL, needs: list })
    has to be present on turns with no picture in them. Two lines is what the
    25% ceiling in check-ask had room for, and the worked example stays in
    the gated paragraph where it is free. */
-check('everything, as it was', A.preambleTokens(FULL), 14175)
+check('everything, as it was', A.preambleTokens(FULL), 14212)
 check('a turn about nothing in particular', tokensFor([]), 8182)
 check('which is a third of it gone', A.preambleTokens(FULL) - tokensFor([]) > 4500, true)
 check('a turn about the screen', tokensFor(['desktop']) < A.preambleTokens(FULL), true)
@@ -275,10 +275,10 @@ check('nor one about opening a site', needs(said('I opened vocabulary.com for yo
 
 /* ------------------------------------------------------- the shape contract */
 
-check('no list at all means everything', A.preambleTokens({ ...FULL }), 14175)
-check('an empty list is a real answer, not everything', tokensFor([]) < 14175, true)
+check('no list at all means everything', A.preambleTokens({ ...FULL }), 14212)
+check('an empty list is a real answer, not everything', tokensFor([]) < 14212, true)
 check('one capability is not the other', tokensFor(['open']) !== tokensFor(['desktop']), true)
-check('every topic together is everything', tokensFor(ALL), 14175)
+check('every topic together is everything', tokensFor(ALL), 14212)
 
 /* --------------------------------------------------------------- the wiring */
 
@@ -289,6 +289,43 @@ check('and reused for the attempt', /\bon,\s*sending,/.test(main), true)
 
 const app = readFileSync('src/renderer/src/App.tsx', 'utf8')
 check('the meter uses the same decision', /needs: needsFor\(/.test(app), true)
+
+/* ------------------------------------------------ looking without a picture */
+
+/*
+ * A model that cannot read a picture is told what it actually gets.
+ *
+ * Only Google's models have vision here, and wireMessage drops the bytes on
+ * the other three - so the screen section was promising a photograph that
+ * never left the machine, and the hand-back said "a screenshot is attached,
+ * answer from what is visible" to a model holding nothing. What every model
+ * does get is the control list, which is text, and which is what the acting
+ * steps use: press, focus, fill, read and reveal are lookups by name, and
+ * runPlan requires a frame only for click and move.
+ */
+const BLIND = { ...FULL, sees: false }
+check('a model with vision is told a picture arrives', A.assemblePrompt(FULL).includes('arrives as an image'), true)
+check('and one without is not', A.assemblePrompt(BLIND).includes('arrives as an image'), false)
+check('it gets the list instead', A.assemblePrompt(BLIND).includes('LIST OF CONTROLS'), true)
+check('the same block asks for it either way', A.assemblePrompt(BLIND).includes('wumpy-screen'), true)
+/* Swapping the section must not move the budget: the two are the same size
+   on purpose, so a text-only model is not quietly paying more or less. */
+check('and the swap costs nothing either way', Math.abs(A.preambleTokens(BLIND) - A.preambleTokens(FULL)) < 30, true)
+
+/* The one rule that was overstated: a named step never needed a picture, and
+   runPlan has only ever required one for the two steps measured in pixels. */
+check(
+  'a pixel step is what needs a look first',
+  /A step aimed at a PIXEL is refused/.test(A.assemblePrompt(FULL)),
+  true
+)
+
+const mainSrc = readFileSync('src/main/index.ts', 'utf8')
+check('no photograph is taken for a model that cannot read one', /const blind = !seesMedia\(activeModel\(\)\)/.test(mainSrc), true)
+check('and the prompt is told which world it is in', /sees: seesMedia\(activeModel\(\)\)/.test(mainSrc), true)
+check('a look with no picture says so', /picture: false/.test(mainSrc), true)
+check('the hand-back does not claim an attachment', /NO PICTURE was taken/.test(app), true)
+check('and nothing is attached when there is none', /picture \? \[shot\] : \[\]/.test(app), true)
 
 console.log(`${NL}${count - failed}/${count} needs checks passed`)
 if (failed) process.exit(1)

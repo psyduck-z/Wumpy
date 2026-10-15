@@ -543,17 +543,50 @@ export default function App(): React.JSX.Element {
        making room for first. */
     await makeRoom()
     chatRef.current.notify(screenLine())
+    /*
+     * A look that sent no picture says so, and says it to the model.
+     *
+     * The old wording was unconditional - "a screenshot is attached, answer
+     * from what is actually visible" - and on a model without vision the
+     * bytes never left the machine, so that paragraph was the app telling
+     * the model it had been given something it had not. What it does have is
+     * the control list, which is text and reaches every model, and which is
+     * what the acting steps work from anyway.
+     */
+    const picture = shot.picture !== false
+    const nothing = !picture && !(shot.elements ?? []).length
     chatRef.current.send(
       [
-        'A screenshot was taken automatically and is attached. This was not sent',
-        'by the user and they have not said anything - do not thank them for it',
-        'or answer as though they spoke.',
-        'Answer from what is actually visible. If something is too small or cut',
-        'off to read, say so rather than guessing.',
-        ...namedControls(shot)
+        ...(picture
+          ? [
+              'A screenshot was taken automatically and is attached. This was not sent',
+              'by the user and they have not said anything - do not thank them for it',
+              'or answer as though they spoke.',
+              'Answer from what is actually visible. If something is too small or cut',
+              'off to read, say so rather than guessing.'
+            ]
+          : [
+              'Wumpy looked at the screen automatically. This was not sent by the user',
+              'and they have not said anything - do not thank them for it or answer as',
+              'though they spoke.',
+              'NO PICTURE was taken, because the model you are cannot read one. What is',
+              'on screen is listed below by name instead, and that is what you act on:',
+              'press, focus, fill, read and reveal find a control by name wherever it',
+              'is. If what was asked is how something LOOKS - a colour, an image, the',
+              'wording of something that is not a named control - say you cannot see it',
+              'rather than describing a screen you were not shown.'
+            ]),
+        ...(nothing
+          ? [
+              'Nothing could be read: desktop control is off, so there is no control',
+              'list either. Say so and ask them to turn it on in settings.'
+            ]
+          : namedControls(shot))
       ].join(String.fromCharCode(10)),
-      'Shared my screen',
-      [shot],
+      picture ? 'Shared my screen' : 'Looked at my screen',
+      /* Nothing is attached when there is no picture: an empty data URL
+         through the wire is an attachment that renders as a broken image. */
+      picture ? [shot] : [],
       true
     )
   }, [makeRoom])
@@ -601,7 +634,9 @@ function namedControls(shot: Attachment): string[] {
   return [
     '',
     `These ${list.length} controls are on screen right now${where}, with their`,
-    'real centres. PRESS one by name rather than guessing a pixel from the picture:',
+    /* Not "a pixel from the picture": the same list is handed over when there
+       was no picture, and on that turn the phrase describes nothing. */
+    'real centres. PRESS one by name rather than guessing a pixel:',
     ...list.map((e) => `  ${e.role}: ${JSON.stringify(e.name)}`),
     ...more
   ]
@@ -653,7 +688,14 @@ function namedControls(shot: Attachment): string[] {
       'The plan was carried out automatically. This is a report, not the user',
       'speaking - they have said nothing. What each step did:',
       ...lines,
-      after ? 'The attached screenshot is the screen as it is now.' : '',
+      /* The same distinction as a look: on a model without vision no picture
+         was taken, and claiming an attachment that was never sent is how a
+         plan's own report becomes the thing that misleads it. */
+      after && after.picture !== false
+        ? 'The attached screenshot is the screen as it is now.'
+        : after
+          ? 'No picture was taken - you cannot read one. These are the controls on screen now.'
+          : '',
       ...(after ? namedControls(after) : [])
     ]
       .filter(Boolean)
@@ -663,7 +705,12 @@ function namedControls(shot: Attachment): string[] {
        scrolled: the model's answer, and no line saying the screen had been
        touched. A plan that half worked is the case that needs it. */
     chatRef.current.notify(desktopLine(result))
-    const sent = chatRef.current.send(report, 'Ran it on my screen', after ? [after] : undefined, true)
+    const sent = chatRef.current.send(
+      report,
+      'Ran it on my screen',
+      after && after.picture !== false ? [after] : undefined,
+      true
+    )
     /* A turn had started in the meantime, so the report would have vanished -
        and a model that is never told what its own plan did will propose the
        same steps again. It still reaches it, as a fact rather than a question;
@@ -1180,12 +1227,22 @@ function namedControls(shot: Attachment): string[] {
               [
                 action.ask || 'What is on my screen?',
                 '',
-                'A screenshot of my screen is attached. Answer from what is actually',
-                'visible; if something is too small or cut off, say so.',
+                /* Same two worlds as the model's own look: a photograph, or
+                   the names of what is on screen when it cannot read one. */
+                ...(shot.picture === false
+                  ? [
+                      'No picture could be sent - the model you are cannot read one. What is',
+                      'on screen is listed below by name. If the question is about how',
+                      'something LOOKS, say you cannot see it rather than guessing.'
+                    ]
+                  : [
+                      'A screenshot of my screen is attached. Answer from what is actually',
+                      'visible; if something is too small or cut off, say so.'
+                    ]),
                 ...namedControls(shot)
               ].join(String.fromCharCode(10)),
               action.ask || 'What is on my screen?',
-              [shot]
+              shot.picture === false ? [] : [shot]
             )
           } catch (err) {
             say(err instanceof Error ? err.message : 'Could not capture the screen.')
