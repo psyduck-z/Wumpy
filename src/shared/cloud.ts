@@ -726,6 +726,55 @@ export function seesMedia(model: string): boolean {
 }
 
 /**
+ * A model that looks at the picture on behalf of one that cannot.
+ *
+ * Asked for directly: "is there a way it can see images without sacrificing
+ * much". The two obvious answers both cost something. Switching to the
+ * vision model loses three ladder rungs on every turn, including the ones
+ * with no picture in them. Staying text-only loses the picture.
+ *
+ * This is the third: the answering model stays what it is, and when a
+ * picture actually matters ONE extra call goes to the vision model, whose
+ * answer comes back as text. What that costs is one call - 859ms measured,
+ * on a provider with no daily cap - and it is paid only on the turns that
+ * have a picture in them. What it buys is that the bytes stop being thrown
+ * away.
+ *
+ * The honest cost is in the other direction: a description is second-hand
+ * and lossy, and the model acting on it did not see the screen. So it is
+ * labelled as second-hand everywhere it appears, and the control list -
+ * which is first-hand, exact, and what the acting steps use - still goes
+ * with it.
+ *
+ * Null when the model can already see, because then there is nothing to
+ * borrow and the picture itself is better than any description of it.
+ */
+export function eyeFor(model: string): CloudModel | null {
+  if (!model || seesMedia(model)) return null
+  /* The best measured one, not the first one typed into the catalogue:
+     rankedModels keeps catalogue order and carries the place as a number. */
+  const seers = rankedModels()
+    .filter((r) => r.model.sees)
+    .sort((a, b) => (a.rank ?? Number.MAX_SAFE_INTEGER) - (b.rank ?? Number.MAX_SAFE_INTEGER))
+  return seers[0]?.model ?? null
+}
+
+/**
+ * The same, but only when it could actually answer right now.
+ *
+ * An eye on a provider with no key is not an eye, and offering one would
+ * mean accepting a dropped image for a call that cannot be made. Shared so
+ * the composer's decision to accept a paste and the main process's decision
+ * to make the call cannot disagree - which is the bug the `keyless` flag
+ * had to be invented for.
+ */
+export function eyeReady(model: string, configured: readonly ProviderId[]): CloudModel | null {
+  const eye = eyeFor(model)
+  if (!eye) return null
+  return PROVIDERS[eye.provider].keyless || configured.includes(eye.provider) ? eye : null
+}
+
+/**
  * Collapses every system message into one at the front.
  *
  * Order is preserved, because the preamble has to precede the facts that refer

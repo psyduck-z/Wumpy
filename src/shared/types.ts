@@ -321,6 +321,17 @@ export interface Attachment {
    * not on the list can still be found.
    */
   elementTotal?: number
+  /**
+   * What a vision model saw, when the answering model cannot see.
+   *
+   * Present only on a look with `picture: false`, which is the whole point:
+   * no bytes were sent to the model answering, so this is the only thing it
+   * has of how the screen LOOKS. Second-hand, and labelled as such in the
+   * hand-back and on the card - the model that acts did not see this.
+   */
+  described?: string
+  /** Which model described it, so the transcript says whose account it is. */
+  describedBy?: string
 }
 
 export interface SearchResult {

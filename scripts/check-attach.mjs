@@ -241,7 +241,19 @@ const composer = readFileSync('src/renderer/src/components/Composer.tsx', 'utf8'
 check('the picker accepts anything', /accept="image/.test(composer), false)
 check('a drop takes any file', /filesIn\(e\.dataTransfer/.test(composer), true)
 check('and so does a paste', /filesIn\(e\.clipboardData/.test(composer), true)
-check('vision is checked per attachment', /sendsBytes\(attachment\.kind\) && !canSeeMedia/.test(composer), true)
+check('vision is checked per attachment', /sendsBytes\(attachment\.kind\) && !readable/.test(composer), true)
+/*
+ * And "can anything read this", not "can the model read this". A model
+ * without eyes can borrow a pair for a still image - the bytes go to a
+ * vision model and its description comes back as text - but not for a clip,
+ * a sound or a PDF, which the eye is not sent and could not watch, hear or
+ * page through if it were.
+ */
+check(
+  'an image counts as readable when something will read it',
+  /canSeeMedia \|\| \(attachment\.kind === 'image' && Boolean\(describedBy\)\)/.test(composer),
+  true
+)
 
 const chats = readFileSync('src/main/chats.ts', 'utf8')
 check(

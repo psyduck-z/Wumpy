@@ -702,7 +702,16 @@ export class CloudClient {
   async complete(
     model: string,
     messages: Array<Pick<ChatMessage, 'role' | 'content' | 'images'>>,
-    opts: { numPredict?: number }
+    /**
+     * `pictures` is off by default and has to be asked for.
+     *
+     * The three original callers - titles, compaction, transcript polish -
+     * send the whole conversation, and a conversation can hold screenshots.
+     * Sending those up to summarise a chat would be paying for vision to
+     * name a tab. The one caller that wants them is the borrowed eye, where
+     * the picture IS the question.
+     */
+    opts: { numPredict?: number; pictures?: boolean }
   ): Promise<string | null> {
     const check = this.ready(model)
     if (!check.ok || !check.provider) return null
@@ -730,11 +739,30 @@ export class CloudClient {
           model,
           messages: wireMessagesFor(
             provider,
-            messages.map((m) => ({ role: m.role as WireMessage['role'], content: m.content }))
+            messages.map((m) =>
+              opts.pictures
+                ? wireMessage(m, seesMedia(model))
+                : { role: m.role as WireMessage['role'], content: m.content }
+            )
           ),
           stream: false,
           temperature: 0.2,
-          max_tokens: opts.numPredict ?? 400
+          max_tokens: opts.numPredict ?? 400,
+          /*
+           * Thinking off, where the provider has a switch for it.
+           *
+           * chat() has always sent this and complete() never did, which was
+           * invisible while the callers were titles and compaction - a
+           * reasoning model thinks for a sentence and still produces one.
+           * It is not invisible for the borrowed eye: measured on the VL
+           * model, a 64-token ceiling came back with EMPTY content and the
+           * whole budget spent in reasoning_content. A description that
+           * silently comes back blank reads downstream as "no eye".
+           */
+          ...(() => {
+            const kwargs = thinkingKwargsFor(provider, false)
+            return kwargs ? { chat_template_kwargs: kwargs } : {}
+          })()
         }),
         signal: AbortSignal.timeout(120_000)
       })

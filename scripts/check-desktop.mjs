@@ -177,7 +177,7 @@ check('every point is checked before anything runs', /for \(const step of plan\.
 check('a failed step stops the rest', /if \(!ok\) break/.test(input), true)
 check('the panel is made click-through', /setIgnoreMouseEvents\(true\)/.test(input), true)
 check('and put back afterwards', /finally[\s\S]{0,80}setIgnoreMouseEvents\(false\)/.test(input), true)
-check('a fresh screenshot follows every plan', /settings\.get\('screenEnabled'\) \? await shotWithNames\(\) : null/.test(main), true)
+check('a fresh screenshot follows every plan', /settings\.get\('screenEnabled'\) \? await shotWithNames\('step'\) : null/.test(main), true)
 /*
  * And it carries the control names, which it did not.
  *
@@ -186,8 +186,12 @@ check('a fresh screenshot follows every plan', /settings\.get\('screenEnabled'\)
  * which leaves a model nothing to press BY name and is why the log is full of
  * nudged coordinates. One function now does both halves.
  */
-check('and names what is in it', /async function shotWithNames\(\)/.test(main), true)
-check('both callers use it', (main.match(/shotWithNames\(\)/g) ?? []).length >= 3, true)
+check('and names what is in it', /async function shotWithNames\(why: 'asked' \| 'step'/.test(main), true)
+check('both callers use it', (main.match(/shotWithNames\(/g) ?? []).length >= 3, true)
+/* Which caller it is decides whether a picture is worth describing: a look
+   the user asked for is usually a question about how something looks, while
+   a plan step already has the control list. */
+check('and they say which they are', /shotWithNames\('step'\)/.test(main), true)
 
 /*
  * The prompt must insist on looking between steps. Without that habit the

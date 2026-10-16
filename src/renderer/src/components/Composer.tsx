@@ -31,6 +31,7 @@ export function Composer({
   prefill,
   placeholder,
   canSeeMedia = false,
+  describedBy,
   onSay
 }: {
   onSend(text: string, images?: Attachment[]): void
@@ -67,6 +68,15 @@ export function Composer({
    * paste is refused with a reason instead.
    */
   canSeeMedia?: boolean
+  /**
+   * The model that will read an image for this one, when it cannot.
+   *
+   * Named rather than a boolean, because what happens to the picture is
+   * worth saying out loud: it goes to a different model, and what comes
+   * back to the one answering is that model's description. Undefined when
+   * there is no such model to borrow - then the refusal above stands.
+   */
+  describedBy?: string
   /** Said in a line that fades, for things that are not part of the chat. */
   onSay?(text: string): void
 }): React.JSX.Element {
@@ -111,7 +121,14 @@ export function Composer({
     for (const file of files) {
       try {
         const attachment = await readAnyFile(file)
-        if (sendsBytes(attachment.kind) && !canSeeMedia) {
+        /*
+         * An image is accepted when something can read it - this model, or
+         * the one it borrows eyes from. A clip, a sound or a PDF still needs
+         * the model itself, because the eye is sent one still image and
+         * cannot watch or listen.
+         */
+        const readable = canSeeMedia || (attachment.kind === 'image' && Boolean(describedBy))
+        if (sendsBytes(attachment.kind) && !readable) {
           refusedForVision++
           continue
         }
@@ -123,7 +140,9 @@ export function Composer({
     if (refusedForVision > 0) {
       onSay?.(
         refusedForVision === 1
-          ? 'This model cannot read images, sound or PDFs. Switch with /model, or attach a text file.'
+          ? describedBy
+            ? `This model cannot read clips, sound or PDFs — only images, which ${describedBy} reads for it. Switch with /model.`
+            : 'This model cannot read images, sound or PDFs. Switch with /model, or attach a text file.'
           : `${refusedForVision} files need a model that can see them. Switch with /model.`
       )
     }
@@ -760,7 +779,9 @@ export function Composer({
           title={
             canSeeMedia
               ? 'Attach a file of any sort (or just drop or paste one)'
-              : 'Attach a file. This model cannot see pictures, sound or PDFs, but text files work'
+              : describedBy
+                ? `Attach a file. This model cannot see, so ${describedBy} reads any image for it and passes on what it says`
+                : 'Attach a file. This model cannot see pictures, sound or PDFs, but text files work'
           }
         >
           <svg viewBox="0 0 24 24" width="15" height="15" aria-hidden="true">

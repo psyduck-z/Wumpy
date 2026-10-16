@@ -324,7 +324,10 @@ const mainSrc = readFileSync('src/main/index.ts', 'utf8')
 check('no photograph is taken for a model that cannot read one', /const blind = !seesMedia\(activeModel\(\)\)/.test(mainSrc), true)
 check('and the prompt is told which world it is in', /sees: seesMedia\(activeModel\(\)\)/.test(mainSrc), true)
 check('a look with no picture says so', /picture: false/.test(mainSrc), true)
-check('the hand-back does not claim an attachment', /NO PICTURE was taken/.test(app), true)
+/* "was sent to you", not "was taken": a picture may well have been taken
+   now, for a vision model to read on this one's behalf. What must stay true
+   is that the model answering never thinks the bytes reached it. */
+check('the hand-back does not claim an attachment', /NO PICTURE was sent to you/.test(app), true)
 check('and nothing is attached when there is none', /picture \? \[shot\] : \[\]/.test(app), true)
 
 console.log(`${NL}${count - failed}/${count} needs checks passed`)

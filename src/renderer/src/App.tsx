@@ -40,7 +40,7 @@ import {
 import { refusedAttachment, sendsBytes, withoutBytes } from '@shared/attach'
 import { needsFor } from '@shared/needs'
 import { shouldRetitle } from '@shared/titles'
-import { CLOUD_MODELS, PROVIDERS, modelTag, rankedModels, seesMedia } from '@shared/cloud'
+import { CLOUD_MODELS, PROVIDERS, eyeReady, modelTag, rankedModels, seesMedia } from '@shared/cloud'
 import { useChat, nextId, type ChatStats } from './hooks/useChat'
 import {
   allCommands,
@@ -569,12 +569,37 @@ export default function App(): React.JSX.Element {
               'Wumpy looked at the screen automatically. This was not sent by the user',
               'and they have not said anything - do not thank them for it or answer as',
               'though they spoke.',
-              'NO PICTURE was taken, because the model you are cannot read one. What is',
-              'on screen is listed below by name instead, and that is what you act on:',
-              'press, focus, fill, read and reveal find a control by name wherever it',
-              'is. If what was asked is how something LOOKS - a colour, an image, the',
-              'wording of something that is not a named control - say you cannot see it',
-              'rather than describing a screen you were not shown.'
+              'NO PICTURE was sent to you, because the model you are cannot read one.',
+              'What is on screen is listed below by name instead, and that is what you',
+              'act on: press, focus, fill, read and reveal find a control by name',
+              'wherever it is.',
+              /*
+               * Borrowed eyes, labelled as borrowed.
+               *
+               * The line above used to end "say you cannot see it rather than
+               * describing a screen you were not shown", which stays true of
+               * everything the description does not cover - so the warning is
+               * repeated here rather than dropped. What changes is that there
+               * is now something to answer from, and the model must not
+               * mistake it for its own sight: it did not see this screen, it
+               * is being told about it by another model that did.
+               */
+              ...(shot.described
+                ? [
+                    '',
+                    `A vision model (${shot.describedBy ?? 'another model'}) looked at the`,
+                    'screenshot for you and reported this. It is SECOND-HAND - you did not',
+                    'see the screen - so answer from it, say so when the question needs',
+                    'detail it does not cover, and never claim to have seen anything it',
+                    'does not mention:',
+                    shot.described,
+                    '[End of what it saw.]'
+                  ]
+                : [
+                    'If what was asked is how something LOOKS - a colour, an image, the',
+                    'wording of something that is not a named control - say you cannot see',
+                    'it rather than describing a screen you were not shown.'
+                  ])
             ]),
         ...(nothing
           ? [
@@ -2607,6 +2632,7 @@ function namedControls(shot: Attachment): string[] {
         focusToken={focusToken}
         tucked={tucked}
         canSeeMedia={seesMedia(model)}
+        describedBy={eyeReady(model, keyStatus?.configured ?? [])?.label}
         onSay={say}
         prefill={prefill}
         queued={queued}

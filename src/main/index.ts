@@ -44,6 +44,7 @@ import { runPlan, visibleElements } from './input'
 import { readPlan } from '@shared/steps'
 import {
   PROVIDERS,
+  eyeReady,
   isCloudModel,
   isProviderId,
   looksLikeKey,
@@ -52,7 +53,7 @@ import {
   seesMedia,
   siblingModel
 } from '@shared/cloud'
-import type { ProviderId } from '@shared/cloud'
+import type { CloudModel, ProviderId } from '@shared/cloud'
 import { checkLink, isSearchEngine } from '@shared/links'
 import { POLISH_PROMPT, polishAcceptable, tidyTranscript } from '@shared/dictation'
 import { captureConsole, logPath } from './log'
@@ -477,6 +478,7 @@ function registerIpc(): void {
        for every attempt including the fallback - so a retry cannot quietly
        send a different preamble from the one the meter counted. */
     const sending = withContext(req)
+    await lendEyes(sending)
     const systemPrompt = systemPromptFor(assistant, scope, sending)
 
     // Stand aside for the duration of the turn: tokens matter more than UI.
@@ -918,7 +920,136 @@ function registerIpc(): void {
    * scaled image is wrong identically every time - which is exactly what
    * "keeps clicking the same place every time" looked like.
    */
-  async function shotWithNames(): Promise<Attachment> {
+  /**
+   * The vision model that can answer right now, or null.
+   *
+   * Null is the ordinary case for a model that can already see, and for one
+   * that cannot when there is no key for the eye's provider - in which case
+   * a look is names-only exactly as it was.
+   */
+  function readyEye(): CloudModel | null {
+    return eyeReady(activeModel(), keys.configured())
+  }
+
+  /**
+   * What the picture shows, asked of a model that can see it.
+   *
+   * Second-hand by construction, and said so everywhere it is used. The
+   * instruction is written against the two ways this goes wrong: a
+   * description that is a guided tour of the desktop when one sentence was
+   * needed, and a description that helpfully invents the thing it was
+   * expected to find. Nothing here asks for advice - the model being lent
+   * these eyes is the one doing the thinking.
+   */
+  async function readPicture(
+    eye: CloudModel,
+    picture: { dataUrl: string; bytes?: number },
+    about: 'screen' | 'file',
+    ask?: string
+  ): Promise<string | null> {
+    if (!picture.dataUrl) return null
+    const started = Date.now()
+    try {
+      const text = await cloud.complete(
+        eye.id,
+        [
+          {
+            role: 'user',
+            content: [
+              'You are the eyes for another model, which cannot see pictures.',
+              ...(about === 'screen'
+                ? [
+                    'It is driving this Windows desktop and already has the list of',
+                    'control names, so describe what the names cannot say:'
+                  ]
+                : ['A person attached this image to a question for it. Describe it:']),
+              '- what this is, and what state it is in',
+              '- any text that matters: errors, dialogs, headings, field contents',
+              '- anything visibly wrong, empty, loading or greyed out',
+              'At most 120 words. Report ONLY what is visible. If something is',
+              'unreadable, say so. Do not guess at what is cut off, do not give',
+              'advice, and do not say what should be done next.',
+              ...(ask ? ['', `Answer this in particular: ${ask.slice(0, 400)}`] : [])
+            ].join(String.fromCharCode(10)),
+            /* The eye is sent the bytes and nothing else: width, height and
+               the rest belong to the transcript, not to this question. */
+            images: [
+              {
+                kind: 'image' as const,
+                dataUrl: picture.dataUrl,
+                width: 0,
+                height: 0,
+                bytes: picture.bytes ?? 0
+              }
+            ]
+          }
+        ],
+        { numPredict: 400, pictures: true }
+      )
+      if (text) console.log(`[wumpy] ${eye.label} read a ${about} in ${Date.now() - started}ms`)
+      return text?.trim() || null
+    } catch {
+      /* An eye that failed is a turn without one, which is every turn
+         yesterday. Never a reason to fail the answer. */
+      return null
+    }
+  }
+
+  /** The screen, photographed here and read there. */
+  async function lookFor(eye: CloudModel): Promise<string | null> {
+    try {
+      const shot = await captureScreen(panel.liveWindow())
+      return await readPicture(eye, shot, 'screen')
+    } catch {
+      return null
+    }
+  }
+
+  /**
+   * A picture the user attached, for a model that cannot open it.
+   *
+   * Until now the composer refused the paste outright, which is honest and
+   * useless: "an annoying thing is that the model does not support images".
+   * The bytes now go to the eye and its answer goes in as text, marked as
+   * second-hand so the answering model does not claim to have seen it.
+   *
+   * The newest user turn only, and two pictures at most. Every older image
+   * has already been through here on the turn it arrived, and re-reading
+   * the whole transcript each turn is the quadratic cost trimPictures
+   * exists to stop.
+   */
+  async function lendEyes(
+    messages: Array<Pick<ChatMessage, 'role' | 'content' | 'images'>>
+  ): Promise<void> {
+    if (seesMedia(activeModel())) return
+    const eye = readyEye()
+    if (!eye) return
+    const last = [...messages].reverse().find((m) => m.role === 'user' && m.images?.length)
+    if (!last) return
+    const pictures = (last.images ?? [])
+      .filter((a) => (a.kind ?? 'image') === 'image' && a.dataUrl)
+      .slice(0, 2)
+    if (!pictures.length) return
+
+    const seen: string[] = []
+    for (const picture of pictures) {
+      const text = await readPicture(eye, picture, 'file', last.content)
+      if (text) seen.push(text)
+    }
+    if (!seen.length) return
+    last.content = [
+      last.content,
+      '',
+      `[${pictures.length === 1 ? 'An image was' : `${pictures.length} images were`} attached` +
+        ` to this message. You cannot read pictures, so ${eye.label} looked and reported:]`,
+      ...seen.map((text, i) => (pictures.length > 1 ? `Image ${i + 1}: ${text}` : text)),
+      '[End of what it saw. That is second-hand - you did not see the picture.',
+      'Answer from it, and say so if what was asked needs detail it does not cover.]'
+    ].join(String.fromCharCode(10))
+  }
+
+  /** `asked` is the user pressing the card; `step` is the look after a plan. */
+  async function shotWithNames(why: 'asked' | 'step' = 'asked'): Promise<Attachment> {
     /*
      * A model that cannot read a picture is not photographed.
      *
@@ -946,10 +1077,28 @@ function registerIpc(): void {
     const blind = !seesMedia(activeModel())
     if (blind) {
       const named = await visibleNames()
+      /*
+       * BORROWED EYES, and only when they are worth their price.
+       *
+       * The description costs one call to the vision model - 859ms measured,
+       * no daily cap - and a desktop plan looks after every single step, so
+       * paying it every time would put a second on each step to describe a
+       * screen the control list already covers exactly.
+       *
+       * So: when the user asked to be looked at, always, because the
+       * question is usually about how something looks. During a plan, only
+       * when the names came back thin - an app with no accessibility tree
+       * (a canvas, a remote desktop, a game, a PDF viewer) is the case where
+       * a picture is not a luxury but the only information there is.
+       */
+      const eye = readyEye()
+      const thin = named.elements.length < 5
+      const described = eye && (why === 'asked' || thin) ? await lookFor(eye) : null
       console.log(
         `[wumpy] looked by name (${activeModel()} cannot read a picture): ` +
           `${named.elements.length} of ${named.total} controls in ` +
-          JSON.stringify(named.window || 'an unnamed window')
+          JSON.stringify(named.window || 'an unnamed window') +
+          (described ? `; ${eye?.label} described it in ${described.length} chars` : '')
       )
       return {
         kind: 'image',
@@ -960,7 +1109,8 @@ function registerIpc(): void {
         picture: false,
         elements: named.elements,
         window: named.window,
-        elementTotal: named.total
+        elementTotal: named.total,
+        ...(described ? { described, describedBy: eye?.label } : {})
       }
     }
     const shot = await captureScreen(panel.liveWindow())
@@ -1020,7 +1170,7 @@ function registerIpc(): void {
      * look, act, look - the only loop there is.
      */
     const after =
-      result.refused === null && settings.get('screenEnabled') ? await shotWithNames() : null
+      result.refused === null && settings.get('screenEnabled') ? await shotWithNames('step') : null
     return { ...result, problems: plan.problems, after }
   })
 

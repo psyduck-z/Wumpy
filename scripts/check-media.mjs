@@ -13,7 +13,7 @@
  * Run with: npm run check:images
  */
 import { build } from 'esbuild'
-import { rmSync } from 'node:fs'
+import { readFileSync, rmSync } from 'node:fs'
 import { pathToFileURL } from 'node:url'
 
 const NL = String.fromCharCode(10)
@@ -136,6 +136,45 @@ check(
   C.CLOUD_MODELS.filter((m) => m.sees).map((m) => m.id),
   ['nvidia/nemotron-3.5-super-vl-120b-a12b']
 )
+
+/* ------------------------------------------------------- borrowed eyes */
+
+/*
+ * "is there a way it can see images without sacrificing much"
+ *
+ * Switching to the vision model costs three ladder rungs on every turn,
+ * including the ones with no picture in them. Borrowing it costs one extra
+ * call on the turns that have a picture, and nothing on the rest.
+ */
+const BLIND = 'deepseek-ai/deepseek-v4.1-flash'
+check('a model that cannot see gets an eye', C.eyeFor(BLIND)?.id, 'nvidia/nemotron-3.5-super-vl-120b-a12b')
+check('one that can see does not need one', C.eyeFor('nvidia/nemotron-3.5-super-vl-120b-a12b'), null)
+check('nor does a Gemini typed in by hand', C.eyeFor('gemini-3.8-flash'), null)
+check('and nothing is not a model', C.eyeFor(''), null)
+/* An eye on a provider with no key is not an eye: the composer would accept
+   a paste for a call that cannot be made. Same question, one answer, so the
+   two cannot disagree. */
+check('an eye with no key is not offered', C.eyeReady(BLIND, []), null)
+check('with one, it is', C.eyeReady(BLIND, ['nvidia'])?.id, 'nvidia/nemotron-3.5-super-vl-120b-a12b')
+check('a key for someone else does not count', C.eyeReady(BLIND, ['groq', 'google']), null)
+
+const mainSrc = readFileSync('src/main/index.ts', 'utf8')
+/* The cost is one call, and it is only paid where it buys something. A plan
+   looks after every step, and the control list already covers a screen that
+   has one - so during a plan the picture is read only when the names came
+   back thin, which is an app with no accessibility tree. */
+check('a look the user asked for is described', /why === 'asked' \|\| thin/.test(mainSrc), true)
+check('and a plan step only when the names are thin', /const thin = named\.elements\.length < 5/.test(mainSrc), true)
+check('the eye is asked with the picture attached', /pictures: true/.test(mainSrc), true)
+check('and background work still is not', /opts\.pictures/.test(readFileSync('src/main/cloud.ts', 'utf8')), true)
+/* A description is not sight. The model answering did not see the screen,
+   and every place this surfaces says so - otherwise the next step is a
+   confident claim about a pixel nobody looked at. */
+check('the hand-back calls it second-hand', /SECOND-HAND - you did not/.test(readFileSync('src/renderer/src/App.tsx', 'utf8')), true)
+check('and the card says who described it', /described it/.test(readFileSync('src/renderer/src/components/ScreenCard.tsx', 'utf8')), true)
+check('an attached picture is read for it too', /async function lendEyes/.test(mainSrc), true)
+check('but only the newest turn of it', /\.reverse\(\)\.find\(\(m\) => m\.role === 'user' && m\.images\?\.length\)/.test(mainSrc), true)
+check('and at most two pictures', /\.slice\(0, 2\)/.test(mainSrc), true)
 
 /* ------------------------------------------------------- the shape on the wire */
 

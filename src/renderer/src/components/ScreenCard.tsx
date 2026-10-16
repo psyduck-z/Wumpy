@@ -136,7 +136,12 @@ export function ScreenCard({
                 picture is taken at all, and "0×0 sent" would be the card
                 reporting a photograph that does not exist. */}
             {shot.picture === false
-              ? `${(shot.elements ?? []).length} controls read, no picture sent`
+              ? `${(shot.elements ?? []).length} controls read, no picture sent` +
+                /* And when another model read the picture, whose account it
+                   is: the bytes still did not reach the model answering, and
+                   a description from somewhere else should not look like
+                   something it saw. */
+                (shot.described ? ` · ${shot.describedBy ?? 'a vision model'} described it` : '')
               : `${shot.width}×${shot.height} sent`}
           </span>
         )}
