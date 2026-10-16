@@ -295,100 +295,29 @@ export interface CloudModel {
 }
 
 export const CLOUD_MODELS: CloudModel[] = [
-  // Google only. Everything else was measured and removed on purpose;
-  // see the note above CLOUD_MODELS.
-  // --- Google, in the order worth trying them -----------------------------
   /*
-   * Lite first, and the blurbs say what each one COSTS.
+   * GOOGLE IS OUT, for now. Asked for in those words: "remove gemini and
+   * google for now".
    *
-   * They used to be ordered by how well they answered, which is the right
-   * order only if you can get an answer. On 13 October every Flash model
-   * refused on all eighteen live keys and returned zero prompt tokens, while
-   * Lite answered six requests untroubled - and the picker was still saying
-   * 3.5 was "the one to start with", which is how four Flash models get tried
-   * in a row on a morning when none of them will answer.
+   * Nothing here says Gemini stopped working - the provider row, the system
+   * folding, the loose-fence promotion, the measured allowances and the
+   * `gemini-` routing rule are all still in place, so `/model gemini-3.1-
+   * flash-lite` typed by hand reaches it exactly as before and putting these
+   * entries back is one commit. What is gone is the offer.
+   *
+   * Measured the evening before, ten rungs at two runs each:
+   *
+   *   nemotron-3-super-120b   9/10     907ms   counted per minute
+   *   gemini-3.1-flash-lite   8/10   2,278ms   counted per day
+   *   gemini-3.8-flash        5/10  11,023ms   ~25 requests a day
+   *   gemini-3.1-pro          -        429     limit: 0 on all four meters
+   *
+   * The one real loss is eyes: seesMedia is Google-only, so with no Gemini
+   * selected nothing in the picker can read a picture. A look comes back as
+   * the control list instead, which drives the desktop by name perfectly
+   * well and cannot answer "what does this look like". That is the trade,
+   * and it is the user's to make.
    */
-  {
-    id: 'gemini-3.1-flash-lite',
-    provider: 'google',
-    label: 'Gemini 3.1 Flash Lite',
-    blurb: 'Scored 4/4 here, and the only one with a real free allowance. Start here.',
-    looseFences: true
-  },
-  {
-    id: 'gemini-3.5-flash',
-    provider: 'google',
-    label: 'Gemini 3.5 Flash',
-    blurb: 'Measured 8/8 writing files that compile. Smarter, but ~25 a day per key.',
-    looseFences: true
-  },
-  {
-    id: 'gemini-3.6-flash',
-    provider: 'google',
-    label: 'Gemini 3.6 Flash',
-    blurb: 'Between 3.5 and 3.8. Same small daily allowance as the other Flashes.',
-    looseFences: true
-  },
-  {
-    id: 'gemini-3.7-flash',
-    provider: 'google',
-    label: 'Gemini 3.7 Flash',
-    blurb: 'Newer Flash. Untested here, and the newer ones have the smallest quotas.',
-    looseFences: true
-  },
-  {
-    id: 'gemini-3.8-flash',
-    provider: 'google',
-    label: 'Gemini 3.8 Flash',
-    // Measured the hard way: roughly 25 requests and it asked for 18 hours.
-    /*
-     * And it is not only scarce, it is the worst of the Geminis at this job.
-     * Ten rungs at two runs each: 5/10, with 0/2 on five of them and the
-     * reason nearly always "no command proposed" - it answers in prose where
-     * the rung needs a wumpy-run block. Checked for a harness fault first,
-     * because one was found the same evening: the fence promotion is applied
-     * for Google here, and it still answers in prose. 11.0s median, against
-     * 2.3s for Lite, with 531 invisible thinking tokens on top.
-     */
-    blurb: '5/10 here and 11s a turn — answers in prose instead of commands. ~25/day.',
-    looseFences: true
-  },
-  {
-    id: 'gemini-3.1-pro-preview',
-    provider: 'google',
-    label: 'Gemini 3.1 Pro',
-    // Pro moved behind billing in May 2026, so on a free key this is likely
-    // to refuse. Listed because a key with billing on can use it, and finding
-    // out costs one request.
-    // Probed: a 429 naming ContentInputTokensPerModelPerMinute-FreeTier on a
-    // two-token request, so it is reachable but the free input allowance is
-    // too small to be worth routing to. Not "paid only", which is what this
-    // said before measuring it.
-    /*
-     * Measured again, and it is worse than "too small". A two-token request
-     * on a fresh key is refused by all FOUR free-tier meters at once, each
-     * reporting limit: 0 -
-     *
-     *   GenerateRequestsPerMinutePerProjectPerModel-FreeTier
-     *   GenerateRequestsPerDayPerProjectPerModel-FreeTier
-     *   GenerateContentInputTokensPerModelPerMinute-FreeTier
-     *   GenerateContentInputTokensPerModelPerDay-FreeTier
-     *
-     * with retryDelay 8650s. A ten-rung ladder across rotated keys scored
-     * 0/10, every rung a 429, so nothing about the model itself was
-     * measured. Zero is not an allowance that rotation multiplies.
-     */
-    blurb: 'Most capable Gemini — but every free-tier meter reports limit 0, so it refuses.',
-    looseFences: true
-  },
-  {
-    id: 'gemini-flash-latest',
-    provider: 'google',
-    label: 'Gemini Flash (latest)',
-    blurb: 'Whatever Google currently points "latest" at. Moves without warning.',
-    looseFences: true
-  },
-
   /* --- NVIDIA, measured 15 October 2026 ----------------------------------
    *
    * The list was Google-only because the others had been measured and found
@@ -983,11 +912,18 @@ export function looksLikeKey(provider: ProviderId, raw: string): { ok: boolean; 
  * tasks, and the quick tiers are answering one-liners that do not need it.
  * Never 3.8 Flash, whose free tier is about 25 requests a day.
  */
+/*
+ * Re-pointed when Google left the picker. The split is the same idea and
+ * the same evidence: the quick tiers get the fastest thing measured, and
+ * the ones that act get the one that scored highest without being slow.
+ * Super is both at once, so the split is narrower than it was - DeepSeek
+ * matches it at 9/10 and is the one to differ on if a tier needs variety.
+ */
 export const FALLBACK_CLOUD_MODEL: Record<string, string> = {
-  flash: 'gemini-3.1-flash-lite',
-  fast: 'gemini-3.5-flash',
-  thinker: 'gemini-3.5-flash',
-  deep: 'gemini-3.5-flash'
+  flash: 'nvidia/nemotron-3-super-120b-a12b',
+  fast: 'nvidia/nemotron-3-super-120b-a12b',
+  thinker: 'deepseek-ai/deepseek-v4.1-flash',
+  deep: 'deepseek-ai/deepseek-v4.1-flash'
 }
 
 /* ------------------------------------------------------------- the thinking */

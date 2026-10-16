@@ -1247,7 +1247,17 @@ export const VOICE_PROMPT = [
  * for a turn that needs it, and 25 a day per project is plenty when it is the
  * exception rather than the default.
  */
-export const DEFAULT_MODEL = 'gemini-3.1-flash-lite'
+/*
+ * Now Nemotron, because Google is out of the picker and this is what the
+ * measurements chose: 9/10 on ten ladder rungs at two runs each, 907ms
+ * median at Wumpy's real preamble - faster than Flash Lite's 2,278ms - and
+ * a budget counted per minute instead of 25 requests a day.
+ *
+ * It needs an NVIDIA key, and until one is added `ready()` says exactly
+ * that, which is a better failure than a model that answers badly. The one
+ * entry needing no key at all is gemma4:31b-cloud, a /model away.
+ */
+export const DEFAULT_MODEL = 'nvidia/nemotron-3-super-120b-a12b'
 
 /**
  * What the assistant may propose, and how much room it gets to say it.

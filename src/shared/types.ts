@@ -488,6 +488,21 @@ export interface WumpySettings {
    * to work. It is a setting rather than a silent default for that reason.
    */
   leanPrompt: boolean
+  /**
+   * Whether the one-time move off Google has already happened.
+   *
+   * Google left the picker, but `providerFor` still routes `gemini-*` so a
+   * name typed by hand keeps working. That leaves a settings file holding
+   * gemini-3.1-flash-lite pointing at a model nothing offers any more, and
+   * it would answer normally, so the change would look like it had not
+   * happened.
+   *
+   * Hence a migration, and hence a flag rather than a check on every read:
+   * run every time, it would also bounce a user who deliberately typed
+   * `/model gemini-3.5-flash` back off it at the next restart, which is the
+   * opposite of leaving the door open.
+   */
+  movedOffGoogle: boolean
   /** Let the model propose opening a page in the real browser. */
   browserEnabled: boolean
   /**

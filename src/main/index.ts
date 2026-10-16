@@ -149,6 +149,28 @@ function activeModel(): string {
   return chosen && isCloudModel(chosen) ? chosen : DEFAULT_MODEL
 }
 
+/**
+ * The one-time move off Google, when it left the picker.
+ *
+ * `providerFor` still routes `gemini-*`, deliberately - a name typed by hand
+ * has always worked and still should. The cost of that is a settings file
+ * holding gemini-3.1-flash-lite, which answers perfectly well, so removing
+ * Google from the list would have changed nothing for the one person whose
+ * settings already named one.
+ *
+ * Once, therefore, and remembered: a user who later types a Gemini name on
+ * purpose keeps it through every restart after this.
+ */
+function moveOffGoogle(): void {
+  if (settings.get('movedOffGoogle')) return
+  const chosen = settings.get('model')
+  const wasGoogle = chosen ? providerFor(chosen) === 'google' : false
+  settings.patch({ movedOffGoogle: true, ...(wasGoogle ? { model: DEFAULT_MODEL } : {}) })
+  if (wasGoogle) {
+    console.log(`[wumpy] moved off ${chosen}: Google is no longer offered, now ${DEFAULT_MODEL}`)
+  }
+}
+
 function resolveModel(): string | null {
   const model = activeModel()
   return cloud?.ready(model).ok ? model : null
@@ -291,9 +313,17 @@ function promptShape(
     search: settings.get('searchEnabled'),
     screen: settings.get('screenEnabled'),
     browser: settings.get('browserEnabled'),
-    /* Only when there is a pool to talk about: a local-only install has no
-       quota and a sentence about keys would be noise. */
-    quota: keys.count('google') > 0,
+    /*
+     * Only when there is a pool to talk about, and only when the model being
+     * answered with is actually counted that way.
+     *
+     * It used to ask whether any Google key existed, which was the same
+     * question while Google was the only thing offered. It is not now: on
+     * NVIDIA the budget is per minute with no daily allowance to run out, so
+     * five lines about rotating daily keys and `/usage` would be advice
+     * about a limit this turn cannot hit - paid for on every single turn.
+     */
+    quota: providerFor(activeModel()) === 'google' && keys.count('google') > 0,
     needs,
     /* An environment variable as well, because the benchmarks set it and a
        bench should not have to write the user's settings file to run. */
@@ -1356,6 +1386,9 @@ void app.whenReady().then(async () => {
   if (!isPrimary) return
 
   settings = new SettingsStore()
+  /* Before anything reads the model: the panel, the tray and the status all
+     ask for it during this same boot. */
+  moveOffGoogle()
   chats = new ChatStore()
   inputHistory = new InputHistory()
   keys = new KeyStore()

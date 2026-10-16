@@ -180,8 +180,22 @@ check('and is zero padded', U.todayKey(new Date(2026, 10, 1)), '2026-11-01')
  * 3.5 is the better model and is one /model away. It is not the better
  * DEFAULT, because the best default is the one that answers.
  */
-check('there is one model, and it is the chosen one', T.DEFAULT_MODEL, 'gemini-3.1-flash-lite')
-check('it is a model the cloud layer can route', C.providerFor(T.DEFAULT_MODEL), 'google')
+/*
+ * Changed again on 15 October, when Google left the picker entirely. The
+ * reasoning above still decides it - the best default is the one that
+ * answers - and the measurements moved: Nemotron 3 Super scored 9/10 on ten
+ * ladder rungs at two runs each and answered in 907ms against Flash-Lite's
+ * 2,278ms, on a budget counted per minute rather than 25 requests a day.
+ *
+ * It does need a key, which Flash-Lite also did. What it cannot do is see,
+ * so a look comes back as the control list; the only keyless entry is
+ * gemma4:31b-cloud, one /model away.
+ */
+check('there is one model, and it is the chosen one', T.DEFAULT_MODEL, 'nvidia/nemotron-3-super-120b-a12b')
+check('it is a model the cloud layer can route', C.providerFor(T.DEFAULT_MODEL), 'nvidia')
+/* The default must never be one counted per day: that was the whole lesson
+   of 13 October, when every Flash refused on all eighteen keys at once. */
+check('and not one counted per day', C.providerFor(T.DEFAULT_MODEL) === 'google', false)
 check(
   'and one the picker offers',
   C.CLOUD_MODELS.some((m) => m.id === T.DEFAULT_MODEL),

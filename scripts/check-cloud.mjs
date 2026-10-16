@@ -576,11 +576,21 @@ check(
   C.CLOUD_MODELS.every((m) => C.providerFor(m.id) === m.provider),
   true
 )
+/*
+ * Google left the picker, so the 3.8-flash blurb is no longer in it. What
+ * replaces that assertion is the reason it existed: a model whose budget is
+ * worth knowing before you pick it must say so in the list. Every entry now
+ * names either its score or its cost.
+ */
 check(
-  'and the 25-a-day one says so',
-  C.CLOUD_MODELS.find((m) => m.id === 'gemini-3.8-flash').blurb.includes('25'),
+  'every blurb says what it scored or what it costs',
+  C.CLOUD_MODELS.every((m) => /\d/.test(m.blurb)),
   true
 )
+check('and no Gemini is offered', C.CLOUD_MODELS.some((m) => m.provider === 'google'), false)
+/* The routing rule stays, so a name typed by hand still reaches Google -
+   which is what makes this reversible rather than a deletion. */
+check('but one typed by hand still routes', C.providerFor('gemini-3.1-flash-lite'), 'google')
 
 /* ------------------------------------------------------- the billed thinking */
 
@@ -635,16 +645,24 @@ check(
   ),
   true
 )
-// 25 requests a day is not something to land on by default.
+// A daily cap is not something to land on by default, and now nothing in
+// the fallback map has one at all.
 check(
-  'never the 25-a-day model',
-  Object.values(C.FALLBACK_CLOUD_MODEL).includes('gemini-3.8-flash'),
+  'never a model counted per day',
+  Object.values(C.FALLBACK_CLOUD_MODEL).some((m) => C.providerFor(m) === 'google'),
   false
 )
 check(
-  'the acting tiers get the one that scored 8/8',
+  'the acting tiers get one that scored 9/10',
   C.FALLBACK_CLOUD_MODEL.thinker,
-  'gemini-3.5-flash'
+  'deepseek-ai/deepseek-v4.1-flash'
+)
+/* Every fallback has to be something the picker actually offers, or a tier
+   falls through to a name the user cannot see or select. */
+check(
+  'and every fallback is in the catalogue',
+  Object.values(C.FALLBACK_CLOUD_MODEL).every((m) => C.CLOUD_MODELS.some((c) => c.id === m)),
+  true
 )
 
 /* ------------------------------------------------- the key never comes back */
@@ -742,27 +760,24 @@ check('and it does not claim the day is gone', perMin.message.includes('today'),
 // The cap is per model - the quota id says PerModel, and it was measured:
 // gemini-3.5-flash refused with 14.5h to go while flash-lite and 3.8-flash
 // answered on the same key in the same minute.
-check(
-  'a spent model has a sibling to try',
-  C.siblingModel('gemini-3.5-flash', new Set()),
-  'gemini-3.6-flash'
-)
-check(
-  'never itself',
-  C.siblingModel('gemini-3.1-flash-lite', new Set()) !== 'gemini-3.1-flash-lite',
-  true
-)
+/* Now read against NVIDIA, which is where the shipped models live. The rule
+   is unchanged and so is the reason for it: a model refused or busy should
+   step sideways rather than end the turn. */
+const SUPER = 'nvidia/nemotron-3-super-120b-a12b'
+check('a spent model has a sibling to try', typeof C.siblingModel(SUPER, new Set()), 'string')
+check('never itself', C.siblingModel(SUPER, new Set()) !== SUPER, true)
 check(
   'nor one already known to be spent',
-  C.siblingModel('gemini-3.5-flash', new Set(['gemini-3.6-flash'])),
-  'gemini-3.7-flash'
+  C.siblingModel(SUPER, new Set([C.siblingModel(SUPER, new Set())])) !==
+    C.siblingModel(SUPER, new Set()),
+  true
 )
 check('nor does a Groq model', C.siblingModel('openai/gpt-oss-120b', new Set()), null)
 // A shipped model still finds one, and stays with its provider.
 check(
   'a shipped model stays with its provider',
-  C.providerFor(C.siblingModel('gemini-3.5-flash', new Set())),
-  'google'
+  C.providerFor(C.siblingModel(SUPER, new Set())),
+  'nvidia'
 )
 check(
   'and gives up when every one is spent',
