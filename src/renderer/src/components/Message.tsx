@@ -14,6 +14,7 @@ import type { LinkApproval } from '@shared/links'
 import { sizeLabel } from '@shared/attach'
 import { inlineCode } from '@shared/notify'
 import { foldLabel, foldWorking } from '@shared/working'
+import { claimsBeforeRunning, NOT_YET_LINE } from '@shared/finished'
 import { Markdown } from './Markdown'
 import { AskCard } from './AskCard'
 import { useSmoothText } from '../hooks/useSmoothText'
@@ -318,6 +319,17 @@ export const Message = memo(function Message({
             ? 'The provider stopped this answer part-way.'
             : 'This hit the length limit and stopped part-way. Say “carry on” for the rest.'}
         </div>
+      )}
+
+      {/* A message that proposes a command and then says it worked.
+          Reported three times: "it still falsely claims that it's finished
+          when it's not ... when it's still running like a code". The words
+          after a block are written before the block runs, so the claim is
+          false at the moment it appears - and the prompt asking the model
+          not to has not been enough. Shown once the message is complete,
+          because a sentence half-arrived is not yet a claim. */}
+      {!message.error && !animating && message.role === 'assistant' && claimsBeforeRunning(shown) && (
+        <div className="msg-cutoff">{NOT_YET_LINE}</div>
       )}
     </div>
   )

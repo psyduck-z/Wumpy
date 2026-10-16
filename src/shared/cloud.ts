@@ -292,6 +292,33 @@ export interface CloudModel {
    * question about syntax.
    */
   looseFences?: boolean
+  /** What it scored here, when it has been measured. See Measured. */
+  measured?: Measured
+}
+
+/**
+ * What a model scored on this machine, as a number rather than a sentence.
+ *
+ * It was in the blurb - "9/10 on the ladder and 907ms" - which reads fine
+ * and cannot be sorted, compared or kept honest. Four models said 9/10 and
+ * the list was in the order someone typed them.
+ *
+ * `of` and `runs` are here because a score without them is not a score. Ten
+ * rungs at one run apiece put nemotron-3-ultra at 10/10; the same ten at two
+ * runs put it at 9/10, because L23 passes about half the time. A number that
+ * does not say how hard it was measured invites exactly that mistake.
+ */
+export interface Measured {
+  /** Ladder rungs answered cleanly on every run. */
+  clean: number
+  /** Rungs attempted. The full ladder is 41; a sample is fewer. */
+  of: number
+  /** Runs per rung. One is a sample, two is a measurement. */
+  runs: number
+  /** Median ms to a complete short answer at Wumpy's real preamble. */
+  medianMs: number
+  /** When, so a stale number is visibly stale rather than quietly wrong. */
+  on: string
 }
 
 export const CLOUD_MODELS: CloudModel[] = [
@@ -335,13 +362,15 @@ export const CLOUD_MODELS: CloudModel[] = [
     id: 'nvidia/nemotron-3-super-120b-a12b',
     provider: 'nvidia',
     label: 'Nemotron 3 Super 120B',
-    blurb: '9/10 on the ladder and 907ms — faster than Flash Lite, no daily cap. Start here.'
+    blurb: '32/41 on the full ladder, 0.9s, no daily cap.',
+    measured: { clean: 32, of: 41, runs: 1, medianMs: 907, on: '2026-10-16' }
   },
   {
     id: 'deepseek-ai/deepseek-v4.1-flash',
     provider: 'nvidia',
     label: 'DeepSeek V4.1 Flash',
-    blurb: '9/10, 1.3s, and it cached 99.8% of the preamble. The other one to try.'
+    blurb: '39/41 on the full ladder — the best measured here. 1.3s, no daily cap.',
+    measured: { clean: 39, of: 41, runs: 1, medianMs: 1256, on: '2026-10-16' }
   },
   {
     id: 'nvidia/nemotron-3-ultra-550b-a55b',
@@ -369,7 +398,8 @@ export const CLOUD_MODELS: CloudModel[] = [
     id: 'gemma4:31b-cloud',
     provider: 'ollama',
     label: 'Gemma 4 31B (Ollama cloud)',
-    blurb: '8/10 and 967ms, on your Ollama account. No key and no Wumpy quota.'
+    blurb: '35/41 on the full ladder, 1.0s. Your Ollama account — no key, no Wumpy quota.',
+    measured: { clean: 35, of: 41, runs: 1, medianMs: 967, on: '2026-10-16' }
   }
 ]
 
@@ -381,6 +411,69 @@ export const CLOUD_MODELS: CloudModel[] = [
  * the colon, which is what separates `qwen2.5-coder:14b` from
  * `openai/gpt-oss-120b`.
  */
+/** A catalogue entry with its place in the measured order. */
+export interface Ranked {
+  model: CloudModel
+  /** 1 is best. Null when the model has never been measured here. */
+  rank: number | null
+}
+
+/**
+ * The catalogue in measured order, best first.
+ *
+ * Score decides, then speed breaks the tie - which is the right way round
+ * for this app and worth saying why. A wrong answer costs the user the turn
+ * and then another turn correcting it; a slow right answer costs seconds.
+ * But four models scored within a rung of each other, so speed is doing most
+ * of the separating in practice, and at a desktop step every turn is a step.
+ *
+ * Unmeasured entries keep their catalogue position and get no rank, rather
+ * than being sorted to the bottom as though they had scored zero.
+ */
+export function rankedModels(models: readonly CloudModel[] = CLOUD_MODELS): Ranked[] {
+  const share = (m: CloudModel): number =>
+    m.measured && m.measured.of > 0 ? m.measured.clean / m.measured.of : -1
+
+  const order = models
+    .filter((m) => m.measured)
+    .slice()
+    .sort((a, b) => share(b) - share(a) || (a.measured!.medianMs - b.measured!.medianMs))
+
+  const place = new Map(order.map((m, i) => [m.id, i + 1]))
+  return models.map((model) => ({ model, rank: place.get(model.id) ?? null }))
+}
+
+/** What the badge beside a model's name says, and how loudly. */
+export interface ModelTag {
+  text: string
+  tone: 'top' | 'good' | 'fair' | 'weak'
+  /** The whole measurement, for the tooltip. */
+  title: string
+}
+
+/**
+ * The badge for one model.
+ *
+ * Rank and raw score together: the rank answers "which is the good one"
+ * at a glance and the score keeps it honest, because #1 of a bad field is
+ * still #1. The bands are drawn where the measurements actually fall rather
+ * than at round numbers.
+ */
+export function modelTag(model: CloudModel, rank: number | null): ModelTag | null {
+  const m = model.measured
+  if (!m || !rank) return null
+  const share = m.of > 0 ? m.clean / m.of : 0
+  const tone = rank === 1 ? 'top' : share >= 0.8 ? 'good' : share >= 0.6 ? 'fair' : 'weak'
+  const seconds = m.medianMs >= 10_000 ? `${Math.round(m.medianMs / 1000)}s` : `${(m.medianMs / 1000).toFixed(1)}s`
+  return {
+    text: `#${rank} · ${m.clean}/${m.of}`,
+    tone,
+    title:
+      `${m.clean} of ${m.of} ladder rungs clean at ${m.runs} run${m.runs === 1 ? '' : 's'} each, ` +
+      `${seconds} median to a short answer. Measured ${m.on}.`
+  }
+}
+
 export function providerFor(model: string): ProviderId | null {
   const name = (model ?? '').trim()
   if (!name) return null

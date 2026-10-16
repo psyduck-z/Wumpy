@@ -1512,6 +1512,43 @@ body {
   color: rgb(var(--muted));
 }
 
+/*
+ * The rank badge beside a model's name.
+ *
+ * The list is chosen from by how good each one is, and that was a clause in
+ * the middle of a sentence. Four bands rather than a gradient, because the
+ * eye is being asked "which of these is the good one" and not "what exactly
+ * did it score" - the number is in the badge for anyone who wants it and
+ * the whole measurement is in the tooltip.
+ */
+.picker-tag {
+  margin-left: 6px;
+  padding: 1px 5px;
+  border-radius: 999px;
+  font-family: var(--mono);
+  font-size: 9px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  vertical-align: 1px;
+  white-space: nowrap;
+  /* Tinted from the row's own colours so it works in both themes without a
+     second set of values under prefers-color-scheme. */
+  background: rgb(var(--muted) / 0.14);
+  color: rgb(var(--muted));
+}
+.picker-tag.is-top {
+  background: rgb(var(--accent) / 0.18);
+  color: rgb(var(--accent-text));
+}
+.picker-tag.is-good {
+  background: rgb(var(--accent) / 0.1);
+  color: rgb(var(--accent-text) / 0.85);
+}
+.picker-tag.is-weak {
+  background: rgb(var(--danger) / 0.12);
+  color: rgb(var(--danger));
+}
+
 .picker-del {
   width: 30px;
   background: none;

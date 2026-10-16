@@ -5,6 +5,14 @@ export interface PickerItem {
   title: string
   /** Secondary line under the title. */
   meta?: string
+  /**
+   * A short badge beside the title, for a fact worth seeing before reading.
+   *
+   * Added for the model list, where the thing being chosen between is how
+   * good each one is and that was buried mid-sentence in `meta`. `tone`
+   * colours it by band so the order is visible without reading any of them.
+   */
+  tag?: { text: string; tone: 'top' | 'good' | 'fair' | 'weak'; title?: string }
   /** Right-aligned hint, such as a keyboard shortcut. */
   hint?: string
   /** Greyed out and not selectable. */
@@ -168,6 +176,11 @@ export function Picker({
               >
                 <span className="picker-title">
                   {item.title}
+                  {item.tag && (
+                    <span className={`picker-tag is-${item.tag.tone}`} title={item.tag.title}>
+                      {item.tag.text}
+                    </span>
+                  )}
                   {item.active && <span className="picker-dot" title="Current" />}
                 </span>
                 {item.meta && <span className="picker-meta">{item.meta}</span>}

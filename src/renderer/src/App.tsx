@@ -40,7 +40,7 @@ import {
 import { refusedAttachment, sendsBytes, withoutBytes } from '@shared/attach'
 import { needsFor } from '@shared/needs'
 import { shouldRetitle } from '@shared/titles'
-import { CLOUD_MODELS, PROVIDERS, seesMedia } from '@shared/cloud'
+import { CLOUD_MODELS, PROVIDERS, modelTag, rankedModels, seesMedia } from '@shared/cloud'
 import { useChat, nextId, type ChatStats } from './hooks/useChat'
 import {
   allCommands,
@@ -2299,15 +2299,26 @@ function namedControls(shot: Attachment): string[] {
       const usable = (p: (typeof CLOUD_MODELS)[number]['provider']): boolean =>
         PROVIDERS[p].keyless || (keyStatus?.configured.includes(p) ?? false)
 
-      const cloudItems = CLOUD_MODELS.map((m) => {
-        const ready = usable(m.provider)
-        return {
-          id: m.id,
-          title: m.label,
-          meta: `${PROVIDERS[m.provider].label}  ·  ${ready ? m.blurb : 'needs a key — /key ' + m.provider}`,
-          active: m.id === current
-        }
-      })
+      /*
+       * Ordered by what each one scored, not by the order they were typed
+       * into the catalogue, and badged with its place. The thing being
+       * chosen between here IS how good they are, and that used to be a
+       * clause halfway through the blurb.
+       */
+      const cloudItems = rankedModels()
+        .slice()
+        .sort((a, b) => (a.rank ?? 99) - (b.rank ?? 99))
+        .map(({ model: m, rank }) => {
+          const ready = usable(m.provider)
+          const tag = modelTag(m, rank)
+          return {
+            id: m.id,
+            title: m.label,
+            meta: `${PROVIDERS[m.provider].label}  ·  ${ready ? m.blurb : 'needs a key — /key ' + m.provider}`,
+            ...(tag ? { tag } : {}),
+            active: m.id === current
+          }
+        })
 
       return {
         heading: 'Model',

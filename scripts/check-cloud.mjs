@@ -919,3 +919,63 @@ check(
 
 console.log(failures ? `\n${failures} cloud checks FAILED` : '\nall cloud checks')
 process.exitCode = failures ? 1 : 0
+
+/* ------------------------------------------------- the rank beside the name */
+
+/**
+ * The list is chosen from by how good each model is, so that belongs in the
+ * row rather than mid-sentence in a blurb - asked for as "a tag of how smart
+ * they are in the rankings".
+ *
+ * What these defend is that the badge cannot lie. A score is a number with
+ * `of` and `runs` beside it, because the same model scored 10/10 on ten rungs
+ * at one run and 9/10 on the same ten at two; and the order on screen is
+ * computed from those numbers rather than typed, so it cannot drift from them.
+ */
+const ranked = C.rankedModels()
+check('every catalogue model is ranked or explicitly not', ranked.length, C.CLOUD_MODELS.length)
+
+const measured = ranked.filter((r) => r.model.measured)
+check('the measured ones all have a place', measured.every((r) => r.rank !== null), true)
+check('and the places are 1..n with no gaps', new Set(measured.map((r) => r.rank)).size, measured.length)
+check('someone is first', measured.some((r) => r.rank === 1), true)
+
+/* Score decides, speed breaks the tie - asserted on the real catalogue so a
+   future edit that sorts by speed alone is caught. */
+const byRank = measured.slice().sort((a, b) => a.rank - b.rank)
+for (let i = 1; i < byRank.length; i++) {
+  const prev = byRank[i - 1].model.measured
+  const here = byRank[i].model.measured
+  const better = prev.clean / prev.of > here.clean / here.of
+  const same = prev.clean / prev.of === here.clean / here.of
+  check(
+    `#${i} is not beaten by #${i + 1}`,
+    better || (same && prev.medianMs <= here.medianMs),
+    true
+  )
+}
+
+/* A measurement with no `of` is not a measurement; a share over 1 is a typo
+   that would sort to the top and be believed. */
+for (const m of C.CLOUD_MODELS.filter((m) => m.measured)) {
+  const x = m.measured
+  check(`${m.id} scored out of something`, x.of > 0 && x.clean <= x.of, true)
+  check(`${m.id} says how many runs`, x.runs >= 1, true)
+  check(`${m.id} says when`, /^\d{4}-\d{2}-\d{2}$/.test(x.on), true)
+}
+
+/* A catalogue with no measurements at all would pass every check above by
+   having nothing to check, which is the shape of a feature that quietly
+   stopped being maintained. */
+check('the catalogue actually carries measurements', measured.length > 0, true)
+
+const top = C.modelTag(byRank[0].model, 1)
+check('the badge names the place and the score', /^#1 · \d+\/\d+$/.test(top.text), true)
+check('and the best one is coloured as the best', top.tone, 'top')
+check('the tooltip carries how hard it was measured', /run/.test(top.title) && /rungs/.test(top.title), true)
+/* An unmeasured model gets no badge at all, rather than a confident blank. */
+check('an unmeasured model gets no badge', C.modelTag({ id: 'x', provider: 'nvidia', label: 'x', blurb: 'x' }, null), null)
+
+const renderer = readFileSync('src/renderer/src/App.tsx', 'utf8')
+check('the picker orders by the measured rank', /rankedModels\(\)/.test(renderer), true)
+check('and shows the badge', /modelTag\(m, rank\)/.test(renderer), true)
