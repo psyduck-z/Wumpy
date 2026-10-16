@@ -653,7 +653,42 @@ internal static class Program
     /// not take the hook down with it - without the hook, the hotkey stops
     /// working altogether, which is far worse than a panel that opens deaf.
     /// </summary>
-    private static void Activate(IntPtr hwnd)
+    private static void Activate(IntPtr hwnd) => Raiser(hwnd, report: true).Start();
+
+    /// <summary>
+    /// The same activation, done now, with an answer.
+    /// </summary>
+    /// <remarks>
+    /// A PLAN NEEDS THIS AS MUCH AS THE PANEL DOES, and for a reason that took
+    /// a day of empty compose windows to see: characters follow the FOREGROUND
+    /// window, and the window a plan acts on is deliberately not it.
+    ///
+    /// `Target` walks under Wumpy's own panel on purpose, so every UIA call -
+    /// press, select, read - lands in the user's window while the panel keeps
+    /// the keyboard. That is right for all of them except the one that is
+    /// about the keyboard. FOCUS set the UIA focus in a background Edge,
+    /// Chromium honoured it and reported HasKeyboardFocus=true, and the
+    /// ctrl+a and ctrl+v that followed went to whatever was actually in front.
+    /// "The characters went somewhere else" was literally true.
+    ///
+    /// Silent, because this runs inside a FOCUS and the reply to a command is
+    /// one line; what happened is reported there as `fg=`. Bounded, because
+    /// the caller is a command the app is waiting on, and joined with a
+    /// timeout for the same reason the panel's copy runs on a thread: a
+    /// SetForegroundWindow across merged input queues can block, and a wedge
+    /// here must cost one slow step rather than the hotkey.
+    /// </remarks>
+    internal static bool RaiseNow(IntPtr hwnd, int ms)
+    {
+        if (hwnd == IntPtr.Zero) return false;
+        if (GetForegroundWindow() == hwnd) return true;
+        var worker = Raiser(hwnd, report: false);
+        worker.Start();
+        worker.Join(ms);
+        return GetForegroundWindow() == hwnd;
+    }
+
+    private static Thread Raiser(IntPtr hwnd, bool report)
     {
         var worker = new Thread(() =>
         {
@@ -665,6 +700,7 @@ internal static class Program
             {
                 if (hwnd == IntPtr.Zero || !IsWindowVisible(hwnd))
                 {
+                    if (!report) return;
                     Console.WriteLine("ACTIVATE skipped window-not-visible");
                     Console.Out.Flush();
                     return;
@@ -722,6 +758,7 @@ internal static class Program
                 // not the same as the one that worked. Wumpy's own show() may
                 // have won the foreground before any of this ran, and a label
                 // claiming otherwise is how five fixes came to be believed.
+                if (!report) return;
                 Console.WriteLine(
                     $"ACTIVATE {(won ? "ok" : "FAILED")} after={after} " +
                     $"attempts={attempts} joined={joined} setfg={returned} err={error}");
@@ -729,12 +766,13 @@ internal static class Program
             }
             catch (Exception err)
             {
+                if (!report) return;
                 Console.WriteLine($"ACTIVATE error {err.GetType().Name}");
                 Console.Out.Flush();
             }
         })
         { IsBackground = true, Name = "activate" };
-        worker.Start();
+        return worker;
     }
 
     /* ------------------------------------------------------------- self-test */
@@ -1190,6 +1228,7 @@ internal static class Program
      */
     private static void Type(string text)
     {
+        if (!Keyboard(out var why)) { Console.WriteLine($"TYPE FAILED {why}"); return; }
         var events = new List<INPUT>(text.Length * 2);
         foreach (var unit in text)
         {
@@ -1219,6 +1258,38 @@ internal static class Program
                 : $"TYPE FAILED sent={sent}/{arr.Length} err={Marshal.GetLastWin32Error()}");
     }
 
+    /// <summary>
+    /// Refuses to type while Wumpy's own panel holds the keyboard.
+    /// </summary>
+    /// <remarks>
+    /// SendInput goes to the foreground window, whatever any step thought it
+    /// was aiming at. The panel is usually the foreground window - the user
+    /// summons it, types a request and presses Enter - so a plan that types
+    /// without focusing first types into the panel, and the report says ok
+    /// because the characters really were sent.
+    ///
+    /// That is how "stanley" ended up anywhere but the To field. The guard is
+    /// on the last step before the keys leave, rather than on the step that
+    /// should have focused, because this is the only place that knows where
+    /// they will actually land.
+    ///
+    /// FOCUS and FILL now bring the window forward themselves, so this fires
+    /// only for a plan that types at a window it never focused - which is the
+    /// case worth refusing rather than performing.
+    /// </remarks>
+    private static bool Keyboard(out string why)
+    {
+        if (!UiTree.ForegroundIsOurs())
+        {
+            why = string.Empty;
+            return true;
+        }
+        why = "wumpy-has-the-keyboard - Wumpy's own panel is in front, so these characters would " +
+              "be typed into it, not into the window you mean. Focus the box first (focus, or " +
+              "fill which does both), which brings that window forward.";
+        return false;
+    }
+
     /// <summary>The named keys that are not characters, plus modifiers.</summary>
     private static readonly Dictionary<string, ushort> NamedKeys = new(StringComparer.OrdinalIgnoreCase)
     {
@@ -1234,6 +1305,7 @@ internal static class Program
     /// <summary>A chord: "ctrl+a", "alt+tab", "enter". Modifiers held, last key tapped.</summary>
     private static void Key(string chord)
     {
+        if (!Keyboard(out var why)) { Console.WriteLine($"KEY FAILED {why}"); return; }
         var parts = chord.Split('+', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
         var codes = new List<ushort>();
         foreach (var part in parts)

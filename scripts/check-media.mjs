@@ -119,6 +119,23 @@ check('and so can the lite one', C.seesMedia('gemini-3.1-flash-lite'), true)
 check('codestral cannot', C.seesMedia('codestral-latest'), false)
 check('nor can a Groq model', C.seesMedia('openai/gpt-oss-120b'), false)
 check('and nothing is not a model', C.seesMedia(''), false)
+/*
+ * SEEING IS A PROPERTY OF THE MODEL, NOT OF ITS PROVIDER. It was "is it a
+ * Gemini", which was true of everything offered until Google came out of
+ * the picker and the catalogue had no eyes left in it at all: "an annoying
+ * thing is that the model does not support images".
+ *
+ * So the catalogue decides, and the Gemini rule stays underneath it for a
+ * name typed in by hand - the entries are gone, the routing is not.
+ */
+check('the vision model on NVIDIA can see', C.seesMedia('nvidia/nemotron-3.5-super-vl-120b-a12b'), true)
+check('its text-only neighbour cannot', C.seesMedia('deepseek-ai/deepseek-v4.1-flash'), false)
+check('nor can the one it is named after', C.seesMedia('nvidia/nemotron-3-super-120b-a12b'), false)
+check(
+  'the catalogue marks exactly the models that were proved by asking',
+  C.CLOUD_MODELS.filter((m) => m.sees).map((m) => m.id),
+  ['nvidia/nemotron-3.5-super-vl-120b-a12b']
+)
 
 /* ------------------------------------------------------- the shape on the wire */
 

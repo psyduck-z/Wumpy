@@ -292,6 +292,16 @@ export interface CloudModel {
    * question about syntax.
    */
   looseFences?: boolean
+  /**
+   * It can read a picture, so a screenshot is worth sending.
+   *
+   * Only set where it has been proven by asking: a 64x64 image, red on the
+   * left and blue on the right, and a question only the pixels answer. A
+   * model that is listed as vision-language and answers from the words
+   * around the image would be worse than one that cannot see at all, since
+   * the bytes would be paid for and the answer invented.
+   */
+  sees?: boolean
   /** What it scored here, when it has been measured. See Measured. */
   measured?: Measured
 }
@@ -339,11 +349,11 @@ export const CLOUD_MODELS: CloudModel[] = [
    *   gemini-3.8-flash        5/10  11,023ms   ~25 requests a day
    *   gemini-3.1-pro          -        429     limit: 0 on all four meters
    *
-   * The one real loss is eyes: seesMedia is Google-only, so with no Gemini
-   * selected nothing in the picker can read a picture. A look comes back as
-   * the control list instead, which drives the desktop by name perfectly
-   * well and cannot answer "what does this look like". That is the trade,
-   * and it is the user's to make.
+   * Eyes were the one real loss, and they are back without Google: see the
+   * VL entry below, which is the only model here that can read a picture.
+   * Everything else in this list is text-only, so a look on those comes back
+   * as the control list - enough to drive the desktop by name, not enough to
+   * answer "what does this look like".
    */
   /* --- NVIDIA, measured 15 October 2026 ----------------------------------
    *
@@ -353,10 +363,10 @@ export const CLOUD_MODELS: CloudModel[] = [
    * correctness and speed - on a budget counted per MINUTE rather than per
    * day, which is the part that matters when every desktop step is a turn.
    *
-   * None of them can see. `seesMedia` is Google-only, so a screenshot is
-   * dropped on the way out and a look comes back as the control list
-   * instead. That is enough to drive the desktop by name and not enough to
-   * answer "what does this look like".
+   * Only the VL one can see. On the rest a screenshot is dropped on the way
+   * out and a look comes back as the control list instead - enough to drive
+   * the desktop by name and not enough to answer "what does this look
+   * like".
    */
   {
     id: 'nvidia/nemotron-3-super-120b-a12b',
@@ -385,13 +395,45 @@ export const CLOUD_MODELS: CloudModel[] = [
     blurb: '38/41 on the full ladder — second only to DeepSeek. But 15s a turn.',
     measured: { clean: 38, of: 41, runs: 1, medianMs: 14882, on: '2026-10-16' }
   },
+  /*
+   * THE ONE THAT CAN SEE, and the reason this entry exists at all.
+   *
+   * "an annoying thing is that the model does not support images, sooo,
+   * yea. its pretty smart at least." Removing Google took the eyes out of
+   * the picker, which was named at the time as the trade; this puts them
+   * back without putting Google back.
+   *
+   * Proven rather than assumed. NVIDIA's catalogue lists several vision
+   * models and being listed is not evidence, so it was asked: a 64x64
+   * image, red on the left and blue on the right, and "which colour fills
+   * the left half?". It answered correctly in 2.3 seconds. Two of the older
+   * ones were tried the same way and are not here.
+   *
+   * Two full ladders rather than one, because the first run hit a 500 and a
+   * 502 from the gateway - infrastructure, not the model, so those rungs are
+   * not counted as failures. Clean on BOTH runs: 36. Run two alone was 38.
+   *
+   * And it is the fastest thing in this list: 859ms median at Wumpy's real
+   * 14,212-token preamble, of which 13,008 came back cached.
+   */
+  {
+    id: 'nvidia/nemotron-3.5-super-vl-120b-a12b',
+    provider: 'nvidia',
+    label: 'Nemotron 3.5 Super VL 120B',
+    sees: true,
+    blurb: 'The only one here that can read a picture. 36/41 on two full ladders, 0.9s — the fastest measured.',
+    measured: { clean: 36, of: 41, runs: 2, medianMs: 859, on: '2026-10-16' }
+  },
   {
     id: 'z-ai/glm-5.3',
     provider: 'nvidia',
     label: 'GLM 5.3',
-    // The index said it was the best free model there is. Measured here it
-    // is second to last, and 88 seconds is not a turn anyone sits through.
-    blurb: '5/10 and 88 SECONDS a turn. Listed so the measurement is visible.'
+    // The index said it was the best free model there is. The full ladder
+    // puts it below its own Flash sibling - 33 against 38 - and 88 seconds
+    // is not a turn anyone sits through. Listed so the measurement is
+    // visible rather than folklore.
+    blurb: '33/41 and 88 SECONDS a turn — worse than its own Flash, and slowest here.',
+    measured: { clean: 33, of: 41, runs: 1, medianMs: 87934, on: '2026-10-16' }
   },
 
   /* --- the user's own Ollama account ------------------------------------- */
@@ -660,12 +702,17 @@ export function wireText(content: string | WirePart[]): string {
 /**
  * Whether this model can look at a picture or a clip.
  *
- * Every model Wumpy offers is a Gemini and all of them can, video included:
- * measured, a three-second mp4 sent as a data URL came back correctly
- * through the same endpoint and the same part shape as an image. The other
- * three providers are still wired up - their keys keep working if you have
- * one - and the models on them are text only, so an image sent to one is a
- * 400 that costs the whole turn rather than a request that works less well.
+ * It was "is it a Gemini", which was true of every model offered and stopped
+ * being true twice over: Google came out of the picker, and then an NVIDIA
+ * vision-language model went in. Reported, reasonably: "an annoying thing is
+ * that the model does not support images".
+ *
+ * So the catalogue answers, and `sees` is a property of the model rather
+ * than of its provider - which is what it always was. Google keeps answering
+ * by provider underneath, because every Gemini can see, video included
+ * (measured: a three-second mp4 as a data URL came back correctly through
+ * the same part shape as an image), and because a `gemini-` name typed in by
+ * hand is not in the catalogue any more and must still work.
  *
  * This is asked before the paste is accepted, not after: refusing to attach
  * and saying why is a missing feature, while attaching and quietly dropping
@@ -673,7 +720,9 @@ export function wireText(content: string | WirePart[]): string {
  * asked.
  */
 export function seesMedia(model: string): boolean {
-  return Boolean(model) && providerFor(model) === 'google'
+  if (!model) return false
+  if (CLOUD_MODELS.find((m) => m.id === model)?.sees) return true
+  return providerFor(model) === 'google'
 }
 
 /**

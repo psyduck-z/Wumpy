@@ -694,8 +694,25 @@ check('reveal is preferred over the wheel', /prefer reveal/.test(desktop), true)
   check('and fill aims the keyboard for what follows', plan('fill "To" a', 'key tab').steps.length, 2)
 }
 
-check('fill focuses, selects, pastes and reads back', /FOCUS \$\{named\}[\s\S]{0,2000}KEY ctrl\+a[\s\S]{0,400}pasteText[\s\S]{0,400}readValue/.test(inputSrc), true)
+check('fill focuses, selects, pastes and reads back', /focusNamed\(step\.name[\s\S]{0,3000}KEY ctrl\+a[\s\S]{0,400}pasteText[\s\S]{0,400}readValue/.test(inputSrc), true)
 check('a focus that did not take stops it', /focused=no/.test(inputSrc), true)
+/*
+ * ONE CLICK, THEN STOP. The recovery a person would do, and the loop it
+ * must not become: the Gmail log is six steps that each repeat the one
+ * before, which is what the user saw as "it keeps on missing the TO fillin
+ * box".
+ *
+ * The coordinates come from the helper's own reply - UI Automation measured
+ * them - rather than from a model estimating off a scaled screenshot, which
+ * is the thing this whole file exists to replace.
+ */
+check('a box that will not take the caret is clicked', /CLICK \$\{at\[1\]\} \$\{at\[2\]\}/.test(inputSrc), true)
+check('through the panel, which sits over that half of the screen', /throughThePanel\(panel, \(\) => send\(`CLICK/.test(inputSrc), true)
+check('once, not in a loop', (inputSrc.match(/FOCUS \$\{named\}/g) ?? []).length, 2)
+check('and the second refusal says to stop trying', /Do not try this box again/.test(inputSrc), true)
+/* focus and fill share it, because a plan that focuses and then types has
+   exactly the same problem as one that fills. */
+check('a bare focus gets the same recovery', /focusNamed\(step\.name, panel, send\)/.test(inputSrc), true)
 /* fill presses ctrl+a and pastes over the selection. That is right in a text
    field and destructive anywhere else - a message list, somebody's open
    document - so the role is checked before anything is selected. */
@@ -761,8 +778,38 @@ check('the nearest match is taken, not the first by name', /bestGap <= 4/.test(u
 check('typeable controls are listed first', /"Edit" or "ComboBox" => 0/.test(uia), true)
 check('and duplicate names do not fill the cap', /\.GroupBy\(f => \$"\{f\.Role\}/.test(uia), true)
 check('focus prefers the box over the label beside it', /preferEditable: focusOnly/.test(uia), true)
-check('and reported either way', /focused=\{TakeFocus\(el\)\}/.test(uia), true)
-check('the window is activated before giving up', /SetForegroundWindow\(hwnd\)/.test(uia), true)
+/*
+ * UI AUTOMATION FOCUS IS NOT THE KEYBOARD.
+ *
+ * The second Gmail attempt, with the tab bug already fixed:
+ *
+ *   FOCUS ok via=focus name="To recipients" role=ComboBox focused=yes
+ *   FILL FAILED the text did not land: "To recipients" says ""
+ *
+ * Both true. SetFocus on a Chromium element sets the DOM focus in a window
+ * that is not in front, and HasKeyboardFocus says yes; the ctrl+a and ctrl+v
+ * that follow go to the foreground window, which while a plan runs is
+ * Wumpy's own panel, because Target walks underneath it on purpose.
+ *
+ * So the verdict needs both halves, and a focus that did not take is a
+ * failed step rather than an ok one with a flag on the end - the same rule
+ * as the tab above.
+ */
+check('the window is brought to the front first', /Program\.RaiseNow\(hwnd/.test(uia), true)
+check('and the keyboard is only claimed when it is', /via != "none" && front/.test(uia), true)
+check('a focus that did not take is a failure', /FAILED did-not-take-keyboard/.test(uia), true)
+check('the editable thing inside a wrapper is tried too', /InnerFocusable\(el\)/.test(uia), true)
+/* The same activation the panel uses, rather than a bare SetForegroundWindow:
+   measured on a real show, that one returns false with the input queues
+   joined, which is why there are two levers. */
+check('activation is shared, not reinvented', /internal static bool RaiseNow/.test(hook), true)
+check('and is bounded, because a command is waiting on it', /worker\.Join\(ms\)/.test(hook), true)
+/* The last gate before the characters leave. SendInput goes to the
+   foreground window whatever the step thought it was aiming at, so typing
+   while the panel is in front types into the panel - which is where
+   "stanley" went, three times, reported as ok. */
+check('typing into our own panel is refused', /wumpy-has-the-keyboard/.test(hook), true)
+check('on both the characters and the chords', (hook.match(/Keyboard\(out var why\)/g) ?? []).length, 2)
 check(
   'the report says which window the steps acted on',
   /acted on the window behind it/.test(readFileSync('src/renderer/src/App.tsx', 'utf8')),

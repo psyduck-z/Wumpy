@@ -1323,9 +1323,10 @@ export interface PromptShape {
   /**
    * Whether this model can read a picture at all.
    *
-   * Only Google's can - see `seesMedia`. On the other three the bytes are
-   * dropped on the way out, so a section promising a photograph described a
-   * turn that cannot happen; NAMES_PROMPT describes the one that does.
+   * The catalogue says which - see `seesMedia`. On a model that cannot, the
+   * bytes are dropped on the way out, so a section promising a photograph
+   * described a turn that cannot happen; NAMES_PROMPT describes the one
+   * that does.
    *
    * Undefined means yes, because every caller before this was on Google and
    * a benchmark measuring the prompt is measuring that one.

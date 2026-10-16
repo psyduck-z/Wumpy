@@ -603,6 +603,30 @@ body {
   opacity: 0.75;
 }
 
+/* An answered question folds to one line: the answer is already in the
+   transcript as the user's own message, so the card was saying it twice.
+   Clicking unfolds it. Truncated rather than wrapped, because the point of
+   it is to take one line. */
+.ask.is-folded {
+  display: block;
+  width: 100%;
+  padding: 6px 12px;
+  overflow: hidden;
+  border-color: rgb(var(--border));
+  color: rgb(var(--muted));
+  font: inherit;
+  font-size: 11.5px;
+  text-align: left;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.ask.is-folded:hover {
+  border-color: rgb(var(--accent) / 0.4);
+  color: rgb(var(--text));
+}
+
 .ask-question {
   margin: 0 0 9px;
   font-size: 13px;

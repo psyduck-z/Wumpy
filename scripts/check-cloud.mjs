@@ -469,6 +469,7 @@ const NV_PROBED = [
   'moonshotai/kimi-k3',
   'nvidia/nemotron-3-ultra-550b-a55b',
   'nvidia/nemotron-3-super-120b-a12b',
+  'nvidia/nemotron-3.5-super-vl-120b-a12b',
   'deepseek-ai/deepseek-v4.1-flash'
 ]
 check(

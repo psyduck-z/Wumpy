@@ -442,6 +442,41 @@ async function readValue(
   }
 }
 
+/**
+ * FOCUS, and when the box will not take the keyboard, one click at it.
+ *
+ * The helper does the parts only it can do: it brings the window to the
+ * front, because characters follow the foreground window and not the UI
+ * Automation focus, and it tries the editable element inside a wrapper like
+ * Gmail's recipient ComboBox. If it still cannot hand over the caret, what
+ * is left is what a person does - click the box - and the rectangle to click
+ * is in the reply, measured by UI Automation rather than estimated off a
+ * scaled screenshot.
+ *
+ * ONCE. The Gmail log is six steps that each repeat the one before, and a
+ * recovery that can run twice is how that happens. The click goes through
+ * the panel's mouse-transparency for the same reason every other click does:
+ * the panel sits over the right-hand side of the screen, which is exactly
+ * where a compose window's To field is.
+ */
+async function focusNamed(
+  name: string,
+  panel: BrowserWindow | null,
+  send: (command: string, timeoutMs?: number) => Promise<string>
+): Promise<string> {
+  const named = Buffer.from(name, 'utf8').toString('base64')
+  const first = await send(`FOCUS ${named}`, 6000)
+  const at = /\bat=(-?\d+),(-?\d+)/.exec(first)
+  if (!/did-not-take-keyboard/.test(first) || !at) return first
+
+  const clicked = await throughThePanel(panel, () => send(`CLICK ${at[1]} ${at[2]}`))
+  if (!OK.test(clicked)) return first
+  /* Long enough for the click to have been handled and focus to have moved. */
+  await wait(150)
+  const again = await send(`FOCUS ${named}`, 6000)
+  return `${again} (after clicking it at ${at[1]},${at[2]})`
+}
+
 async function oneStep(
   step: Step,
   frame: ReturnType<typeof lastShot>,
@@ -481,11 +516,11 @@ async function oneStep(
        * which was the bug. Base64 because controls are named things like
        * "To recipients, Press Delete to remove".
        */
-      return send(
-        `${step.focusOnly ? 'FOCUS' : 'PRESS'} ` +
-          Buffer.from(step.name, 'utf8').toString('base64'),
-        6000
-      )
+      /* A focus gets the click recovery too, because a plan that focuses
+         and then types has exactly the same problem as a fill. */
+      return step.focusOnly
+        ? focusNamed(step.name, panel, send)
+        : send(`PRESS ${Buffer.from(step.name, 'utf8').toString('base64')}`, 6000)
     case 'read': {
       /*
        * The reply carries the text base64-encoded, and it is decoded here
@@ -512,8 +547,21 @@ async function oneStep(
        */
       /* Whether the value belongs in the report at all. See isSecretField. */
       const secret = isSecretField(step.name)
-      const named = Buffer.from(step.name, 'utf8').toString('base64')
-      const focus = await send(`FOCUS ${named}`, 6000)
+      const focus = await focusNamed(step.name, panel, send)
+      /*
+       * The box would not take the caret even after its window was brought
+       * forward and it was clicked. Three things have been tried, so the
+       * instruction is to stop rather than to try again: the log that
+       * started this is the same fill repeated six times.
+       */
+      if (/did-not-take-keyboard/.test(focus)) {
+        return (
+          `FILL FAILED ${JSON.stringify(step.name)} would not take the keyboard, so nothing was ` +
+          `typed. (${focus.trim()}) Its window was brought to the front and it was clicked, and ` +
+          'it still does not hold the caret. Do not try this box again - look at the screen, and ' +
+          'either name a different one or ask the user to put the cursor in it.'
+        )
+      }
       if (!OK.test(focus)) return `FILL FAILED could not put the cursor in ${JSON.stringify(step.name)}: ${focus}`
       /*
        * Did the box actually take the keyboard? A newer helper answers;

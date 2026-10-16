@@ -367,7 +367,13 @@ internal static class UiTree
              */
             if (focusOnly || chosen.Role is "Edit" or "ComboBox" or "Document")
             {
-                Console.WriteLine($"{verb} ok via=focus {what} focused={TakeFocus(el)}");
+                /* A focus that did not take is a FAILED step, not an ok one
+                   with a flag on the end. Same rule as the tab below: the
+                   step either did the thing or it did not. */
+                var took = TakeFocus(el, out var how);
+                Console.WriteLine(took
+                    ? $"{verb} ok {how} {what} focused=yes"
+                    : $"{verb} FAILED did-not-take-keyboard {what} {how} focused=no");
                 return;
             }
             if (chosen.Invokable && el.TryGetCurrentPattern(InvokePattern.Pattern, out var pattern))
@@ -455,32 +461,96 @@ internal static class UiTree
     /// windows came from: "it composed three things, didn't put anything
     /// inside the sender."
     ///
-    /// So: ask, then check. HasKeyboardFocus is the question the next step
-    /// actually depends on. When the answer is no and the control's window is
-    /// not in front, the window is activated once and the answer is asked
-    /// again - from a background process Windows may refuse that, and a
-    /// refusal reported as "no" is worth far more than one reported as ok.
+    /// So: ask, then check. And ask the right question.
+    ///
+    /// UI AUTOMATION FOCUS IS NOT THE KEYBOARD. This is the bug behind the
+    /// second Gmail attempt, and it is subtler than the first. From the log:
+    ///
+    ///   FOCUS ok via=focus name="To recipients" role=ComboBox focused=yes
+    ///   FILL FAILED the text did not land: "To recipients" says ""
+    ///
+    /// Both lines are true. SetFocus on a Chromium element sets the DOM focus
+    /// and HasKeyboardFocus duly answers yes - in a window that is not in
+    /// front. Characters do not follow that. They follow the FOREGROUND
+    /// window, which while a plan runs is usually Wumpy's own panel, because
+    /// `Target` walks underneath it on purpose. So ctrl+a and ctrl+v went to
+    /// the panel, the box stayed empty, and the report said the focus was
+    /// fine - three times, with the model dutifully trying again.
+    ///
+    /// Hence two conditions, not one: the element holds the UIA focus AND its
+    /// window is the one in front. The window is raised first, through the
+    /// same two-lever routine the panel uses, because a SetFocus into a
+    /// background window is also likelier to be refused outright.
+    ///
+    /// The wrapper case is handled here too: Gmail's recipient box is a
+    /// ComboBox around an input, and some wrappers cannot take focus at all
+    /// while the editable thing inside them can.
     /// </summary>
-    private static string TakeFocus(AutomationElement el)
+    private static bool TakeFocus(AutomationElement el, out string note)
+    {
+        /* The element came out of TargetTree, so its window is the target. */
+        var hwnd = Target();
+        var front = Program.RaiseNow(hwnd, 1200);
+
+        var via = "none";
+        if (Put(el)) via = "focus";
+        else
+        {
+            var inner = InnerFocusable(el);
+            if (inner is not null && Put(inner)) via = "focus-inner";
+        }
+
+        note = $"via={via} fg={(front ? "yes" : "no")}";
+        return via != "none" && front;
+    }
+
+    /// <summary>
+    /// SetFocus, then the only question that matters, twice.
+    ///
+    /// Twice because a web app moves focus in its own handlers: the first
+    /// read can catch the moment before the page has settled. 80ms is a
+    /// frame or two and is only ever paid on the way to a "no".
+    /// </summary>
+    private static bool Put(AutomationElement el)
     {
         try { el.SetFocus(); }
-        catch { /* reported as no, below */ }
-        if (HasFocus(el)) return "yes";
+        catch { /* an answer of no, below */ }
+        if (HasFocus(el)) return true;
+        Thread.Sleep(80);
+        return HasFocus(el);
+    }
 
-        /* Second attempt, after bringing the window forward. */
+    /// <summary>
+    /// The editable thing inside a control that will not take focus itself.
+    ///
+    /// Same shape as Inner, and the same reason: the name and the role belong
+    /// to the outer element and the caret belongs to an input inside it.
+    /// Bounded for the same reason too - a field is a small subtree, and the
+    /// cap is what stops a bad match walking a page.
+    /// </summary>
+    private static AutomationElement? InnerFocusable(AutomationElement el)
+    {
         try
         {
-            var hwnd = new IntPtr(el.Current.NativeWindowHandle);
-            if (hwnd == IntPtr.Zero) hwnd = Target();
-            if (hwnd != IntPtr.Zero && hwnd != GetForegroundWindow())
+            var inside = el.FindAll(
+                TreeScope.Descendants,
+                new AndCondition(
+                    new PropertyCondition(AutomationElement.IsKeyboardFocusableProperty, true),
+                    new OrCondition(
+                        new PropertyCondition(AutomationElement.ControlTypeProperty, ControlType.Edit),
+                        new PropertyCondition(AutomationElement.ControlTypeProperty, ControlType.Document))));
+            var seen = 0;
+            foreach (AutomationElement child in inside)
             {
-                SetForegroundWindow(hwnd);
-                try { el.SetFocus(); }
-                catch { /* same */ }
+                if (++seen > 8) break;
+                return child;
             }
         }
-        catch { /* and the same again */ }
-        return HasFocus(el) ? "yes" : "no";
+        catch
+        {
+            /* A tree that moved under us is not an answer. */
+        }
+        return null;
     }
 
     private static bool HasFocus(AutomationElement el)
@@ -488,9 +558,6 @@ internal static class UiTree
         try { return el.Current.HasKeyboardFocus; }
         catch { return false; }
     }
-
-    [System.Runtime.InteropServices.DllImport("user32.dll")]
-    private static extern bool SetForegroundWindow(IntPtr hWnd);
 
     /// <summary>
     /// Reads a named control back, so a plan can check its own work.

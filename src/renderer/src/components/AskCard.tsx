@@ -33,6 +33,7 @@ export function AskCard({
 }): React.JSX.Element {
   const multi = groups.length > 1
   const [picked, setPicked] = useState<Record<number, string>>({})
+  const [shown, setShown] = useState(false)
   const cardRef = useRef<HTMLDivElement>(null)
   const done = answered !== null
 
@@ -69,6 +70,30 @@ export function AskCard({
   const submit = (): void => {
     if (!ready || done) return
     onAnswer(groups.map((g, i) => `${g.question} ${picked[i]}`).join(String.fromCharCode(10)))
+  }
+
+  /*
+   * ANSWERED, SO OUT OF THE WAY. Asked for in those words: "make this
+   * feedback decision hidden".
+   *
+   * A question that has been answered is being said twice. The card keeps
+   * the question and all of its options on screen with one of them
+   * highlighted, and directly underneath it is the user's own message saying
+   * the same thing - which is the note-repeated-in-the-chat complaint again,
+   * in a different card.
+   *
+   * Folded rather than removed. The answer is in the transcript either way,
+   * but the question is not, and a scrollback of bare answers to questions
+   * nobody can read is worse than a line of grey text. Clicking it puts the
+   * card back, so nothing is actually lost - and it never folds before it
+   * has been answered.
+   */
+  if (done && !shown) {
+    return (
+      <button type="button" className="ask is-answered is-folded" onClick={() => setShown(true)}>
+        {multi ? `${groups.length} questions answered` : groups[0].question}
+      </button>
+    )
   }
 
   return (
