@@ -382,7 +382,8 @@ export const CLOUD_MODELS: CloudModel[] = [
     id: 'z-ai/glm-5.3-flash',
     provider: 'nvidia',
     label: 'GLM 5.3 Flash',
-    blurb: 'Scores with the best at 9/10, but 15s a turn.'
+    blurb: '38/41 on the full ladder — second only to DeepSeek. But 15s a turn.',
+    measured: { clean: 38, of: 41, runs: 1, medianMs: 14882, on: '2026-10-16' }
   },
   {
     id: 'z-ai/glm-5.3',

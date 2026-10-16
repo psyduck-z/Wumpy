@@ -191,7 +191,24 @@ check('and is zero padded', U.todayKey(new Date(2026, 10, 1)), '2026-11-01')
  * so a look comes back as the control list; the only keyless entry is
  * gemma4:31b-cloud, one /model away.
  */
-check('there is one model, and it is the chosen one', T.DEFAULT_MODEL, 'nvidia/nemotron-3-super-120b-a12b')
+/*
+ * Moved again on 16 October, and this one is a correction rather than a
+ * change of mind. The choice above was made on ten rungs at one run; on
+ * the full forty-one, nemotron-3-super scores 32 and deepseek 39. The
+ * sample had picked rungs that Super happens to answer.
+ *
+ * Which is the standing lesson of this file: a default chosen on a sample
+ * is a default chosen on luck.
+ */
+check('there is one model, and it is the chosen one', T.DEFAULT_MODEL, 'deepseek-ai/deepseek-v4.1-flash')
+/* And it must be the best thing measured, not merely a good one - the
+   picker now shows a rank beside every name, so a default that is not #1
+   is a contradiction the user can see. */
+check(
+  'and it is the top-ranked model',
+  C.rankedModels().find((r) => r.model.id === T.DEFAULT_MODEL)?.rank,
+  1
+)
 check('it is a model the cloud layer can route', C.providerFor(T.DEFAULT_MODEL), 'nvidia')
 /* The default must never be one counted per day: that was the whole lesson
    of 13 October, when every Flash refused on all eighteen keys at once. */

@@ -90,6 +90,29 @@ export function repeatOf(
 }
 
 /**
+ * The same question for a NOTE, which chips deliberately did not cover.
+ *
+ * When the chips were built, notes were left alone on the grounds that they
+ * are the app speaking rather than a receipt for an action. Reported with a
+ * screenshot of two identical lines back to back: "I said repeating
+ * notifications spam the chat". The exclusion was the whole of the bug.
+ *
+ * Only the line immediately before counts, rather than walking back the way
+ * repeatOf does. A note states what is true NOW - "Now answering with X" -
+ * so two in a row are the same statement said twice, while the same note
+ * after something else has happened is worth saying again.
+ *
+ * A chip, an error, a question and the person speaking are all not this.
+ */
+export function repeatOfNote(messages: readonly ChatMessage[], content: string): Repeat | null {
+  const last = messages[messages.length - 1]
+  if (!last || !last.local || last.error || last.localAsk) return null
+  if (last.aside || chipKind(last)) return null
+  if (last.role !== 'assistant' || last.content !== content) return null
+  return { id: last.id, repeat: (last.repeat ?? 1) + 1 }
+}
+
+/**
  * Applies a repeat: the chip gets its count and moves to the end.
  *
  * Moved rather than updated where it stands, because the transcript is

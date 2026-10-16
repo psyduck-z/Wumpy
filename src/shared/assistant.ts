@@ -1248,16 +1248,23 @@ export const VOICE_PROMPT = [
  * exception rather than the default.
  */
 /*
- * Now Nemotron, because Google is out of the picker and this is what the
- * measurements chose: 9/10 on ten ladder rungs at two runs each, 907ms
- * median at Wumpy's real preamble - faster than Flash Lite's 2,278ms - and
- * a budget counted per minute instead of 25 requests a day.
+ * DeepSeek, on the full ladder rather than the sample that chose the last
+ * one. This moved twice in two days and the second move is the correction:
+ *
+ *   ten rungs, 1 run    nemotron-3-super 9/10,  deepseek 10/10
+ *   forty-one rungs     nemotron-3-super 32/41, deepseek 39/41
+ *
+ * Seven rungs apart on the full ladder, where the sample had them level -
+ * the ten rungs happened to be ones Super answers. Unbroken to L18, and
+ * the only two it drops are L19 and L38. 1.3s median at Wumpy's real
+ * preamble, a budget counted per minute, and 99.8% of the preamble came
+ * back cached.
  *
  * It needs an NVIDIA key, and until one is added `ready()` says exactly
  * that, which is a better failure than a model that answers badly. The one
  * entry needing no key at all is gemma4:31b-cloud, a /model away.
  */
-export const DEFAULT_MODEL = 'nvidia/nemotron-3-super-120b-a12b'
+export const DEFAULT_MODEL = 'deepseek-ai/deepseek-v4.1-flash'
 
 /**
  * What the assistant may propose, and how much room it gets to say it.

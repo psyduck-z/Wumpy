@@ -370,5 +370,61 @@ const css = readFileSync('src/renderer/src/styles.css', 'utf8')
 ok('the count has somewhere to live', /\.chip-count \{/.test(css))
 ok('and a receipt is quieter than a notice', /\.notice-chip\.is-receipt \{/.test(css))
 
+/* --------------------------------------------- the same NOTE, twice over */
+
+/*
+ * Reported with a screenshot of two identical lines back to back: "I said
+ * repeating notifications spam the chat". The chips learned this and notes
+ * were deliberately excluded, on the grounds that a note is the app
+ * speaking rather than a receipt for an action. That exclusion was the bug.
+ *
+ * A note collapses rather than counts. A chip counts because the action
+ * really did happen twice; a note states what is true NOW, and "Now
+ * answering with X x2" would describe the state as though it had doubled.
+ */
+const aNote = (content, over = {}) => ({
+  id: `n${Math.random()}`,
+  role: 'assistant',
+  content,
+  createdAt: 1,
+  local: true,
+  ...over
+})
+
+const SAID = 'Now answering with **DeepSeek V4.1 Flash**. 39/41 on the full ladder.'
+check('the same note twice running is one note', N.repeatOfNote([aNote(SAID)], SAID)?.repeat, 2)
+check('a different note is not a repeat', N.repeatOfNote([aNote('Reasoning shown.')], SAID), null)
+check('nor is an empty transcript', N.repeatOfNote([], SAID), null)
+/* Only the line immediately before counts: once anything else has happened,
+   saying it again is worth doing. */
+check(
+  'a note after something else is said again',
+  N.repeatOfNote([aNote(SAID), { id: 'u', role: 'user', content: 'hi', createdAt: 2 }], SAID),
+  null
+)
+check('an error is never folded in', N.repeatOfNote([aNote(SAID, { error: 'boom' })], SAID), null)
+check(
+  'nor is a question',
+  N.repeatOfNote([aNote(SAID, { localAsk: { question: 'q', options: [], kind: 'rename' } })], SAID),
+  null
+)
+check(
+  'nor a chip, which counts instead',
+  N.repeatOfNote([aNote(SAID, { notification: 'run' })], SAID),
+  null
+)
+{
+  const before = [aNote(SAID)]
+  const after = N.collapsed(before, N.repeatOfNote(before, SAID), 9)
+  check('one line survives the collapse', after.length, 1)
+  check('and it is the same one, moved to the end', after[0].id, before[0].id)
+}
+
+ok('note() asks before appending', /repeatOfNote\(prev, content\)/.test(chat))
+/* The cause, not just the safety net: picking the model already in use is a
+   confirmation, and announcing a change that did not happen is the spam. */
+ok('picking the current model says nothing', /if \(name === current\) \{/.test(app))
+ok('and typing it says "already" instead', /Already answering with/.test(app))
+
 console.log(`\n${failures === 0 ? 'all' : `${failures} FAILED of`} notification checks`)
 process.exit(failures === 0 ? 0 : 1)

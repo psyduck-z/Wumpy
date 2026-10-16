@@ -1295,6 +1295,12 @@ function namedControls(shot: Attachment): string[] {
             return
           }
 
+          /* Typed rather than picked, so there IS an answer owed - but
+             "now" is a change, and nothing changed. */
+          if (id === model) {
+            chat.note(`Already answering with \`${id}\`.`)
+            return
+          }
           await patch({ model: id })
           void window.wumpy.assistant.status().then(setAssistant)
           chat.note(`Now answering with \`${id}\`.`)
@@ -2336,6 +2342,19 @@ function namedControls(shot: Attachment): string[] {
                 `Get one at ${PROVIDERS[hosted.provider].keyUrl} and paste it with ` +
                 `\`/key ${hosted.provider} <key>\`, then pick it again.`
             )
+            close()
+            return
+          }
+          /*
+           * Picking the model already in use says nothing.
+           *
+           * The row carries a dot for the current one and is still
+           * clickable, so choosing it is a confirmation rather than a
+           * change - and announcing a change that did not happen is how
+           * two identical lines end up in the transcript. The de-duplication
+           * in `note` is the safety net; this is the cause.
+           */
+          if (name === current) {
             close()
             return
           }

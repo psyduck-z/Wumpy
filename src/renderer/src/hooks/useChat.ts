@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { actionFacts } from '../ledger'
 import type { Attachment, ChatMessage } from '@shared/types'
 import { BAIL_WINDOW_MS, hasBlock, returnsThePrompt } from '../abort'
-import { collapsed, repeatOf, type ChipKind } from '@shared/notify'
+import { collapsed, repeatOf, repeatOfNote, type ChipKind } from '@shared/notify'
 
 let counter = 0
 export const nextId = (): string => `m${Date.now().toString(36)}${(counter++).toString(36)}`
@@ -288,17 +288,36 @@ export function useChat(): ChatState {
   )
 
   const note = useCallback((content: string, error = false) => {
-    setMessages((prev) => [
-      ...prev,
-      {
-        id: nextId(),
-        role: 'assistant',
-        content: error ? '' : content,
-        error: error ? content : undefined,
-        createdAt: Date.now(),
-        local: true
-      }
-    ])
+    setMessages((prev) => {
+      /*
+       * The same note twice running is said once.
+       *
+       * Reported with a screenshot of two identical "Now answering with
+       * DeepSeek V4.1 Flash" lines: "I said repeating notifications spam
+       * the chat". The chips learned this and notes were excluded, which
+       * was the bug rather than the design.
+       *
+       * No count is shown, unlike a chip. A chip is a receipt for an action
+       * that really did happen twice; a note states what is true now, and
+       * "Now answering with X ×2" would be describing the state as though
+       * it had doubled. It moves to the end instead, so it is still the
+       * last thing said. Decided inside the updater, so a StrictMode double
+       * invoke cannot count the same note twice.
+       */
+      const again = error ? null : repeatOfNote(prev, content)
+      if (again) return collapsed(prev, again, Date.now())
+      return [
+        ...prev,
+        {
+          id: nextId(),
+          role: 'assistant',
+          content: error ? '' : content,
+          error: error ? content : undefined,
+          createdAt: Date.now(),
+          local: true
+        }
+      ]
+    })
   }, [])
 
   const setContext = useCallback((ctx: { chatTitle: string | null }) => {
