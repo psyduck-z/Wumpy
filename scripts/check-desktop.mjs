@@ -698,7 +698,7 @@ check('reveal is preferred over the wheel', /prefer reveal/.test(desktop), true)
   check('and fill aims the keyboard for what follows', plan('fill "To" a', 'key tab').steps.length, 2)
 }
 
-check('fill focuses, selects, pastes and reads back', /focusNamed\(step\.name[\s\S]{0,3000}KEY ctrl\+a[\s\S]{0,400}pasteText[\s\S]{0,400}readValue/.test(inputSrc), true)
+check('fill focuses, selects, pastes and reads back', /focusNamed\(step\.name[\s\S]{0,5000}KEY ctrl\+shift\+home[\s\S]{0,1200}pasteText[\s\S]{0,400}readValue/.test(inputSrc), true)
 check('a focus that did not take stops it', /focused=no/.test(inputSrc), true)
 /*
  * ONE CLICK, THEN STOP. The recovery a person would do, and the loop it
@@ -712,16 +712,33 @@ check('a focus that did not take stops it', /focused=no/.test(inputSrc), true)
  */
 check('a box that will not take the caret is clicked', /CLICK \$\{at\[1\]\} \$\{at\[2\]\}/.test(inputSrc), true)
 check('through the panel, which sits over that half of the screen', /throughThePanel\(panel, \(\) => send\(`CLICK/.test(inputSrc), true)
-check('once, not in a loop', (inputSrc.match(/FOCUS \$\{named\}/g) ?? []).length, 2)
+check('once, not in a loop', (inputSrc.match(/FOCUS \$\{named\(name\)\}/g) ?? []).length, 2)
 check('and the second refusal says to stop trying', /Do not try this box again/.test(inputSrc), true)
 /* focus and fill share it, because a plan that focuses and then types has
    exactly the same problem as one that fills. */
 check('a bare focus gets the same recovery', /focusNamed\(step\.name, panel, send\)/.test(inputSrc), true)
-/* fill presses ctrl+a and pastes over the selection. That is right in a text
-   field and destructive anywhere else - a message list, somebody's open
+/* fill selects what is in the field and pastes over the selection. That is
+   right in a text field and destructive anywhere else - somebody's open
    document - so the role is checked before anything is selected. */
 check('and a control that is not a box stops it too', /is a \$\{role\}, not a box text goes into/.test(inputSrc), true)
-check('before the select-all, not after', inputSrc.indexOf('not a box text goes into') < inputSrc.indexOf("send('KEY ctrl+a'"), true)
+check('before the select, not after', inputSrc.indexOf('not a box text goes into') < inputSrc.indexOf("send('KEY ctrl+end'"), true)
+/*
+ * CTRL+A IS NOT A TEXT-FIELD KEY, which the user worked out from their own
+ * run: "it pressed Control A, and when it pressed Control A, that's when it
+ * unselects the to recipient... it didn't notice."
+ *
+ * It is an application key, and a web app is free to take it - Gmail's
+ * message list answers it by selecting every conversation. ctrl+end and
+ * ctrl+shift+home are caret movements that belong to the control holding
+ * the caret, and they cannot select anything outside it.
+ */
+check('the old contents are selected from inside the field', /KEY ctrl\+shift\+home/.test(inputSrc), true)
+check('and ctrl+a is not pressed at all', /KEY ctrl\+a/.test(inputSrc), false)
+/* An empty box needs no emptying, and the keystrokes that would empty it are
+   a chance for the page to do something else instead. The read that decides
+   is a UI Automation call, so it cannot be intercepted. */
+check('an empty box is not selected first', /const holds = \(before\.text \?\? ''\)\.trim\(\)\.length > 0/.test(inputSrc), true)
+check('and the caret is checked again after emptying', /moved the keyboard out of it/.test(inputSrc), true)
 check('and nothing is typed in that case', /did not take the keyboard, so nothing was typed/.test(inputSrc), true)
 check('a box that still says the wrong thing is a failure', /FILL FAILED the text did not land/.test(inputSrc), true)
 check('and an unreadable box is neither', /so this is unproven/.test(inputSrc), true)

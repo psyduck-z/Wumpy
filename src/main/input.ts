@@ -459,13 +459,16 @@ async function readValue(
  * the panel sits over the right-hand side of the screen, which is exactly
  * where a compose window's To field is.
  */
+/* Control names go over a line protocol and are things like "To recipients,
+   Press Delete to remove", so they travel base64. */
+const named = (name: string): string => Buffer.from(name, 'utf8').toString('base64')
+
 async function focusNamed(
   name: string,
   panel: BrowserWindow | null,
   send: (command: string, timeoutMs?: number) => Promise<string>
 ): Promise<string> {
-  const named = Buffer.from(name, 'utf8').toString('base64')
-  const first = await send(`FOCUS ${named}`, 6000)
+  const first = await send(`FOCUS ${named(name)}`, 6000)
   const at = /\bat=(-?\d+),(-?\d+)/.exec(first)
   if (!/did-not-take-keyboard/.test(first) || !at) return first
 
@@ -473,7 +476,7 @@ async function focusNamed(
   if (!OK.test(clicked)) return first
   /* Long enough for the click to have been handled and focus to have moved. */
   await wait(150)
-  const again = await send(`FOCUS ${named}`, 6000)
+  const again = await send(`FOCUS ${named(name)}`, 6000)
   return `${again} (after clicking it at ${at[1]},${at[2]})`
 }
 
@@ -580,15 +583,14 @@ async function oneStep(
         )
       }
       /*
-       * And is it a box at all? Asked before the select-all, not after.
+       * And is it a box at all? Asked before anything is selected, not after.
        *
-       * This step presses ctrl+a and then pastes over the selection, which
-       * is exactly right in a text field and destructive anywhere else: aim
-       * it at a message list and ctrl+a selects every message; aim it at an
-       * editor nobody meant to touch and the paste replaces the document.
-       * The reply already says which control was chosen, so the role is
-       * checked rather than assumed - and it is checked even against the
-       * older helper, which reports a role but not whether focus landed.
+       * This step selects what is in the field and pastes over it, which is
+       * exactly right in a text field and destructive anywhere else: aim it
+       * at an editor nobody meant to touch and the paste replaces the
+       * document. The reply already says which control was chosen, so the
+       * role is checked rather than assumed - and it is checked even against
+       * the older helper, which reports a role but not whether focus landed.
        */
       const role = /role=(\S+)/.exec(focus)?.[1] ?? ''
       if (role && !/^(Edit|ComboBox|Document)$/i.test(role)) {
@@ -597,9 +599,58 @@ async function oneStep(
           'so nothing was selected or typed. Name the field itself, or press it and look again.'
         )
       }
-      /* Select what is there, so the text replaces rather than joins it. */
-      const selected = await send('KEY ctrl+a', 6000)
-      if (!OK.test(selected)) return `FILL FAILED could not select the contents: ${selected}`
+      /*
+       * EMPTYING A BOX THAT IS ALREADY EMPTY IS ALL RISK AND NO BENEFIT.
+       *
+       * The user, after reading back what their own run did: "it pressed
+       * Control A, and when it pressed Control A, that's when it unselects
+       * the to recipient... it didn't notice."
+       *
+       * ctrl+a is not a text-field key. It is an APPLICATION key that a web
+       * app is free to take: in Gmail's message list it selects every
+       * conversation, and anywhere a page handles it, the keystroke is gone
+       * and whatever it did to the selection or the focus happened instead.
+       * The field being empty is the common case - a fresh compose window,
+       * an empty search box - and in that case the select does nothing
+       * except give the page a chance to do something else.
+       *
+       * So: read first, and press nothing when there is nothing to replace.
+       * The read is a UI Automation call, not a keystroke, so it cannot be
+       * intercepted and costs no risk at all.
+       */
+      const before = await readValue(step.name, send)
+      const holds = (before.text ?? '').trim().length > 0
+      if (holds) {
+        /*
+         * And when there IS something, empty it from inside the field.
+         *
+         * ctrl+end then ctrl+shift+home is the caret moving to the end and
+         * selecting back to the start - both are text-editing keys that
+         * belong to the control with the caret, where ctrl+a is a verb the
+         * whole application hears. It also cannot select a message list,
+         * which is the accident the old comment here worried about.
+         */
+        const toEnd = await send('KEY ctrl+end', 6000)
+        if (!OK.test(toEnd)) return `FILL FAILED could not reach the end of the box: ${toEnd}`
+        const selected = await send('KEY ctrl+shift+home', 6000)
+        if (!OK.test(selected)) return `FILL FAILED could not select the contents: ${selected}`
+        /*
+         * And check the box still has the caret before pasting over it.
+         *
+         * This is the user's point, kept as a guard rather than an
+         * assumption: if emptying the field moved the keyboard somewhere
+         * else, the paste lands there. Noticing costs one local call;
+         * not noticing cost six turns and three empty compose windows.
+         */
+        const still = await send(`FOCUS ${named(step.name)}`, 6000)
+        if (/did-not-take-keyboard/.test(still) || /focused=no\b/.test(still)) {
+          return (
+            `FILL FAILED emptying ${JSON.stringify(step.name)} moved the keyboard out of it, ` +
+            `so nothing was pasted. (${still.trim()}) The box may be inside something that ` +
+            'takes those keys for itself. Try a shorter name, or clear it another way.'
+          )
+        }
+      }
       const put = await pasteText(step.text, send)
       if (!put.ok) return `FILL FAILED ${put.reply} ${put.note}`
       /* Long enough for a web editor to have run its input handler. */
