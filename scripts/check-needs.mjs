@@ -312,6 +312,30 @@ check('the same block asks for it either way', A.assemblePrompt(BLIND).includes(
    on purpose, so a text-only model is not quietly paying more or less. */
 check('and the swap costs nothing either way', Math.abs(A.preambleTokens(BLIND) - A.preambleTokens(FULL)) < 30, true)
 
+/*
+ * THE SAME BUG, INVERTED, WHICH IS WHY THESE ARE HERE.
+ *
+ * The first version of this promised a photograph to a model the bytes were
+ * dropped for. Borrowed eyes created the mirror image: a vision model reads
+ * the screen and its description goes into the blind model's turn as text,
+ * while NAMES_PROMPT was still telling that model it could not know how
+ * anything looks and should say so rather than describe a screen it had not
+ * seen. Instructions beat input, so the capability was there to be refused.
+ *
+ * Three states now, and the test is that each one describes its own turn.
+ */
+const LENT = { ...FULL, sees: false, eye: true }
+check('eyes lent means a description is promised', /SHORT DESCRIPTION IN WORDS/.test(A.assemblePrompt(LENT)), true)
+check('and no eyes means none is', /SHORT DESCRIPTION IN WORDS/.test(A.assemblePrompt(BLIND)), false)
+check('the description is called second-hand', /SECOND-HAND/.test(A.assemblePrompt(LENT)), true)
+/* The sentence that would make it refuse the description it was handed.
+   True without an eye, false with one, and the difference is the point. */
+const DENIES = /What it cannot tell you is how something/
+check('names-only says it cannot know how things look', DENIES.test(A.assemblePrompt(BLIND)), true)
+check('and the lent version does not', DENIES.test(A.assemblePrompt(LENT)), false)
+check('either way the control list is what it acts on', A.assemblePrompt(LENT).includes('BY NAME'), true)
+check('and neither is promised a picture', /arrives as an image/.test(A.assemblePrompt(LENT)), false)
+
 /* The one rule that was overstated: a named step never needed a picture, and
    runPlan has only ever required one for the two steps measured in pixels. */
 check(
@@ -323,6 +347,10 @@ check(
 const mainSrc = readFileSync('src/main/index.ts', 'utf8')
 check('no photograph is taken for a model that cannot read one', /const blind = !seesMedia\(activeModel\(\)\)/.test(mainSrc), true)
 check('and the prompt is told which world it is in', /sees: seesMedia\(activeModel\(\)\)/.test(mainSrc), true)
+/* One expression, asked by both the eye and the preamble. Two copies of it
+   is how the prompt and the turn drift apart - see systemPromptFor. */
+check('and whether an eye is standing in for it', /eye: readyEye\(\) !== null/.test(mainSrc), true)
+check('from the same place the look asks', /^function readyEye\(\)/m.test(mainSrc), true)
 check('a look with no picture says so', /picture: false/.test(mainSrc), true)
 /* "was sent to you", not "was taken": a picture may well have been taken
    now, for a vision model to read on this one's behalf. What must stay true

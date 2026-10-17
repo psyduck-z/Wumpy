@@ -628,12 +628,14 @@ export const SCREEN_PROMPT = [
 /**
  * The same capability, for a model that cannot read a picture.
  *
- * Every model but Google's is text-only here, and the old section told all of
- * them a photograph would arrive. It would not: `wireMessage` drops the bytes
- * on a model without vision, because sending them is a 400 that costs the
- * whole turn. So the model was promised an image, given a message that said
- * one was attached, and had to answer from nothing - which reads as a model
- * hallucinating a screen, and was really the app lying to it.
+ * Most models here are text-only - the catalogue's `sees` flag says which,
+ * and only Google's and the Nemotron VL entry carry it - and the old section
+ * told all of them a photograph would arrive. It would not: `wireMessage`
+ * drops the bytes on a model without vision, because sending them is a 400
+ * that costs the whole turn. So the model was promised an image, given a
+ * message that said one was attached, and had to answer from nothing - which
+ * reads as a model hallucinating a screen, and was really the app lying to
+ * it.
  *
  * What it does get is the thing the acting steps actually use. The control
  * list is text: sixty names, roles and centres, about 580 tokens. press,
@@ -660,6 +662,56 @@ export const NAMES_PROMPT = [
   'LOOKS - a colour, a photograph, an error drawn as an image, the wording of',
   'something that is not a named control. Say that plainly when it is what you',
   'were asked, rather than describing a screen you have not seen.',
+  'Do NOT ask when a command would answer better: a version, a path, what is',
+  'installed, whether something is running. Never ask twice in a row for the',
+  'same question, and never just to check your own work - `read "<name>"` answers',
+  'that directly and costs a line.'
+].join(String.fromCharCode(10))
+
+/**
+ * And the same capability again, for a blind model that has been lent eyes.
+ *
+ * NAMES_PROMPT is accurate right up until a vision model is configured, and
+ * then it is accurate about the wrong turn. `lookFor` photographs the screen,
+ * sends it to the eye, and puts the eye's answer into this model's turn as
+ * text - so a model reading NAMES_PROMPT is told "what it cannot tell you is
+ * how something LOOKS... say that plainly rather than describing a screen you
+ * have not seen", and then handed a paragraph describing exactly that.
+ *
+ * Which is the original bug upside down. The app promised a picture and sent
+ * none; now it sends a description and the prompt says none is coming. A
+ * model that believes its instructions over its input will refuse to use what
+ * it was given, and that refusal is the whole capability wasted.
+ *
+ * Longer than the two it sits beside, and allowed to be: it is only sent when
+ * the eye exists, and it is the only section describing a turn in which this
+ * model's information is second-hand. Being clear about whose eyes those are
+ * is the part that stops it claiming to have seen the screen itself.
+ */
+export const EYES_PROMPT = [
+  'You can ask WHAT IS ON SCREEN: a wumpy-screen block with a # line saying what',
+  'you are looking for, and nothing else in it. Two things come back, and',
+  'neither is a picture - you cannot read one.',
+  '',
+  '```wumpy-screen',
+  '# See which buttons the dialog is offering',
+  '```',
+  '',
+  '1. THE LIST OF CONTROLS - names, roles and centres. This is what you act on:',
+  '   every press, focus, fill, read and reveal finds a control BY NAME wherever',
+  '   it is, so you never estimate a pixel.',
+  '2. A SHORT DESCRIPTION IN WORDS, written by a vision model that looked at the',
+  '   picture for you. It covers what names cannot: colours, photographs, errors',
+  '   drawn as images, wording that belongs to no named control.',
+  '',
+  'THE DESCRIPTION IS SECOND-HAND AND SAYING SO IS NOT A DISCLAIMER, IT IS THE',
+  'TRUTH. You did not see the screen; another model did and wrote you a',
+  'paragraph. Use it - it is there to be used - and never claim to have seen',
+  'the screen yourself. If what you were asked needs detail the description does',
+  'not cover, say that it does not cover it rather than filling the gap in.',
+  'It is at most 120 words and it is not always there: during a plan the',
+  'description is only fetched when the control list came back nearly empty,',
+  'because the list already says everything a named step needs.',
   'Do NOT ask when a command would answer better: a version, a path, what is',
   'installed, whether something is running. Never ask twice in a row for the',
   'same question, and never just to check your own work - `read "<name>"` answers',
@@ -1336,6 +1388,16 @@ export interface PromptShape {
    * a benchmark measuring the prompt is measuring that one.
    */
   sees?: boolean
+  /**
+   * Whether a vision model is reading pictures on this one's behalf.
+   *
+   * Only meaningful with `sees: false`, and only true when there is a key
+   * for the eye's provider - see `eyeReady`. It picks EYES_PROMPT over
+   * NAMES_PROMPT, which is the difference between a model that uses the
+   * description it is handed and one that has been told no description
+   * exists.
+   */
+  eye?: boolean
 }
 
 /**
@@ -1437,8 +1499,11 @@ export function promptSections(shape: PromptShape): string[] {
     shape.needs === undefined || shape.needs.includes(capability)
 
   /* A photograph on a model that cannot read one is a promise the wire
-     breaks: see NAMES_PROMPT. Same capability, described as it works. */
-  const looking = shape.sees === false ? NAMES_PROMPT : SCREEN_PROMPT
+     breaks: see NAMES_PROMPT. Same capability, described as it works -
+     three ways, because a blind model with an eye configured gets a written
+     description too and must be told so. */
+  const looking =
+    shape.sees === false ? (shape.eye ? EYES_PROMPT : NAMES_PROMPT) : SCREEN_PROMPT
 
   /*
    * The short form replaces the three sections that always go out, as one

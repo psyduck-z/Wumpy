@@ -18,8 +18,9 @@
  * vanish.
  */
 import { app } from 'electron'
-import { readFileSync, writeFileSync, existsSync, mkdirSync, rmSync } from 'node:fs'
-import { join, dirname } from 'node:path'
+import { readFileSync, existsSync, rmSync } from 'node:fs'
+import { join } from 'node:path'
+import { writeAtomic } from './atomic'
 
 /**
  * Roughly 500 tokens at four characters each.
@@ -81,8 +82,10 @@ export class ContextStore {
         rmSync(this.file, { force: true })
         return { ok: true, why: '' }
       }
-      mkdirSync(dirname(this.file), { recursive: true })
-      writeFileSync(this.file, `${next}${String.fromCharCode(10)}`, 'utf8')
+      /* Atomically, because this one is theirs: a half-written notes file
+         reads as an empty one, and the thing they asked it to remember
+         would be gone with no sign that it ever existed. */
+      writeAtomic(this.file, `${next}${String.fromCharCode(10)}`)
       return { ok: true, why: '' }
     } catch (err) {
       return { ok: false, why: `Could not save it: ${(err as Error)?.name ?? 'unknown error'}` }

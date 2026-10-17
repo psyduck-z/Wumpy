@@ -1,6 +1,7 @@
 import { app } from 'electron'
-import { readFileSync, writeFileSync, mkdirSync } from 'node:fs'
-import { join, dirname } from 'node:path'
+import { readFileSync } from 'node:fs'
+import { join } from 'node:path'
+import { writeAtomic } from './atomic'
 import type { DayUsage, UsageEvent, UsageLine } from '@shared/usage'
 import { record, summarise, todayKey } from '@shared/usage'
 import { pacificDayKey } from '@shared/pool'
@@ -91,8 +92,7 @@ export class UsageStore {
     if (!this.dirty) return
     this.dirty = false
     try {
-      mkdirSync(dirname(this.file), { recursive: true })
-      writeFileSync(this.file, `${JSON.stringify(this.day, null, 2)}\n`, 'utf8')
+      writeAtomic(this.file, `${JSON.stringify(this.day, null, 2)}\n`)
     } catch {
       // Losing a usage total is not worth troubling anyone about.
     }

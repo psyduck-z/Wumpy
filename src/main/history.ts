@@ -1,6 +1,7 @@
 import { app } from 'electron'
-import { readFileSync, writeFileSync, mkdirSync } from 'node:fs'
-import { join, dirname } from 'node:path'
+import { readFileSync } from 'node:fs'
+import { join } from 'node:path'
+import { writeAtomic } from './atomic'
 
 /** Kept short: this is for reaching back a few messages, not an archive. */
 const LIMIT = 200
@@ -47,8 +48,7 @@ export class InputHistory {
     this.entries = [...this.entries.filter((e) => e !== entry), entry].slice(-LIMIT)
 
     try {
-      mkdirSync(dirname(this.file), { recursive: true })
-      writeFileSync(this.file, `${JSON.stringify(this.entries, null, 0)}\n`, 'utf8')
+      writeAtomic(this.file, `${JSON.stringify(this.entries, null, 0)}\n`)
     } catch (err) {
       console.error('[wumpy] could not persist input history:', err)
     }
@@ -58,7 +58,7 @@ export class InputHistory {
   clear(): void {
     this.entries = []
     try {
-      writeFileSync(this.file, '[]\n', 'utf8')
+      writeAtomic(this.file, '[]\n')
     } catch {
       // Nothing useful to do; the in-memory list is already empty.
     }

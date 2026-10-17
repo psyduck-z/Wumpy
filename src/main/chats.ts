@@ -1,15 +1,28 @@
 import { app } from 'electron'
-import {
-  readFileSync,
-  writeFileSync,
-  mkdirSync,
-  readdirSync,
-  unlinkSync,
-  existsSync
-} from 'node:fs'
+import { readFileSync, mkdirSync, readdirSync, statSync, unlinkSync, existsSync } from 'node:fs'
 import { join } from 'node:path'
+import { writeAtomic } from './atomic'
 import type { Attachment, ChatMessage, ChatSummary, SavedChat } from '@shared/types'
 import { sendsBytes } from '@shared/attach'
+
+/**
+ * How many conversations are kept, and how many bytes of attachments.
+ *
+ * Nothing used to drop out. A chat was written and stayed, and its images
+ * stayed with it, so the only bound on this directory was how long the app
+ * had been installed - which is the definition of a leak, just a slow one.
+ * Measured here after eleven days of daily use: 2 chats and 28 KB, which is
+ * why it had never been noticed and why there is room to be generous.
+ *
+ * 200 conversations is more than the resume picker can usefully show and
+ * more than anyone scrolls back through; at the size a chat actually is
+ * (14 KB here) it is about three megabytes of text. The image budget is
+ * the one that can be reached in an afternoon - one screenshot is ~300 KB,
+ * and Wumpy takes one every time it looks at the screen - so it is set
+ * where a year of heavy use still fits in a folder nobody would call big.
+ */
+const MAX_CHATS = 200
+const MAX_IMAGE_BYTES = 64 * 1024 * 1024
 
 /**
  * Saved conversations, one JSON file per chat under the user data directory.
@@ -43,6 +56,151 @@ export class ChatStore {
     } catch (err) {
       console.error('[wumpy] could not create chat directory:', err)
     }
+    this.sweep()
+  }
+
+  /**
+   * Bytes nothing can reach any more, removed at startup.
+   *
+   * `delete` takes a conversation's images with it, which covers the
+   * ordinary case and misses three real ones:
+   *
+   *  - An image is named `<chatid>-<messageIndex>-<n>.jpg`. Save a chat,
+   *    then save it again with a message removed, and `-7-0.jpg` is
+   *    written by nobody and referenced by nobody, for ever.
+   *  - `deleteAll` walks `list()`, and `list()` skips a chat whose JSON
+   *    will not parse. The file goes; its pictures do not.
+   *  - A crash between writing the images and writing the chat leaves the
+   *    images with no chat to belong to.
+   *
+   * Startup, because it is the one moment nothing is mid-save, and it is
+   * once per launch rather than once per turn. The cheap pass runs always;
+   * the pass that has to read the chat files to find what they reference
+   * runs only when the folder is actually over budget, because reading
+   * every chat in full is the cost `imageDir` exists to avoid.
+   */
+  private sweep(): void {
+    try {
+      const ids = new Set(
+        readdirSync(this.dir)
+          .filter((f) => f.endsWith('.json'))
+          .map((f) => f.slice(0, -5))
+      )
+
+      let files: string[]
+      try {
+        files = readdirSync(this.imageDir)
+      } catch {
+        return
+      }
+
+      let freed = 0
+      let kept = 0
+      const live: string[] = []
+      for (const file of files) {
+        /* A temp file left behind by a write that was interrupted between
+           opening it and renaming it into place. Nothing reads these. */
+        const orphan = file.endsWith('.tmp') || !ids.has(chatIdOf(file, ids))
+        let size = 0
+        try {
+          size = statSync(join(this.imageDir, file)).size
+        } catch {
+          continue
+        }
+        if (!orphan) {
+          kept += size
+          live.push(file)
+          continue
+        }
+        try {
+          unlinkSync(join(this.imageDir, file))
+          freed += size
+        } catch {
+          /* Locked by a viewer the user has open. Next launch. */
+        }
+      }
+
+      if (kept > MAX_IMAGE_BYTES) freed += this.sweepUnreferenced(live)
+
+      if (freed) {
+        console.log(
+          `[wumpy] chat images: freed ${Math.round(freed / 1024)} KB of unreachable files, ` +
+            `${Math.round(kept / 1024)} KB in use`
+        )
+      }
+    } catch (err) {
+      /* A sweep that cannot run is not a reason to lose the history. */
+      console.error('[wumpy] could not sweep chat images:', err)
+    }
+  }
+
+  /**
+   * The expensive half: which files any chat still names.
+   *
+   * Only reached when the folder is over budget, because this parses every
+   * conversation. Anything no message points at is a file written by a save
+   * that has since been superseded.
+   */
+  private sweepUnreferenced(files: readonly string[]): number {
+    const named = new Set<string>()
+    let chats: string[]
+    try {
+      chats = readdirSync(this.dir).filter((f) => f.endsWith('.json'))
+    } catch {
+      return 0
+    }
+    for (const file of chats) {
+      try {
+        const chat = JSON.parse(readFileSync(join(this.dir, file), 'utf8')) as SavedChat
+        for (const message of chat.messages ?? []) {
+          for (const image of message.images ?? []) {
+            if (image.file) named.add(image.file)
+          }
+        }
+      } catch {
+        /*
+         * An unreadable chat is not permission to delete its pictures.
+         *
+         * Its images are reachable in principle - the JSON could be
+         * repaired by hand - and more to the point this function cannot
+         * see what it references, so every one of them would look
+         * unreferenced. Claim the whole prefix instead.
+         */
+        const id = file.slice(0, -5)
+        for (const image of files) if (image.startsWith(`${id}-`)) named.add(image)
+      }
+    }
+
+    let freed = 0
+    for (const file of files) {
+      if (named.has(file)) continue
+      try {
+        const size = statSync(join(this.imageDir, file)).size
+        unlinkSync(join(this.imageDir, file))
+        freed += size
+      } catch {
+        /* Gone or locked; either is fine. */
+      }
+    }
+    return freed
+  }
+
+  /**
+   * Drops the oldest conversations past the cap.
+   *
+   * By `updatedAt`, which is when it was last spoken in rather than when it
+   * was started - reopening an old chat should keep it, and that is the
+   * same order the resume picker shows.
+   */
+  private prune(): void {
+    try {
+      const all = this.list()
+      if (all.length <= MAX_CHATS) return
+      for (const old of all.slice(MAX_CHATS)) this.delete(old.id)
+      console.log(`[wumpy] chats: dropped ${all.length - MAX_CHATS} past the ${MAX_CHATS} kept`)
+    } catch {
+      /* The cap is housekeeping. Failing it must not fail the save. */
+    }
   }
 
   /** Writes each image out and leaves a filename in its place. */
@@ -54,7 +212,7 @@ export class ChatStore {
         const name = `${safeId(id)}-${mi}-${i}.${extFor(img.dataUrl)}`
         try {
           const base64 = img.dataUrl.slice(img.dataUrl.indexOf(',') + 1)
-          writeFileSync(join(this.imageDir, name), Buffer.from(base64, 'base64'))
+          writeAtomic(join(this.imageDir, name), Buffer.from(base64, 'base64'))
         } catch (err) {
           // Keep the image in the JSON rather than losing it. A slow listing
           // is a worse outcome than a missing picture only in the abstract.
@@ -171,11 +329,18 @@ export class ChatStore {
     }
 
     try {
-      writeFileSync(this.pathFor(chat.id), `${JSON.stringify(record, null, 2)}\n`, 'utf8')
+      /* Atomically: this is written on every turn, including while the
+         user is quitting, and a half-written chat is one the picker then
+         skips - the conversation reads as gone. */
+      writeAtomic(this.pathFor(chat.id), `${JSON.stringify(record, null, 2)}\n`)
     } catch (err) {
       console.error('[wumpy] could not save chat:', err)
       return null
     }
+
+    /* After the write, not before: the cap is about old conversations, and
+       dropping one must never be the reason this one was not saved. */
+    this.prune()
 
     const { messages: _messages, ...summary } = record
     return summary
@@ -220,6 +385,20 @@ export class ChatStore {
 /** Ids are generated internally, but never trust one into a path join. */
 function safeId(id: string): string {
   return id.replace(/[^a-zA-Z0-9_-]/g, '')
+}
+
+/**
+ * Which conversation an image file belongs to, or '' for none.
+ *
+ * By asking the ids rather than by splitting the filename, because `safeId`
+ * keeps hyphens and so an id may contain one - `abc-1-0.jpg` could be
+ * message 1 of chat `abc` or message 0 of chat `abc-1`. The set of chats
+ * that exist is the only thing that can tell those apart, and it is the
+ * same predicate `imagesOf` uses to delete them.
+ */
+function chatIdOf(file: string, ids: ReadonlySet<string>): string {
+  for (const id of ids) if (file.startsWith(`${id}-`)) return id
+  return ''
 }
 
 /**

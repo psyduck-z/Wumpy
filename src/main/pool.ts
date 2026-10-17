@@ -1,6 +1,7 @@
 import { app } from 'electron'
-import { readFileSync, writeFileSync, mkdirSync } from 'node:fs'
-import { join, dirname } from 'node:path'
+import { readFileSync } from 'node:fs'
+import { join } from 'node:path'
+import { writeAtomic } from './atomic'
 import { isRejected, restsChanged, type PoolDay } from '@shared/pool'
 import { PROVIDER_IDS, type ProviderId } from '@shared/cloud'
 
@@ -130,8 +131,7 @@ export class PoolStore {
     if (!this.dirty) return
     this.dirty = false
     try {
-      mkdirSync(dirname(this.file), { recursive: true })
-      writeFileSync(this.file, `${JSON.stringify(this.data, null, 2)}\n`, 'utf8')
+      writeAtomic(this.file, `${JSON.stringify(this.data, null, 2)}\n`)
     } catch {
       // Losing the ledger costs a handful of 429s, not correctness.
     }

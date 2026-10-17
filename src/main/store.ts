@@ -1,6 +1,7 @@
 import { app } from 'electron'
-import { readFileSync, writeFileSync, mkdirSync } from 'node:fs'
-import { join, dirname } from 'node:path'
+import { readFileSync } from 'node:fs'
+import { join } from 'node:path'
+import { writeAtomic } from './atomic'
 import { DEFAULT_SETTINGS } from '@shared/defaults'
 import type { WumpySettings } from '@shared/types'
 
@@ -52,8 +53,10 @@ export class SettingsStore {
   patch(patch: Partial<WumpySettings>): WumpySettings {
     this.cache = { ...this.cache, ...patch }
     try {
-      mkdirSync(dirname(this.file), { recursive: true })
-      writeFileSync(this.file, `${JSON.stringify(this.cache, null, 2)}\n`, 'utf8')
+      /* Atomically: a torn settings file reads as no settings at all, and
+         `read` would then hand back DEFAULT_SETTINGS - silently undoing
+         every choice the user has made, approval mode among them. */
+      writeAtomic(this.file, `${JSON.stringify(this.cache, null, 2)}\n`)
     } catch (err) {
       console.error('[wumpy] could not persist settings:', err)
     }

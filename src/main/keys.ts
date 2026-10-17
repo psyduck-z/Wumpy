@@ -1,6 +1,7 @@
 import { app, safeStorage } from 'electron'
-import { readFileSync, writeFileSync, mkdirSync, rmSync } from 'node:fs'
-import { join, dirname } from 'node:path'
+import { readFileSync, rmSync } from 'node:fs'
+import { join } from 'node:path'
+import { writeAtomic } from './atomic'
 import type { ProviderId } from '@shared/cloud'
 import { PROVIDER_IDS, maskKey } from '@shared/cloud'
 import { splitKeys } from '@shared/rotation'
@@ -91,8 +92,16 @@ export class KeyStore {
         rmSync(this.file, { force: true })
         return
       }
-      mkdirSync(dirname(this.file), { recursive: true })
-      writeFileSync(this.file, safeStorage.encryptString(JSON.stringify(data)))
+      /*
+       * Atomically, and this is the one where it matters most.
+       *
+       * `load` cannot tell a corrupt blob from an absent one - decrypting
+       * half a ciphertext throws, and the catch says "there is no usable
+       * key" either way. So a torn write here does not degrade anything:
+       * it silently deletes every key the user has pasted in, and the
+       * first sign of it is a turn that says no key is configured.
+       */
+      writeAtomic(this.file, safeStorage.encryptString(JSON.stringify(data)))
     } catch (err) {
       // The message is ours, not the exception's, in case the exception
       // helpfully quoted what it was trying to encrypt.

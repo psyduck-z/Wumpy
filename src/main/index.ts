@@ -1,4 +1,4 @@
-import { app, clipboard, dialog, ipcMain, nativeImage, Tray } from 'electron'
+import { app, clipboard, dialog, ipcMain, nativeImage, session, Tray } from 'electron'
 import { homedir } from 'node:os'
 import { IPC } from '@shared/types'
 import type {
@@ -18,6 +18,7 @@ import type {
 } from '@shared/types'
 import { DEFAULT_MODEL, assistantFor, assemblePrompt, type PromptShape } from '@shared/assistant'
 import { SettingsStore } from './store'
+import { capDiskCache, reclaimCache } from './disk'
 import { ChatStore } from './chats'
 import { InputHistory } from './history'
 import { CloudClient } from './cloud'
@@ -107,6 +108,9 @@ if (!isPrimary) {
 }
 
 app.setAppUserModelId('dev.psyduckz.wumpy')
+/* Before anything opens the cache, which is why it is here and not in the
+   ready handler: see @main/disk, where the 26 MB came from. */
+capDiskCache()
 // Registering any handler here overrides Electron's quit-on-last-window
 // behaviour, which is what keeps Wumpy alive in the tray with no window open.
 app.on('window-all-closed', () => {})
@@ -303,6 +307,22 @@ function factsFor(chatTitle: string | null, actions: string[] = []): string {
  * mapping from settings to that shape - which is the part that belongs here,
  * because settings do.
  */
+/**
+ * The vision model that can answer right now, or null.
+ *
+ * Null is the ordinary case for a model that can already see, and for one
+ * that cannot when there is no key for the eye's provider - in which case
+ * a look is names-only exactly as it was.
+ *
+ * Module scope rather than inside registerIpc, because the preamble has to
+ * ask the same question: a model that is going to be handed a description
+ * of the screen must be told that is what happens. Two copies of this
+ * expression is exactly the drift that `systemPromptFor` exists to stop.
+ */
+function readyEye(): CloudModel | null {
+  return eyeReady(activeModel(), keys.configured())
+}
+
 function promptShape(
   assistant: Assistant,
   scope: 'none' | 'read' | 'full',
@@ -332,7 +352,18 @@ function promptShape(
     /* Which of the two screen sections is true for this model. The bytes are
        dropped for the ones that cannot read them, so promising a photograph
        would describe a turn that cannot happen. */
-    sees: seesMedia(activeModel())
+    sees: seesMedia(activeModel()),
+    /*
+     * And whether a vision model is standing in for it.
+     *
+     * The same rule as `sees`, one turn later. A blind model with an eye
+     * configured is handed a written description of the screen alongside
+     * the control list, and NAMES_PROMPT tells it the opposite - that it
+     * cannot know how anything looks and should say so. That is the first
+     * bug inverted: the app used to promise a picture and send none, and
+     * now it sends a description the prompt says will not arrive.
+     */
+    eye: readyEye() !== null
   }
 }
 
@@ -920,17 +951,6 @@ function registerIpc(): void {
    * scaled image is wrong identically every time - which is exactly what
    * "keeps clicking the same place every time" looked like.
    */
-  /**
-   * The vision model that can answer right now, or null.
-   *
-   * Null is the ordinary case for a model that can already see, and for one
-   * that cannot when there is no key for the eye's provider - in which case
-   * a look is names-only exactly as it was.
-   */
-  function readyEye(): CloudModel | null {
-    return eyeReady(activeModel(), keys.configured())
-  }
-
   /**
    * What the picture shows, asked of a model that can see it.
    *
@@ -1580,6 +1600,12 @@ void app.whenReady().then(async () => {
   // Launched by the login item, or by a restart during development: stay in
   // the tray instead of opening over whatever the user is doing.
   if (!process.argv.includes('--hidden')) panel.show('launch')
+
+  /* Last, and not awaited by anything above it: reclaiming a cache is
+     housekeeping, and the panel should not wait on a disk walk to open. */
+  void reclaimCache(session.defaultSession).then((held) => {
+    if (held) console.log(`[wumpy] cleared ${Math.round(held / 1024 / 1024)} MB of HTTP cache`)
+  })
 })
 
 /**
