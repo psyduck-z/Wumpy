@@ -1633,6 +1633,12 @@ body {
   font-variant-numeric: tabular-nums;
   opacity: 0.85;
 }
+/* Before the first word arrives, which on a queued provider can be most of
+   the turn. Quieter than the numbers beside it: it is a state, not a count. */
+.status-num.is-waiting {
+  font-style: italic;
+  opacity: 0.6;
+}
 .status .spacer {
   flex: 1;
 }

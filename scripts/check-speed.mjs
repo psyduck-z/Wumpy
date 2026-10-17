@@ -4,7 +4,7 @@
  * Run with: npm run check:speed
  */
 import { build } from 'esbuild'
-import { rmSync } from 'node:fs'
+import { readFileSync, rmSync } from 'node:fs'
 import { pathToFileURL } from 'node:url'
 
 const out = '.speed-check.mjs'
@@ -55,6 +55,25 @@ for (const [c, w] of [[0, 0], [10, 0], [0, 1000], [NaN, 100], [10, NaN], [Infini
   count++
 }
 console.log(`ok   no input produces Infinity or NaN`)
+
+/*
+ * WAITING IS NOT THINKING, and the bar says which.
+ *
+ * "it thinks a bit overly slowly... idk if its slowed down because of
+ * wumpy's looking at my screen process". Measured the same morning, same
+ * build, same 15.4k preamble: 2.4s to the first token at 10:28 and 88s at
+ * 12:05, with the output rate healthy either way. The time is the
+ * provider's queue, and the look is 1.2s of it.
+ *
+ * The load figure was already here, but only after the turn ended, which
+ * is when it has stopped being useful.
+ */
+{
+  const bar = readFileSync('src/renderer/src/components/StatusBar.tsx', 'utf8')
+  check('the bar says when nothing has arrived yet', /stats\.liveTokens === 0/.test(bar), true)
+  check('and says it is the model being waited on', /waiting for the model/.test(bar), true)
+  check('while the rate still waits for real tokens', /stats\.liveTokens > 0/.test(bar), true)
+}
 
 console.log(`${String.fromCharCode(10)}${count - failed}/${count} speed checks correct`)
 process.exit(failed === 0 ? 0 : 1)

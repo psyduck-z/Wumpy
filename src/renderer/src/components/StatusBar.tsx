@@ -232,6 +232,27 @@ export function StatusBar({
       {streaming ? (
         <span className="status-live">
           {elapsed && <span className="status-num">{elapsed}</span>}
+          {/*
+           * WAITING IS NOT THINKING, and the difference is worth one word.
+           *
+           * "it thinks a bit overly slowly... idk if its slowed down because
+           * of wumpy's looking at my screen process, or stuff like that."
+           * Measured the same morning: 2.4s to the first token at 10:28 and
+           * 88s at 12:05, same build, same preamble, with the output rate
+           * healthy either way - so the time is spent in the provider's
+           * queue before a single word is generated, and Wumpy's look is
+           * 1.2s of it.
+           *
+           * Nothing said so while it was happening. The load figure was
+           * already in this bar, but only AFTER the turn, which is exactly
+           * when nobody needs it any more.
+           */}
+          {stats.liveTokens === 0 && (
+            <>
+              <span className="status-sep">·</span>
+              <span className="status-num is-waiting">waiting for the model</span>
+            </>
+          )}
           {stats.liveTokens > 0 && (
             <>
               <span className="status-sep">·</span>
