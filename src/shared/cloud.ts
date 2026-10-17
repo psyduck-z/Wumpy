@@ -382,12 +382,28 @@ export const CLOUD_MODELS: CloudModel[] = [
     blurb: '39/41 on the full ladder — the best measured here. 1.3s, no daily cap.',
     measured: { clean: 39, of: 41, runs: 1, medianMs: 1256, on: '2026-10-16' }
   },
-  {
-    id: 'nvidia/nemotron-3-ultra-550b-a55b',
-    provider: 'nvidia',
-    label: 'Nemotron 3 Ultra 550B',
-    blurb: 'Biggest here, 9/10 and 2.5s. No measured advantage over Super.'
-  },
+  /*
+   * NEMOTRON 3 ULTRA IS NOT OFFERED, because it does not answer.
+   *
+   * It was here on a ten-rung sample - 9/10, 2.5s, biggest model on the
+   * list - and three attempts to confirm that on the full ladder have now
+   * failed in three different ways:
+   *
+   *   16 Oct   every one of 41 rungs came back 504 from the gateway
+   *   17 Oct   the stream opened and closed having said nothing at all
+   *   17 Oct   asked again a minute later: 503 "Service temporarily
+   *            overloaded", with and without the thinking switch
+   *
+   * The empty stream is the one that decided it. A 504 is visibly a
+   * failure; an empty answer is a turn the user spent and got a blank
+   * panel for, which is the exact thing the offered list exists to
+   * prevent - the same reason kimi and gpt-oss came out of it.
+   *
+   * Routing is untouched, like Google's: `/model nvidia/nemotron-3-ultra-
+   * 550b-a55b` typed by hand still reaches NVIDIA and gets whatever NVIDIA
+   * says that day, and putting the entry back is one commit. What is gone
+   * is the offer.
+   */
   {
     id: 'z-ai/glm-5.3-flash',
     provider: 'nvidia',

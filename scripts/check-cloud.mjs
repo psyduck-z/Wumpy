@@ -451,7 +451,21 @@ check('while Google keeps the tier’s own', C.maxTokensFor(384, false, 'google'
 check('and no provider at all is unchanged', C.maxTokensFor(384, false), 384)
 
 check('its models route there', C.providerFor('z-ai/glm-5.3'), 'nvidia')
+/*
+ * Ultra keeps its routing and loses its row, like Google's entries did.
+ *
+ * Three attempts at a real measurement, three different failures: 41 rungs
+ * of 504 on 16 Oct, then a stream that opened and said nothing, then 503
+ * "Service temporarily overloaded" a minute later. An empty answer costs
+ * the user the turn as completely as a 404, which is what the offered list
+ * is for; typing the name by hand still reaches NVIDIA.
+ */
 check('including Nemotron', C.providerFor('nvidia/nemotron-3-ultra-550b-a55b'), 'nvidia')
+check(
+  'but Ultra is not offered, because it answers with nothing',
+  C.CLOUD_MODELS.some((m) => m.id.includes('nemotron-3-ultra')),
+  false
+)
 check('and DeepSeek', C.providerFor('deepseek-ai/deepseek-v4.1-flash'), 'nvidia')
 // Routing still works for the retired id, which is the point: a model typed in
 // by hand reaches the right endpoint and gets that endpoint's own 410, rather

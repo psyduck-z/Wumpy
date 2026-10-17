@@ -109,8 +109,18 @@ for (const m of C.CLOUD_MODELS) {
       }
     }
     const clean = said.trim().replace(/\s+/g, ' ').slice(0, 40)
+    /*
+     * A STREAM THAT SAID NOTHING IS NOT AN OK.
+     *
+     * nemotron-3-ultra printed `ok 0ms to first word, 653ms total said=""`
+     * here, and the whole point of this script is to catch a row in the
+     * picker that loses the user their turn. An empty answer loses it as
+     * completely as a 404 does - the panel shows nothing and the turn is
+     * spent. Asked directly a minute later, the same model answered 503
+     * "Service temporarily overloaded", which is what the empty stream was.
+     */
     console.log(
-      `${m.id.padEnd(34)} ok  ${String(first + 'ms').padStart(8)} to first word, ` +
+      `${m.id.padEnd(34)} ${clean ? 'ok ' : 'EMPTY'}  ${String(first + 'ms').padStart(8)} to first word, ` +
         `${String(Date.now() - started + 'ms').padStart(8)} total  said=${JSON.stringify(clean)}`
     )
   } catch (err) {
