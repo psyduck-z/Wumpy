@@ -95,9 +95,32 @@ export const SHELL_PROMPT = [
   'Do not repeat it back in the first person. Told that, Wumpy answered "I',
   'prefer celsius for temperatures", which is not an acknowledgement, it is',
   'the model adopting their preference as its own taste.',
-  'Wumpy keeps NOTHING between chats. A new chat starts with none of this,',
-  'so never promise to remember it tomorrow. If that matters, say it plainly',
-  'in one clause: it holds for this chat.',
+  'YOU cannot save anything, so never say you have and never promise to',
+  'remember it tomorrow. Say in one clause that it holds for this chat.',
+  '',
+  /*
+   * Gated, and the gate is why this is its own paragraph.
+   *
+   * The claim above was "Wumpy keeps NOTHING between chats", which was true
+   * when it was written and stopped being true the day ContextStore was
+   * built - `/remember` writes to a markdown file that notes.forPrompt()
+   * puts in the facts on EVERY turn. So the model was denying a feature
+   * that was sitting a few hundred tokens above it in the same message.
+   *
+   * Saying so costs 90 tokens, and the always-sent half has a ceiling at a
+   * quarter of the window that it was already near - see check-ask, which
+   * is explicit that tripping it means trimming or arguing. Neither was
+   * needed: the turn where this matters is the turn they say "remember" or
+   * state a preference, which @shared/needs can see. A missed gate costs
+   * an unmentioned command, never a false claim, because the line that has
+   * to stay true - you cannot save anything - is ungated above.
+   */
+  'ONE THING DOES PERSIST, AND IT IS THEIRS.',
+  '`/remember <thing>` writes a line to a notes file that is read on every',
+  'turn and arrives in the facts above, so a preference CAN be kept - just',
+  'not by you. Acknowledge it for this chat and name `/remember` in the same',
+  'breath. Not for every passing remark, and never say you have written to',
+  'it yourself.',
   '',
   'AND WHEN YOU HAVE NO PLAN, THE ANSWER IS WORDS, NOT THE NEAREST EXAMPLE.',
   'Asked to remember a preference, Wumpy proposed Get-Command git. Nothing',
@@ -1420,8 +1443,11 @@ export interface PromptShape {
  */
 const SHELL_PARTS = SHELL_PROMPT.split(String.fromCharCode(10, 10))
 
-const STARTS: Record<'install' | 'picture', readonly string[]> = {
+const STARTS: Record<'install' | 'picture' | 'remember', readonly string[]> = {
   install: ['AND AN INSTALL IS NOT FINISHED UNTIL SOMETHING SAYS IT IS.', 'Do not call that done'],
+  /* One paragraph, and the shortest entry here: the rule that must survive
+     its absence is in the paragraph above it rather than in a stub. */
+  remember: ['ONE THING DOES PERSIST, AND IT IS THEIRS.'],
   picture: [
     'THEY CAN SHOW YOU THINGS.',
     'You cannot MAKE one.',
@@ -1446,7 +1472,7 @@ const WRITE_PARTS = new Set(
     .filter((p) => p.length > 20)
 )
 
-function topicOf(paragraph: string): 'install' | 'picture' | 'write' | null {
+function topicOf(paragraph: string): 'install' | 'picture' | 'write' | 'remember' | null {
   const head = paragraph.trimStart()
   if (WRITE_PARTS.has(head.trim())) return 'write'
   for (const [topic, heads] of Object.entries(STARTS)) {

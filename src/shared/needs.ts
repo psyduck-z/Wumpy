@@ -52,7 +52,7 @@
  * paragraph about what winget prints is not needed to answer a question
  * about a file, and 918 tokens of it went out on every turn.
  */
-export type Capability = 'open' | 'desktop' | 'install' | 'picture' | 'write'
+export type Capability = 'open' | 'desktop' | 'install' | 'picture' | 'write' | 'remember'
 
 /** The message shape this needs: role, what was said, whether it has pictures. */
 export interface Turn {
@@ -117,6 +117,30 @@ const PICTURE_WORDS =
 const WRITE_WORDS =
   /\b(write|writes|writing|wrote|save|saves|saving|create|creates|creating|make|makes|edit|edits|editing|append|appends|overwrite|rename|file|files|script|scripts|note|notes|document|readme|config|\.py|\.txt|\.md|\.json|\.ts|\.js|\.ps1|\.csv|\.html|\.css)\b/i
 
+/**
+ * Asking for something to be kept, or stating the kind of thing worth
+ * keeping.
+ *
+ * TIGHTER THAN THE REST OF THIS FILE, DELIBERATELY, AND THE ASYMMETRY IS
+ * THE OTHER WAY ROUND HERE.
+ *
+ * Everywhere above, a missed gate costs an answer - a model that was not
+ * told it can click does not click. What this gates is the sentence naming
+ * `/remember`, and the rule that has to stay true without it ("you cannot
+ * save anything, never promise to remember it tomorrow") is ungated in the
+ * paragraph above. So a miss costs one unmentioned command on one turn,
+ * which is cheap enough to buy a trigger that does not fire on everything.
+ *
+ * Which matters because the obvious words for this are the commonest words
+ * there are. "always", "never", "I am" and "I like" would match most turns
+ * in a conversation about anything, and a gate that is always open is 90
+ * tokens added to the always-sent half with extra steps. So: the verbs for
+ * keeping something, and the few phrasings that are only ever used to state
+ * a standing preference.
+ */
+const REMEMBER_WORDS =
+  /\b(remember|remembers|remembered|remembering|forget|forgets|forgot|memorise|memorize|keep in mind|bear in mind|from now on|going forward|in future|in the future|next time|every time|permanently|persist|preference|preferences|my name is|call me|i prefer|i'd prefer|i always|i never|note that|make a note|keep a note|take note)\b/i
+
 /** The fences, so a sequence keeps its instructions while it is running. */
 const FENCES: Partial<Record<Capability, RegExp>> = {
   open: /```wumpy-open/,
@@ -172,6 +196,7 @@ export function needsFor(messages: readonly Turn[]): Capability[] {
     if (INSTALL_WORDS.test(text)) needs.add('install')
     if (PICTURE_WORDS.test(text)) needs.add('picture')
     if (WRITE_WORDS.test(text)) needs.add('write')
+    if (REMEMBER_WORDS.test(text)) needs.add('remember')
   }
 
   return [...needs]

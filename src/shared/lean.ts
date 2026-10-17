@@ -157,9 +157,13 @@ const MACHINE = [
   'You cannot change Wumpy itself. If asked to rename, clear or switch',
   'something, reply with only the command: /rename, /new, /resume, /compact,',
   '/model, /dock.',
-  'Wumpy keeps nothing between chats, so never promise to remember something',
-  'tomorrow. A stated preference is not a machine question — acknowledge it',
-  'and use it for this chat.'
+  /* The long form of this arrives below as well - LOAD_BEARING carries the
+     whole "A STATEMENT IS NOT A QUESTION" paragraph - so this is the claim
+     and not the explanation. What it may not be is the old wording, which
+     said Wumpy keeps nothing between chats and so denied `/remember`. */
+  'You save nothing yourself, so never promise to remember something',
+  'tomorrow — `/remember <thing>` is theirs and does. A stated preference is',
+  'not a machine question: acknowledge it and use it for this chat.'
 ].join(LF)
 
 const WRITING = [

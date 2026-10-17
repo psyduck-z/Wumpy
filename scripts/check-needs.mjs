@@ -96,9 +96,19 @@ const tokensFor = (list) => A.preambleTokens({ ...FULL, needs: list })
    analogy question that did the same thing was typed, so the general half
    has to be present on turns with no picture in them. Two lines is what the
    25% ceiling in check-ask had room for, and the worked example stays in
-   the gated paragraph where it is free. */
-check('everything, as it was', A.preambleTokens(FULL), 14284)
-check('a turn about nothing in particular', tokensFor([]), 8182)
+   the gated paragraph where it is free.
+
+   8,182 -> 8,242 to stop the prompt denying a feature the app has. It said
+   "Wumpy keeps NOTHING between chats, so never promise to remember it
+   tomorrow", which was true when it was written and has not been since:
+   ContextStore was built to fix exactly that, `/remember <thing>` writes to
+   it, and notes.forPrompt() puts it in the facts on every single turn. The
+   model was telling users a preference could not be kept while the
+   mechanism for keeping it sat one line above in the same message. 60
+   tokens, ungateable - the turn where it matters is the turn they say
+   "remember this", which looks like any other. */
+check('everything, as it was', A.preambleTokens(FULL), 14359)
+check('a turn about nothing in particular', tokensFor([]), 8170)
 check('which is a third of it gone', A.preambleTokens(FULL) - tokensFor([]) > 4500, true)
 check('a turn about the screen', tokensFor(['desktop']) < A.preambleTokens(FULL), true)
 check('a turn about a website', tokensFor(['open']) < A.preambleTokens(FULL), true)
@@ -161,7 +171,7 @@ check('a turn about a website', tokensFor(['open']) < A.preambleTokens(FULL), tr
  * literal, so the text is untouched - and the invariant that makes that safe
  * is checked rather than hoped for.
  */
-const ALL = ['open', 'desktop', 'install', 'picture', 'write']
+const ALL = ['open', 'desktop', 'install', 'picture', 'write', 'remember']
 check('with everything on it is the same string', A.shellFor(ALL) === A.SHELL_PROMPT, true)
 check('and so is no list at all', A.shellFor(undefined) === A.SHELL_PROMPT, true)
 {
@@ -193,7 +203,24 @@ check('and so is no list at all', A.shellFor(undefined) === A.SHELL_PROMPT, true
   check('and a huge scope is still a misunderstanding', /A HUGE SCOPE IS A MISUNDERSTANDING/.test(lean), true)
   check('and keys still cannot be read', /CANNOT READ THEIR API KEYS/.test(lean), true)
   check('and folders are still not where you think', /THEIR FOLDERS ARE NOT WHERE YOU THINK/.test(lean), true)
+  /*
+   * The gate whose miss has to be harmless, tested as such.
+   *
+   * The paragraph naming `/remember` goes; the sentence saying nothing can
+   * be saved by the model stays. Those two together are what make a narrow
+   * trigger safe - drop the first and the model says less than it could,
+   * drop the second and it promises something it cannot do.
+   */
+  check('the notes command is gone with its paragraph', /ONE THING DOES PERSIST/.test(lean), false)
+  check('but saving nothing yourself is not', /YOU cannot save anything/.test(lean), true)
 }
+
+/* And present when the turn is about it, which is the other half. */
+check(
+  'asked to remember, the command is named',
+  /`\/remember <thing>`/.test(A.shellFor(['remember'])),
+  true
+)
 
 check('installing', needs('install spotify').includes('install'), true)
 check('downloading', needs('download the latest node').includes('install'), true)
@@ -238,6 +265,36 @@ check('a window', needs('switch to the chrome window'), ['desktop', 'open'])
 check('signing in', needs('sign in to my account for me'), ['desktop'])
 check('composing mail', needs('compose a gmail to my teacher'), ['desktop', 'open'])
 
+/*
+ * THE ONE GATE WHERE A MISS IS CHEAP, AND SO THE TRIGGER IS ALLOWED TO BE
+ * NARROW.
+ *
+ * Everything above errs towards expanding, because a model that was not
+ * told it can click does not click. What this gates is the sentence naming
+ * `/remember`; the rule that must hold without it - you cannot save
+ * anything, never promise to remember it tomorrow - is ungated. So a miss
+ * costs an unmentioned command and never a false claim, which is what buys
+ * a trigger that does not fire on "always" and "I am".
+ *
+ * That restraint is the thing worth testing. The commonest words in any
+ * conversation are the obvious ones for this subject, and a gate that is
+ * always open is 90 tokens on the always-sent half with extra steps.
+ */
+check('asking it to remember', needs('remember that i prefer celsius'), ['remember'])
+check('a standing preference', needs('from now on keep answers short'), ['remember'])
+check('being named', needs('call me Sam'), ['remember'])
+check('wanting it forgotten', needs('forget what i said about celsius'), ['remember'])
+/* And the restraint. None of these is about keeping anything. */
+check('a plain question is not', needs('what is 12 percent of 840'), [])
+check('an absolute is not a preference', needs('that always throws a TypeError'), [])
+/* "i am on windows 11" would have done here too, except that "windows" is
+   in DESKTOP_WORDS and brings the aiming rules in - which is that gate
+   working as designed and would have hidden what this one is testing. */
+check('nor is saying what you are', needs('i am a student'), [])
+/* "note" is in WRITE_WORDS and means a file; it must not also drag this in,
+   or every "write me a note" turn pays for both. */
+check('a note to write is a file, not a memory', needs('write me a note about this'), ['write'])
+
 /* A picture in the window is the strongest signal there is: desktop work
    always begins by looking, so the rules arrive with the screenshot. */
 check('a screenshot expands the aiming rules', needs(said('now what', 'user', [1])), [
@@ -275,10 +332,10 @@ check('nor one about opening a site', needs(said('I opened vocabulary.com for yo
 
 /* ------------------------------------------------------- the shape contract */
 
-check('no list at all means everything', A.preambleTokens({ ...FULL }), 14284)
-check('an empty list is a real answer, not everything', tokensFor([]) < 14284, true)
+check('no list at all means everything', A.preambleTokens({ ...FULL }), 14359)
+check('an empty list is a real answer, not everything', tokensFor([]) < 14359, true)
 check('one capability is not the other', tokensFor(['open']) !== tokensFor(['desktop']), true)
-check('every topic together is everything', tokensFor(ALL), 14284)
+check('every topic together is everything', tokensFor(ALL), 14359)
 
 /* --------------------------------------------------------------- the wiring */
 
