@@ -599,7 +599,11 @@ check('the guideline says when to paste and when to type', /PASTE ANYTHING LONG/
  * dropdown. Either one, believed, produces a plan that is confidently wrong.
  */
 check('it says focus does not empty the box', /FOCUS DOES NOT EMPTY THE BOX/.test(desktop), true)
-check('and how to replace the contents', /key ctrl\+a/.test(desktop), true)
+/* And how to replace them BY HAND, which is the same recipe fill follows:
+   read what is there, then delete that many characters. The prompt used to
+   say ctrl+a, which is the key this stopped pressing. */
+check('and how to replace the contents', /key backspace <however/.test(desktop), true)
+check('without recommending ctrl\\+a any more', /key ctrl\+a/.test(desktop), false)
 check('it says ok is not the same as worked', /NOT THAT IT WORKED/.test(desktop), true)
 check('with the escape that proved it', /only closed the suggestions dropdown/.test(desktop), true)
 check('and why type exists at all', /where a keystroke is what a field is expecting/.test(desktop), true)
@@ -698,7 +702,27 @@ check('reveal is preferred over the wheel', /prefer reveal/.test(desktop), true)
   check('and fill aims the keyboard for what follows', plan('fill "To" a', 'key tab').steps.length, 2)
 }
 
-check('fill focuses, selects, pastes and reads back', /focusNamed\(step\.name[\s\S]{0,5000}KEY ctrl\+shift\+home[\s\S]{0,1200}pasteText[\s\S]{0,400}readValue/.test(inputSrc), true)
+/* The order of the whole verb, read out of the fill case itself rather than
+   out of a window of N characters - the step has grown a read, a count and
+   two re-checks, and a check that breaks on length is a check nobody trusts
+   by the third time they widen it. */
+const fillCase = inputSrc.slice(inputSrc.indexOf("case 'fill': {"), inputSrc.indexOf("case 'paste': {"))
+const inOrder = (...marks) =>
+  marks.every((mark, i) => {
+    const at = fillCase.indexOf(mark)
+    return at >= 0 && (i === 0 || at > fillCase.indexOf(marks[i - 1]))
+  })
+check(
+  'fill focuses, reads, empties, pastes and reads back',
+  inOrder(
+    'focusNamed(step.name',
+    'const before = await readValue',
+    'KEY backspace ${presses}',
+    'pasteText(step.text',
+    'const back = await readValue'
+  ),
+  true
+)
 check('a focus that did not take stops it', /focused=no/.test(inputSrc), true)
 /*
  * ONE CLICK, THEN STOP. The recovery a person would do, and the loop it
@@ -732,13 +756,33 @@ check('before the select, not after', inputSrc.indexOf('not a box text goes into
  * ctrl+shift+home are caret movements that belong to the control holding
  * the caret, and they cannot select anything outside it.
  */
-check('the old contents are selected from inside the field', /KEY ctrl\+shift\+home/.test(inputSrc), true)
 check('and ctrl+a is not pressed at all', /KEY ctrl\+a/.test(inputSrc), false)
+/*
+ * Backspace instead, asked for in those words: "just better backspace."
+ *
+ * It needs no selection to exist, so nothing between the read and the paste
+ * depends on a state the page might have changed underneath. The count comes
+ * from the read, and the presses go in one batch - one call for a sentence,
+ * not one per character.
+ */
+check('the box is emptied a character at a time', /KEY backspace \$\{presses\}/.test(inputSrc), true)
+check('from the end, because backspace deletes leftwards', inputSrc.indexOf("send('KEY ctrl+end'") < inputSrc.indexOf('KEY backspace ${presses}'), true)
+check('as many presses as it holds', /const presses = held\.length \+ 4/.test(inputSrc), true)
+check('and a selection is kept for a box too long to backspace', /presses <= 400[\s\S]{0,200}KEY ctrl\+shift\+home/.test(inputSrc), true)
 /* An empty box needs no emptying, and the keystrokes that would empty it are
    a chance for the page to do something else instead. The read that decides
    is a UI Automation call, so it cannot be intercepted. */
-check('an empty box is not selected first', /const holds = \(before\.text \?\? ''\)\.trim\(\)\.length > 0/.test(inputSrc), true)
-check('and the caret is checked again after emptying', /moved the keyboard out of it/.test(inputSrc), true)
+check('an empty box is not touched at all', /if \(held\.trim\(\)\.length > 0\) \{/.test(inputSrc), true)
+/* Look again afterwards, which is the half of this the user asked for twice:
+   the box either is empty or it is not, and a read says which. */
+check('the box is read again after emptying', /would not empty - it still says/.test(inputSrc), true)
+check('and the caret is checked again too', /moved the keyboard out of it/.test(inputSrc), true)
+/* One key, many presses, one command. A step per press would be a plan of
+   forty lines, and MAX_STEPS is twelve. */
+check('a key step can carry a repeat', S.readPlan('```wumpy-do\n# x\nkey backspace 12\n```').steps[0], { kind: 'key', chord: 'backspace', times: 12 })
+check('an ordinary chord carries none', S.readPlan('```wumpy-do\n# x\nkey ctrl+end\n```').steps[0], { kind: 'key', chord: 'ctrl+end' })
+check('f12 is a key, not twelve f keys', S.readPlan('```wumpy-do\n# x\nkey f12\n```').steps[0], { kind: 'key', chord: 'f12' })
+check('and a silly count is refused rather than sent', S.readPlan('```wumpy-do\n# x\nkey backspace 999\n```').steps.length, 0)
 check('and nothing is typed in that case', /did not take the keyboard, so nothing was typed/.test(inputSrc), true)
 check('a box that still says the wrong thing is a failure', /FILL FAILED the text did not land/.test(inputSrc), true)
 check('and an unreadable box is neither', /so this is unproven/.test(inputSrc), true)

@@ -27,7 +27,7 @@ export type Step =
   | { kind: 'click'; x: number; y: number; button: 'left' | 'right'; times: number }
   | { kind: 'move'; x: number; y: number }
   | { kind: 'type'; text: string }
-  | { kind: 'key'; chord: string }
+  | { kind: 'key'; chord: string; times?: number }
   | { kind: 'wait'; ms: number }
   /*
    * Pressing a control by its NAME rather than its pixel.
@@ -127,6 +127,16 @@ export const MAX_TYPE = 500
  * before it happens, not a file write.
  */
 export const MAX_PASTE = 2000
+
+/**
+ * How many times one key may repeat in a step.
+ *
+ * Enough to empty any field worth emptying a character at a time, and short
+ * of a mistyped count holding a key down over something that is not a text
+ * box. The helper enforces the same number, because a plan is not the only
+ * thing that can send a command.
+ */
+export const MAX_REPEAT = 400
 
 /** A pause the user can sit through. Anything longer is a hang. */
 export const MAX_WAIT = 5000
@@ -345,7 +355,22 @@ export function readPlan(raw: string): Plan {
         problems.push(`key needs a chord like ctrl+a: ${text}`)
         continue
       }
-      steps.push({ kind: 'key', chord: rest.replace(/\s+/g, '') })
+      /*
+       * A trailing number repeats the key: `key backspace 12`.
+       *
+       * Emptying a box is one press per character, and a step per press
+       * would be a plan of forty lines and forty round trips. The count is
+       * separated here rather than in the chord, so "f12" stays a key and
+       * "backspace 12" becomes twelve backspaces.
+       */
+      const repeat = /^(.*?)\s+(\d{1,3})$/.exec(rest)
+      const chord = (repeat ? repeat[1] : rest).replace(/\s+/g, '')
+      const times = repeat ? Number(repeat[2]) : 1
+      if (times < 1 || times > MAX_REPEAT) {
+        problems.push(`key can repeat 1 to ${MAX_REPEAT} times, not ${times}: ${text}`)
+        continue
+      }
+      steps.push(times > 1 ? { kind: 'key', chord, times } : { kind: 'key', chord })
       continue
     }
 
@@ -398,7 +423,9 @@ export function describe(step: Step): string {
     case 'type':
       return `Type ${JSON.stringify(step.text)}`
     case 'key':
-      return `Press ${step.chord}`
+      return step.times && step.times > 1
+        ? `Press ${step.chord} ${step.times} times`
+        : `Press ${step.chord}`
     case 'wait':
       return `Wait ${step.ms}ms`
     case 'press':

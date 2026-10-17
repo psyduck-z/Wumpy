@@ -510,7 +510,12 @@ async function oneStep(
          end the command and leave the rest to be read as another one. */
       return send(`TYPE ${Buffer.from(step.text, 'utf8').toString('base64')}`)
     case 'key':
-      return send(`KEY ${step.chord}`)
+      /* The count rides on the same line, so forty backspaces are one
+         command and one SendInput batch rather than forty of each. */
+      return send(
+        step.times && step.times > 1 ? `KEY ${step.chord} ${step.times}` : `KEY ${step.chord}`,
+        8000
+      )
     case 'press':
       /*
        * No coordinate and no pointer. UI Automation presses the control
@@ -619,28 +624,70 @@ async function oneStep(
        * intercepted and costs no risk at all.
        */
       const before = await readValue(step.name, send)
-      const holds = (before.text ?? '').trim().length > 0
-      if (holds) {
+      const held = before.text ?? ''
+      if (held.trim().length > 0) {
         /*
-         * And when there IS something, empty it from inside the field.
+         * And when there IS something, delete it the way a person does.
          *
-         * ctrl+end then ctrl+shift+home is the caret moving to the end and
-         * selecting back to the start - both are text-editing keys that
-         * belong to the control with the caret, where ctrl+a is a verb the
-         * whole application hears. It also cannot select a message list,
-         * which is the accident the old comment here worried about.
+         * "I like to read the screen and see what's inside the box first,
+         * if there's anything inside. Then maybe Control A works, I'm not
+         * sure, but you know, just better backspace."
+         *
+         * Backspace is the right key for a reason worth writing down: it
+         * does not need a selection to exist, so nothing between the read
+         * and the paste depends on a state some page might have quietly
+         * changed. The count comes from the read - one press per character
+         * that is actually in the box - and they go in a single SendInput
+         * batch, so a sentence costs one call rather than forty.
+         *
+         * ctrl+end first, because backspace deletes to the LEFT of the
+         * caret and the caret may be anywhere. Both are text-editing keys
+         * that belong to the control holding it.
          */
         const toEnd = await send('KEY ctrl+end', 6000)
         if (!OK.test(toEnd)) return `FILL FAILED could not reach the end of the box: ${toEnd}`
-        const selected = await send('KEY ctrl+shift+home', 6000)
-        if (!OK.test(selected)) return `FILL FAILED could not select the contents: ${selected}`
         /*
-         * And check the box still has the caret before pasting over it.
+         * A few spare presses, because the value read and the characters in
+         * the box are not always the same count - a date box shows
+         * separators it does not report, a rich field can hold formatting.
+         * Extra backspaces in an empty box do nothing.
          *
-         * This is the user's point, kept as a guard rather than an
+         * Over the cap, select instead: 400 keystrokes through a web
+         * editor's handlers is slower than the thing it is clearing, and a
+         * read is trimmed at 600 characters anyway, so beyond that the
+         * count would be a guess.
+         */
+        const presses = held.length + 4
+        const cleared =
+          presses <= 400
+            ? await send(`KEY backspace ${presses}`, 8000)
+            : await send('KEY ctrl+shift+home', 6000)
+        if (!OK.test(cleared)) return `FILL FAILED could not empty the box: ${cleared}`
+        /*
+         * Then look again, which is the half of this the user asked for
+         * twice now. The box either is empty or it is not, and a read says
+         * which - where "I pressed the keys that usually empty it" does
+         * not. Not fatal on its own: the paste replaces a selection and
+         * joins leftover text, so what this changes is that the report
+         * tells the truth about which happened.
+         */
+        const after = await readValue(step.name, send)
+        const left = (after.text ?? '').trim()
+        if (left.length > 0 && left === held.trim()) {
+          return (
+            `FILL FAILED ${JSON.stringify(step.name)} would not empty - it still says ` +
+            `${JSON.stringify(after.text)} after ${presses} backspaces, so nothing was pasted ` +
+            'on top of it. Something is putting the text back, or the keys are going ' +
+            'elsewhere. Look at the screen rather than repeating this.'
+          )
+        }
+        /*
+         * And check the box still has the caret before pasting into it.
+         *
+         * This is the user's own diagnosis kept as a guard rather than an
          * assumption: if emptying the field moved the keyboard somewhere
-         * else, the paste lands there. Noticing costs one local call;
-         * not noticing cost six turns and three empty compose windows.
+         * else, the paste lands there. Noticing costs one local call; not
+         * noticing cost six turns and three empty compose windows.
          */
         const still = await send(`FOCUS ${named(step.name)}`, 6000)
         if (/did-not-take-keyboard/.test(still) || /focused=no\b/.test(still)) {

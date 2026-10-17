@@ -1302,10 +1302,39 @@ internal static class Program
         ["f11"] = 0x7A, ["f12"] = 0x7B
     };
 
-    /// <summary>A chord: "ctrl+a", "alt+tab", "enter". Modifiers held, last key tapped.</summary>
-    private static void Key(string chord)
+    /// <summary>
+    /// A chord: "ctrl+a", "alt+tab", "enter". Modifiers held, last key tapped.
+    /// </summary>
+    /// <remarks>
+    /// A trailing count repeats it - "backspace 12" - and the repeats go in
+    /// ONE SendInput call rather than twelve commands down the pipe.
+    ///
+    /// Asked for by the user, who wanted a box emptied the way a person
+    /// empties one: "maybe Control A works, I'm not sure, but you know, just
+    /// better backspace." They are right that it is the safer key. It is only
+    /// usable in bulk, though, because emptying a field means one press per
+    /// character, and a round trip apiece would make clearing a sentence
+    /// slower than retyping it.
+    ///
+    /// Capped at 400, which is well past any field worth clearing this way
+    /// and short of a stuck repeat doing real damage somewhere unintended.
+    /// </remarks>
+    private static void Key(string line)
     {
         if (!Keyboard(out var why)) { Console.WriteLine($"KEY FAILED {why}"); return; }
+        var chord = line.Trim();
+        var times = 1;
+        var space = chord.LastIndexOf(' ');
+        if (space > 0 && int.TryParse(chord.AsSpan(space + 1), out var asked))
+        {
+            if (asked < 1 || asked > 400)
+            {
+                Console.WriteLine($"KEY FAILED repeat-out-of-range={asked}");
+                return;
+            }
+            times = asked;
+            chord = chord[..space].Trim();
+        }
         var parts = chord.Split('+', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
         var codes = new List<ushort>();
         foreach (var part in parts)
@@ -1327,15 +1356,19 @@ internal static class Program
         /* Down in order, up in reverse, so a modifier is still held when the
            key it modifies is pressed and released. */
         var events = new List<INPUT>();
-        foreach (var vk in codes) events.Add(KeyEvent(vk, false));
-        for (var i = codes.Count - 1; i >= 0; i--) events.Add(KeyEvent(codes[i], true));
+        for (var press = 0; press < times; press++)
+        {
+            foreach (var vk in codes) events.Add(KeyEvent(vk, false));
+            for (var i = codes.Count - 1; i >= 0; i--) events.Add(KeyEvent(codes[i], true));
+        }
 
         var arr = events.ToArray();
         var sent = SendInput((uint)arr.Length, arr, Marshal.SizeOf<INPUT>());
+        var what = times > 1 ? $"{chord} x{times}" : chord;
         Console.WriteLine(
             sent == arr.Length
-                ? $"KEY ok chord={chord}"
-                : $"KEY FAILED sent={sent}/{arr.Length} err={Marshal.GetLastWin32Error()}");
+                ? $"KEY ok chord={what}"
+                : $"KEY FAILED sent={sent}/{arr.Length} chord={what} err={Marshal.GetLastWin32Error()}");
     }
 
     private static INPUT KeyEvent(ushort vk, bool up)
