@@ -26,7 +26,8 @@ import { KeyStore } from './keys'
 import { UsageStore } from './usage'
 import { PoolStore } from './pool'
 import { perKeyCapFor } from '@shared/usage'
-import { spent, usable } from '@shared/probe'
+import { DEFAULT_RUNS, spent, usable } from '@shared/probe'
+import { lookAtFile } from './look'
 import { needsFor, type Capability } from '@shared/needs'
 import { trimPictures } from '@shared/pressure'
 import { Panel } from './panel'
@@ -717,8 +718,8 @@ function registerIpc(): void {
    * Errors are recorded too, so a probe that found a dead model leaves the
    * same trace in `/usage` as a turn that hit it would have.
    */
-  ipcMain.handle(IPC.modelsProbe, async () => {
-    const results = await cloud.probeModels()
+  ipcMain.handle(IPC.modelsProbe, async (_e, req?: { runs?: number }) => {
+    const results = await cloud.probeModels(req?.runs ?? DEFAULT_RUNS)
     for (const r of results) {
       if (!spent(r.state)) continue
       usage.add({
@@ -1207,6 +1208,17 @@ function registerIpc(): void {
   }
 
   ipcMain.handle(IPC.screenCapture, async () => shotWithNames())
+
+  /**
+   * Open a picture the model named, after the user pressed the card.
+   *
+   * There is no autonomous path here either. The read itself is harmless;
+   * what needs the click is that this is the one read that SENDS what it
+   * reads, to a model provider, on a path the model chose. So the path is
+   * on the card in the words the model wrote, and what comes back is the
+   * resolved form of that same string.
+   */
+  ipcMain.handle(IPC.lookFile, (_e, req: { path?: string }) => lookAtFile(req?.path ?? ''))
 
   /**
    * Clicking and typing on the real desktop.

@@ -347,7 +347,14 @@ export interface CloudModel {
 export interface Measured {
   /** Ladder rungs answered cleanly on every run. */
   clean: number
-  /** Rungs attempted. The full ladder is 41; a sample is fewer. */
+  /**
+   * Rungs attempted. A sample is fewer than the whole ladder.
+   *
+   * The ladder grows, so this is not a constant and every score below
+   * carries the length it was measured against: everything on file is
+   * `of: 41`, and L42 was added on 18 Oct after a model told the user it
+   * could not type while holding the instructions that say it can.
+   */
   of: number
   /** Runs per rung. One is a sample, two is a measurement. */
   runs: number
@@ -405,7 +412,7 @@ export const CLOUD_MODELS: CloudModel[] = [
     id: 'deepseek-ai/deepseek-v4.1-flash',
     provider: 'nvidia',
     /**
-     * THE LATENCY HERE IS IN DISPUTE AND THE BLURB NO LONGER PROMISES 1.3s.
+     * THE LATENCY HERE IS SETTLED NOW, AND IT IS NOT 1.3s.
      *
      * 1,256ms on 16 Oct, one run of the full ladder, median to a COMPLETE
      * short answer at Wumpy's real preamble. 103,204ms to the FIRST WORD on
@@ -416,8 +423,13 @@ export const CLOUD_MODELS: CloudModel[] = [
      * prompt, and stopping at the first token instead of the last - and it
      * came back eighty times slower on the model this app answers with by
      * default. Nothing about prompt size explains that; it is queueing at
-     * the provider. Both are single samples, and `Measured.runs` exists
-     * precisely so that neither can be mistaken for settled.
+     * the provider.
+     *
+     * Asked a second time the same day, because one sample is not a
+     * measurement and this file says so: 114,646ms. Two runs, both about
+     * a hundred seconds, on the easier question. That is the figure now.
+     * The 1,256ms stands as what one ladder run saw on 16 Oct and no
+     * longer as what anyone should expect.
      *
      * So the measurement is left as recorded rather than overwritten by a
      * second sample that disagrees with it, and the blurb - which is what
@@ -429,7 +441,13 @@ export const CLOUD_MODELS: CloudModel[] = [
      */
     label: 'DeepSeek V4.1 Flash',
     blurb: '39/41 on the full ladder — the best measured here. Latency varies wildly.',
-    measured: { clean: 39, of: 41, runs: 1, medianMs: 1256, on: '2026-10-16' }
+    /* 103,204ms is the kinder of two probes on 18 Oct and a FLOOR for this
+       field, not a like-for-like: the probe asks four words and stops at
+       the first token, where this column means a complete short answer at
+       the real preamble. Understating it is the safe direction, and it is
+       within a tenth of the truth where 1,256ms was out by eighty times.
+       The ladder score is from 16 Oct and stands. */
+    measured: { clean: 39, of: 41, runs: 2, medianMs: 103_204, on: '2026-10-18' }
   },
   /*
    * NEMOTRON 3 ULTRA IS NOT OFFERED, because it does not answer.
@@ -486,18 +504,29 @@ export const CLOUD_MODELS: CloudModel[] = [
     provider: 'nvidia',
     label: 'Nemotron 3.5 Super VL 120B',
     sees: true,
-    blurb: 'The only one here that can read a picture. 36/41 on two full ladders, 0.9s — the fastest measured.',
+    /* The 859ms stands as a ladder median on 16 Oct. Two probes on 18 Oct
+       came back at 4,128ms and 9,252ms to the first word, on a far shorter
+       prompt, so "the fastest measured" is no longer a claim this can
+       carry. The ladder score is untouched. */
+    blurb: 'The only one here that can read a picture. 36/41 on two full ladders.',
     measured: { clean: 36, of: 41, runs: 2, medianMs: 859, on: '2026-10-16' }
   },
   {
     id: 'z-ai/glm-5.3',
     provider: 'nvidia',
     label: 'GLM 5.3',
-    // The index said it was the best free model there is. The full ladder
-    // puts it below its own Flash sibling - 33 against 38 - and 88 seconds
-    // is not a turn anyone sits through. Listed so the measurement is
-    // visible rather than folklore.
-    blurb: '33/41 and 88 SECONDS a turn — worse than its own Flash, and slowest here.',
+    /*
+     * The index said it was the best free model there is. The full ladder
+     * puts it below its own Flash sibling - 33 against 38 - and 88 seconds
+     * is not a turn anyone sits through. Listed so the measurement is
+     * visible rather than folklore.
+     *
+     * Worse than slow, as of 18 Oct: two probes with a four-word prompt
+     * returned 104,315ms and then nothing at all, aborted at the 180s
+     * ceiling. Not a latency any more, an unreliability - which is the
+     * distinction `/model check` now draws, and the reason it asks twice.
+     */
+    blurb: '33/41, around 90 SECONDS when it answers — and twice it did not.',
     measured: { clean: 33, of: 41, runs: 1, medianMs: 87934, on: '2026-10-16' }
   },
 
@@ -527,6 +556,23 @@ export interface Ranked {
 }
 
 /**
+ * Time past which a right answer has stopped being worth waiting for.
+ *
+ * The ordering below used to be score first and speed only as a tie-break,
+ * on the reasoning that "a wrong answer costs the user the turn and then
+ * another turn correcting it; a slow right answer costs seconds". Sound,
+ * and its premise failed on 18 Oct: deepseek-v4.1-flash took 103 and 115
+ * seconds to the first word, and glm-5.3 took 104 and then never answered
+ * at all. That is not seconds, and nobody sits through it - they press
+ * stop, which costs the turn exactly the way a wrong answer does.
+ *
+ * So there is a floor now, and it is drawn well clear of anything in
+ * normal territory: the slowest entry below it is 15s, the quickest above
+ * it is 88s. Nothing has ever been measured here in between.
+ */
+export const UNUSABLY_SLOW_MS = 30_000
+
+/**
  * The catalogue in measured order, best first.
  *
  * Score decides, then speed breaks the tie - which is the right way round
@@ -535,13 +581,20 @@ export interface Ranked {
  * But four models scored within a rung of each other, so speed is doing most
  * of the separating in practice, and at a desktop step every turn is a step.
  *
+ * A LATENCY FLOOR WAS TRIED HERE AND IS NOT IN YET. The premise above -
+ * that a slow right answer costs seconds - failed on 18 Oct, when
+ * deepseek took 103s and 115s to the first word and glm-5.3 took 104s and
+ * then nothing. Sorting those below everything that answers moved the
+ * top of the list, and moving the list on four-word probes would repeat
+ * the mistake this file keeps making. UNUSABLY_SLOW_MS is kept, unused,
+ * for the ladder run that settles it.
+ *
  * Unmeasured entries keep their catalogue position and get no rank, rather
  * than being sorted to the bottom as though they had scored zero.
  */
 export function rankedModels(models: readonly CloudModel[] = CLOUD_MODELS): Ranked[] {
   const share = (m: CloudModel): number =>
     m.measured && m.measured.of > 0 ? m.measured.clean / m.measured.of : -1
-
   const order = models
     .filter((m) => m.measured)
     .slice()
@@ -1048,6 +1101,29 @@ export const GIVE_UP_AFTER_MS = 120_000
  */
 export const EXHAUSTED_AFTER_MS = 4 * 3_600_000
 
+/**
+ * The provider having a bad minute, which waiting a moment does fix.
+ *
+ * 503 was the only one of these treated as transient, and the other three
+ * fell through to "returned 500: {json}" with no retry - the user was
+ * handed a status code and an error object and the turn was over. That is
+ * the wrong response to infrastructure, and this file already said so
+ * somewhere else: the VL model's two ladder runs are in the catalogue
+ * precisely because "the first run hit a 500 and a 502 from the gateway -
+ * infrastructure, not the model, so those rungs are not counted as
+ * failures". The bench excused them and the app did not.
+ *
+ * Seen here as `NVIDIA NIM returned 500: {"message":"Failed to generate
+ * completions","type":"Internal Server Error","code":500}` on an ordinary
+ * question, with every key healthy and nothing rate limited.
+ *
+ * Retried rather than reported, because a gateway blip is the one failure
+ * where asking again is both cheap and likely to work. Deliberately NOT
+ * including 500-class errors from the 4xx range: a malformed request will
+ * be malformed again, and 400 and 404 still mean "try a different model".
+ */
+export const GATEWAY_TROUBLE = new Set([500, 502, 503, 504])
+
 export function classifyLimit(
   status: number,
   body: string,
@@ -1055,7 +1131,7 @@ export function classifyLimit(
   /** The per-minute request allowance the provider reported, if it did. */
   limitPerMinute?: string | null
 ): LimitVerdict {
-  if (status !== 429 && status !== 503) {
+  if (status !== 429 && !GATEWAY_TROUBLE.has(status)) {
     return { kind: 'other', waitMs: 0, message: '' }
   }
 
@@ -1119,7 +1195,7 @@ export function classifyLimit(
     }
   }
 
-  if (status === 503) {
+  if (GATEWAY_TROUBLE.has(status)) {
     return {
       kind: 'busy',
       waitMs: Math.min(GIVE_UP_AFTER_MS, askedMs || 8000),

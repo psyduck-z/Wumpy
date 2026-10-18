@@ -24,6 +24,7 @@
  * re-encoded as JPEG picks up ringing around the letters, which is the one
  * case where the file was never the problem.
  */
+import { officeKind, readOfficeText } from './office'
 import type { Attachment } from '@shared/types'
 import {
   encodingOf,
@@ -249,6 +250,36 @@ export async function readAnyFile(file: File): Promise<Attachment> {
       text: cut.text,
       chars: readEverything ? whole.length : Math.max(whole.length, file.size),
       truncated: cut.truncated || !readEverything
+    }
+  }
+
+  /*
+   * A document that is really a zip full of XML: .docx, .pptx, .xlsx and
+   * the OpenDocument three. These were `opaque` - attached as a sentence
+   * saying they could not be read - which was true and was also the most
+   * common kind of file anyone has.
+   *
+   * Tried after everything else and before giving up, so nothing that
+   * already worked changes shape. A document that will not open falls
+   * through to the same opaque line it produced before.
+   */
+  const office = officeKind(file.name)
+  if (office) {
+    const text = await readOfficeText(file, office).catch(() => '')
+    if (text) {
+      const cut = trimForSend(text)
+      return {
+        kind: 'text',
+        dataUrl: '',
+        name: file.name,
+        mime,
+        width: 0,
+        height: 0,
+        bytes: file.size,
+        text: cut.text,
+        chars: text.length,
+        truncated: cut.truncated
+      }
     }
   }
 

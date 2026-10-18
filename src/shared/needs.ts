@@ -103,9 +103,20 @@ const INSTALL_WORDS =
  * that Wumpy can read a picture and cannot produce one - and a request about
  * either needs both, so that "no, but here is what I can do" is available in
  * the same breath as the refusal.
+ *
+ * AND THE FILE EXTENSIONS, which were the hole this had all along.
+ *
+ * The `wumpy-look` rules hang off this topic, and "what does the error in
+ * D:\shots\build.png say" contains not one word from the list - no "image",
+ * no "picture", no "screenshot", just a path. Measured before the fix: that
+ * sentence returned no topics at all, and so did "read report.pdf". The one
+ * turn that most needs the grammar for opening a picture was the one turn
+ * that could not reach it.
+ *
+ * A name ending .png is naming a picture as plainly as the word is.
  */
 const PICTURE_WORDS =
-  /\b(picture|pictures|image|images|photo|photos|screenshot|screenshots|draw|drawing|sketch|render|diagram|chart|graph|logo|icon|wallpaper|video|videos|clip|recording|attached|attachment)\b/i
+  /\b(picture|pictures|image|images|photo|photos|screenshot|screenshots|draw|drawing|sketch|render|diagram|chart|graph|logo|icon|wallpaper|video|videos|clip|recording|attached|attachment)\b|\.(png|jpe?g|gif|webp|bmp|tiff?|heic|svg|pdf)\b/i
 
 /**
  * Putting text into a file, which is the one thing with its own block.

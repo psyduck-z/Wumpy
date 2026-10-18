@@ -755,7 +755,14 @@ export const IPC = {
    */
   screenCapture: 'screen:capture',
   /* Clicking and typing on the real desktop, aimed by the last screenshot. */
-  doRun: 'do:run'
+  doRun: 'do:run',
+  /**
+   * Open a picture that is already on the disk, so the model can see it.
+   *
+   * Like the screenshot, only on a click: the path the model chose is shown
+   * on a card first, because this is the one read that SENDS what it reads.
+   */
+  lookFile: 'look:file'
 } as const
 
 /* --------------------------------------------------------------------- keys */

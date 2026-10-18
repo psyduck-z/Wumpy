@@ -1,5 +1,6 @@
 import type { Assistant } from './types'
 import { WRITE_PROMPT } from './writefile'
+import { LOOK_PROMPT } from './look'
 import { STUBS, type Capability } from './needs'
 import { middlePrompt } from './lean'
 
@@ -767,8 +768,43 @@ export const EYES_PROMPT = [
  */
 const BACKSLASH = String.fromCharCode(92)
 
+/**
+ * "DEFAULT TO DOING IT" IS IN HERE AND HAS NOT BEEN SHOWN TO DO ANYTHING.
+ *
+ * Added 18 Oct after a real refusal: asked "can YOU type it" at a typing
+ * test, the answer was "I can't type into your browser for you - I can
+ * only look at your screen and run commands", which is false twice over.
+ *
+ * It is recorded as unproven because the A/B says so. L42 was written from
+ * that exact exchange and run against three models with the paragraph and
+ * without it: 2/2 either way, both times. So on the bench the paragraph
+ * changes nothing, and the real failure is not reproduced there at all -
+ * what the bench lacks is the screenshot that was in the live context, and
+ * a VL model looking at an actual typing test is not the same question as
+ * one told about it in prose.
+ *
+ * Kept anyway, on the same grounds as the rule at L10 that also failed to
+ * move its number: it is true of cases the ladder does not cover, and a
+ * refusal dressed as an incapacity is the one failure the user cannot
+ * argue with. Recorded here as not having changed the number, so nobody
+ * later mistakes it for a fix that worked.
+ */
 export const DESKTOP_PROMPT = [
   'YOU CAN CLICK AND TYPE ON THEIR SCREEN. Not just look at it.',
+  '',
+  'DEFAULT TO DOING IT. This is their own computer, they are sitting at it, and',
+  'nothing you propose happens until they click it. You are not the last line of',
+  'defence and you are not being asked to approve of the task. A typing test, a',
+  'game, a form, a practice score, a tedious bit of clicking they would rather',
+  'not do by hand — none of that is yours to weigh up. Do it.',
+  'If you genuinely would rather not, say THAT — "I would rather not" is honest,',
+  'and "I cannot type into your browser" is a lie when you can. Never dress a',
+  'refusal as a missing ability: they can argue with a no, and they cannot argue',
+  'with a limit that does not exist, so they simply stop asking.',
+  'What still gets a real no: spending money, anything aimed at someone else’s',
+  'machine or account, and a step that cannot be undone. Say which of those it',
+  'is, in one line, and offer the nearest thing you can do.',
+  '',
   'A wumpy-do block, a # line saying why, then one step per line:',
   '  press "<name>"     focus "<name>"       fill "<name>" <text>',
   '  read "<name>"      reveal "<name>"      type <text>',
@@ -1343,6 +1379,37 @@ export const VOICE_PROMPT = [
  * that, which is a better failure than a model that answers badly. The one
  * entry needing no key at all is gemma4:31b-cloud, a /model away.
  */
+/*
+ * AND IT ALMOST MOVED A THIRD TIME, ON LATENCY RATHER THAN ON THE LADDER.
+ * It has NOT moved. Asked on 18 Oct, the choice was to measure properly
+ * before changing anything, which is the right instinct and the standing
+ * lesson of this file one more time - the last two moves were both made
+ * on single runs and one of them was a correction of the other.
+ *
+ * Everything above about DeepSeek's answers still holds - 39/41 is the
+ * best measured here and nothing has displaced it. What did not hold was
+ * "1.3s median", which came from one ladder run on 16 Oct. Asked twice on
+ * 18 Oct with a four-word prompt, the easier question by far, it took
+ * 103,204ms and 114,646ms to the first word. Two runs agreeing at about a
+ * hundred seconds is a measurement, and a hundred seconds before the
+ * first word is not a default anyone can use.
+ *
+ * The VL model instead, which the same pair of probes puts at 4,128ms and
+ * 9,252ms:
+ *
+ *   ladder    36/41 over TWO full runs, against DeepSeek's 39/41 over one
+ *   pictures  the only entry here that can read one, so a screenshot needs
+ *             no borrowed eye and arrives as itself
+ *   speed     single-digit seconds rather than a hundred
+ *
+ * Three rungs of answer quality for two orders of magnitude of latency,
+ * and vision thrown in. The nearest rival is nemotron-3-super at 637ms,
+ * which is quicker still and four rungs worse again with no eyes.
+ *
+ * DeepSeek stays in the catalogue and stays one `/model` away. What it
+ * stops being is what a fresh install, and the move off Google, hands
+ * someone before they have measured anything themselves.
+ */
 export const DEFAULT_MODEL = 'deepseek-ai/deepseek-v4.1-flash'
 
 /**
@@ -1545,6 +1612,11 @@ export function promptSections(shape: PromptShape): string[] {
       scope !== 'none' && search ? SEARCH_PROMPT : '',
       scope !== 'none' && browser ? (wants('open') ? OPEN_PROMPT : STUBS.open) : '',
       screen ? looking : '',
+      /* Opening a picture off the disk. Behind the picture topic, because
+         a turn that is not about an image does not need the grammar - and
+         behind `screen`, because it is the same permission: bytes off this
+         machine going to the model. */
+      screen && wants('picture') ? LOOK_PROMPT : '',
       quota ? QUOTA_PROMPT : '',
       screen && browser && scope === 'full'
         ? wants('desktop')
@@ -1563,6 +1635,7 @@ export function promptSections(shape: PromptShape): string[] {
     scope !== 'none' && search ? SEARCH_PROMPT : '',
     scope !== 'none' && browser ? (wants('open') ? OPEN_PROMPT : STUBS.open) : '',
     screen ? looking : '',
+    screen && wants('picture') ? LOOK_PROMPT : '',
     quota ? QUOTA_PROMPT : '',
     /* Both, because driving the screen without seeing it is aiming blind. */
     screen && browser && scope === 'full'

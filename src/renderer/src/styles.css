@@ -550,7 +550,29 @@ body {
   background: rgb(var(--danger-soft));
   border-color: rgb(var(--danger) / 0.45);
 }
-.picker-row.is-removing .picker-del {
+.picker-row.is-removing /*
+ * The capability badge, beside the score tag and deliberately unlike it.
+ *
+ * An outline rather than a fill, because the two are different kinds of
+ * claim: the filled tag is a ranking and its colour carries meaning (top,
+ * good, weak), while this one is a fact that is either true or absent.
+ * Giving it a tone would invite reading it as a grade.
+ */
+.picker-badge {
+  margin-left: 5px;
+  padding: 0 5px;
+  border: 1px solid rgb(var(--muted) / 0.35);
+  border-radius: 999px;
+  font-family: var(--mono);
+  font-size: 9px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  vertical-align: 1px;
+  white-space: nowrap;
+  color: rgb(var(--muted));
+}
+
+.picker-del {
   opacity: 1;
 }
 

@@ -41,6 +41,17 @@ import { GIVE_UP_AFTER_MS } from './cloud'
 export type ProbeState =
   | 'ok'
   | 'slow'
+  /**
+   * It worked on some runs and not others, which one run cannot see.
+   *
+   * The most useful verdict here and the reason asking twice is worth the
+   * requests. nemotron-3-ultra answered one probe and 503'd the next; a
+   * single run would have called it working or called it dead, and both
+   * would have been wrong in a way that costs a turn later. A model that
+   * fails half the time is a different thing from one that fails, and the
+   * user is entitled to decide about it knowing that.
+   */
+  | 'flaky'
   | 'empty'
   | 'missing'
   | 'refused'
@@ -63,7 +74,29 @@ export interface ProbeResult {
   said: string
   /** Why, when the state needs explaining. Never carries key material. */
   why: string
+  /** How many times it was asked. 1 is a sample; 2 or more is a measurement. */
+  runs?: number
+  /** Every run's time, slowest last, so a spread is visible rather than averaged away. */
+  times?: number[]
+  /** The distinct verdicts seen, when the runs did not agree. */
+  seen?: ProbeState[]
 }
+
+/**
+ * How many times to ask each model, when nobody says.
+ *
+ * Two, which is this codebase's own standard for the difference between a
+ * sample and a measurement - `Measured.runs` exists because ten rungs at
+ * one run apiece put nemotron-3-ultra at 10/10 and the same ten at two
+ * runs put it at 9/10.
+ *
+ * It was one until there were two accounts to spread the cost over. The
+ * honest trade is stated where the command is run: two runs is twice the
+ * requests and twice the wait, and the wait is the part that bites, since
+ * the slowest models here take about a hundred seconds each.
+ */
+export const DEFAULT_RUNS = 2
+export const MAX_RUNS = 5
 
 /**
  * Past this, a working model is worth calling slow.
@@ -127,21 +160,128 @@ export function spent(state: ProbeState): boolean {
   return state !== 'nokey'
 }
 
-/** Would picking this model right now get an answer? */
+/**
+ * Would picking this model right now get an answer?
+ *
+ * `flaky` is deliberately NOT usable. It answered at least once, so there
+ * is a case for counting it - and the case is wrong: the question this
+ * report answers is "what should I switch to", and the honest answer about
+ * a model that fails half the time is not "yes".
+ */
 export function usable(state: ProbeState): boolean {
   return state === 'ok' || state === 'slow'
 }
 
+/* ----------------------------------------------------------- many runs */
+
+/** The middle time, which a single slow outlier cannot drag. */
+function median(times: readonly number[]): number {
+  if (!times.length) return 0
+  const sorted = [...times].sort((a, b) => a - b)
+  const mid = Math.floor(sorted.length / 2)
+  return sorted.length % 2 ? sorted[mid] : Math.round((sorted[mid - 1] + sorted[mid]) / 2)
+}
+
+/**
+ * Several runs of one model, as one verdict.
+ *
+ * THE DISAGREEMENT IS THE POINT, so it survives rather than being averaged
+ * into a number that hides it. Three outcomes:
+ *
+ *   every run worked      -> ok or slow, on the MEDIAN time, not the best:
+ *                            the quickest of two runs is a sales pitch
+ *   every run failed      -> that failure, with how many times it was seen
+ *   they disagreed        -> flaky, which no single run could have found
+ *
+ * A model that never answered keeps its own verdict rather than becoming
+ * flaky, because "refused twice" and "worked once, refused once" need
+ * different things done about them.
+ *
+ * Returns the single run unchanged when there is only one, so a one-run
+ * check reads exactly as it did before this existed.
+ */
+export function combineRuns(runs: readonly ProbeResult[]): ProbeResult {
+  if (!runs.length) throw new Error('combineRuns needs at least one run')
+  if (runs.length === 1) return { ...runs[0], runs: 1, times: [runs[0].ms] }
+
+  const last = runs[runs.length - 1]
+  const states = runs.map((r) => r.state)
+  const distinct = [...new Set(states)]
+  const times = runs.map((r) => r.ms).filter((ms) => ms > 0)
+  const worked = runs.filter((r) => usable(r.state))
+
+  /* Nothing was asked, so there is nothing to disagree about. */
+  if (distinct.length === 1 && distinct[0] === 'nokey') {
+    return { ...last, runs: runs.length, times: [] }
+  }
+
+  if (worked.length && worked.length < runs.length) {
+    const bad = runs.find((r) => !usable(r.state))
+    return {
+      ...last,
+      state: 'flaky',
+      ms: median(worked.map((r) => r.ms)),
+      runs: runs.length,
+      times,
+      seen: distinct,
+      why:
+        `answered ${worked.length} of ${runs.length} times` +
+        (bad ? `; otherwise ${bad.state}${bad.why ? ` (${bad.why})` : ''}` : '')
+    }
+  }
+
+  if (worked.length === runs.length) {
+    const mid = median(times)
+    return {
+      ...last,
+      state: mid >= SLOW_MS ? 'slow' : 'ok',
+      ms: mid,
+      runs: runs.length,
+      times,
+      why: ''
+    }
+  }
+
+  /* Every run failed. If they failed differently, say so rather than
+     reporting the last one as though it were the whole story. */
+  return {
+    ...last,
+    ms: median(times),
+    runs: runs.length,
+    times,
+    ...(distinct.length > 1 ? { seen: distinct } : {})
+  }
+}
+
 /* ------------------------------------------------------------ the report */
+
+/**
+ * The spread, when there was more than one run and they differed.
+ *
+ * Shown rather than hidden behind the median, because a model that
+ * answered in 900ms and then 104,000ms is not a 52-second model - it is
+ * two different experiences and the user is choosing between them.
+ */
+function spread(r: ProbeResult): string {
+  const times = r.times ?? []
+  if (times.length < 2) return ''
+  const low = Math.min(...times)
+  const high = Math.max(...times)
+  /* Within a fifth of each other is one number told twice. */
+  if (high - low < low / 5) return ''
+  return ` (${low.toLocaleString()}–${high.toLocaleString()}ms over ${times.length})`
+}
 
 /** One line per model, in the order a person scans them. */
 function row(r: ProbeResult): string {
   const ms = r.ms ? ` — ${r.ms.toLocaleString()}ms` : ''
   switch (r.state) {
     case 'ok':
-      return `- \`${r.model}\`${ms}`
+      return `- \`${r.model}\`${ms}${spread(r)}`
     case 'slow':
-      return `- \`${r.model}\`${ms} — **slow**`
+      return `- \`${r.model}\`${ms}${spread(r)} — **slow**`
+    case 'flaky':
+      return `- \`${r.model}\` — **${r.why || 'did not answer every time'}**${ms ? `, ${r.ms.toLocaleString()}ms when it did` : ''}`
     case 'empty':
       return `- \`${r.model}\` — **answered nothing**${ms}. Usually an overloaded model; worth asking again later.`
     case 'missing':
@@ -174,19 +314,41 @@ export function probeLines(results: readonly ProbeResult[], current = ''): strin
   if (!results.length) return ['Nothing to check: the catalogue is empty.']
 
   const working = results.filter((r) => usable(r.state))
-  const broken = results.filter((r) => !usable(r.state) && r.state !== 'nokey')
+  const flaky = results.filter((r) => r.state === 'flaky')
+  const broken = results.filter(
+    (r) => !usable(r.state) && r.state !== 'nokey' && r.state !== 'flaky'
+  )
   const unasked = results.filter((r) => r.state === 'nokey')
-  const asked = results.filter((r) => spent(r.state)).length
+  /* Runs, not models: two runs of six models is twelve requests, and the
+     line is there to say what the check cost. */
+  const asked = results
+    .filter((r) => spent(r.state))
+    .reduce((n, r) => n + Math.max(1, r.runs ?? 1), 0)
+  const runs = Math.max(...results.map((r) => r.runs ?? 1), 1)
 
   const lines: string[] = [
-    `**${working.length} of ${results.length} models answered.** ` +
-      `${asked} request${asked === 1 ? '' : 's'} spent asking.`
+    `**${working.length} of ${results.length} models answered${runs > 1 ? ' every time' : ''}.** ` +
+      `${asked} request${asked === 1 ? '' : 's'} spent asking` +
+      (runs > 1 ? `, ${runs} per model.` : '.') +
+      /* Said out loud, because the whole difference between this and the
+         old one-run check is the standing of the answer. */
+      (runs > 1 ? '' : ' One run each, so this is a sample rather than a measurement.')
   ]
 
   if (working.length) {
     /* Quickest first: the number is the reason this list is ordered at all. */
     const sorted = [...working].sort((a, b) => a.ms - b.ms)
     lines.push('', '**Working**', ...sorted.map(row))
+  }
+
+  /*
+   * Between the two groups, because that is where it belongs: not
+   * something to switch to, not something to write off. This group only
+   * ever has anything in it when the check ran more than once, which is
+   * the argument for running it more than once.
+   */
+  if (flaky.length) {
+    lines.push('', '**Unreliable — answered sometimes**', ...flaky.map(row))
   }
 
   if (broken.length) {

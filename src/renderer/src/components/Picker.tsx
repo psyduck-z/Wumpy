@@ -13,6 +13,16 @@ export interface PickerItem {
    * colours it by band so the order is visible without reading any of them.
    */
   tag?: { text: string; tone: 'top' | 'good' | 'fair' | 'weak'; title?: string }
+  /**
+   * A second badge, for a capability rather than a score.
+   *
+   * Kept apart from `tag` instead of appended to its text, because they
+   * answer different questions: one is how well it did on the ladder and
+   * moves every time it is measured, the other is whether it can see at
+   * all and does not move. Crowding both into "#2 · 36/41 · vision" would
+   * read as one claim.
+   */
+  badge?: { text: string; title?: string }
   /** Right-aligned hint, such as a keyboard shortcut. */
   hint?: string
   /** Greyed out and not selectable. */
@@ -179,6 +189,11 @@ export function Picker({
                   {item.tag && (
                     <span className={`picker-tag is-${item.tag.tone}`} title={item.tag.title}>
                       {item.tag.text}
+                    </span>
+                  )}
+                  {item.badge && (
+                    <span className="picker-badge" title={item.badge.title}>
+                      {item.badge.text}
                     </span>
                   )}
                   {item.active && <span className="picker-dot" title="Current" />}

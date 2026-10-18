@@ -1,5 +1,6 @@
 import type { Dock, ProviderName } from '@shared/types'
 import { PROVIDER_IDS, PROVIDERS, isProviderId } from '@shared/cloud'
+import { MAX_RUNS } from '@shared/probe'
 import { nearest } from '@shared/nearest'
 
 /**
@@ -21,8 +22,11 @@ export type CommandAction =
   | { kind: 'rename'; title: string }
   | { kind: 'renameChoice'; question: string; options: string[] }
   | { kind: 'model'; name: string }
-  /** `/model check` — ask every model in the catalogue whether it answers. */
-  | { kind: 'models' }
+  /**
+   * `/model check [runs]` — ask every model whether it answers, `runs`
+   * times each. Undefined means DEFAULT_RUNS.
+   */
+  | { kind: 'models'; runs?: number }
   | { kind: 'dock'; dock: Dock | null }
   | { kind: 'reasoning'; show: boolean | 'toggle' }
   | { kind: 'pin'; pinned: boolean | 'toggle' }
@@ -246,7 +250,7 @@ export const COMMANDS: CommandSpec[] = [
     name: 'model',
     aliases: ['models', 'gemini'],
     hint: 'Choose the model, or `check` which ones still answer',
-    arg: 'name | check',
+    arg: 'name | check [runs]',
     // With a name it sets directly, which is quicker than the picker once you
     // know what you want and is the only way to reach a model not in the list.
     run: (arg) => {
@@ -256,7 +260,24 @@ export const COMMANDS: CommandSpec[] = [
        * "check" would still be reachable from the picker.
        */
       const name = arg.trim()
-      if (/^(check|test|verify|status)$/i.test(name)) return { kind: 'models' }
+      /*
+       * An optional run count: `/model check 3`. Two by default, because
+       * one run is a sample and this codebase's own standard for a
+       * measurement is two - the same reason `Measured.runs` exists. One
+       * is still there for a quick look, and it says in the report that
+       * that is what it was.
+       */
+      const checking = /^(?:check|test|verify|status)(?:\s+(\d+))?$/i.exec(name)
+      if (checking) {
+        const runs = checking[1] ? Number(checking[1]) : undefined
+        if (runs !== undefined && (runs < 1 || runs > MAX_RUNS)) {
+          return {
+            kind: 'error',
+            message: `\`/model check\` takes 1 to ${MAX_RUNS} runs. Two is the default.`
+          }
+        }
+        return { kind: 'models', runs }
+      }
       return { kind: 'model', name }
     }
   },

@@ -2,6 +2,7 @@ import { contextBridge, ipcRenderer } from 'electron'
 import { IPC } from '@shared/types'
 import type { LinkCheck } from '@shared/links'
 import type { ProbeResult } from '@shared/probe'
+import type { LookResult } from '../main/look'
 import type {
   Attachment,
   DesktopResult,
@@ -169,6 +170,15 @@ const api = {
     get: (): Promise<UsageReport> => ipcRenderer.invoke(IPC.usageGet),
     reset: (): Promise<UsageReport> => ipcRenderer.invoke(IPC.usageReset)
   },
+  look: {
+    /**
+     * Read one picture off the disk, after the user has pressed the card.
+     *
+     * The path crosses as the model wrote it and comes back resolved, so
+     * what the user approved and what was opened are the same string.
+     */
+    file: (path: string): Promise<LookResult> => ipcRenderer.invoke(IPC.lookFile, { path })
+  },
   models: {
     /**
      * Which models answer right now, asked one real request at a time.
@@ -176,7 +186,8 @@ const api = {
      * No argument, on purpose: the catalogue decides what is asked, so the
      * page cannot name a host or an id of its own and have it dialled.
      */
-    probe: (): Promise<ProbeResult[]> => ipcRenderer.invoke(IPC.modelsProbe)
+    probe: (runs?: number): Promise<ProbeResult[]> =>
+      ipcRenderer.invoke(IPC.modelsProbe, { runs })
   },
   /**
    * The notes Wumpy carries between chats. Plain text the user owns - no

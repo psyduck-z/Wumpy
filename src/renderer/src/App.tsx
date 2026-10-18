@@ -54,7 +54,7 @@ import { newestPending } from './pending'
 import { forgetClaims } from './once'
 import { forgetAllLive } from './live'
 import { poolLines } from './quota'
-import { probeLines } from '@shared/probe'
+import { DEFAULT_RUNS, probeLines } from '@shared/probe'
 import { copyText } from './copy'
 import { Toast } from './components/Toast'
 import { forgetActions, record } from './ledger'
@@ -529,6 +529,44 @@ export default function App(): React.JSX.Element {
   const canSeeScreen = settings?.screenEnabled ?? true
 
   const captureScreen = useCallback(() => window.wumpy.screen.capture(), [])
+
+  /** Opens a picture the model named, once the card has been pressed. */
+  const lookAtPath = useCallback(
+    (path: string) => window.wumpy.look.file(path),
+    []
+  )
+
+  /**
+   * Hands a picture off the disk to the model, as the user's own next turn.
+   *
+   * The same hand-back the screenshot uses and for the same reason: it is
+   * where attachments already render, so what the model was given is what
+   * is on screen in front of the user.
+   *
+   * Says the file's NAME in the text as well as attaching it. A model that
+   * asked for build.png and is handed an unnamed image has to assume it is
+   * the right one; told the name, it can notice when it is not - which is
+   * the whole failure mode of a path the model guessed at.
+   */
+  const onLooked = useCallback(
+    async (file: Attachment, why: string) => {
+      await makeRoom()
+      chatRef.current.notify(`Opened ${file.name ?? 'a picture'}`)
+      chatRef.current.send(
+        [
+          `Wumpy opened ${file.name ?? 'the file'} and attached it. This was not sent by`,
+          'the user and they have not said anything - do not thank them for it or',
+          'answer as though they spoke.',
+          ...(why ? [`You asked for it in order to: ${why}`] : []),
+          'Answer from what is actually in the picture. If it is too small or cut off',
+          'to read, say so rather than guessing at it.'
+        ].join(String.fromCharCode(10)),
+        `Opened ${file.name ?? 'a picture'}`,
+        [file]
+      )
+    },
+    [makeRoom]
+  )
 
   /**
    * Hands the photograph to the model as the user's own next turn.
@@ -1347,11 +1385,24 @@ function namedControls(shot: Attachment): string[] {
         }
 
         case 'models': {
+          const runs = action.runs ?? DEFAULT_RUNS
+          /*
+           * What it will cost, before it costs it. Two runs of six models
+           * is twelve requests and can take several minutes, because the
+           * slowest entries here answer in about a hundred seconds - and
+           * a command that sits silent for that long is one somebody runs
+           * again thinking it did nothing.
+           */
           chat.note(
-            `Asking all ${CLOUD_MODELS.length} models whether they answer — ` +
-              'one small request each, so this costs a little quota and takes a moment.'
+            `Asking all ${CLOUD_MODELS.length} models whether they answer, ` +
+              `${runs} time${runs === 1 ? '' : 's'} each — ` +
+              `${CLOUD_MODELS.length * runs} small requests. ` +
+              (runs === 1
+                ? 'One run each, so it is a sample rather than a measurement.'
+                : 'Asking twice is what finds a model that works only sometimes. ' +
+                  'The slowest here take about a hundred seconds, so give it a few minutes.')
           )
-          const results = await window.wumpy.models.probe()
+          const results = await window.wumpy.models.probe(runs)
           chat.note(probeLines(results, model).join(NEWLINE))
           return
         }
@@ -2412,6 +2463,22 @@ function namedControls(shot: Attachment): string[] {
             title: m.label,
             meta: `${PROVIDERS[m.provider].label}  ·  ${ready ? m.blurb : 'needs a key — /key ' + m.provider}`,
             ...(tag ? { tag } : {}),
+            /*
+             * Which ones can actually see. It was only findable by reading
+             * a blurb - "the only one here that can read a picture" - so
+             * the one property that decides whether a screenshot is worth
+             * sending was the one you had to read a sentence to learn.
+             */
+            ...(m.sees
+              ? {
+                  badge: {
+                    text: 'vision',
+                    title:
+                      'Reads pictures directly: screenshots and image files go to this model ' +
+                      'as images. Models without this get a written description instead.'
+                  }
+                }
+              : {}),
             active: m.id === current
           }
         })
@@ -2629,6 +2696,7 @@ function namedControls(shot: Attachment): string[] {
                   autoWrite={fresh && (settings?.approvalMode ?? 'manual') === 'all'}
                   onCaptureScreen={canSeeScreen ? captureScreen : undefined}
                   onScreenCaptured={onScreenCaptured}
+                  {...(canSeeScreen ? { onLook: lookAtPath, onLooked } : {})}
                   onDesktop={canDrive ? runDesktop : undefined}
                   onDesktopDone={onDesktopDone}
                   onOpenLink={canOpenLinks ? openLink : undefined}

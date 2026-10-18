@@ -409,10 +409,17 @@ export function textBlock(file: Attached): string {
 export function opaqueLine(file: Attached): string {
   const name = file.name ?? 'an attached file'
   const type = file.mime && file.mime !== 'application/octet-stream' ? `, ${file.mime}` : ''
+  /* The advice has to stay true as the readable list grows. Word,
+     PowerPoint, Excel and the OpenDocument three are opened now - they are
+     zips full of XML and @shared/office takes the words out - so telling
+     someone to export a .docx to text would be sending them to do work the
+     app already does. What is left here is genuinely unreadable: archives,
+     binaries, design files and the rest. */
   return (
     `[attached: ${name} (${sizeLabel(file.bytes)}${type}). ` +
     'Its contents were NOT sent - this format is not text and cannot be read here. ' +
-    'Say so rather than guessing at what is in it; a text, CSV, Markdown or PDF export can be read.]'
+    'Say so rather than guessing at what is in it. Text, CSV, Markdown, PDF, Word, ' +
+    'PowerPoint, Excel and OpenDocument files can all be read if they have one.]'
   )
 }
 

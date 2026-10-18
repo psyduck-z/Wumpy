@@ -19,6 +19,7 @@ import { CommandCard } from './CommandCard'
 import { AskCard } from './AskCard'
 import { SearchCard } from './SearchCard'
 import { ScreenCard } from './ScreenCard'
+import { LookCard } from './LookCard'
 import { DoCard } from './DoCard'
 import { LinkCard } from './LinkCard'
 import { WriteCard } from './WriteCard'
@@ -188,6 +189,11 @@ function readScreen(children: ReactNode): string | null {
   return readTagged(children, 'language-wumpy-screen') ?? ''
 }
 
+/** Pulls the path out of a `wumpy-look` block. */
+function readLook(children: ReactNode): string | null {
+  return readTagged(children, 'language-wumpy-look')
+}
+
 /** Pulls the steps out of a `wumpy-do` block. */
 function readDo(children: ReactNode): string | null {
   return readTagged(children, 'language-wumpy-do')
@@ -347,6 +353,10 @@ export interface MarkdownProps {
   onCaptureScreen?: () => Promise<Attachment>
   /** Hands the picture to the conversation. */
   onScreenCaptured?: (shot: Attachment) => void
+  /** Opens a picture already on the disk. Absent when screen reading is off. */
+  onLook?: (path: string) => Promise<{ ok: boolean; file?: Attachment; path: string; why: string }>
+  /** Hands that picture to the conversation, with the reason it was wanted. */
+  onLooked?: (file: Attachment, why: string) => void
   /** Runs an approved plan of clicks and keystrokes. Absent when off. */
   onDesktop?: (body: string) => Promise<DesktopResult>
   /** Hands the outcome, and the screen afterwards, to the conversation. */
@@ -419,6 +429,8 @@ export const Markdown = memo(function Markdown({
   onDesktop,
   onDesktopDone,
   onScreenCaptured,
+  onLook,
+  onLooked,
   onOpenLink,
   onOpenSearch,
   onOpened,
@@ -481,6 +493,21 @@ export const Markdown = memo(function Markdown({
                 fallbackReason={leadIn(text)}
                 onCapture={onCaptureScreen!}
                 onCaptured={onScreenCaptured ?? (() => {})}
+              />
+            )
+          }
+
+          const look = onLook ? readLook(children) : null
+          if (look !== null) {
+            return (
+              <LookCard
+                body={look}
+                complete={settled(look)}
+                mode={linkMode}
+                messageId={messageId ?? ''}
+                fallbackReason={leadIn(text)}
+                onLook={onLook!}
+                onOpened={onLooked ?? (() => {})}
               />
             )
           }

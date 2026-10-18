@@ -97,6 +97,8 @@ check('and everything else does', [
 
 /* ------------------------------------------------------------ the report */
 
+const combine = (runs) => P.combineRuns(runs)
+
 const R = (model, state, ms = 500, extra = {}) => ({
   model,
   label: model,
@@ -154,6 +156,84 @@ const R = (model, state, ms = 500, extra = {}) => ({
 
 check('an empty catalogue says so rather than throwing', P.probeLines([]).length, 1)
 
+/* ------------------------------------------- one run is a sample, two is not */
+
+/*
+ * The whole argument for asking twice: a model that works half the time is
+ * a third thing, and one run cannot see it. nemotron-3-ultra answered one
+ * probe and 503'd the next - called working or called dead, both verdicts
+ * would have been wrong in a way that costs a turn later.
+ */
+{
+  const one = combine([R('a/x', 'ok', 900)])
+  check('a single run is reported as one run', one.runs, 1)
+  check('and is unchanged otherwise', one.state, 'ok')
+
+  const agreed = combine([R('a/x', 'ok', 900), R('a/x', 'ok', 1100)])
+  check('two agreeing runs stay ok', agreed.state, 'ok')
+  /* The median, not the best: the quickest of two runs is a sales pitch. */
+  check('timed on the middle, not the quickest', agreed.ms, 1000)
+  check('and both times are kept', agreed.times, [900, 1100])
+
+  const mixed = combine([R('a/x', 'ok', 900), R('a/x', 'empty', 300)])
+  check('a model that failed once is flaky', mixed.state, 'flaky')
+  check('which is NOT something to switch to', P.usable(mixed.state), false)
+  check('it says how often it worked', /answered 1 of 2 times/.test(mixed.why), true)
+  check('and what went wrong the other time', /empty/.test(mixed.why), true)
+  check('timed on the runs that answered', mixed.ms, 900)
+
+  /* Failing every time keeps its own verdict: "refused twice" and "worked
+     once, refused once" need different things done about them. */
+  const dead = combine([R('a/x', 'refused'), R('a/x', 'refused')])
+  check('failing twice is not flaky', dead.state, 'refused')
+  check('and says it was asked twice', dead.runs, 2)
+
+  /* Failing differently each time is still a failure, but the report must
+     not present the last one as the whole story. */
+  const varied = combine([R('a/x', 'timeout'), R('a/x', 'empty')])
+  check('different failures keep both', varied.seen, ['timeout', 'empty'])
+
+  /* Slowness is judged on the combined figure, not on one unlucky run. */
+  const slow = combine([R('a/x', 'ok', 20_000), R('a/x', 'ok', 30_000)])
+  check('two slow runs are slow', slow.state, 'slow')
+  const once = combine([R('a/x', 'ok', 600), R('a/x', 'slow', 20_000)])
+  check('one slow run among quick ones is judged on the median', once.state, 'slow')
+
+  /* Nothing was asked, so there is nothing to disagree about. */
+  const none = combine([R('a/x', 'nokey', 0), R('a/x', 'nokey', 0)])
+  check('an unasked model is never flaky', none.state, 'nokey')
+  check('and spent nothing', none.times, [])
+}
+
+/* The report has to show the spread, or a model that answered in 900ms and
+   then 104,000ms reads as a 52-second model, which it is not. */
+{
+  const wide = combine([R('a/x', 'ok', 900), R('a/x', 'ok', 104_000)])
+  const text = P.probeLines([wide]).join(NL)
+  check('a wide spread is printed', /900–104,000ms over 2/.test(text), true)
+
+  const tight = P.probeLines([combine([R('a/x', 'ok', 1000), R('a/x', 'ok', 1050)])]).join(NL)
+  check('and a tight one is not noise', /over 2/.test(tight), false)
+
+  const flakyText = P.probeLines([combine([R('a/x', 'ok', 900), R('a/x', 'empty', 0)])]).join(NL)
+  check('flaky models get their own group', /Unreliable — answered sometimes/.test(flakyText), true)
+  check('and are not in Working', flakyText.indexOf('a/x') > flakyText.indexOf('Unreliable'), true)
+
+  /* The cost line counts requests, not models. */
+  const cost = P.probeLines([
+    combine([R('a/x', 'ok', 900), R('a/x', 'ok', 900)]),
+    combine([R('a/y', 'ok', 900), R('a/y', 'ok', 900)])
+  ]).join(NL)
+  check('the cost line counts runs', /4 requests spent asking, 2 per model/.test(cost), true)
+
+  /* And a one-run check says what it is worth. */
+  const sample = P.probeLines([combine([R('a/x', 'ok', 900)])]).join(NL)
+  check('one run admits it is a sample', /sample rather than a measurement/.test(sample), true)
+}
+
+check('two runs is the default', P.DEFAULT_RUNS, 2)
+check('and there is a ceiling on asking', P.MAX_RUNS, 5)
+
 /* -------------------------------------------- what the check actually costs */
 
 const cloud = readFileSync('src/main/cloud.ts', 'utf8')
@@ -180,13 +260,23 @@ check('with its own timeout', /signal: AbortSignal\.timeout\(PROBE_TIMEOUT_MS\)/
 /* A key never crosses to the renderer, here as everywhere else. */
 check('the reply carries no key', /said: truncate\(said, 40\)/.test(cloud), true)
 check('and a key is stripped from an error body', /stripKey\(await res\.text\(\)/.test(cloud), true)
-check('the page cannot name what gets dialled', /probe: \(\): Promise<ProbeResult\[\]>/.test(preload), true)
+/* A run count is the only thing the page may pass: no host, no id, no
+   key. The catalogue still decides what gets dialled. */
+check(
+  'the page can only say how many times',
+  /probe: \(runs\?: number\): Promise<ProbeResult\[\]>/.test(preload),
+  true
+)
+check('and the count is all that crosses', /IPC\.modelsProbe, \{ runs \}/.test(preload), true)
 
 /* Nothing automatic. The only caller is the command. */
 check('only one place starts a probe', (main.match(/probeModels\(/g) ?? []).length, 1)
-check('and it is an explicit request', /IPC\.modelsProbe, async \(\)/.test(main), true)
+check('and it is an explicit request', /IPC\.modelsProbe, async \(_e, req\?/.test(main), true)
 check('nothing polls it', /setInterval[^;]{0,120}probe/i.test(main), false)
-check('the panel says it is spending quota first', /costs a little quota/.test(app), true)
+/* What it will cost, before it costs it: twelve requests and several
+   minutes is a command somebody runs twice if nothing says so. */
+check('the panel says what it will spend first', /small requests/.test(app), true)
+check('and how long it will take', /give it a few minutes/.test(app), true)
 
 /*
  * A probe's 429 must not become a measured daily cap. `exhaustedAt` means

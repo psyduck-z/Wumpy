@@ -17,7 +17,7 @@ import {
   seesMedia
 } from '@shared/cloud'
 import type { CloudModel } from '@shared/cloud'
-import { PROBE_TIMEOUT_MS, verdictFor } from '@shared/probe'
+import { MAX_RUNS, PROBE_TIMEOUT_MS, combineRuns, verdictFor } from '@shared/probe'
 import type { ProbeResult } from '@shared/probe'
 import type { ChatOptions, StreamFailure, StreamHandlers, StreamStats } from './stream'
 import type { KeyStore } from './keys'
@@ -340,9 +340,12 @@ export class CloudClient {
    * knows.
    */
   async probeModels(
+    runs = 1,
     onEach?: (done: number, total: number) => void
   ): Promise<ProbeResult[]> {
     const out: ProbeResult[] = []
+    const times = Math.min(MAX_RUNS, Math.max(1, Math.floor(runs)))
+    const total = CLOUD_MODELS.length * times
     let done = 0
 
     /*
@@ -366,13 +369,31 @@ export class CloudClient {
           state: 'nokey',
           ms: 0,
           said: '',
-          why: check.why
+          why: check.why,
+          runs: 0,
+          times: []
         })
-        onEach?.(++done, CLOUD_MODELS.length)
+        /* Counted as all of its runs at once: nothing was asked, and a
+           progress bar that stalled on the keyless entries would be
+           describing work that is not happening. */
+        done += times
+        onEach?.(done, total)
         continue
       }
-      out.push(await this.probeOne(entry, check.provider))
-      onEach?.(++done, CLOUD_MODELS.length)
+      /*
+       * Each model's runs together rather than a whole sweep repeated.
+       *
+       * Back to back is the harder test and the fairer one: a provider
+       * that answers and then 503s does it within seconds, which is how
+       * nemotron-3-ultra was caught, and a second sweep minutes later
+       * would be asking a different question about a different moment.
+       */
+      const attempts: ProbeResult[] = []
+      for (let run = 0; run < times; run++) {
+        attempts.push(await this.probeOne(entry, check.provider))
+        onEach?.(++done, total)
+      }
+      out.push(combineRuns(attempts))
     }
     return out
   }
@@ -765,10 +786,32 @@ export class CloudClient {
        * request will be malformed again anywhere.
        */
       const unusableModel = res.status === 404 || res.status === 400
+      /*
+       * The provider's sentence, not its error object.
+       *
+       * This printed the raw body, so a gateway blip reached the user as
+       * `returned 500: {"message":"Failed to generate completions","type":
+       * "Internal Server Error","code":500}` - three restatements of the
+       * status code and one actual fact, in JSON, under a red banner. The
+       * message field is the only part worth reading; the rest is already
+       * in the status. Falls back to the whole body when there is no
+       * message to find, because an unparsed error beats a silent one.
+       */
+      const said = /"message":\s*"([^"]{0,200})/.exec(stripKey(detail ?? ''))?.[1]
       handlers.onError(
-        `${PROVIDERS[provider].label} returned ${res.status}${
-          detail ? `: ${truncate(stripKey(detail), 300)}` : ''
-        }`,
+        `${PROVIDERS[provider].label} returned ${res.status}` +
+          (said
+            ? `: ${said}`
+            : detail
+              ? `: ${truncate(stripKey(detail), 300)}`
+              : '') +
+          /* A 5xx has already been retried twice by the time it gets here,
+             so saying "try again" alone would be advice the app has taken
+             on the user's behalf and lost. */
+          (res.status >= 500 && !unusableModel
+            ? '. That is their gateway rather than your key or your question — ' +
+              'it was retried twice already, so give it a moment.'
+            : ''),
         {
           kind: unusableModel ? 'unusable' : 'other',
           elsewhere: unusableModel || res.status >= 500

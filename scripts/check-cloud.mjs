@@ -163,7 +163,18 @@ const busy = C.classifyLimit(503, 'high demand', 'x')
 check('503 is the provider being busy', busy.kind, 'busy')
 check('and is capped, not honoured blindly', busy.waitMs <= C.GIVE_UP_AFTER_MS, true)
 
-check('a 500 is not a rate limit', C.classifyLimit(500, '', 'x').kind, 'other')
+/*
+ * A 500 is not a rate limit, which is what this always meant - 'other' was
+ * simply the only verdict available that was not one. It is 'busy' now,
+ * and the distinction that matters is preserved and worth stating: busy
+ * does NOT rest a key, where throttle and exhausted both do. A gateway
+ * blip must not take a working key out of the rotation.
+ */
+{
+  const five = C.classifyLimit(500, '', 'x')
+  check('a 500 is not a rate limit', five.kind !== 'throttle' && five.kind !== 'exhausted', true)
+  check('it is the provider being busy', five.kind, 'busy')
+}
 check('nor is a 200', C.classifyLimit(200, '', 'x').kind, 'other')
 check('the give-up threshold is two minutes', C.GIVE_UP_AFTER_MS, 120_000)
 
@@ -865,6 +876,65 @@ check('a local model has no sibling', C.siblingModel('phi4-mini:3.8b', new Set()
   // And a provider that sends no such header is unaffected either way.
   const silent = C.classifyLimit(429, '{"message":"Rate limit exceeded"}', 'codestral-latest', null)
   check('a missing header changes nothing', silent.kind, busy.kind)
+}
+
+/**
+ * A GATEWAY 5xx IS INFRASTRUCTURE, AND THE APP NOW TREATS IT LIKE ONE.
+ *
+ * Seen on 18 Oct on an ordinary question, with every key healthy and
+ * nothing rate limited:
+ *
+ *   NVIDIA NIM returned 500: {"message":"Failed to generate completions",
+ *   "type":"Internal Server Error","code":500}
+ *
+ * 503 was the only transient status, so this one fell through to "other",
+ * was never retried, and reached the user as a status code wrapped round
+ * an error object. This file already knew better in the catalogue, where
+ * the VL model has two ladder runs because "the first run hit a 500 and a
+ * 502 from the gateway - infrastructure, not the model". The bench excused
+ * them; the app did not.
+ */
+{
+  const body = '{"message":"Failed to generate completions","type":"Internal Server Error","code":500}'
+  for (const status of [500, 502, 503, 504]) {
+    const v = C.classifyLimit(status, body, 'z-ai/glm-5.3-flash')
+    check(`a ${status} is the provider having a bad minute`, v.kind, 'busy')
+    /* Worth waiting for, and not for ever: the retry loop gives it two
+       goes, so the wait has to be short enough that two of them are not
+       the turn. */
+    check(`and ${status} is worth waiting out`, v.waitMs > 0 && v.waitMs <= C.GIVE_UP_AFTER_MS, true)
+  }
+
+  /* 4xx is OURS. A malformed request is malformed again on the retry, and
+     400/404 still mean "that model is not there - try another". */
+  check('a 400 is not retried', C.classifyLimit(400, body, 'm').kind, 'other')
+  check('nor a 404', C.classifyLimit(404, body, 'm').kind, 'other')
+  check('nor a 401', C.classifyLimit(401, body, 'm').kind, 'other')
+
+  /* The retry gate has to actually include busy, or the classification is
+     a label with nothing behind it. */
+  const main = read('src/main/cloud.ts')
+  check(
+    'and busy is one of the two that retries',
+    /verdict\.kind === 'throttle' \|\| verdict\.kind === 'busy'/.test(main),
+    true
+  )
+
+  /*
+   * What the user reads when it does not clear. The provider's sentence,
+   * not its error object: the body above restates the status three times
+   * and carries one fact.
+   */
+  check(
+    'a persistent failure quotes the message, not the JSON',
+    main.includes('const said = /"message":') && main.includes('.exec(stripKey(detail'),
+    true
+  )
+  check('and says whose fault it is', /their gateway rather than your key/.test(main), true)
+  check('and that it already tried again', /retried twice already/.test(main), true)
+  /* elsewhere: a 5xx is this provider's bad minute, so another model is
+     worth trying; that was already right and must stay. */
+  check('a 5xx still suggests elsewhere', /elsewhere: unusableModel \|\| res\.status >= 500/.test(main), true)
 }
 
 /* ------------------------------------------- waiting, and knowing you waited */

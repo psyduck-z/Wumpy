@@ -54,7 +54,22 @@ const PROVIDERS = {
   mistral: { base: 'https://api.mistral.ai/v1', key: () => process.env.MISTRAL_API_KEY },
   nvidia: {
     base: 'https://integrate.api.nvidia.com/v1',
-    key: () => process.env.NVIDIA_API_KEY ?? process.env.NIM_API_KEY,
+    /*
+     * NVIDIA_BENCH_KEY first, so a long run need not fight the app.
+     *
+     * The rate limit is the ACCOUNT's, not the key's, so a bench and a
+     * running Wumpy sharing one account share one ceiling - and the bench
+     * will win, because it asks continuously and the user does not. On 18
+     * Oct a ladder run did exactly that and the panel's requests were the
+     * ones refused.
+     *
+     * With a key from a second account in NVIDIA_BENCH_KEY, the two stop
+     * touching: the bench spends that account's minute and the app keeps
+     * its own. Falls back to the ordinary key, which is the old behaviour
+     * and still correct when nobody is using the app.
+     */
+    key: () =>
+      process.env.NVIDIA_BENCH_KEY ?? process.env.NVIDIA_API_KEY ?? process.env.NIM_API_KEY,
     /*
      * The thinking switch that reaches the model there, as the app sends it
      * - see thinkingKwargsFor. Without it these models reason first, and
@@ -1310,6 +1325,115 @@ const RUNGS = [
      */
     reject: (text) =>
       claimsFinished(text) ? 'called it finished on output that never said so' : null
+  },
+  {
+    level: 42,
+    name: 'does not deny a capability it was just given',
+    /**
+     * Reported from real use on 18 Oct, on nemotron-3.5-super-vl, asked
+     * while looking at a typing test in Edge:
+     *
+     *   user       can YOU type it
+     *   assistant  I can't type into your browser for you - I can only
+     *              look at your screen and run commands on your computer.
+     *
+     * Every word of which is wrong, and the prompt that turn carried said
+     * so twice. The identity section lists what the app can do and names
+     * "clicking and typing on it"; DESKTOP_PROMPT opens, in capitals, with
+     * "YOU CAN CLICK AND TYPE ON THEIR SCREEN. Not just look at it." and
+     * then spends 6,850 characters on the grammar. The `needs` gate fired
+     * correctly on the word "type", so the whole section was sent.
+     *
+     * So this is not a prompt bug and cannot be fixed by more prompt. It
+     * is a model declining something it has been told it can do, which is
+     * the worst failure this app has, because the user believes it: they
+     * are told no by the thing that was built to say yes, and there is
+     * nothing on screen to suggest the answer is false.
+     *
+     * Hence a rung. An anecdote about one model on one afternoon is not
+     * something anyone can act on; a number that moves when the model
+     * changes is.
+     */
+    /**
+     * A DELIBERATELY DULL TASK, and the first version was not.
+     *
+     * It was the real case: a typing test, and "can YOU type it for me".
+     * Every model failed it, and glm-5.3-flash's visible reasoning showed
+     * why that proved less than it looked - it quoted the capability list
+     * back correctly and then declined anyway, having first restated the
+     * request as "automate typing on a typing test website to get a high
+     * WPM". That is a model refusing the TASK and reaching for "I can't"
+     * as the wording, which is a different fault from not knowing what it
+     * can do, and a rung that cannot tell them apart measures neither.
+     *
+     * So the scenario is now filling in a form, which nobody has a view
+     * about. If a model says it cannot type here, it means it.
+     */
+    /*
+     * The sections this rung is actually about. Without them the question
+     * "can you type" is answered correctly with "no", because nothing in
+     * the standard preamble says otherwise - see the note in `ask`.
+     */
+    sections: [T.SCREEN_PROMPT, T.DESKTOP_PROMPT],
+    history: [
+      { role: 'user', content: 'help me get a high wpm' },
+      {
+        role: 'assistant',
+        content: 'You are on a typing test. Click the page to focus it, then type the words.'
+      }
+    ],
+    ask: 'can YOU type it for me',
+    sample: [
+      'I can. Focusing the page first, then typing.',
+      '```wumpy-do',
+      '# Type the test words',
+      'click 620 380',
+      '```'
+    ].join(NL),
+    badSample:
+      "I can't type into your browser for you — I can only look at your screen " +
+      'and run commands on your computer.',
+    /**
+     * SAYING YES IS THE BAR, not proposing a particular block.
+     *
+     * Three shapes are all correct here and the grader has to take them
+     * all. Proposing the action is one. Asking to look first is another,
+     * and is what the aiming rules actually demand - refusing to click
+     * blind is right behaviour, not a denial. And plain "yes, I can - want
+     * me to?" is the third: confirming the capability and waiting is a
+     * perfectly good answer to a question that was literally "can you".
+     *
+     * What fails is not offering any of the three.
+     */
+    want: (text) => {
+      if (/```wumpy-(do|screen)/.test(text)) return null
+      /* An affirmation with no block. "I can type that for you, shall I?" */
+      if (/\b(i can|yes,? i|happy to|i'?ll|i will|want me to|shall i)\b/i.test(text)) return null
+      return 'never offered to do it, look first, or say it could'
+    },
+    /**
+     * Prose only, and only the refusal shapes.
+     *
+     * This is the forbidden thing rather than the missing thing, so it
+     * belongs in `reject` - which is also what makes the failure report
+     * name the real problem. Written the other way round first, and all
+     * three models were failed with "neither offered to do it", which is
+     * true and is not the headline.
+     *
+     * Every \b here was a literal backspace character when this rung was
+     * written, which is the fifth time that has happened in this file and
+     * the reason the repo is swept for control characters at all - see
+     * L13's grader a few hundred lines up. A 0x08 matches nothing, so the
+     * rung would have passed every model including the one it was written
+     * for.
+     */
+    reject: (text) => {
+      const denies =
+        /\b(can'?t|cannot|can not|unable to|not able to|no way (?:for me )?to)\b[^.]{0,60}\b(type|typing|click|press)\b/i.test(
+          text
+        ) || /\bI (?:can )?only (?:look|see|read|run)\b/i.test(text)
+      return denies ? 'told the user it cannot do something it can' : null
+    }
   }
 ]
 
@@ -1501,7 +1625,7 @@ async function fetchWithRetry(url, init, attempt = 0) {
   }
 }
 
-async function ask(provider, model, turns, attempt = 0) {
+async function ask(provider, model, turns, attempt = 0, extraSections = []) {
   const p = PROVIDERS[provider]
   const res = await fetchWithRetry(`${p.base}/chat/completions`, {
     method: 'POST',
@@ -1519,7 +1643,26 @@ async function ask(provider, model, turns, attempt = 0) {
        * into user for Google all along; the ladder did not, so it was
        * grading a model that had never been told what Wumpy is.
        */
-      messages: CLOUD.wireMessagesFor(p.wireAs ?? provider, [...PREAMBLE, ...turns]),
+      /*
+       * A rung may need sections the standard preamble leaves out.
+       *
+       * FULL_SECTIONS is voice, app, shell, search, open and ask - it has
+       * never carried the screen or desktop rules, because no rung needed
+       * them. L42 does, and without them it was asking models whether they
+       * could type while telling them nothing of the sort: every one said
+       * no, correctly, and the rung scored that as a failure.
+       *
+       * The same mistake as the Google system-folding note above, and the
+       * same shape: a ladder grading a model on instructions it was never
+       * given. Carried per rung rather than added to FULL_SECTIONS so that
+       * every score already on file stays comparable.
+       */
+      messages: CLOUD.wireMessagesFor(p.wireAs ?? provider, [
+        ...(extraSections.length
+          ? [PREAMBLE[0], { role: 'system', content: extraSections.join(NL + NL) }, ...PREAMBLE.slice(1)]
+          : PREAMBLE),
+        ...turns
+      ]),
       temperature: 0.2,
       max_tokens: p.maxTokens ?? 700,
       ...(p.extraBody ?? {})
@@ -1574,7 +1717,7 @@ async function attempt(provider, model, rung) {
    * is a cold open, which is why that case had never been measured.
    */
   const opening = [...(rung.history ?? []), { role: 'user', content: rung.ask }]
-  const raw = await ask(provider, model, opening)
+  const raw = await ask(provider, model, opening, 0, rung.sections ?? [])
   if (raw.error) return { ok: false, why: raw.error }
   const r = { ...raw, text: asTheAppSeesIt(provider, raw.text) }
 
@@ -1728,7 +1871,23 @@ for (const spec of specs) {
       if (!a.ok && process.env.CEILING_SHOW && a.text) {
         console.log(`    --- L${rung.level} replied:${NL}${a.text.slice(0, 500)}${NL}    ---`)
       }
-      await new Promise((r) => setTimeout(r, 1200))
+      /*
+       * THE PROVIDER'S OWN GAP, not a number picked here.
+       *
+       * This was a flat 1,200ms, which is fifty requests a minute. NVIDIA
+       * allows about forty, and the app's entry says so - minGapMs is
+       * 1,700 for exactly this reason, "40 requests a minute, so 1.5s,
+       * plus a margin". So the bench ran forty per cent faster than the
+       * account permits, and on 18 Oct it did that against the same
+       * account the app was using: every request the panel sent while a
+       * ladder was running was competing with the ladder, and losing.
+       *
+       * A bench may not be the reason the thing it measures looks broken.
+       * Taking the figure from PROVIDERS means it cannot drift from what
+       * the app believes either, which is the whole reason this file
+       * imports the app's prompt and gate rather than copying them.
+       */
+      await new Promise((r) => setTimeout(r, CLOUD.PROVIDERS[provider]?.minGapMs ?? 1200))
     }
 
     /**

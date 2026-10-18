@@ -173,12 +173,21 @@ const textFile = {
   check('a cut file says so', /FIRST 100 OF 90,000 CHARACTERS/.test(folded.text), true)
 }
 {
+  /*
+   * A .docx used to be the example here and is no longer unreadable: it is
+   * a zip full of XML and @shared/office takes the words out. The example
+   * has to be something genuinely opaque, or this check passes on a claim
+   * the app has stopped making.
+   */
   const folded = A.foldAttachments('read this', [
-    { kind: 'opaque', name: 'report.docx', bytes: 40_000, mime: 'application/vnd.ms-word' }
+    { kind: 'opaque', name: 'artwork.psd', bytes: 40_000, mime: 'image/vnd.adobe.photoshop' }
   ])
-  check('an unreadable file is still mentioned', folded.text.includes('report.docx'), true)
+  check('an unreadable file is still mentioned', folded.text.includes('artwork.psd'), true)
   check('and says its contents did not go', /NOT sent/.test(folded.text), true)
-  check('and suggests what would work', /export/.test(folded.text), true)
+  /* The advice has to name what IS readable, and stay true as that list
+     grows - it used to say "export it", which is now work the app does. */
+  check('and suggests what would work', /Word, PowerPoint, Excel/.test(folded.text), true)
+  check('without telling them to export a docx', /export/.test(folded.text), false)
 }
 {
   /* The budget is spent in order, so the first file attached gets the room. */
