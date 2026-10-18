@@ -234,6 +234,96 @@ check('an empty catalogue says so rather than throwing', P.probeLines([]).length
 check('two runs is the default', P.DEFAULT_RUNS, 2)
 check('and there is a ceiling on asking', P.MAX_RUNS, 5)
 
+/* ------------------------------------------- which one to actually use */
+
+/*
+ * A report that lists six models and stops has handed the reader the work.
+ * The recommendation balances the ladder score against the time measured
+ * on THIS run - not the catalogue's latency, which is the figure that went
+ * stale and had the picker promising 1.3s for a hundred-second model.
+ *
+ * Weighted slightly towards smartness, as asked: a tenfold slowdown costs
+ * 0.08 of ladder share, so a model ten times slower needs about three more
+ * rungs out of 41 to make up for it.
+ */
+{
+  const M = (m, ms, state = 'ok') => ({
+    model: m,
+    label: m,
+    provider: 'nvidia',
+    state,
+    ms,
+    said: 'ready',
+    why: '',
+    runs: 2,
+    times: [ms, ms]
+  })
+
+  /* The real catalogue, and the medians of the two real sweeps. */
+  const live = [
+    M('nvidia/nemotron-3-super-120b-a12b', 689),
+    M('gemma4:31b-cloud', 862),
+    M('z-ai/glm-5.3-flash', 1629),
+    M('nvidia/nemotron-3.5-super-vl-120b-a12b', 6690),
+    M('deepseek-ai/deepseek-v4.1-flash', 108_925),
+    M('z-ai/glm-5.3', 104_315, 'flaky')
+  ]
+  const ranked = P.recommend(live)
+
+  check('the best balance wins', ranked[0].model, 'z-ai/glm-5.3-flash')
+
+  /*
+   * THE JUDGEMENT THE WHOLE THING EXISTS TO MAKE. DeepSeek has the highest
+   * ladder score here - 39/41, higher than the winner's 38 - and comes
+   * last but one, because two orders of magnitude of latency is not worth
+   * one rung. A weighting that recommended it would be measuring the
+   * ladder and calling it advice.
+   */
+  const deep = ranked.findIndex((p) => p.model === 'deepseek-ai/deepseek-v4.1-flash')
+  check('the smartest is not the pick when it takes 109s', deep > 0, true)
+  /* Beaten by gemma4, which is four rungs worse and 126 times quicker. It
+     is not last: nemotron-3-super at 32/41 still ranks below it, because
+     seven rungs IS worth something and the weighting says so. */
+  check('beaten by a model four rungs worse', deep > ranked.findIndex((p) => p.model === 'gemma4:31b-cloud'), true)
+  check('but not by one seven rungs worse', deep < ranked.findIndex((p) => p.model === 'nvidia/nemotron-3-super-120b-a12b'), true)
+
+  /* And the other direction: fastest does not win either. */
+  check('nor does the quickest win on speed alone', ranked[0].model !== 'nvidia/nemotron-3-super-120b-a12b', true)
+
+  /* Flaky is not recommendable whatever it scores: "use this, it works
+     about half the time" is not a recommendation. */
+  check('a flaky model is never offered', ranked.some((p) => p.model === 'z-ai/glm-5.3'), false)
+
+  const text = P.recommendLines(live, '').join(NL)
+  check('the report names one', /Use `z-ai\/glm-5\.3-flash`/.test(text), true)
+  check('with both numbers behind it', /93% of the ladder at 1\.6s/.test(text), true)
+  check('and the command to take it', /\/model z-ai\/glm-5\.3-flash/.test(text), true)
+
+  /*
+   * Vision is the axis neither number can see, and for someone working
+   * from screenshots it is often the deciding one - so when the winner is
+   * blind and a seeing model answered, it is named rather than buried.
+   */
+  check('a blind winner says so', /cannot read pictures/.test(text), true)
+  check('and names the best that can', /nemotron-3\.5-super-vl/.test(text), true)
+
+  /* Already on it: no point telling someone to switch to where they are. */
+  const staying = P.recommendLines(live, 'z-ai/glm-5.3-flash').join(NL)
+  check('staying put is phrased as staying', /Stay on/.test(staying), true)
+  check('and does not hand out a switch command', /\/model z-ai/.test(staying), false)
+
+  /* Nothing answered, so there is nothing to recommend - and saying so
+     wrongly would be worse than saying nothing. */
+  check('nothing usable recommends nothing', P.recommendLines([M('a/x', 0, 'refused')]), [])
+  /* A model with no ladder score cannot be weighed against ones that have
+     them, so it is left out rather than scored as zero. */
+  check('an unmeasured model is not ranked', P.recommend([M('who/what', 500)]), [])
+
+  /* The weighting itself, pinned so a future tweak is deliberate. */
+  check('a tenfold slowdown costs this much share', P.SLOWNESS_COST, 0.08)
+  check('and under a second there is no penalty', P.FAST_ENOUGH_MS, 1000)
+}
+
 /* -------------------------------------------- what the check actually costs */
 
 const cloud = readFileSync('src/main/cloud.ts', 'utf8')

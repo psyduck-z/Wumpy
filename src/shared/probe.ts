@@ -35,7 +35,7 @@
  * Pure, so every verdict and every line of the report can be driven from a
  * check without a key, a network or a clock.
  */
-import { GIVE_UP_AFTER_MS } from './cloud'
+import { CLOUD_MODELS, GIVE_UP_AFTER_MS } from './cloud'
 
 /** What a probe concluded about one model. */
 export type ProbeState =
@@ -299,6 +299,119 @@ function row(r: ProbeResult): string {
   }
 }
 
+/* ------------------------------------------------- which one to use */
+
+/**
+ * How much a tenfold slowdown is allowed to cost, in ladder share.
+ *
+ * The two numbers being traded are not on the same scale and it matters:
+ * the ladder shares sit between 0.78 and 0.95, a band of 0.17, while the
+ * latencies run from 637ms to 115,000ms - a factor of 180. Added together
+ * raw, speed decides everything and the score is decoration.
+ *
+ * So speed is charged on a log scale and at a deliberately gentle rate.
+ * 0.08 per tenfold means a model ten times slower has to be about three
+ * ladder rungs better to make up for it, and a hundred times slower about
+ * six. That is "smartness slightly ahead", which is what was asked for:
+ * fast enough wins ties, and nothing else.
+ *
+ * Measured against the real numbers this lands where a person would:
+ * deepseek at 39/41 and 110 seconds scores below nemotron-3-super at
+ * 32/41 and 0.7s, because two orders of magnitude is not worth seven
+ * rungs - and that is the judgement the whole feature exists to make.
+ */
+export const SLOWNESS_COST = 0.08
+
+/** Under this, speed stops being a differentiator at all. */
+export const FAST_ENOUGH_MS = 1_000
+
+/** Ladder share for a model, or null when it has never been measured here. */
+function smartness(model: string): number | null {
+  const m = CLOUD_MODELS.find((c) => c.id === model)?.measured
+  return m && m.of > 0 ? m.clean / m.of : null
+}
+
+export interface Pick {
+  model: string
+  /** Ladder share and the time just measured, for the sentence. */
+  share: number
+  ms: number
+  score: number
+  sees: boolean
+}
+
+/**
+ * The best balance of smart and quick, out of what actually answered.
+ *
+ * Scored on the ladder figure from the catalogue and the time measured on
+ * THIS run - not the catalogue's own latency, which is what went stale and
+ * had the picker promising 1.3s for a model that takes a hundred seconds.
+ * The score is a published number; the speed is what just happened.
+ *
+ * Only models that answered every run are eligible. A flaky one cannot be
+ * recommended whatever it scores: "use this, it works about half the time"
+ * is not a recommendation.
+ */
+export function recommend(results: readonly ProbeResult[]): Pick[] {
+  return results
+    .filter((r) => usable(r.state))
+    .map((r) => {
+      const share = smartness(r.model)
+      if (share === null) return null
+      const slower = Math.max(1, r.ms) / FAST_ENOUGH_MS
+      const penalty = slower <= 1 ? 0 : SLOWNESS_COST * Math.log10(slower)
+      return {
+        model: r.model,
+        share,
+        ms: r.ms,
+        score: share - penalty,
+        sees: CLOUD_MODELS.find((c) => c.id === r.model)?.sees === true
+      }
+    })
+    .filter((p): p is Pick => p !== null)
+    .sort((a, b) => b.score - a.score)
+}
+
+/** The recommendation, as the last thing the report says. */
+export function recommendLines(results: readonly ProbeResult[], current = ''): string[] {
+  const ranked = recommend(results)
+  if (!ranked.length) return []
+  const best = ranked[0]
+  const seconds = best.ms >= 10_000 ? `${Math.round(best.ms / 1000)}s` : `${(best.ms / 1000).toFixed(1)}s`
+
+  const lines = [
+    '',
+    best.model === current
+      ? `**Stay on \`${best.model}\`.** Best balance here: ` +
+        `${Math.round(best.share * 100)}% of the ladder at ${seconds}.`
+      : `**Use \`${best.model}\`.** Best balance of the two: ` +
+        `${Math.round(best.share * 100)}% of the ladder at ${seconds}. ` +
+        '`/model ' + best.model + '`'
+  ]
+
+  /*
+   * Vision is the axis the score cannot see.
+   *
+   * The ladder measures reasoning and the probe measures latency, and
+   * neither notices that one model can read a picture and the others
+   * cannot. For someone who works from screenshots that is often the
+   * deciding property, so when the winner is blind and a seeing model
+   * answered too, the alternative is named rather than buried.
+   */
+  if (!best.sees) {
+    const seeing = ranked.find((p) => p.sees)
+    if (seeing) {
+      const its = seeing.ms >= 10_000 ? `${Math.round(seeing.ms / 1000)}s` : `${(seeing.ms / 1000).toFixed(1)}s`
+      lines.push(
+        `That one cannot read pictures. If you work from screenshots, ` +
+          `\`${seeing.model}\` is the best that can — ` +
+          `${Math.round(seeing.share * 100)}% at ${its}.`
+      )
+    }
+  }
+  return lines
+}
+
 /**
  * The whole report, as markdown the panel already knows how to print.
  *
@@ -371,9 +484,19 @@ export function probeLines(results: readonly ProbeResult[], current = ''): strin
       `You are set to \`${current}\`, which is in the list above. ` +
         'Switch with `/model <id>`, or open the picker with `/model`.'
     )
-  } else if (working.length) {
-    lines.push('', 'Switch with `/model <id>`.')
   }
+
+  /* The point of the whole exercise, last so it reads as the conclusion
+     rather than as a header. It replaces the bare "switch with /model
+     <id>", which told the reader how to act and not what to do.
+     
+     Not always, though: a model that is not in the catalogue has no ladder
+     score to weigh, so a run of hand-typed ids produces no pick at all -
+     and a report that then ends without saying how to change anything is
+     worse than the bare line it replaced. */
+  const advice = recommendLines(results, current)
+  if (advice.length) lines.push(...advice)
+  else if (working.length) lines.push('', 'Switch with `/model <id>`.')
 
   return lines
 }
