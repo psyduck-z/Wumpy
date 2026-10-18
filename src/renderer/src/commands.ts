@@ -448,9 +448,18 @@ export const COMMANDS: CommandSpec[] = [
     run: (arg) => ({ kind: 'voice', setting: 'on', on: bool(arg) })
   },
   {
+    /*
+     * "the local model" until 18 Oct, which stopped being true the day
+     * Wumpy went cloud-only and was a worse kind of stale than most: it
+     * named the one property anyone would weigh this setting on. Polishing
+     * used to be a guarantee that dictation never left the machine. It now
+     * sends what was dictated to the model provider, which is a different
+     * bargain - the defaults say so, and this was still advertising the
+     * old one.
+     */
     name: 'polish',
     aliases: ['autocorrect'],
-    hint: 'Tidy dictated punctuation with the local model',
+    hint: 'Tidy dictated punctuation — sends it to the model',
     arg: 'on|off',
     run: (arg) => ({ kind: 'voice', setting: 'polish', on: bool(arg) })
   },

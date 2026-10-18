@@ -1716,9 +1716,16 @@ function namedControls(shot: Attachment): string[] {
             await patch({ voicePolish: next })
             chat.note(
               next
-                ? 'Dictation will be punctuated by the local model. The app’s own vocabulary ' +
-                    'is fixed either way.'
-                : 'Dictation goes in as heard, with only the vocabulary table applied.'
+                ? /* Says where it goes, because that is the whole decision.
+                     This read "punctuated by the local model" long after
+                     there was one, which told the user the opposite of the
+                     truth about the only thing at stake. */
+                  'Dictation will be punctuated by **' +
+                  model +
+                  '**, so what you dictate is sent to the provider before it ' +
+                  'reaches the box. The app’s own vocabulary is fixed either way.'
+                : 'Dictation goes in as heard, with only the vocabulary table applied. ' +
+                  'Nothing is sent anywhere until you press send.'
             )
             return
           }
