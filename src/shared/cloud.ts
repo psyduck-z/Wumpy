@@ -50,6 +50,29 @@ export interface Provider {
    */
   keyless?: boolean
   /**
+   * A SECOND KEY IS A SECOND ALLOWANCE, which is true of exactly one
+   * provider here and is assumed everywhere the meter multiplies.
+   *
+   * Google's free tier is metered PerProjectPerModel and an API key belongs
+   * to a Cloud project, so twenty keys really are twenty allowances - that
+   * is the entire reason the rotation exists and the reason a cap is
+   * multiplied by the number of keys before being shown.
+   *
+   * Nowhere else does a key work like that. An NVIDIA key is a credential
+   * against an account, and the limit belongs to the account: NVIDIA's own
+   * forum describes the ceiling as depending on "the amount of current
+   * overall traffic using the same access", and a second key issued from
+   * the same login buys nothing. Only a second ACCOUNT does. Groq and
+   * Mistral meter per account in the same way.
+   *
+   * So this is off by default and the multiplication asks before applying
+   * itself. It was latent rather than wrong while NVIDIA had no known cap -
+   * zero multiplied is still zero - but the first `exhaustedAt` recorded
+   * from a real 429 would have been multiplied by the number of keys, and
+   * the meter would have read half-full on an allowance already spent.
+   */
+  quotaPerKey?: boolean
+  /**
    * Google keeps only the LAST system message and silently drops every earlier
    * one. Not a 400, not a warning - they simply never reach the model.
    *
@@ -117,6 +140,9 @@ export const PROVIDERS: Record<ProviderId, Provider> = {
     label: 'Google AI Studio',
     base: 'https://generativelanguage.googleapis.com/v1beta/openai',
     keyUrl: 'https://aistudio.google.com/apikey',
+    /* The only one. A key is a Cloud project and the meters are keyed
+       PerProjectPerModel, so keys really do multiply. See quotaPerKey. */
+    quotaPerKey: true,
     foldSystem: true,
     cacheBlockTokens: 4096,
     // 10 requests a minute on the free tier, so 6s plus a margin.
@@ -378,8 +404,31 @@ export const CLOUD_MODELS: CloudModel[] = [
   {
     id: 'deepseek-ai/deepseek-v4.1-flash',
     provider: 'nvidia',
+    /**
+     * THE LATENCY HERE IS IN DISPUTE AND THE BLURB NO LONGER PROMISES 1.3s.
+     *
+     * 1,256ms on 16 Oct, one run of the full ladder, median to a COMPLETE
+     * short answer at Wumpy's real preamble. 103,204ms to the FIRST WORD on
+     * 18 Oct, from scripts/verify-models.mjs, on a four-word prompt.
+     *
+     * The two are not the same measurement, and the mismatch is the point
+     * rather than an excuse: the second is the easier question - a shorter
+     * prompt, and stopping at the first token instead of the last - and it
+     * came back eighty times slower on the model this app answers with by
+     * default. Nothing about prompt size explains that; it is queueing at
+     * the provider. Both are single samples, and `Measured.runs` exists
+     * precisely so that neither can be mistaken for settled.
+     *
+     * So the measurement is left as recorded rather than overwritten by a
+     * second sample that disagrees with it, and the blurb - which is what
+     * the picker shows - stops stating a speed it cannot stand behind. What
+     * settles it is runs: 2 on the ladder, not another anecdote.
+     *
+     * The ladder score is not in dispute. 39/41 is the best measured here
+     * and nothing about today's run touches it.
+     */
     label: 'DeepSeek V4.1 Flash',
-    blurb: '39/41 on the full ladder — the best measured here. 1.3s, no daily cap.',
+    blurb: '39/41 on the full ladder — the best measured here. Latency varies wildly.',
     measured: { clean: 39, of: 41, runs: 1, medianMs: 1256, on: '2026-10-16' }
   },
   /*
@@ -531,6 +580,49 @@ export function modelTag(model: CloudModel, rank: number | null): ModelTag | nul
       `${m.clean} of ${m.of} ladder rungs clean at ${m.runs} run${m.runs === 1 ? '' : 's'} each, ` +
       `${seconds} median to a short answer. Measured ${m.on}.`
   }
+}
+
+/**
+ * Does each of this provider's keys carry an allowance of its own?
+ *
+ * Two ways it can be true, and they are different kinds of fact.
+ *
+ * `quotaPerKey` is a property of the PROVIDER and is known here: a Google
+ * key is a Cloud project and the meters are keyed PerProjectPerModel, so
+ * keys multiply whatever the user does.
+ *
+ * `mode` is a property of the USER'S SETUP and cannot be known here: two
+ * NVIDIA keys are two doors into one account's ceiling, or one door each
+ * into two accounts' ceilings, and the keys are identical either way. The
+ * endpoint will not say, the key will not say, and the only one who knows
+ * is the person who made them. So they tell us, and until they do the
+ * answer is the cautious one.
+ */
+export function keysAreSeparate(
+  provider: ProviderId | null,
+  mode?: 'shared' | 'separate'
+): boolean {
+  if (!provider) return false
+  return PROVIDERS[provider].quotaPerKey === true || mode === 'separate'
+}
+
+/**
+ * How many separate allowances a given number of keys actually buys.
+ *
+ * Getting it wrong is not a cosmetic error: it is the difference between a
+ * meter that says "310 requests left" and one that says 310 when there
+ * are 15.
+ *
+ * At least one, always. Zero keys is not a zero allowance, it is no
+ * provider configured, and a zero here would divide a meter by nothing.
+ */
+export function budgetsFor(
+  provider: ProviderId | null,
+  keys: number,
+  mode?: 'shared' | 'separate'
+): number {
+  const counted = Math.max(1, Math.floor(keys))
+  return keysAreSeparate(provider, mode) ? counted : 1
 }
 
 export function providerFor(model: string): ProviderId | null {

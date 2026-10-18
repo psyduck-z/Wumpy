@@ -2,8 +2,9 @@
  * Which instructions this turn actually needs.
  *
  * The preamble is 13,341 tokens and every one of them goes out on every
- * request, into a 32,768 window, on a tier counted per minute and per day.
- * Measured section by section:
+ * request, into a 32,768 budget, on a free tier that is rate-limited per
+ * minute whatever else it does or does not count. Measured section by
+ * section:
  *
  *   3,834  who Wumpy is and how to answer
  *   3,503  running commands on this machine

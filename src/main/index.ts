@@ -26,6 +26,7 @@ import { KeyStore } from './keys'
 import { UsageStore } from './usage'
 import { PoolStore } from './pool'
 import { perKeyCapFor } from '@shared/usage'
+import { spent, usable } from '@shared/probe'
 import { needsFor, type Capability } from '@shared/needs'
 import { trimPictures } from '@shared/pressure'
 import { Panel } from './panel'
@@ -50,6 +51,7 @@ import {
   isProviderId,
   looksLikeKey,
   PROVIDER_IDS,
+  budgetsFor,
   providerFor,
   seesMedia,
   siblingModel
@@ -661,9 +663,17 @@ function registerIpc(): void {
    * read time rather than remembered, so adding ten more keys widens the
    * meter immediately instead of after a restart.
    */
+  /**
+   * How many separate allowances there are to spend, which is not the same
+   * as how many keys there are. See `budgetsFor`: only Google's keys are
+   * separate projects with separate meters. Three NVIDIA keys on one login
+   * share one ceiling, and counting them as three would show the user half
+   * a tank that is already empty.
+   */
   const freeTiers = (): number => {
     const provider = providerFor(activeModel())
-    return provider ? Math.max(1, keys.count(provider)) : 1
+    if (!provider) return 1
+    return budgetsFor(provider, keys.count(provider), settings.get('keyAccounts')[provider])
   }
 
   /**
@@ -676,7 +686,10 @@ function registerIpc(): void {
    */
   const report = (): UsageReport => {
     const model = activeModel()
-    const cap = perKeyCapFor(usage.today(), model, providerFor(model) ?? 'google')
+    /* No 'google' fallback: a model that routes nowhere has no provider, and
+       reading Google's row for it was how an unroutable name picked up a cap
+       measured on Gemini. */
+    const cap = perKeyCapFor(usage.today(), model, providerFor(model) ?? '')
     return {
       lines: usage.lines(freeTiers()),
       model,
@@ -690,6 +703,47 @@ function registerIpc(): void {
   ipcMain.handle(IPC.usageReset, () => {
     usage.reset()
     return report()
+  })
+
+  /**
+   * Which models answer, asked rather than assumed. See @shared/probe.
+   *
+   * THE REQUESTS ARE COUNTED LIKE ANY OTHER, which is the only honest choice
+   * available: they are real requests against a real allowance, and a meter
+   * that ignored them would read low by one per model every time this is
+   * run. They are recorded against the model they tested, because that is
+   * where the provider counted them.
+   *
+   * Errors are recorded too, so a probe that found a dead model leaves the
+   * same trace in `/usage` as a turn that hit it would have.
+   */
+  ipcMain.handle(IPC.modelsProbe, async () => {
+    const results = await cloud.probeModels()
+    for (const r of results) {
+      if (!spent(r.state)) continue
+      usage.add({
+        model: r.model,
+        via: r.provider || 'unknown',
+        generatingMs: r.ms,
+        error: !usable(r.state),
+        limited: r.state === 'limited',
+        /*
+         * NOT `exhausted`, although a 429 is what sets that elsewhere.
+         *
+         * `exhaustedAt` means "one key's daily cap is the count at this
+         * moment", and a probe cannot know it has found one: a 429 is
+         * equally a per-minute throttle, which is what thirteen requests in
+         * a row are most likely to provoke. Writing one in would pin a cap
+         * of two or three requests a day for a model that has hundreds -
+         * the same class of mistake as the pool total once recorded as a
+         * per-key figure, and it would show as a meter reading 100% while
+         * everything still worked. The real turn path classifies the
+         * refusal properly and is welcome to record it.
+         */
+      })
+    }
+    usage.flush()
+    return results
   })
 
   /**
@@ -1564,7 +1618,9 @@ void app.whenReady().then(async () => {
   keys = new KeyStore()
   notes = new ContextStore()
   pools = new PoolStore()
-  cloud = new CloudClient(keys, pools)
+  /* The third argument is the user's answer to a question nothing else can
+     answer: are these keys on one account or several. See keyAccounts. */
+  cloud = new CloudClient(keys, pools, (p) => settings.get('keyAccounts')[p])
   usage = new UsageStore()
   panel = new Panel(settings)
 

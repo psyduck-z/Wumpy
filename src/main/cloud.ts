@@ -3,9 +3,11 @@ import type { ProviderId, WireMessage } from '@shared/cloud'
 import { KeyRotation, nextPacificMidnight } from '@shared/rotation'
 import type { PoolDay, PoolView } from '@shared/pool'
 import {
+  CLOUD_MODELS,
   PROVIDERS,
   classifyLimit,
   countTokens,
+  keysAreSeparate,
   maxTokensFor,
   providerFor,
   reasoningEffortFor,
@@ -14,6 +16,9 @@ import {
   wireMessage,
   seesMedia
 } from '@shared/cloud'
+import type { CloudModel } from '@shared/cloud'
+import { PROBE_TIMEOUT_MS, verdictFor } from '@shared/probe'
+import type { ProbeResult } from '@shared/probe'
 import type { ChatOptions, StreamFailure, StreamHandlers, StreamStats } from './stream'
 import type { KeyStore } from './keys'
 import { tokensPerSecond } from '@shared/speed'
@@ -109,18 +114,42 @@ export function recordSpend(provider: ProviderId, tokens: number): void {
  * a retry, which already works; being late costs the user a wait they did
  * not need.
  */
-async function pace(provider: ProviderId, key: number, estimatedTokens = 0): Promise<void> {
+async function pace(
+  provider: ProviderId,
+  key: number,
+  estimatedTokens = 0,
+  /** Each key its own ceiling? Passed in: see CloudClient.separate. */
+  separate = false
+): Promise<void> {
   const gap = PROVIDERS[provider].minGapMs
-  const slot = `${provider}:${key}`
+  /**
+   * ONE QUEUE PER ALLOWANCE, WHICH IS NOT ALWAYS ONE QUEUE PER KEY.
+   *
+   * The gap exists to stay under a requests-per-minute ceiling, so it has
+   * to be divided the same way that ceiling is. Google's is per project and
+   * a key is a project, so per key was right and the distinction never came
+   * up while Google was the only provider with more than one.
+   *
+   * It is wrong the moment a second NVIDIA key is added. That ceiling
+   * belongs to the account: two keys each waiting 1,700ms independently put
+   * about seventy requests a minute through a limit of forty, so the second
+   * key would make 429s MORE likely rather than less - the exact opposite
+   * of what someone adds a key for.
+   *
+   * Shared allowance, shared queue. The cost is that a second key buys
+   * resilience rather than speed, which is the truth about what it buys.
+   */
+  const slot = separate ? `${provider}:${key}` : provider
   const wait = (lastRequestAt.get(slot) ?? 0) + gap - Date.now()
   if (wait > 0) {
     console.log(`[wumpy] holding key ${key + 1} for ${wait}ms before asking ${provider}`)
     await new Promise((r) => setTimeout(r, wait))
   }
 
-  /* The token ceiling stays per provider. It is per account like the gap is,
-     but the spend is recorded where the key index is not known, and the one
-     provider it applies to is a one-key account anyway. */
+  /* The token ceiling is per provider, which is now the same rule the gap
+     above follows rather than an exception to it: both are account-level
+     ceilings, and the only provider this one applies to is a one-key
+     account anyway. */
   const perMinute = PROVIDERS[provider].tokensPerMinute
   if (perMinute > 0 && estimatedTokens > 0) {
     const list = recentTokens.get(provider) ?? []
@@ -147,8 +176,23 @@ export class CloudClient {
    */
   constructor(
     private readonly keys: KeyStore,
-    private readonly ledger?: { get(p: ProviderId): PoolDay | null; save(p: ProviderId, d: PoolDay): void }
+    private readonly ledger?: { get(p: ProviderId): PoolDay | null; save(p: ProviderId, d: PoolDay): void },
+    /**
+     * Whether this provider's keys are on separate accounts, which only the
+     * user knows. A function rather than a value because they can change it
+     * with `/key <provider> accounts` while the app is running, and reading
+     * it once at construction would keep the old answer until a restart.
+     *
+     * Optional like the ledger, so a script can build a client without a
+     * settings file; absent means the cautious answer.
+     */
+    private readonly accountMode?: (p: ProviderId) => 'shared' | 'separate' | undefined
   ) {}
+
+  /** Does each key here carry its own ceiling? See `keysAreSeparate`. */
+  private separate(provider: ProviderId): boolean {
+    return keysAreSeparate(provider, this.accountMode?.(provider))
+  }
 
   abort(requestId: string): void {
     this.inflight.get(requestId)?.abort()
@@ -270,13 +314,159 @@ export class CloudClient {
   }
 
   /**
+   * Ask every model in the catalogue whether it is alive.
+   *
+   * ONE REAL REQUEST PER MODEL, which is the only kind of answer worth
+   * having: a /models listing proves a key authenticates and says nothing
+   * about whether an id still exists or whether the body Wumpy builds for
+   * that provider is one it accepts. `checkKeys` is the cheap question and
+   * this is the expensive one, so this is never run on its own - only when
+   * the user asks for it.
+   *
+   * Deliberately small and deliberately boring: four words in, sixteen
+   * tokens out, thinking off. What is being measured is whether a reply
+   * arrives with words in it, and paying for four hundred tokens to find
+   * that out would make the check cost more than the thing it checks.
+   *
+   * Non-streamed, unlike `chat()` and unlike scripts/verify-models.mjs. The
+   * failures this is for - a withdrawn id, a refused key, a spent day, an
+   * empty answer - all show up identically either way, and the streaming
+   * path is 300 lines of frame assembly that would have to be duplicated
+   * here to find out nothing more. The script keeps the streaming check for
+   * when stream_options itself is the suspect.
+   *
+   * Models whose provider has no key are reported without being asked, so
+   * the check never spends anything discovering what the key store already
+   * knows.
+   */
+  async probeModels(
+    onEach?: (done: number, total: number) => void
+  ): Promise<ProbeResult[]> {
+    const out: ProbeResult[] = []
+    let done = 0
+
+    /*
+     * Serial, one model at a time.
+     *
+     * Parallel would finish sooner and would also be the thing that makes
+     * this check lie: every entry but one here is the same NVIDIA account,
+     * firing thirteen requests at a per-minute limit would collect 429s,
+     * and a 429 is indistinguishable from a model that is genuinely out.
+     * The point of the check is to find out which models work, so it must
+     * not be the reason they appear not to. `pace()` is honoured for the
+     * same reason.
+     */
+    for (const entry of CLOUD_MODELS) {
+      const check = this.ready(entry.id)
+      if (!check.ok || !check.provider) {
+        out.push({
+          model: entry.id,
+          label: entry.label,
+          provider: check.provider ?? '',
+          state: 'nokey',
+          ms: 0,
+          said: '',
+          why: check.why
+        })
+        onEach?.(++done, CLOUD_MODELS.length)
+        continue
+      }
+      out.push(await this.probeOne(entry, check.provider))
+      onEach?.(++done, CLOUD_MODELS.length)
+    }
+    return out
+  }
+
+  /** One model, with its own timeout so a hung provider cannot stall the rest. */
+  private async probeOne(entry: CloudModel, provider: ProviderId): Promise<ProbeResult> {
+    const base: Omit<ProbeResult, 'state' | 'ms' | 'said' | 'why'> = {
+      model: entry.id,
+      label: entry.label,
+      provider
+    }
+    const rotation = this.rotation(provider)
+    /* Whatever key the next real turn would use, so the probe tests the
+       thing being tested. Falls back to the first when all are resting:
+       the resulting 429 is itself the answer, and an honest one. */
+    const index = rotation.next(Date.now(), entry.id) ?? 0
+    this.remember(provider, rotation)
+    await pace(provider, index, 0, this.separate(provider))
+
+    const started = Date.now()
+    try {
+      const res = await fetch(`${PROVIDERS[provider].base}/chat/completions`, {
+        method: 'POST',
+        headers: this.headers(provider, index),
+        body: JSON.stringify({
+          model: entry.id,
+          messages: wireMessagesFor(provider, [
+            { role: 'system', content: 'Answer in one word.' },
+            { role: 'user', content: 'Say: ready' }
+          ]),
+          stream: false,
+          temperature: 0,
+          max_tokens: 16,
+          /* Off, and this matters more than the size. A reasoning model
+             given sixteen tokens spends all of them thinking and returns
+             empty content - which this check would then report as a model
+             that answered nothing. Measured on the VL model doing exactly
+             that for the borrowed eye. */
+          ...(() => {
+            const kwargs = thinkingKwargsFor(provider, false)
+            return kwargs ? { chat_template_kwargs: kwargs } : {}
+          })()
+        }),
+        signal: AbortSignal.timeout(PROBE_TIMEOUT_MS)
+      })
+      const ms = Date.now() - started
+
+      if (!res.ok) {
+        const body = stripKey(await res.text().catch(() => ''))
+        const why = /"message":\s*"([^"]{0,160})/.exec(body)?.[1] ?? `HTTP ${res.status}`
+        return { ...base, state: verdictFor(res.status, '', ms), ms, said: '', why: truncate(why, 120) }
+      }
+
+      const payload = (await res.json()) as {
+        choices?: Array<{ message?: { content?: string } }>
+      }
+      const said = (payload.choices?.[0]?.message?.content ?? '').trim().replace(/\s+/g, ' ')
+      return {
+        ...base,
+        state: verdictFor(res.status, said, ms),
+        ms,
+        said: truncate(said, 40),
+        why: ''
+      }
+    } catch (err) {
+      const ms = Date.now() - started
+      const timedOut = (err as Error)?.name === 'TimeoutError'
+      return {
+        ...base,
+        state: timedOut ? 'timeout' : 'error',
+        ms,
+        said: '',
+        why: timedOut ? '' : describe(err)
+      }
+    }
+  }
+
+  /**
    * The pool as a report can print it: how many keys can answer with this
    * model, what they have spent, and when the rest come back.
    */
   poolFor(model: string, perKeyCap: number): PoolView | null {
     const provider = providerFor(model)
     if (!provider) return null
-    return this.rotation(provider).view(model, perKeyCap, nextPacificMidnight())
+    return this.rotation(provider).view(
+      model,
+      perKeyCap,
+      nextPacificMidnight(),
+      Date.now(),
+      /* Whether these keys are separate allowances or separate doors into
+         one. Google's always are; anyone else's are when the user has said
+         so. See keysAreSeparate. */
+      this.separate(provider)
+    )
   }
 
   private headers(provider: ProviderId, index: number): Record<string, string> {
@@ -421,7 +611,7 @@ export class CloudClient {
         )
         return null
       }
-      await pace(provider, index)
+      await pace(provider, index, 0, this.separate(provider))
       const res = await fetch(`${PROVIDERS[provider].base}/chat/completions`, {
         method: 'POST',
         headers: this.headers(provider, index),
@@ -505,13 +695,24 @@ export class CloudClient {
        * pool while every key still had its full 3.5-flash allowance. A
        * per-minute throttle does hold the whole key, because it is over in
        * seconds and the limit is shared by the project.
+       *
+       * ALL OF THAT IS TRUE OF A PER-PROJECT KEY AND FALSE OF A SHARED ONE.
+       * Where the ceiling belongs to the account - NVIDIA, Groq, Mistral -
+       * "move to the next key" moves to a key behind the same wall, and
+       * spends a request proving it. So the refusal is applied to every key
+       * instead, which is both the truth and one request cheaper. See
+       * `restAll`/`outAll` and `Provider.quotaPerKey`.
        */
       if (verdict.kind === 'exhausted' || verdict.kind === 'throttle') {
         const daily = /PerDay/i.test(detail) || /per day/i.test(verdict.message)
+        const shared = !this.separate(provider)
         /* Before the rest, or it reads as zero on the key that just died. */
         const spentHere = rotation.requests(index, model)
-        if (daily) rotation.out(index, model, nextPacificMidnight())
-        else rotation.rest(index, Date.now() + Math.max(1000, verdict.waitMs), 'per-minute')
+        const until = Date.now() + Math.max(1000, verdict.waitMs)
+        if (daily && shared) rotation.outAll(model, nextPacificMidnight())
+        else if (daily) rotation.out(index, model, nextPacificMidnight())
+        else if (shared) rotation.restAll(until, 'per-minute (account)')
+        else rotation.rest(index, until, 'per-minute')
         this.remember(provider, rotation)
         console.log(
           `[wumpy] ${PROVIDERS[provider].label} key ${index + 1}/${keyCount} ` +
@@ -519,7 +720,10 @@ export class CloudClient {
             (daily
               ? `is out of ${model} for the day after ${spentHere} request(s); ` +
                 `${rotation.availableCount(Date.now(), model)} key(s) left on it`
-              : 'rested: rate limit')
+              : shared
+                ? `rested with the whole pool: the ${PROVIDERS[provider].label} ` +
+                  'rate limit is the account\'s'
+                : 'rested: rate limit')
         )
         if (rotation.availableCount(Date.now(), model) > 0) continue
         if (daily) {
@@ -731,7 +935,7 @@ export class CloudClient {
       /* Chosen before the wait, not after: pacing a key nobody had picked
          yet is what made a compaction block the answer it was making room
          for, which is the one moment the user is already waiting. */
-      await pace(provider, index)
+      await pace(provider, index, 0, this.separate(provider))
       const res = await fetch(`${PROVIDERS[provider].base}/chat/completions`, {
         method: 'POST',
         headers: this.headers(provider, index),

@@ -106,6 +106,43 @@ const NEWLINE = String.fromCharCode(10)
   check('and the long one still stands', r.waitMs(T0) > 7 * 3600_000, true)
 }
 
+/**
+ * A SHARED ALLOWANCE IS REFUSED FOR EVERY KEY AT ONCE.
+ *
+ * Resting one key and moving to the next is right when each key has its own
+ * meter, and actively wasteful when they do not. Two NVIDIA keys on one
+ * login sit behind the same 40-a-minute wall: moving to the second spends a
+ * request to be told what the first already said, and with a longer pool
+ * that is a burst of 429s and a turn lost more slowly than one key would
+ * have lost it.
+ *
+ * `Provider.quotaPerKey` picks which of these the client calls; both have
+ * to exist and behave as exact mirrors of `rest` and `out`.
+ */
+{
+  const r = new KeyRotation(3)
+  r.restAll(T0 + 30_000, 'per-minute (account)')
+  check('one account limit holds every key', r.next(T0), null)
+  check('and none is usable', r.availableCount(T0), 0)
+  check('they all come back together', r.next(T0 + 31_000) !== null, true)
+}
+
+{
+  /* The daily form is still per model: the account's day on THIS model is
+     done, and another model on the same keys is untouched. */
+  const r = new KeyRotation(2)
+  r.outAll('a/model', T0 + 8 * 3600_000)
+  check('the account is out of that model', r.next(T0, 'a/model'), null)
+  check('but not of a different one', r.next(T0, 'other/model') !== null, true)
+}
+
+{
+  /* And the per-key forms are unchanged, because Google still needs them. */
+  const r = new KeyRotation(2)
+  r.rest(0, T0 + 30_000)
+  check('resting one key leaves the other', r.next(T0), 1)
+}
+
 /* -------------------------------------------------- keys added or taken */
 
 {

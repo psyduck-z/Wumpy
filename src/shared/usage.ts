@@ -7,7 +7,11 @@
  * sign of it was a 429 asking us to come back in eighteen hours. Nothing in
  * the app could have told you that was coming.
  *
- * Counted per day and per model, because that is how the providers count.
+ * Counted per day and per model, because that is how Google counted and it
+ * is the shape a person asks in anyway ("how much have I used today"). It is
+ * not how every provider counts: NVIDIA names no daily meter when it
+ * refuses, so for those models a day is a reporting period rather than an
+ * allowance, and the cap stays blank until a key is actually turned away.
  * Local models are counted too - not because anything runs out, but because
  * seeing 14 tok/s against 170 beside each other is the clearest statement of
  * what the two backends are.
@@ -57,10 +61,11 @@ export interface DayUsage {
    *
    * Two dates, because the two questions are different. "What have I used
    * today" is asked in the local calendar; "when does it come back" is
-   * answered by Google, at midnight in California. Rolling the counters on
-   * the local day cleared them eight hours early from here: a session past
-   * midnight saw 0% while every key was still spent, which is the exact
-   * failure this file was written to prevent.
+   * answered on the provider's clock, and the only one ever published was
+   * Google's midnight in California. Rolling the counters on the local day
+   * cleared them eight hours early from here: a session past midnight saw 0%
+   * while every key was still spent, which is the exact failure this file
+   * was written to prevent. See pacificDayKey for why that clock is kept.
    */
   quotaDay?: string
   models: Record<string, ModelUsage>
@@ -141,29 +146,39 @@ export interface Allowance {
   requestsPerDay: number
   /** Tokens a day, or 0 when the tier is not counted that way. */
   tokensPerDay: number
+  /** Requests a minute, or 0 when unknown. Recorded, not yet enforced. */
   requestsPerMinute: number
   /** How this number was arrived at, shown so it can be disbelieved. */
   note: string
 }
 
 /**
- * How Google counts, in its own words.
+ * What a free tier allows, per model, where anyone here knows.
  *
- * A 429 from the free tier names the meters it tripped, and there are four
- * of them rather than the one "requests a day" everybody quotes:
+ * GOOGLE PUBLISHED ITS METERS AND NOBODY ELSE HERE DOES, which is why this
+ * table looks lopsided. A 429 from Google's free tier names the meters it
+ * tripped, and there are four rather than the one "requests a day" everybody
+ * quotes:
  *
  *   GenerateRequestsPerMinutePerProjectPerModel-FreeTier
  *   GenerateRequestsPerDayPerProjectPerModel-FreeTier
  *   GenerateContentInputTokensPerModelPerMinute-FreeTier
  *   GenerateContentInputTokensPerModelPerDay-FreeTier
  *
- * Two things in those names decide how Wumpy should behave. They are keyed
+ * Two things in those names decided how Wumpy behaves. They are keyed
  * PerProjectPerModel, so a second key is a second project and multiplies all
- * four - which is why rotation works at all. And the token meters count
- * INPUT tokens: the preamble, the transcript and every screenshot are what
- * spend the day's allowance, while the model's own answer is not metered
- * this way. A long preamble is not only slower and dearer, it is less of the
- * day.
+ * four - which is why rotation works at all, and why `summarise` multiplies
+ * a cap by the number of keys. And the token meters count INPUT tokens: the
+ * preamble, the transcript and every screenshot are what spend the day's
+ * allowance, while the model's own answer is not metered this way. A long
+ * preamble is not only slower and dearer, it is less of the day.
+ *
+ * NVIDIA SAYS NONE OF THAT. There is no per-day meter named in a refusal, no
+ * published figure for these models, and the community numbers disagree with
+ * each other - so nothing here claims one. The entries below exist to put
+ * that in words where the user can read it, because an empty note next to
+ * the model they are actually running looks like a bug rather than like
+ * honesty. A zero cap is never multiplied and never drawn as a meter.
  */
 export const ALLOWANCES: Record<string, Allowance> = {
   /**
@@ -209,6 +224,46 @@ export const ALLOWANCES: Record<string, Allowance> = {
   }
 }
 
+/**
+ * What to say about a model the table has never heard of.
+ *
+ * Keyed by provider, because the thing worth saying is a property of the
+ * tier and not of the model: NVIDIA's catalogue moves faster than this file
+ * does, and a row per model id would be stale by the time a name changed.
+ *
+ * It exists because the move off Google left `/usage` printing a blank note
+ * beside `deepseek-ai/deepseek-v4.1-flash` - the default model, the one in
+ * use on nearly every turn - while four Gemini rows that cannot be reached
+ * any more still had their measurements. The blank was correct and it read
+ * as broken.
+ *
+ * The caps stay at zero on purpose. Community sources put NVIDIA's free tier
+ * at about 40 requests a minute and disagree about whether the credit
+ * allowance still exists; none of it has been seen from this machine, and
+ * this file's whole rule is that a measurement beats a published figure and
+ * a published figure beats nothing. So the number stays absent and the
+ * sentence says why - which is what `exhaustedAt` is for: the first time a
+ * key is refused, the count at that moment becomes the cap.
+ */
+export const PROVIDER_ALLOWANCES: Record<string, Allowance> = {
+  nvidia: {
+    requestsPerDay: 0,
+    tokensPerDay: 0,
+    requestsPerMinute: 0,
+    note: 'no daily figure published — the first key to run out sets the cap'
+  }
+}
+
+/**
+ * The allowance for a model, falling back to whatever its provider allows.
+ *
+ * Model first, because a measurement on one model is not a fact about its
+ * neighbours.
+ */
+export function allowanceFor(model: string, via = ''): Allowance | undefined {
+  return ALLOWANCES[model] ?? (via ? PROVIDER_ALLOWANCES[via] : undefined)
+}
+
 /* ------------------------------------------------------------ what to show */
 
 export interface UsageLine {
@@ -249,7 +304,7 @@ export function summarise(day: DayUsage, keys = 1): UsageLine[] {
   return Object.values(day.models)
     .map((u) => {
       const billed = u.promptTokens + u.completionTokens + u.thinkingTokens - u.cachedTokens
-      const allowance = ALLOWANCES[u.model]
+      const allowance = allowanceFor(u.model, u.via)
       let usedFraction: number | null = null
 
       // What this machine saw beats what anyone published. If the model has
@@ -309,11 +364,16 @@ function noteFor(
  * guesses: one source had gemini-3.8-flash at 1500 a day and another at 20,
  * and this machine saw about 25. Zero means nothing credible is known, and a
  * zero must be shown as "cap unknown" rather than as a full meter.
+ *
+ * `via` used to default to 'google', from when that was the only provider
+ * with keys to rotate. It defaults to nothing now: a caller that does not
+ * know the provider must not be handed Google's row, which is both the wrong
+ * number and a number for a model the app can no longer reach.
  */
-export function perKeyCapFor(day: DayUsage, model: string, via = 'google'): number {
+export function perKeyCapFor(day: DayUsage, model: string, via = ''): number {
   const measured = day.models[`${via}:${model}`]?.exhaustedAt
   if (measured !== undefined) return measured
-  return ALLOWANCES[model]?.requestsPerDay ?? 0
+  return allowanceFor(model, via)?.requestsPerDay ?? 0
 }
 
 /** The local date, which is the day the providers reset on from here. */

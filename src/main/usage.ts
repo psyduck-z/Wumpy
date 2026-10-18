@@ -48,10 +48,11 @@ export class UsageStore {
   /**
    * Rolls over when the quota does, without needing a timer to notice.
    *
-   * On the Pacific day, not the local one. The counters exist to measure an
-   * allowance Google resets at midnight in California, so that is the moment
-   * they are allowed to forget anything; the local date is carried alongside
-   * purely so the report can say "today" and mean it.
+   * On the Pacific day, not the local one: the later of the two from here,
+   * so the counters are allowed to forget late rather than early. See
+   * pacificDayKey, which says why that is still the right clock now that the
+   * provider it was chosen for is not the one being used. The local date is
+   * carried alongside purely so the report can say "today" and mean it.
    */
   private current(): DayUsage {
     if (this.day.quotaDay !== pacificDayKey()) this.day = this.blank()

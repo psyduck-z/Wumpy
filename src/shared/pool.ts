@@ -449,6 +449,14 @@ export interface PoolView {
   requests: number
   /** The per-project daily cap, or 0 when nothing credible is known. */
   perKeyCap: number
+  /**
+   * Whether `perKeyCap` is per key or the whole account's.
+   *
+   * Carried so the report can say which it means. "25 per key x 20" and
+   * "25 shared across 20 keys" are the same two numbers and opposite
+   * answers, and the reader cannot tell them apart from the figures.
+   */
+  perKeyQuota: boolean
   /** The pool's ceiling: the per-key cap times the number of keys. */
   cap: number
   /** Requests still available today, or null when the cap is unknown. */
@@ -457,7 +465,7 @@ export interface PoolView {
   usedFraction: number | null
   /** 0 when something is usable now. */
   nextFreeMs: number
-  /** When Google's day turns over, which is when everything comes back. */
+  /** When the quota day turns over, which is when everything comes back. */
   resetAt: number
   rows: KeyRow[]
 }
@@ -479,7 +487,20 @@ export function poolView(
   model: string,
   perKeyCap: number,
   now: number,
-  resetAt: number
+  resetAt: number,
+  /**
+   * Whether each key carries its own allowance, which only Google's do.
+   *
+   * Passed in rather than looked up, so this file stays free of imports and
+   * every case can be driven from a check. See `Provider.quotaPerKey` for
+   * why it is false everywhere else: an NVIDIA key is a credential against
+   * an account and the ceiling belongs to the account, so five of them are
+   * five ways in to one allowance rather than five allowances.
+   *
+   * Defaults true, which is what every caller meant before this existed and
+   * what the Google-only history of this file assumed throughout.
+   */
+  perKeyQuota = true
 ): PoolView {
   const key = model || 'unknown'
   const cap = Math.max(0, Math.floor(perKeyCap))
@@ -525,8 +546,23 @@ export function poolView(
   /*
    * The ceiling counts only the keys that could serve today, so a dead key
    * lowers the ceiling rather than silently inflating what is remaining.
+   *
+   * On a shared allowance there is nothing to multiply: the cap IS the
+   * ceiling however many keys reach it, and a dead key costs a way in
+   * rather than a slice of the budget. Guarded on there being a live key at
+   * all, so a pool of nothing but refused keys still reports no ceiling
+   * rather than a full one.
    */
-  const ceiling = cap * (pool.spend.length - rejected)
+  const live = pool.spend.length - rejected
+  const ceiling = perKeyQuota ? cap * live : live > 0 ? cap : 0
+  /*
+   * And what is left of it, which has to be counted the same way or the two
+   * numbers disagree. Per key it is the sum of each live key's remainder,
+   * accumulated above. Shared, every key has been drinking from the one pot,
+   * so it is the cap less what the whole pool has drawn - summing per key
+   * would report five times the truth on five keys.
+   */
+  if (!perKeyQuota) left = ceiling ? Math.max(0, cap - requests) : 0
   return {
     day: pool.day,
     model: key,
@@ -537,6 +573,7 @@ export function poolView(
     rejected,
     requests,
     perKeyCap: cap,
+    perKeyQuota,
     cap: ceiling,
     remaining: ceiling ? left : null,
     usedFraction: ceiling ? Math.min(1, Math.max(0, 1 - left / ceiling)) : null,
@@ -549,13 +586,22 @@ export function poolView(
 /* -------------------------------------------------------- the quota clock */
 
 /**
- * The Pacific calendar day, which is the day Google's counters belong to.
+ * The Pacific calendar day, which is the latest day any of this could roll on.
  *
  * Not the local day. The usage file rolled over at local midnight, which from
- * here is eight hours before the quota resets: a late-night session saw its
- * totals clear and the meter read 0% while every key was still spent. The
+ * here is eight hours before Google's quota resets: a late-night session saw
+ * its totals clear and the meter read 0% while every key was still spent. The
  * date is the one thing in this file that has to come from a real timezone
  * database rather than from arithmetic.
+ *
+ * STILL PACIFIC AFTER THE MOVE OFF GOOGLE, and not by inertia. NVIDIA names
+ * no daily meter in a refusal and publishes no reset time, so there is no
+ * second clock to switch to - and of the two candidates this is the safe one.
+ * Pacific midnight is the later of the two from here, so the counters are
+ * cleared late rather than early. Clearing late over-reports what is spent;
+ * clearing early reports a fresh day while every key is still out, which is
+ * the exact failure this function was written for. If a provider is ever
+ * observed resetting on its own clock, that evidence belongs here.
  */
 export function pacificDayKey(now: number = Date.now()): string {
   const formatted = new Date(now).toLocaleDateString('en-CA', {

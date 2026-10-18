@@ -870,23 +870,54 @@ check('a local model has no sibling', C.siblingModel('phi4-mini:3.8b', new Set()
 /* ------------------------------------------- waiting, and knowing you waited */
 
 /**
- * The gap between requests is per KEY, and it has to stay that way.
+ * The gap between requests is divided the way the LIMIT is divided, and it
+ * has to stay that way in both directions.
  *
- * Google's entry says "10 requests a minute on the free tier, so 6s plus a
- * margin" — ten per PROJECT, and every key in the pool is its own project.
- * Keyed on the provider it was one queue for all twenty: a follow-up asked
- * within seven seconds of the last answer sat there doing nothing before it
- * was sent, and a turn is rarely one request. A command's output is
- * another, a compaction is another, the title is another, so a three-step
- * sequence paid twenty-one seconds of nothing while nineteen keys were idle.
+ * Per key, for Google. Its entry says "10 requests a minute on the free
+ * tier, so 6s plus a margin" — ten per PROJECT, and every key in the pool
+ * is its own project. Keyed on the provider it was one queue for all
+ * twenty: a follow-up asked within seven seconds of the last answer sat
+ * there doing nothing before it was sent, and a turn is rarely one request.
+ * A command's output is another, a compaction is another, the title is
+ * another, so a three-step sequence paid twenty-one seconds of nothing
+ * while nineteen keys were idle.
+ *
+ * Per ACCOUNT, for everyone else, and this half was added the day a second
+ * NVIDIA key arrived. That ceiling is the account's: two keys each keeping
+ * their own 1,700ms gap put about seventy requests a minute through a limit
+ * of forty, so the second key would have made refusals likelier than one
+ * key was - the opposite of the reason for adding it.
+ *
+ * UNLESS THE KEYS ARE ON SEPARATE ACCOUNTS, which no amount of looking at a
+ * key will reveal and the user simply knows. `/key <provider> accounts
+ * separate` is them saying so, and then two keys really are two ceilings
+ * and pace independently again. The decision lives in CloudClient.separate
+ * because it needs both halves: the provider's metering, and the setting.
+ *
+ * All three are the same rule. None is safe to apply to the others.
  */
 {
   const main = read('src/main/cloud.ts')
-  check('the gap is kept per key', /const slot = `\$\{provider\}:\$\{key\}`/.test(main), true)
-  check('and the sender paces the key it picked', /await pace\(provider, index\)/.test(main), true)
+  check(
+    'the gap is divided the way the allowance is',
+    /const slot = separate \? `\$\{provider\}:\$\{key\}` : provider/.test(main),
+    true
+  )
+  check('Google is still the per-key case', C.PROVIDERS.google.quotaPerKey, true)
+  check('and NVIDIA shares one queue by default', C.keysAreSeparate('nvidia'), false)
+  check('until the user says otherwise', C.keysAreSeparate('nvidia', 'separate'), true)
+  /* And saying "shared" cannot take Google's away, because that one is a
+     fact about the metering rather than about the setup. */
+  check('which cannot be said away for Google', C.keysAreSeparate('google', 'shared'), true)
+  check(
+    'and the sender paces the key it picked',
+    /await pace\(provider, index, 0, this\.separate\(provider\)\)/.test(main),
+    true
+  )
   check(
     'including the background work',
-    main.indexOf('const index = background.next') < main.lastIndexOf('await pace(provider, index)'),
+    main.indexOf('const index = background.next') <
+      main.lastIndexOf('await pace(provider, index, 0, this.separate(provider))'),
     true
   )
   check('and a wait long enough to notice is logged', /holding key \$\{key \+ 1\}/.test(main), true)

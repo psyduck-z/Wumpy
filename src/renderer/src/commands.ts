@@ -21,6 +21,8 @@ export type CommandAction =
   | { kind: 'rename'; title: string }
   | { kind: 'renameChoice'; question: string; options: string[] }
   | { kind: 'model'; name: string }
+  /** `/model check` — ask every model in the catalogue whether it answers. */
+  | { kind: 'models' }
   | { kind: 'dock'; dock: Dock | null }
   | { kind: 'reasoning'; show: boolean | 'toggle' }
   | { kind: 'pin'; pinned: boolean | 'toggle' }
@@ -40,6 +42,11 @@ export type CommandAction =
       /** `/key google drop 1 2 3` - remove these by position. */
       drop?: number[]
     }
+  /**
+   * `/key <provider> accounts separate|shared` — are these keys one account
+   * or several? Null reports rather than sets. See WumpySettings.keyAccounts.
+   */
+  | { kind: 'accounts'; provider: ProviderName; mode: 'shared' | 'separate' | null }
   | { kind: 'remember'; value: string; clear: boolean }
   | { kind: 'usage'; reset: boolean }
   | { kind: 'approve'; mode: 'manual' | 'auto' | 'all' | 'cycle' }
@@ -238,11 +245,20 @@ export const COMMANDS: CommandSpec[] = [
   {
     name: 'model',
     aliases: ['models', 'gemini'],
-    hint: 'Choose the model for this tier — local or hosted',
-    arg: 'name',
+    hint: 'Choose the model, or `check` which ones still answer',
+    arg: 'name | check',
     // With a name it sets directly, which is quicker than the picker once you
     // know what you want and is the only way to reach a model not in the list.
-    run: (arg) => ({ kind: 'model', name: arg.trim() })
+    run: (arg) => {
+      /*
+       * `check` before the name lookup, and it cannot collide: it is matched
+       * whole, and no catalogue id is one word. A model genuinely called
+       * "check" would still be reachable from the picker.
+       */
+      const name = arg.trim()
+      if (/^(check|test|verify|status)$/i.test(name)) return { kind: 'models' }
+      return { kind: 'model', name }
+    }
   },
   {
     name: 'open',
@@ -296,7 +312,7 @@ export const COMMANDS: CommandSpec[] = [
     name: 'key',
     aliases: ['apikey'],
     hint: 'Add or remove hosted-model API keys (several rotate)',
-    arg: 'google|groq|mistral|nvidia [add|check|drop|clear] <key…>',
+    arg: 'google|groq|mistral|nvidia [add|check|drop|clear|accounts] <key…>',
     argRequired: true,
     /**
      * Parsed here rather than in a dialog because a key is pasted, and the
@@ -313,7 +329,7 @@ export const COMMANDS: CommandSpec[] = [
           message:
             'Say which one: ' +
             PROVIDER_IDS.map((id) => `\`/key ${id} <key>\``).join(', ') +
-            '. Use `/key google clear` to remove it.'
+            '. Add `clear` to one of those to remove it.'
         }
       }
       /*
@@ -345,6 +361,33 @@ export const COMMANDS: CommandSpec[] = [
         return { kind: 'key', provider, value: '', clear: false, add: false, check: true }
       }
       /*
+       * `accounts separate` tells Wumpy something it cannot find out.
+       *
+       * A rate limit belongs to the account on every provider but Google,
+       * and two keys look identical whether they came from one login or
+       * two. Said wrong in the cautious direction the app simply paces
+       * slower than it could; said right it uses what the user actually
+       * paid in sign-ups for. With no argument it reports what it thinks.
+       */
+      const accounts = /^accounts?(?:\s+(.*))?$/i.exec(rest)
+      if (accounts) {
+        const word = (accounts[1] ?? '').trim().toLowerCase()
+        if (!word) return { kind: 'accounts', provider, mode: null }
+        if (/^(separate|different|several|many|own)$/.test(word)) {
+          return { kind: 'accounts', provider, mode: 'separate' }
+        }
+        if (/^(shared|same|one|single)$/.test(word)) {
+          return { kind: 'accounts', provider, mode: 'shared' }
+        }
+        return {
+          kind: 'error',
+          message:
+            `\`/key ${provider} accounts separate\` if each key is from its own ` +
+            `account, \`shared\` if they are all from one. ` +
+            `\`/key ${provider} accounts\` says which it currently assumes.`
+        }
+      }
+      /*
        * `drop 1 2 3` removes by position, which is what `check` reports.
        * Parsed here so the numbers are numbers before they cross: the
        * handler on the other side has no way to ask what was meant.
@@ -358,7 +401,9 @@ export const COMMANDS: CommandSpec[] = [
         if (!numbers.length || numbers.some((n) => !Number.isInteger(n) || n < 1)) {
           return {
             kind: 'error',
-            message: 'Which ones? `/key google drop 1 2 3` — the numbers `/key google check` gave.'
+            message:
+              `Which ones? \`/key ${provider} drop 1 2 3\` — ` +
+              `the numbers \`/key ${provider} check\` gave.`
           }
         }
         return { kind: 'key', provider, value: '', clear: false, add: false, drop: numbers }

@@ -120,6 +120,34 @@ export class KeyRotation {
   }
 
   /**
+   * THE WHOLE POOL, for a provider whose allowance belongs to the account.
+   *
+   * Resting one key and moving to the next is the right answer when each
+   * key has its own meter, and the wrong one when they share. Two NVIDIA
+   * keys on one login are behind the same 40-a-minute wall: the turn that
+   * just hit it would move straight to the other key, hit the identical
+   * limit, and spend a second request finding out what it already knew.
+   * With a long enough pool that is a burst of 429s and a turn lost slower
+   * than one key would have lost it.
+   *
+   * So on a shared allowance a refusal is news about the ACCOUNT, and every
+   * key hears it. The pair of these mirror `rest` and `out` exactly;
+   * `Provider.quotaPerKey` is what picks between them.
+   */
+  restAll(until: number, why = 'rate limited'): void {
+    for (let index = 0; index < this.count; index++) {
+      this.pool = restOn(this.pool, index, until, why)
+    }
+  }
+
+  /** As `out`, for every key: the account's day on this model is done. */
+  outAll(model: string, until: number): void {
+    for (let index = 0; index < this.count; index++) {
+      this.pool = outOn(this.pool, index, model, until)
+    }
+  }
+
+  /**
    * The provider refused this key. Set it aside until that changes.
    *
    * Not a rest with a long `until`, which is what this was: a refusal has to
@@ -175,9 +203,21 @@ export class KeyRotation {
     return this.fresh(now)
   }
 
-  /** The pool as a report can print it. */
-  view(model: string, perKeyCap: number, resetAt: number, now: number = Date.now()): PoolView {
-    return poolView(this.fresh(now), model, perKeyCap, now, resetAt)
+  /**
+   * The pool as a report can print it.
+   *
+   * `perKeyQuota` says whether these keys carry an allowance each, which is
+   * the caller's to know - it is a fact about the provider, and this class
+   * holds keys rather than providers. See `Provider.quotaPerKey`.
+   */
+  view(
+    model: string,
+    perKeyCap: number,
+    resetAt: number,
+    now: number = Date.now(),
+    perKeyQuota = true
+  ): PoolView {
+    return poolView(this.fresh(now), model, perKeyCap, now, resetAt, perKeyQuota)
   }
 }
 

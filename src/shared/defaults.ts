@@ -44,6 +44,11 @@ export const DEFAULT_SETTINGS: WumpySettings = {
   searchEnabled: true,
   searchApiKey: '',
 
+  // Empty means every provider's keys share one allowance, which is true of
+  // all of them but Google and is the safe half of the guess. See
+  // WumpySettings.keyAccounts.
+  keyAccounts: {},
+
   // Better another model than none, so long as the answer says which it is.
   apiFallback: true,
   // Off until asked for with /voice. It is not only a microphone button: with it

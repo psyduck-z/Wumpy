@@ -385,6 +385,14 @@ check('because guessed options are still guessing', /still guessing/.test(prompt
    * one most turns pay, so anything added to the always-sent half has to be
    * argued for here rather than absorbed.
    */
+  /*
+   * quota: true although NVIDIA turns that section off (see promptShape:
+   * there is no daily allowance to run out, and a 429 is absorbed by
+   * rotation before the model hears about it). Deliberately the worst case -
+   * the bound has to hold for the configuration that sends the most, not for
+   * the one in use today, or adding a Google key back would quietly push a
+   * plain turn past a ceiling that had been measured without it.
+   */
   const FULL = { scope: 'full', search: true, screen: true, browser: true, quota: true }
   const plain = T.preambleTokens({ ...FULL, needs: [] })
   const everything = T.preambleTokens(FULL)

@@ -45,6 +45,7 @@ const P = await load('src/shared/pool.ts', 'pool')
 const R = await load('src/shared/rotation.ts', 'rot')
 const U = await load('src/shared/usage.ts', 'use')
 const Q = await load('src/renderer/src/quota.ts', 'view')
+const C = await load('src/shared/cloud.ts', 'cloud')
 
 let failed = 0
 let count = 0
@@ -89,7 +90,9 @@ const LITE = 'gemini-3.1-flash-lite'
   check('not the pool total', U.summarise(withKey)[0].exhaustedAt === 500, false)
 
   /* And the ceiling it implies, across twenty keys. */
-  check('twenty keys of 25 is 500, not 10,000', U.perKeyCapFor(withKey, FLASH) * 20, 500)
+  /* The provider is passed, not defaulted. perKeyCapFor used to assume
+     'google' and these checks leaned on that; the assumption is gone. */
+  check('twenty keys of 25 is 500, not 10,000', U.perKeyCapFor(withKey, FLASH, 'google') * 20, 500)
 
   /* Without the per-key figure it still falls back, which is right for one key. */
   const oneKey = U.record(day, { model: FLASH, via: 'google', error: true, exhausted: true })
@@ -100,13 +103,109 @@ const LITE = 'gemini-3.1-flash-lite'
 
 {
   const blank = { date: 'd', quotaDay: 'q', models: {} }
-  check('with nothing measured the table is used', U.perKeyCapFor(blank, FLASH), 25)
-  check('an unknown model has no cap at all', U.perKeyCapFor(blank, 'gemini-9-new'), 0)
+  check('with nothing measured the table is used', U.perKeyCapFor(blank, FLASH, 'google'), 25)
+  check('an unknown model has no cap at all', U.perKeyCapFor(blank, 'gemini-9-new', 'google'), 0)
 
   let seen = blank
   seen = U.record(seen, { model: FLASH, via: 'google' })
   seen = U.record(seen, { model: FLASH, via: 'google', exhausted: true, exhaustedAfter: 7 })
-  check('what this machine saw overrides it', U.perKeyCapFor(seen, FLASH), 7)
+  check('what this machine saw overrides it', U.perKeyCapFor(seen, FLASH, 'google'), 7)
+
+  /*
+   * The MEASUREMENT is keyed by provider and model both; the TABLE is keyed
+   * by model alone. So naming the wrong provider does not invent a figure -
+   * it loses the measured one and falls back to the published row for that
+   * same model, 7 becoming 25 here. Which is why every caller passes the
+   * provider the model actually routes to rather than leaning on a default.
+   */
+  check('the wrong provider loses the measurement', U.perKeyCapFor(seen, FLASH, 'nvidia'), 25)
+  check('and reads no measurement with none at all', U.perKeyCapFor(seen, FLASH, ''), 25)
+}
+
+/* ------------------------------ a second key is not always a second budget */
+
+/*
+ * The meter multiplied the cap by the number of keys unconditionally, which
+ * is right for Google and wrong for everyone else. A Google key is a Cloud
+ * project and the meters are keyed PerProjectPerModel; an NVIDIA key is a
+ * credential against an account, and NVIDIA's own forum describes the limit
+ * as following "the amount of current overall traffic using the same
+ * access". Five keys from one login are five doors into one allowance.
+ *
+ * It was latent while NVIDIA had no known cap - zero multiplied is zero -
+ * but the first 429 recorded from a real turn sets `exhaustedAt`, and that
+ * WOULD have been multiplied. The meter would then have read half full on
+ * an allowance already spent, which is the failure this whole file exists
+ * to prevent, arrived at from the other direction.
+ */
+{
+  check('Google keys each carry an allowance', C.PROVIDERS.google.quotaPerKey, true)
+  for (const id of ['nvidia', 'groq', 'mistral', 'ollama']) {
+    check(`${id} keys share one`, C.PROVIDERS[id].quotaPerKey ?? false, false)
+  }
+
+  check('so three Google keys are three budgets', C.budgetsFor('google', 3), 3)
+  check('and three NVIDIA keys are one', C.budgetsFor('nvidia', 3), 1)
+  /* Zero keys is no provider configured, not a zero allowance: a zero here
+     divides a meter by nothing. */
+  check('no keys still counts as one budget', C.budgetsFor('nvidia', 0), 1)
+  check('and an unroutable model has one', C.budgetsFor(null, 9), 1)
+
+  /* The same divergence through the pool, which draws the status-bar meter. */
+  let shared = P.emptyPool('2026-10-18', 3)
+  for (let i = 0; i < 10; i++) shared = P.spendOn(shared, i % 3, 'a/model')
+
+  const perKey = P.poolView(shared, 'a/model', 25, NOW, MIDNIGHT, true)
+  check('per key, three keys of 25 is 75', perKey.cap, 75)
+  check('with 65 left after ten requests', perKey.remaining, 65)
+
+  const pooled = P.poolView(shared, 'a/model', 25, NOW, MIDNIGHT, false)
+  check('shared, three keys of 25 is still 25', pooled.cap, 25)
+  /* The whole pool drank from one pot, so it is the cap less the pool's
+     total - not the sum of each key's remainder, which would say 65. */
+  check('and 15 left, not 65', pooled.remaining, 15)
+  check('the view says which kind it is', pooled.perKeyQuota, false)
+
+  /* A refused key costs a way in, not a slice of the budget. */
+  const hurt = P.poolView(P.rejectOn(shared, 0), 'a/model', 25, NOW, MIDNIGHT, false)
+  check('a dead key does not shrink a shared ceiling', hurt.cap, 25)
+  const hurtPerKey = P.poolView(P.rejectOn(shared, 0), 'a/model', 25, NOW, MIDNIGHT, true)
+  check('but it does shrink a per-key one', hurtPerKey.cap, 50)
+
+  /* The pacer divides the same way, and is checked where that rule's
+     history lives: see "the gap is divided the way the allowance is" in
+     check-cloud.mjs. */
+
+  /* The report has to say which, because the figures alone cannot. */
+  const sharedText = Q.poolLines(pooled, NOW).join(NL)
+  check('and the report says shared', /shared across all 3 keys/.test(sharedText), true)
+  check('not per key', /per key x/.test(sharedText), false)
+  const perKeyText = Q.poolLines(perKey, NOW).join(NL)
+  check('while a per-key pool still multiplies out loud', /25 per key x 3/.test(perKeyText), true)
+}
+
+/* ------------------------------------------- the provider-level fallback */
+
+/*
+ * After the move off Google, `/usage` printed a blank note beside the model
+ * in use on nearly every turn, because ALLOWANCES is keyed by model id and
+ * had no NVIDIA rows. The fallback says what is true of the tier instead.
+ */
+{
+  const DEFAULT = 'deepseek-ai/deepseek-v4.1-flash'
+  const line = U.summarise(U.record({ date: 'd', models: {} }, { model: DEFAULT, via: 'nvidia' }))[0]
+  check('the default model has something to say about its cap', line.note.length > 0, true)
+  check('and it says no figure is published', /no daily figure published/.test(line.note), true)
+
+  /* Nothing credible is known, so nothing is drawn. A zero cap multiplied by
+     twenty keys is still zero, and must not read as a full meter. */
+  check('with no figure there is no meter', line.usedFraction, null)
+  check('and no cap to multiply', U.perKeyCapFor({ date: 'd', models: {} }, DEFAULT, 'nvidia'), 0)
+
+  /* A model row still beats the provider row: a measurement on one model is
+     not a fact about its neighbours. */
+  check('a measured model keeps its own figure', U.allowanceFor(FLASH, 'google').requestsPerDay, 25)
+  check('an unknown provider has no fallback', U.allowanceFor('who/what', 'mistral'), undefined)
 }
 
 /* -------------------------------------- a daily cap is per model per key */
@@ -594,8 +693,21 @@ check('a negative wait is now', Q.untilText(-5000), 'in 0s')
 
 const cloud = readFileSync('src/main/cloud.ts', 'utf8')
 check('a key is chosen for the model being asked', /rotation\.next\(Date\.now\(\), model\)/.test(cloud), true)
+/*
+ * Four branches, because a refusal means two different things depending on
+ * whether the keys share an allowance. Per key: a daily cap takes out one
+ * MODEL on one key, a throttle holds the whole key. Shared: both apply to
+ * every key, because the next key is behind the same wall and asking it
+ * spends a request to learn nothing.
+ */
 check('a daily cap takes out one model', /rotation\.out\(index, model, nextPacificMidnight\(\)\)/.test(cloud), true)
-check('a throttle still holds the key', /rotation\.rest\(index, Date\.now\(\) \+ Math\.max/.test(cloud), true)
+check('a throttle still holds the key', /rotation\.rest\(index, until, 'per-minute'\)/.test(cloud), true)
+check('a shared daily cap takes out every key', /rotation\.outAll\(model, nextPacificMidnight\(\)\)/.test(cloud), true)
+check('and a shared throttle rests the pool', /rotation\.restAll\(until, 'per-minute \(account\)'\)/.test(cloud), true)
+/* Decided by the provider's metering AND the user's answer about accounts,
+   which is what CloudClient.separate joins together. */
+check('which is decided by both halves', /const shared = !this\.separate\(provider\)/.test(cloud), true)
+check('reading the provider and the setting', /keysAreSeparate\(provider, this\.accountMode\?\.\(provider\)\)/.test(cloud), true)
 check('the per-key count is read before the rest', cloud.indexOf('const spentHere') < cloud.indexOf('rotation.out(index'), true)
 check('and travels with the failure', /afterRequests: spentHere/.test(cloud), true)
 check('the model being spent is stated, not spelled', /spent: true/.test(cloud), true)
@@ -604,7 +716,14 @@ check('availability is asked per model', /availableCount\(Date\.now\(\), model\)
 check('a wait is said in units people use', /friendlyWait\(wait\)/.test(cloud), true)
 
 const main = readFileSync('src/main/index.ts', 'utf8')
-check('the pool ledger is given to the client', /new CloudClient\(keys, pools\)/.test(main), true)
+check('the pool ledger is given to the client', /new CloudClient\(keys, pools,/.test(main), true)
+/* And the account setting as a function, not a value: the user can change
+   it mid-session and a value read at construction would go stale. */
+check(
+  'along with a live read of the account setting',
+  /\(p\) => settings\.get\('keyAccounts'\)\[p\]/.test(main),
+  true
+)
 check('the report carries the pool', /pool: cloud\.poolFor\(model, cap\)/.test(main), true)
 check('with the cap this machine measured', /perKeyCapFor\(usage\.today\(\)/.test(main), true)
 check('a spent model is recognised by the flag', /failure\.spent === true/.test(main), true)

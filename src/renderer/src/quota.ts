@@ -1,4 +1,5 @@
 import type { PoolView } from '@shared/pool'
+import { providerFor } from '@shared/cloud'
 
 /**
  * The key pool, written out for someone who asked how much they have left.
@@ -35,6 +36,27 @@ function clock(at: number): string {
   return new Date(at).toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' })
 }
 
+/**
+ * `/key nvidia` for an NVIDIA model, and never `/key google` for one.
+ *
+ * These lines used to name google outright, because google was the only
+ * provider with a pool worth reporting on. After the move to NVIDIA they
+ * still did: a refused NVIDIA key printed "drop them with `/key google drop
+ * 3`", which is a command that acts on a different provider's list - or on
+ * an empty one - while the key it was complaining about stays exactly where
+ * it was. Advice that names the wrong provider is worse than none, because
+ * it gets followed.
+ *
+ * The model is the only thing a PoolView carries, so the provider comes
+ * from the catalogue. A hand-typed model id that routes nowhere gets the
+ * placeholder, which reads as something to fill in rather than as a command
+ * to paste.
+ */
+export function keyCommandFor(model: string): string {
+  const provider = providerFor(model)
+  return provider ? `/key ${provider}` : '/key <provider>'
+}
+
 export function poolLines(pool: PoolView, now: number = Date.now()): string[] {
   if (pool.keys <= 0) return []
 
@@ -50,10 +72,22 @@ export function poolLines(pool: PoolView, now: number = Date.now()): string[] {
    * limit worth trusting and a confident wrong ceiling is worse than none.
    */
   if (pool.remaining !== null) {
+    /*
+     * How the ceiling was arrived at, which is a different sentence
+     * depending on the provider and must not be guessed from the figures:
+     * "25 per key x 20" and "25 shared across 20 keys" print the same two
+     * numbers and mean opposite things. Only Google's keys each carry an
+     * allowance; an NVIDIA key is a door into the account's one budget.
+     */
+    const how =
+      pool.perKeyQuota && pool.keys > 1
+        ? `${pool.perKeyCap} per key x ${pool.keys}`
+        : pool.keys > 1
+          ? `shared across all ${pool.keys} keys`
+          : `${pool.perKeyCap} a day`
     lines.push(
       `About **${pool.remaining.toLocaleString()}** of ${pool.cap.toLocaleString()} requests ` +
-        `left today (${pool.perKeyCap} per key x ${pool.keys}), ` +
-        `${pool.requests} used.`
+        `left today (${how}), ${pool.requests} used.`
     )
   } else {
     lines.push(
@@ -74,12 +108,13 @@ export function poolLines(pool: PoolView, now: number = Date.now()): string[] {
    * saying so, which is the whole reason this line exists.
    */
   if (dead.length) {
+    const key = keyCommandFor(pool.model)
     lines.push(
       `**${dead.length === 1 ? 'Key' : 'Keys'} ${keyList(dead)} ${dead.length === 1 ? 'was' : 'were'} refused** ` +
-        '(deleted project, revoked key, or a project Google restricted). Waiting will not fix ' +
-        `those and neither will tomorrow — drop them with \`/key google drop ${dead.join(' ')}\`. ` +
+        '(revoked, mistyped, or an account the provider has restricted). Waiting will not fix ' +
+        `those and neither will tomorrow — drop them with \`${key} drop ${dead.join(' ')}\`. ` +
         'They are left out of the figures above. ' +
-        '`/key google check` re-asks the provider for nothing, if you think one has come back.'
+        `\`${key} check\` re-asks the provider for nothing, if you think one has come back.`
     )
   }
 

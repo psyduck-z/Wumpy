@@ -1,6 +1,7 @@
 import type { ApprovalMode, ContextUsage } from '@shared/types'
 import { MIDTASK_AT, SEND_AT } from '@shared/pressure'
 import type { PoolView } from '@shared/pool'
+import { keyCommandFor } from '../quota'
 import type { ChatStats } from '../hooks/useChat'
 
 /**
@@ -145,8 +146,9 @@ function QuotaMeter({
         (dead ? `, ${pool.spent} out for the day` : '') +
         (pool.resting ? `, ${pool.resting} resting a moment` : '') +
         /* The one that needs doing something about, so it is said in the
-           hover rather than only in the full report. */
-        (pool.rejected ? `, ${pool.rejected} REFUSED — run /key google check` : '') +
+           hover rather than only in the full report. Named for the provider
+           this model actually routes to: see keyCommandFor. */
+        (pool.rejected ? `, ${pool.rejected} REFUSED — run ${keyCommandFor(pool.model)} check` : '') +
         `.\n${comesBack}\nClick for the full breakdown.`
       }
     >

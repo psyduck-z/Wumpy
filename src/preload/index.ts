@@ -1,6 +1,7 @@
 import { contextBridge, ipcRenderer } from 'electron'
 import { IPC } from '@shared/types'
 import type { LinkCheck } from '@shared/links'
+import type { ProbeResult } from '@shared/probe'
 import type {
   Attachment,
   DesktopResult,
@@ -167,6 +168,15 @@ const api = {
     /** Today's totals, per model. Counts only — no prompt text is kept. */
     get: (): Promise<UsageReport> => ipcRenderer.invoke(IPC.usageGet),
     reset: (): Promise<UsageReport> => ipcRenderer.invoke(IPC.usageReset)
+  },
+  models: {
+    /**
+     * Which models answer right now, asked one real request at a time.
+     *
+     * No argument, on purpose: the catalogue decides what is asked, so the
+     * page cannot name a host or an id of its own and have it dialled.
+     */
+    probe: (): Promise<ProbeResult[]> => ipcRenderer.invoke(IPC.modelsProbe)
   },
   /**
    * The notes Wumpy carries between chats. Plain text the user owns - no
