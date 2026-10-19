@@ -465,6 +465,10 @@ bench-results.json
 /.usage-check-*.mjs
 /.bc-*.mjs
 
+# Written by `npm run bench:vision`; a record of one afternoon's API calls
+# on one machine, which is what the catalogue's `vision` field is for.
+/.vision-results.json
+
 # esbuild scratch bundles, written at the repo root by the check and bench
 # scripts so a relative import resolves. They are deleted on success and
 # left behind on a crash, and one was committed that way.
