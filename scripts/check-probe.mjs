@@ -415,13 +415,37 @@ check('and it is an explicit request', /IPC\.modelsProbe, async \(_e, req\?/.tes
 check('nothing polls it', /setInterval[^;]{0,120}probe/i.test(main), false)
 /* What it will cost, before it costs it: twelve requests and several
    minutes is a command somebody runs twice if nothing says so. */
-/* It used to say "12 small requests", which stopped being true when the
-   probe started carrying the real 14.6k preamble - that is now the bulk
-   of what the check spends, and the note has to say so before spending
-   it. */
-check('the panel says what it will spend first', /\$\{CLOUD_MODELS\.length \* runs\} requests/.test(app), true)
-check('and that each carries the real instructions', /full instructions/.test(app), true)
-check('and how long it will take', /give it a few minutes/.test(app), true)
+/*
+ * The cost and the wait, in one line.
+ *
+ * This grew to five explaining why it asks twice, what a real preamble
+ * costs and how long to wait - all true, all already decided, and none
+ * of it anything the reader can act on while they sit there. What is
+ * worth saying before spending twelve requests is that it is twelve
+ * requests and that they will wait.
+ */
+check('the panel says what it will spend first', /real requests, a few minutes/.test(app), true)
+check('in one line', /Checking \$\{CLOUD_MODELS\.length\} models/.test(app), true)
+
+/*
+ * A TYPO IS NOT A MODEL. `/model chack` - a mistyped `check` - was
+ * accepted whole, and the panel answered "Now answering with chack."
+ * There is no such model, no provider for it and nothing that could ever
+ * reply; the status bar read `chack` and the failure would have surfaced
+ * on the next question, nowhere near the mistake.
+ *
+ * Typing an id by hand must keep working, since that is the only way to
+ * reach a model the catalogue does not list - so the gate is
+ * ROUTABILITY, not membership. An id with a slash or a colon goes to a
+ * provider; one with neither goes nowhere and is a slip.
+ */
+check('a name that routes nowhere is refused', /!hosted && providerFor\(id\) === null/.test(app), true)
+check('and a near-miss is named', app.includes('Did you mean'), true)
+/* Two characters, same length: chack/check, modle/model. Any looser and
+   a real short model id would be "corrected" into a subcommand. */
+check('within two characters', /countDiff\(word, id\.toLowerCase\(\)\) <= 2/.test(app), true)
+check('and the same length', /word\.length === id\.length/.test(app), true)
+check('and how long it will take', /a few minutes/.test(app), true)
 
 /*
  * A probe's 429 must not become a measured daily cap. `exhaustedAt` means

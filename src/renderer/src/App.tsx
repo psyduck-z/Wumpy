@@ -40,7 +40,7 @@ import {
 import { refusedAttachment, sendsBytes, withoutBytes } from '@shared/attach'
 import { needsFor } from '@shared/needs'
 import { shouldRetitle } from '@shared/titles'
-import { CLOUD_MODELS, PROVIDERS, eyeReady, modelTag, rankedModels, seesMedia } from '@shared/cloud'
+import { CLOUD_MODELS, PROVIDERS, eyeReady, modelTag, providerFor, rankedModels, seesMedia } from '@shared/cloud'
 import { useChat, nextId, type ChatStats } from './hooks/useChat'
 import {
   allCommands,
@@ -1393,18 +1393,14 @@ function namedControls(shot: Attachment): string[] {
            * a command that sits silent for that long is one somebody runs
            * again thinking it did nothing.
            */
+          /* One line. This was five, explaining why it asks twice and
+             what a real preamble costs and how long to wait - all true,
+             all already decided, and none of it anything the reader can
+             act on while they wait. The cost and the wait are the two
+             facts; the reasoning lives in the code. */
           chat.note(
-            `Asking all ${CLOUD_MODELS.length} models whether they answer, ` +
-              `${runs} time${runs === 1 ? '' : 's'} each — ` +
-              `${CLOUD_MODELS.length * runs} requests. ` +
-              /* Not "small" any more: each one carries the real preamble,
-                 because that is the only way the times mean what a turn
-                 costs. It is the bulk of what the check now spends. */
-              'Each carries the full instructions, so the times are the times you would get. ' +
-              (runs === 1
-                ? 'One run each, so it is a sample rather than a measurement.'
-                : 'Asking twice is what finds a model that works only sometimes. ' +
-                  'The slowest here take about a hundred seconds, so give it a few minutes.')
+            `Checking ${CLOUD_MODELS.length} models, ${runs} run${runs === 1 ? '' : 's'} each — ` +
+              `${CLOUD_MODELS.length * runs} real requests, a few minutes.`
           )
           const results = await window.wumpy.models.probe(runs)
           chat.note(probeLines(results, model).join(NEWLINE))
@@ -1425,6 +1421,33 @@ function namedControls(shot: Attachment): string[] {
             (m) => m.id === wanted || m.label.toLowerCase() === wanted.toLowerCase()
           )
           const id = hosted?.id ?? wanted
+
+          /**
+           * A TYPO IS NOT A MODEL, and this used to set one.
+           *
+           * `/model chack` - a mistyped `check` - was accepted whole and
+           * the panel said "Now answering with chack." No catalogue
+           * entry, no provider, nothing that could ever answer; the
+           * status bar read `chack` and the next question would have
+           * failed somewhere far away from the mistake.
+           *
+           * Typing an id by hand has to keep working, because that is
+           * the only way to reach a model the catalogue does not list.
+           * So the gate is routability rather than membership: an id
+           * with a slash or a colon in it goes to a provider, and one
+           * with neither goes nowhere and is a slip.
+           */
+          if (!hosted && providerFor(id) === null) {
+            const near = ['check', 'test', 'verify', 'status'].find(
+              (word) => word.length === id.length && countDiff(word, id.toLowerCase()) <= 2
+            )
+            chat.note(
+              near
+                ? `No model called \`${id}\`. Did you mean \`/model ${near}\`?`
+                : `No model called \`${id}\`. \`/model\` lists them, \`/model check\` tests them.`
+            )
+            return
+          }
 
           /* Keyless providers are exempt: Ollama is this machine, and there
              is no key for the user to add however often they are told to. */
@@ -1697,9 +1720,8 @@ function namedControls(shot: Attachment): string[] {
           await patch({ leanPrompt: next })
           chat.note(
             next
-              ? 'Short instructions on. About 2,500 fewer tokens every turn — the thirteen ' +
-                  'rules measured to carry the benchmark are kept, the worked examples are not.'
-              : 'Full instructions on. Every rule, every example, about 2,500 tokens more a turn.'
+              ? 'Short instructions on — about 2,500 fewer tokens a turn.'
+              : 'Full instructions on — about 2,500 more a turn.'
           )
           return
         }
@@ -1709,9 +1731,8 @@ function namedControls(shot: Attachment): string[] {
             await patch({ voiceEnabled: next })
             chat.note(
               next
-                ? 'Voice input on. **Hold the spacebar** for half a second and talk — let go to ' +
-                    'send it to the box. Ctrl+M does the same without holding.'
-                : 'Voice input off. The spacebar is just a spacebar again.'
+                ? 'Voice on — **hold the spacebar** and talk, or Ctrl+M for a long one.'
+                : 'Voice off.'
             )
             return
           }
@@ -1720,16 +1741,10 @@ function namedControls(shot: Attachment): string[] {
             await patch({ voicePolish: next })
             chat.note(
               next
-                ? /* Says where it goes, because that is the whole decision.
-                     This read "punctuated by the local model" long after
-                     there was one, which told the user the opposite of the
-                     truth about the only thing at stake. */
-                  'Dictation will be punctuated by **' +
-                  model +
-                  '**, so what you dictate is sent to the provider before it ' +
-                  'reaches the box. The app’s own vocabulary is fixed either way.'
-                : 'Dictation goes in as heard, with only the vocabulary table applied. ' +
-                  'Nothing is sent anywhere until you press send.'
+                ? /* Where it goes is the whole decision, and this said
+                     "the local model" long after there was one. */
+                  `Polish on — dictation goes to **${model}** before it reaches the box.`
+                : 'Polish off — dictation goes in as heard.'
             )
             return
           }
@@ -2836,6 +2851,13 @@ function when(ts: number): string {
   const hours = Math.round(mins / 60)
   if (hours < 24) return `${hours}h ago`
   return `${Math.round(hours / 24)}d ago`
+}
+
+/** How many positions two equal-length words differ in. */
+function countDiff(a: string, b: string): number {
+  let n = 0
+  for (let i = 0; i < a.length; i++) if (a[i] !== b[i]) n++
+  return n
 }
 
 function clockOf(ms: number): string {
