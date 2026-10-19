@@ -470,6 +470,13 @@ function registerIpc(): void {
     if (patch.tallWidth || patch.compactWidth || patch.compactHeight) panel.applyGeometry()
     if (patch.launchAtLogin !== undefined) syncLaunchAtLogin(patch.launchAtLogin)
     if (patch.model) void refreshModels()
+    /* Turning dictation on warms the transcriber there and then, rather
+       than leaving the first press of the key to pay for a Python
+       process and a model load. Same warm-up as at startup; see where
+       Speech is constructed for why it is worth doing early. */
+    if (patch.voiceEnabled === true) {
+      void speech.start().then(() => panel.send(IPC.voiceStatusChanged, speech.status()))
+    }
     tray?.refresh()
     return next
   })
@@ -1648,6 +1655,32 @@ void app.whenReady().then(async () => {
 
   priority = new PriorityManager(() => panel.browserWindow)
   speech = new Speech()
+
+  /**
+   * Started before anyone asks for it, when dictation is turned on.
+   *
+   * The transcriber is a Python process holding a Whisper model, and
+   * `start()` keeps it alive once it is up - so the whole cost falls on
+   * the FIRST dictation of a session and none of the rest. That is the
+   * worst place for it: the user has already pressed the key and is
+   * already talking, and the panel sits on "Loading the speech model"
+   * through the first thing they say.
+   *
+   * Warmed here instead, so the key press only ever pays for the
+   * microphone opening. Nothing waits for it and a failure is not fatal:
+   * the status it sets is the same one `voice.start()` would have set,
+   * and dictation still works, just as slowly as it used to.
+   *
+   * Only when the setting is on. Spawning a Python process for a feature
+   * nobody has enabled is not a warm-up, it is a background process
+   * somebody did not ask for.
+   */
+  if (settings.get('voiceEnabled')) {
+    void speech.start().then((ok) => {
+      console.log(`[wumpy] speech ${ok ? 'warmed and waiting' : 'could not be started early'}`)
+      panel.send(IPC.voiceStatusChanged, speech.status())
+    })
+  }
 
   registerIpc()
   panel.create()

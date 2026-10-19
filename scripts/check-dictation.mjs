@@ -462,5 +462,60 @@ check(
 )
 check('the joined text still gets the cleanup', dictationHook.includes('voice.tidy'), true)
 
+
+/* --------------------------------------------- warm before it is wanted */
+
+/*
+ * The transcriber is a Python process holding a Whisper model, and it
+ * stays alive once started - so the entire cost lands on the first
+ * dictation of a session, which is the one moment the user is already
+ * talking. Reported as dictation taking a while to start recording.
+ */
+{
+  const main = readFileSync('src/main/index.ts', 'utf8')
+  check('the transcriber is started before it is asked for', /void speech\.start\(\)\.then/.test(main), true)
+  /* Only when the feature is on: a Python process spawned for something
+     nobody enabled is not a warm-up. */
+  check('and only when dictation is enabled', /if \(settings\.get\('voiceEnabled'\)\) \{/.test(main), true)
+  /* Nothing waits for it, or the panel would be held open by a model
+     load that has nothing to do with showing a window. */
+  check('nothing waits for it', /void speech\.start/.test(main), true)
+  check('and the panel is told when it lands', /voiceStatusChanged, speech\.status\(\)/.test(main), true)
+  /* And turning it on mid-session warms it then, rather than leaving the
+     first key press after `/voice on` to pay the whole cost. */
+  check('turning it on warms it immediately', /patch\.voiceEnabled === true/.test(main), true)
+}
+
+/* ------------------------------------------------------- the level meter */
+
+/*
+ * RMS for ordinary speech is about 0.02 to 0.10. At a flat x8 that is
+ * 0.16 to 0.80, which the bar then mapped onto quarter-to-full height -
+ * so the whole dynamic range of a voice moved it between 0.37 and 0.85
+ * and it read as barely moving. Hearing is roughly logarithmic, so the
+ * curve is too.
+ */
+{
+  const rec = readFileSync('src/renderer/src/recorder.ts', 'utf8')
+  check('the level is curved, not just scaled', /Math\.sqrt\(level \* 8\)/.test(rec), true)
+  check('and still cannot exceed one', /Math\.min\(1, Math\.sqrt/.test(rec), true)
+
+  const mic = readFileSync('src/renderer/src/components/Mic.tsx', 'utf8')
+  check('the bar uses nearly the whole height', /0\.08 \+ level \* 0\.92/.test(mic), true)
+
+  /*
+   * And the button is visible the whole time dictation is on, not only
+   * while it is listening. It was always RENDERED - Mic returns null only
+   * when voice is off - and idle inherited the plain button colours, a
+   * muted glyph on the surface behind it, so between dictations it read
+   * as absent. Reported as the red mic icon disappearing.
+   */
+  const css = readFileSync('src/renderer/src/styles.css', 'utf8')
+  check('idle carries the live colour', /\.mic-idle \{/.test(css), true)
+  check('held back to an outline', /\.mic-idle[\s\S]{0,160}danger[^)]*\) \/ 0\.45\)/.test(css), true)
+  /* Ready and live differ by FILL, not by existence. */
+  check('and listening is the filled one', /\.mic-recording[\s\S]{0,120}background: rgb\(var\(--danger/.test(css), true)
+}
+
 console.log(`\n${failed === 0 ? 'all' : `${failed} FAILED of`} dictation checks`)
 process.exit(failed === 0 ? 0 : 1)

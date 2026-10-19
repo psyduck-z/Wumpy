@@ -246,7 +246,23 @@ export async function record(opts: RecorderOptions = {}): Promise<Recording> {
     let sum = 0
     for (const s of samples) sum += s * s
     const level = Math.sqrt(sum / samples.length)
-    opts.onLevel?.(Math.min(1, level * 8))
+    /*
+     * Curved, not just scaled, so the meter has something to show.
+     *
+     * RMS for ordinary speech sits around 0.02 to 0.10, which at a flat
+     * x8 is 0.16 to 0.80 - and the bar maps that onto a quarter-to-full
+     * scale, so the whole of normal talking moved it between 0.37 and
+     * 0.85. Half an inch of travel for the entire dynamic range of a
+     * voice, which reads as a bar that barely moves.
+     *
+     * Hearing is roughly logarithmic, so a square root is closer to what
+     * a person expects a level meter to do: quiet speech lifts off the
+     * floor properly and the top stays reachable without shouting. Same
+     * RMS range now spans about 0.4 to 0.9 before the bar's own mapping,
+     * and the difference between a mumble and a clear sentence is
+     * visible rather than theoretical.
+     */
+    opts.onLevel?.(Math.min(1, Math.sqrt(level * 8)))
 
     const now = performance.now()
     if (level > SPEECH_LEVEL) {

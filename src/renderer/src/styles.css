@@ -2211,6 +2211,32 @@ body {
   border-color: rgb(var(--accent) / 0.4);
 }
 
+/*
+ * ARMED, AND VISIBLY SO, FROM /voice on UNTIL /voice off.
+ *
+ * Idle inherited the plain button colours - a muted glyph on the surface
+ * colour behind it - so between dictations the microphone read as not
+ * being there at all. Reported exactly that way: the red mic icon
+ * disappears, make it always sit there.
+ *
+ * It was always rendered; it just looked like nothing. So idle carries
+ * the same red as listening, held back to an outline and a tint. The
+ * difference between ready and live is then fill rather than existence,
+ * which is the distinction worth drawing: one is a microphone waiting,
+ * the other is a microphone ON.
+ */
+.mic-idle {
+  color: rgb(var(--danger, 220 64 64));
+  border-color: rgb(var(--danger, 220 64 64) / 0.45);
+  background: rgb(var(--danger, 220 64 64) / 0.08);
+}
+
+.mic-idle:hover {
+  color: rgb(var(--danger, 220 64 64));
+  border-color: rgb(var(--danger, 220 64 64) / 0.75);
+  background: rgb(var(--danger, 220 64 64) / 0.16);
+}
+
 /* Listening has to be unmistakable: this is a live microphone. */
 .mic-recording {
   color: #fff;
@@ -2229,6 +2255,9 @@ body {
   background: #fff;
   transform-origin: bottom;
   opacity: 0.9;
+  /* No transition on the height: the bar IS the latency readout, and
+     easing it would be drawing a smoothed version of the one thing it
+     exists to show honestly. */
 }
 
 .mic-status {

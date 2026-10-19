@@ -46,8 +46,13 @@ export function Mic({ dictation }: { dictation: Dictation }): React.JSX.Element 
       >
         <MicGlyph />
         {state === 'recording' && (
-          // Scaled from the live input level, so you can see it hearing you.
-          <span className="mic-level" style={{ transform: `scaleY(${0.25 + level * 0.75})` }} />
+          /* Scaled from the live input level, so you can see it hearing
+             you - over a wider range than before. This was 0.25 + level *
+             0.75, which pinned the bar between a quarter and full height
+             and left ordinary speech wobbling inside the middle third of
+             that. The floor is lower and the ceiling is actually reached,
+             so a mumble looks like one and a clear sentence fills it. */
+          <span className="mic-level" style={{ transform: `scaleY(${0.08 + level * 0.92})` }} />
         )}
       </button>
 
