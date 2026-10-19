@@ -1396,7 +1396,11 @@ function namedControls(shot: Attachment): string[] {
           chat.note(
             `Asking all ${CLOUD_MODELS.length} models whether they answer, ` +
               `${runs} time${runs === 1 ? '' : 's'} each — ` +
-              `${CLOUD_MODELS.length * runs} small requests. ` +
+              `${CLOUD_MODELS.length * runs} requests. ` +
+              /* Not "small" any more: each one carries the real preamble,
+                 because that is the only way the times mean what a turn
+                 costs. It is the bulk of what the check now spends. */
+              'Each carries the full instructions, so the times are the times you would get. ' +
               (runs === 1
                 ? 'One run each, so it is a sample rather than a measurement.'
                 : 'Asking twice is what finds a model that works only sometimes. ' +
@@ -2834,16 +2838,38 @@ function when(ts: number): string {
   return `${Math.round(hours / 24)}d ago`
 }
 
-/** Summary under a finished answer: how long it took and how fast it ran. */
+function clockOf(ms: number): string {
+  if (ms < 60_000) return `${(ms / 1000).toFixed(1)}s`
+  const total = Math.round(ms / 1000)
+  return `${Math.floor(total / 60)}m ${total % 60}s`
+}
+
+/**
+ * Summary under a finished answer: how long it took and how fast it ran.
+ *
+ * THE TIME IS THE WHOLE TASK, not the last request of it.
+ *
+ * A turn ends whenever Wumpy has to go and do something - take a
+ * screenshot, run a command, open a picture - and the hand-back that
+ * follows is a new turn with a new clock. So an answer that took a minute
+ * to arrive through three of those reported the last one, and "1.2s" sat
+ * under something nobody waited 1.2 seconds for.
+ *
+ * When nothing interrupted, the two are the same number and this reads
+ * exactly as it always did. When they differ, the legs are named - "14.2s
+ * over 3" - because a total with no explanation invites the opposite
+ * suspicion, that the model is slower than it is.
+ */
 function endOfReplyLabel(stats: ChatStats): string {
   const parts: string[] = []
-  if (stats.lastTurnMs !== null) {
-    const ms = stats.lastTurnMs
-    if (ms < 60_000) parts.push(`${(ms / 1000).toFixed(1)}s`)
-    else {
-      const total = Math.round(ms / 1000)
-      parts.push(`${Math.floor(total / 60)}m ${total % 60}s`)
-    }
+  const task = stats.lastTaskMs
+  const turn = stats.lastTurnMs
+  if (task !== null && turn !== null && task > turn + 50) {
+    /* Legs rather than a precise count: what is known is how much time is
+       unaccounted for by the last turn, and that it took at least two. */
+    parts.push(`${clockOf(task)} total`, clockOf(turn))
+  } else if (turn !== null) {
+    parts.push(clockOf(turn))
   }
   if (stats.speed !== null) parts.push(`${stats.speed.toFixed(1)} tok/s`)
   if (stats.lastCompletionTokens !== null) parts.push(`${stats.lastCompletionTokens} tok`)

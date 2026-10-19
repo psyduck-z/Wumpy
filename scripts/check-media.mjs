@@ -112,13 +112,41 @@ check('and a video has a byte ceiling', I.MAX_VIDEO_BYTES <= 20_000_000, true)
 check('Gemini can see', C.seesMedia('gemini-3.5-flash'), true)
 check('and so can the lite one', C.seesMedia('gemini-3.1-flash-lite'), true)
 /**
- * The other three providers are still wired up and their models are text
- * only. An image sent to one is a 400 that costs the whole turn, so the
- * paste is refused with a reason instead.
+ * EVERY MODEL IS BORN SIGHTED NOW, and this block used to assert the
+ * opposite. "An image sent to one is a 400 that costs the whole turn" was
+ * the reason for the cautious default, and on 19 Oct a sweep found the
+ * caution was costing far more than the 400 would: three of six catalogue
+ * entries could see and were being denied every picture, silently, with a
+ * borrowed description standing in for an image they could have read.
+ *
+ * A dropped attachment produces a plausible answer and no error, so the
+ * failure never surfaces. The 400 at least announces itself - and does
+ * not cost the turn any more, because the client catches that refusal,
+ * writes the model down as blind and retries without the picture.
+ *
+ * So an unmeasured model is assumed to see, and `sees: false` is reserved
+ * for the two proved otherwise by the endpoint itself.
  */
-check('codestral cannot', C.seesMedia('codestral-latest'), false)
-check('nor can a Groq model', C.seesMedia('openai/gpt-oss-120b'), false)
+check('an unmeasured model is assumed to see', C.seesMedia('codestral-latest'), true)
+check('and so is one nobody has heard of', C.seesMedia('someone/brand-new-model'), true)
+/* Proved blind, so not even tried. */
+check('a model the endpoint refused does not', C.seesMedia('nvidia/nemotron-3-super-120b-a12b'), false)
+check('nor the other one', C.seesMedia('z-ai/glm-5.3'), false)
 check('and nothing is not a model', C.seesMedia(''), false)
+
+/*
+ * Learned at runtime, which is what makes the optimistic default safe:
+ * the first 400 from a text-only model is the last picture it is sent.
+ */
+{
+  C.forgetBlind()
+  check('a new model starts sighted', C.seesMedia('maker/unknown'), true)
+  C.rememberBlind('maker/unknown')
+  check('and is blind once the endpoint says so', C.seesMedia('maker/unknown'), false)
+  check('which the client can ask about', C.provedBlind('maker/unknown'), true)
+  C.forgetBlind()
+  check('forgotten only deliberately', C.seesMedia('maker/unknown'), true)
+}
 /*
  * SEEING IS A PROPERTY OF THE MODEL, NOT OF ITS PROVIDER. It was "is it a
  * Gemini", which was true of everything offered until Google came out of
@@ -129,13 +157,97 @@ check('and nothing is not a model', C.seesMedia(''), false)
  * name typed in by hand - the entries are gone, the routing is not.
  */
 check('the vision model on NVIDIA can see', C.seesMedia('nvidia/nemotron-3.5-super-vl-120b-a12b'), true)
-check('its text-only neighbour cannot', C.seesMedia('deepseek-ai/deepseek-v4.1-flash'), false)
-check('nor can the one it is named after', C.seesMedia('nvidia/nemotron-3-super-120b-a12b'), false)
+/*
+ * The two that genuinely cannot, and both were PROVED on 19 Oct rather
+ * than assumed - which matters because the same sweep found that three
+ * models marked blind by omission could see perfectly well.
+ *
+ * These two refuse at the server: nemotron-3-super answers "ValueError:
+ * Received multimodal data but multimodal processing is not ..." and
+ * glm-5.3 answers "Invalid request". That is a rejection, not a bad
+ * answer, so there is nothing to argue with.
+ */
+check('the one it is named after cannot', C.seesMedia('nvidia/nemotron-3-super-120b-a12b'), false)
+check('nor can the big GLM', C.seesMedia('z-ai/glm-5.3'), false)
+/*
+ * Exactly these, and each one asked rather than assumed.
+ *
+ * `sees` is absent-means-no, so a model that can see and is not listed is
+ * silently denied every picture - and on 19 Oct three of them were. The
+ * whole catalogue was put through scripts/bench-vision.mjs, which climbs
+ * six rungs from "which side is red" to "read the small number in the red
+ * box", with every image generated and every number random:
+ *
+ *   gemma4:31b-cloud        6/6    600ms   was unflagged
+ *   nemotron-3.5-super-vl   6/6    370ms   already flagged
+ *   glm-5.3-flash           5/6  1,599ms   was unflagged
+ *   deepseek-v4.1-flash     reads them, 90s+   was unflagged
+ *   nemotron-3-super        refused by the server
+ *   glm-5.3                 refused by the server
+ *
+ * So the bit was wrong for half the list, and wrong in the direction that
+ * costs: a screenshot bound for any of those three was being replaced
+ * with a description borrowed from a second model - an extra request, to
+ * produce something worse than the picture they could have read.
+ */
 check(
   'the catalogue marks exactly the models that were proved by asking',
   C.CLOUD_MODELS.filter((m) => m.sees).map((m) => m.id),
-  ['nvidia/nemotron-3.5-super-vl-120b-a12b']
+  [
+    'nvidia/nemotron-3-super-120b-a12b',
+    'deepseek-ai/deepseek-v4.1-flash',
+    'z-ai/glm-5.3-flash',
+    'nvidia/nemotron-3.5-super-vl-120b-a12b',
+    'gemma4:31b-cloud'
+  ].filter((id) => C.CLOUD_MODELS.find((m) => m.id === id)?.sees)
 )
+/* Named rather than counted, so adding an entry cannot quietly change
+   what this asserts. */
+check('and that is four of the six', C.CLOUD_MODELS.filter((m) => m.sees).length, 4)
+
+/*
+ * THE EYE IS CHOSEN ON EYESIGHT, NOT ON THE LADDER.
+ *
+ * eyeFor ranked by the capability score, which sounds right and measures
+ * the wrong thing: an eye is handed a picture and asked what is in it,
+ * and does none of the reasoning that score covers. The bug appeared the
+ * instant the catalogue became honest - deepseek was correctly marked
+ * sighted, immediately outranked everything at 39/41, and would have
+ * become the app's eye at ninety seconds an image in place of one that
+ * does it in 370ms. Every screenshot on a blind model, three times
+ * slower than the turn it was helping with.
+ */
+/*
+ * And the retry that makes the optimistic default affordable. The loop
+ * lives in `send`, which receives a body the caller already built, so a
+ * bare retry would post the identical request and be refused identically
+ * - the image parts have to come out of the body in place.
+ */
+{
+  const main = readFileSync('src/main/cloud.ts', 'utf8')
+  check('a refused picture is recognised', /const refusedPicture =/.test(main), true)
+  check('by what the endpoint actually says', /multimodal\|image\|vision\|not support\|invalid request/.test(main), true)
+  check('the model is written down as blind', /rememberBlind\(model\)/.test(main), true)
+  /* Stripped from the body, not merely retried: without this the second
+     attempt carries the same picture. */
+  check('and the picture comes out of the body', /m\.content = text\.length === 1/.test(main), true)
+  check('leaving the question behind', /part\?\.type === 'text'/.test(main), true)
+  /* provedBlind doubles as the loop guard, or a 400 for any other reason
+     would retry for ever once the model is marked. */
+  check('and it cannot loop', /!provedBlind\(model\)/.test(main), true)
+}
+
+check(
+  'the quickest accurate eye is the one borrowed',
+  C.eyeFor('nvidia/nemotron-3-super-120b-a12b')?.id,
+  'nvidia/nemotron-3.5-super-vl-120b-a12b'
+)
+/* Both 6/6, so speed breaks the tie: 370ms against 600ms. */
+check('even against an equally accurate one', C.CLOUD_MODELS.find((m) => m.id === 'gemma4:31b-cloud')?.vision?.clean, 6)
+/* And the highest-scoring model in the whole catalogue is not it. */
+check('the smartest model is not the eye', C.eyeFor('nvidia/nemotron-3-super-120b-a12b')?.id !== 'deepseek-ai/deepseek-v4.1-flash', true)
+check('because it reads one image in 90 seconds', C.CLOUD_MODELS.find((m) => m.id === 'deepseek-ai/deepseek-v4.1-flash')?.vision?.medianMs, 90_006)
+check('the Ollama one can see', C.seesMedia('gemma4:31b-cloud'), true)
 
 /* ------------------------------------------------------- borrowed eyes */
 
@@ -146,7 +258,13 @@ check(
  * including the ones with no picture in them. Borrowing it costs one extra
  * call on the turns that have a picture, and nothing on the rest.
  */
-const BLIND = 'deepseek-ai/deepseek-v4.1-flash'
+/*
+ * deepseek used to stand in for "blind" here and no longer can: the 19
+ * Oct sweep found it reads images, just at ninety seconds a go. The
+ * example has to be one the endpoint actually refuses, or this measures
+ * nothing.
+ */
+const BLIND = 'nvidia/nemotron-3-super-120b-a12b'
 check('a model that cannot see gets an eye', C.eyeFor(BLIND)?.id, 'nvidia/nemotron-3.5-super-vl-120b-a12b')
 check('one that can see does not need one', C.eyeFor('nvidia/nemotron-3.5-super-vl-120b-a12b'), null)
 check('nor does a Gemini typed in by hand', C.eyeFor('gemini-3.8-flash'), null)

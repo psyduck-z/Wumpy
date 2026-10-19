@@ -201,13 +201,43 @@ check('and is zero padded', U.todayKey(new Date(2026, 10, 1)), '2026-11-01')
  * is a default chosen on luck.
  */
 check('there is one model, and it is the chosen one', T.DEFAULT_MODEL, 'deepseek-ai/deepseek-v4.1-flash')
-/* And it must be the best thing measured, not merely a good one - the
-   picker now shows a rank beside every name, so a default that is not #1
-   is a contradiction the user can see. */
+/*
+ * IT IS NOT THE TOP-RANKED MODEL ANY MORE, AND THAT IS A DECISION.
+ *
+ * This asserted rank 1, on the ground that the picker shows a rank beside
+ * every name and a default that is not first is a contradiction the user
+ * can see. Still true, and the contradiction is now deliberate.
+ *
+ * What changed: the latencies were re-measured on 19 Oct at the real
+ * 14.6k preamble rather than with a four-word probe, and deepseek came
+ * back at 112 seconds a turn. The ranking gained a floor, so it now sits
+ * fifth while keeping the highest score in the catalogue at 39/41.
+ *
+ * Asked twice and answered twice: keep it. First "keep DeepSeek,
+ * re-measure first", before the measurement existed - and then, having
+ * watched it read an image in a minute and a quarter, "it's not bad". A
+ * default is a judgement about what a person will sit through, and that
+ * judgement is theirs rather than this file's.
+ *
+ * So the requirement becomes the one that actually matters - the default
+ * must be something that works - and the rank is RECORDED rather than
+ * required, so the day it moves is visible right here.
+ */
+const defaultRank = C.rankedModels().find((r) => r.model.id === T.DEFAULT_MODEL)?.rank
+check('the default is ranked at all', typeof defaultRank === 'number', true)
+check('and is ranked fifth, deliberately', defaultRank, 5)
 check(
-  'and it is the top-ranked model',
-  C.rankedModels().find((r) => r.model.id === T.DEFAULT_MODEL)?.rank,
-  1
+  'because it still holds the highest ladder score',
+  C.CLOUD_MODELS.find((m) => m.id === T.DEFAULT_MODEL)?.measured?.clean,
+  39
+)
+/* The floor it sits below - not a reason to change the default, a reason
+   the rank is where it is. */
+check(
+  'and sits below the usable-speed floor',
+  (C.CLOUD_MODELS.find((m) => m.id === T.DEFAULT_MODEL)?.measured?.medianMs ?? 0) >
+    C.UNUSABLY_SLOW_MS,
+  true
 )
 check('it is a model the cloud layer can route', C.providerFor(T.DEFAULT_MODEL), 'nvidia')
 /* The default must never be one counted per day: that was the whole lesson

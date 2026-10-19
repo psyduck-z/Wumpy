@@ -1056,9 +1056,18 @@ check('the measured ones all have a place', measured.every((r) => r.rank !== nul
 check('and the places are 1..n with no gaps', new Set(measured.map((r) => r.rank)).size, measured.length)
 check('someone is first', measured.some((r) => r.rank === 1), true)
 
-/* Score decides, speed breaks the tie - asserted on the real catalogue so a
-   future edit that sorts by speed alone is caught. */
+/*
+ * Usable first, then score, then speed - asserted on the real catalogue
+ * so a future edit that sorts by speed alone is caught.
+ *
+ * The first clause is new on 19 Oct and is the one with a story. It was
+ * score-then-speed, which put deepseek at the top of the picker on 39/41
+ * while taking 112 seconds a turn - a #1 badge beside a model the
+ * recommendation refuses to suggest, on the same screen. A rank shown to
+ * someone choosing is advice, so "best" has to mean best to use.
+ */
 const byRank = measured.slice().sort((a, b) => a.rank - b.rank)
+const answers = (m) => m.medianMs < C.UNUSABLY_SLOW_MS
 for (let i = 1; i < byRank.length; i++) {
   const prev = byRank[i - 1].model.measured
   const here = byRank[i].model.measured
@@ -1066,10 +1075,22 @@ for (let i = 1; i < byRank.length; i++) {
   const same = prev.clean / prev.of === here.clean / here.of
   check(
     `#${i} is not beaten by #${i + 1}`,
-    better || (same && prev.medianMs <= here.medianMs),
+    (answers(prev) && !answers(here)) ||
+      (answers(prev) === answers(here) && (better || (same && prev.medianMs <= here.medianMs))),
     true
   )
 }
+/* And the specific case, named, so it cannot regress quietly. */
+check(
+  'the highest scorer is not first when it takes two minutes',
+  byRank[0].model.id !== 'deepseek-ai/deepseek-v4.1-flash',
+  true
+)
+check(
+  'though it keeps the highest score',
+  Math.max(...measured.map((r) => r.model.measured.clean / r.model.measured.of)),
+  39 / 41
+)
 
 /* A measurement with no `of` is not a measurement; a share over 1 is a typo
    that would sort to the top and be believed. */

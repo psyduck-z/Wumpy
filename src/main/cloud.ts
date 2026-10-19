@@ -9,6 +9,8 @@ import {
   countTokens,
   keysAreSeparate,
   maxTokensFor,
+  provedBlind,
+  rememberBlind,
   providerFor,
   reasoningEffortFor,
   thinkingKwargsFor,
@@ -341,7 +343,15 @@ export class CloudClient {
    */
   async probeModels(
     runs = 1,
-    onEach?: (done: number, total: number) => void
+    onEach?: (done: number, total: number) => void,
+    /**
+     * The instructions a real turn carries, so the times mean something.
+     *
+     * Passed in rather than built here: the preamble depends on settings
+     * and on what the turn is about, and this class has neither. The
+     * caller sends the same shape the next question would.
+     */
+    preamble = 'Answer in one word.'
   ): Promise<ProbeResult[]> {
     const out: ProbeResult[] = []
     const times = Math.min(MAX_RUNS, Math.max(1, Math.floor(runs)))
@@ -390,7 +400,7 @@ export class CloudClient {
        */
       const attempts: ProbeResult[] = []
       for (let run = 0; run < times; run++) {
-        attempts.push(await this.probeOne(entry, check.provider))
+        attempts.push(await this.probeOne(entry, check.provider, preamble))
         onEach?.(++done, total)
       }
       out.push(combineRuns(attempts))
@@ -399,7 +409,11 @@ export class CloudClient {
   }
 
   /** One model, with its own timeout so a hung provider cannot stall the rest. */
-  private async probeOne(entry: CloudModel, provider: ProviderId): Promise<ProbeResult> {
+  private async probeOne(
+    entry: CloudModel,
+    provider: ProviderId,
+    preamble: string
+  ): Promise<ProbeResult> {
     const base: Omit<ProbeResult, 'state' | 'ms' | 'said' | 'why'> = {
       model: entry.id,
       label: entry.label,
@@ -420,8 +434,28 @@ export class CloudClient {
         headers: this.headers(provider, index),
         body: JSON.stringify({
           model: entry.id,
+          /*
+           * THE REAL PREAMBLE, NOT FOUR WORDS.
+           *
+           * This asked "Say: ready" under a one-line system message, and
+           * the times it produced were not the times anyone experiences.
+           * Reported from use: two models the check called 1.6s and 6.7s
+           * both took about fifty seconds on a real question - and they
+           * would, because a turn carries eight thousand tokens of
+           * instructions and this carried eleven. What the old probe
+           * measured was the provider's queue, with the whole of prompt
+           * processing left out.
+           *
+           * Which made the recommendation worse than useless: it ranked
+           * models on a cost they never pay. The same mistake the
+           * catalogue made with medianMs, arrived at from the other side.
+           *
+           * So the probe sends what a turn sends. It costs more per model
+           * - the preamble is the expensive part - and that is the price
+           * of the number meaning something.
+           */
           messages: wireMessagesFor(provider, [
-            { role: 'system', content: 'Answer in one word.' },
+            { role: 'system', content: preamble },
             { role: 'user', content: 'Say: ready' }
           ]),
           stream: false,
@@ -785,6 +819,58 @@ export class CloudClient {
        * the local one does not share. Every other 4xx is ours - a malformed
        * request will be malformed again anywhere.
        */
+      /**
+       * A REFUSED PICTURE IS NOT A REFUSED MODEL. Retry without it.
+       *
+       * Every model is born sighted now (see seesMedia), which costs one
+       * 400 for each model that turns out not to be - and this is where
+       * that bill is paid instead of being passed to the user. The
+       * endpoint says so plainly when it happens: nemotron-3-super
+       * answers "Received multimodal data but multimodal processing is
+       * not ..." and glm-5.3 "Invalid request". Both refuse the MESSAGE,
+       * not the model, and the same question without the image works.
+       *
+       * So the model is written down as blind, the images are dropped,
+       * and the turn carries on. Once per model for the life of the
+       * process: the next attempt never attaches anything.
+       *
+       * Guarded on there being images to drop, or an ordinary 400 would
+       * retry itself unchanged and fail the same way twice.
+       */
+      const refusedPicture =
+        res.status === 400 &&
+        /multimodal|image|vision|not support|invalid request/i.test(detail ?? '')
+      const carryingPicture = (
+        (body as { messages?: Array<{ content?: unknown }> }).messages ?? []
+      ).some((m) => Array.isArray(m.content))
+      if (refusedPicture && carryingPicture && !provedBlind(model)) {
+        /* `provedBlind` is both the record and the loop guard: once it is
+           true the next 400 falls through to the ordinary handling
+           instead of retrying for ever. */
+        rememberBlind(model)
+        /*
+         * Stripped from the body in place, because this loop is inside
+         * `send` and the body was built by the caller: a bare `continue`
+         * would post the identical request and be refused identically.
+         * The text parts stay - the question survives, only the picture
+         * goes - and a message left with one text part collapses back to
+         * a plain string, which is the shape every provider prefers.
+         */
+        const dropped = body as { messages?: Array<{ content?: unknown }> }
+        for (const m of dropped.messages ?? []) {
+          if (!Array.isArray(m.content)) continue
+          const text = (m.content as Array<{ type?: string; text?: string }>).filter(
+            (part) => part?.type === 'text'
+          )
+          m.content = text.length === 1 ? (text[0].text ?? '') : text
+        }
+        console.log(
+          `[wumpy] ${model} refused the picture; it is text-only. ` +
+            'Asking again without it, and never attaching one again.'
+        )
+        continue
+      }
+
       const unusableModel = res.status === 404 || res.status === 400
       /*
        * The provider's sentence, not its error object.

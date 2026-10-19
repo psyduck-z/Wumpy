@@ -120,13 +120,13 @@ const R = (model, state, ms = 500, extra = {}) => ({
   ])
   const text = lines.join(NL)
 
-  check('the headline counts what answered', /\*\*2 of 5 models answered\.\*\*/.test(text), true)
+  check('the headline counts what answered', /\*\*2\/5 answered\*\*/.test(text), true)
   /* Four were asked; the keyless one was not, and saying otherwise would
      overstate what the command costs. */
-  check('and says what it spent, excluding the unasked', /4 requests spent/.test(text), true)
+  check('and says what it spent, excluding the unasked', /4 requests/.test(text), true)
 
   check('working models are listed', text.includes('**Working**'), true)
-  check('broken ones are their own group', text.includes('**Not working right now**'), true)
+  check('broken ones are their own group', text.includes('**Not working**'), true)
   check('and so are the ones never asked', text.includes('**Not asked**'), true)
 
   /* Quickest first, because the number is the only reason to order them. */
@@ -145,13 +145,13 @@ const R = (model, state, ms = 500, extra = {}) => ({
  */
 {
   const broken = P.probeLines([R('a/ok', 'ok'), R('a/mine', 'empty')], 'a/mine').join(NL)
-  check('a broken current model is pointed out', /You are set to `a\/mine`/.test(broken), true)
+  check('a broken current model is pointed out', /Your model is in that list/.test(broken), true)
 
   const fine = P.probeLines([R('a/ok', 'ok'), R('a/mine', 'ok')], 'a/mine').join(NL)
-  check('a working one is not', /You are set to/.test(fine), false)
+  check('a working one is not', /in that list/.test(fine), false)
 
   const absent = P.probeLines([R('a/ok', 'ok')], 'something-local').join(NL)
-  check('and neither is a model that was not in the list', /You are set to/.test(absent), false)
+  check('and neither is a model that was not in the list', /in that list/.test(absent), false)
 }
 
 check('an empty catalogue says so rather than throwing', P.probeLines([]).length, 1)
@@ -196,8 +196,13 @@ check('an empty catalogue says so rather than throwing', P.probeLines([]).length
   /* Slowness is judged on the combined figure, not on one unlucky run. */
   const slow = combine([R('a/x', 'ok', 20_000), R('a/x', 'ok', 30_000)])
   check('two slow runs are slow', slow.state, 'slow')
+  /* Judged on the median, which cuts both ways and is the point: one bad
+     run does not condemn a model, and one good run does not save one. */
   const once = combine([R('a/x', 'ok', 600), R('a/x', 'slow', 20_000)])
-  check('one slow run among quick ones is judged on the median', once.state, 'slow')
+  check('one slow run among quick ones does not condemn it', once.state, 'ok')
+  check('and the median is what was timed', once.ms, 10_300)
+  const mostly = combine([R('a/x', 'ok', 600), R('a/x', 'slow', 40_000)])
+  check('but a bad enough run drags the median over', mostly.state, 'slow')
 
   /* Nothing was asked, so there is nothing to disagree about. */
   const none = combine([R('a/x', 'nokey', 0), R('a/x', 'nokey', 0)])
@@ -216,19 +221,19 @@ check('an empty catalogue says so rather than throwing', P.probeLines([]).length
   check('and a tight one is not noise', /over 2/.test(tight), false)
 
   const flakyText = P.probeLines([combine([R('a/x', 'ok', 900), R('a/x', 'empty', 0)])]).join(NL)
-  check('flaky models get their own group', /Unreliable — answered sometimes/.test(flakyText), true)
-  check('and are not in Working', flakyText.indexOf('a/x') > flakyText.indexOf('Unreliable'), true)
+  check('flaky models get their own group', /\*\*Sometimes\*\*/.test(flakyText), true)
+  check('and are not in Working', flakyText.indexOf('a/x') > flakyText.indexOf('Sometimes'), true)
 
   /* The cost line counts requests, not models. */
   const cost = P.probeLines([
     combine([R('a/x', 'ok', 900), R('a/x', 'ok', 900)]),
     combine([R('a/y', 'ok', 900), R('a/y', 'ok', 900)])
   ]).join(NL)
-  check('the cost line counts runs', /4 requests spent asking, 2 per model/.test(cost), true)
+  check('the cost line counts runs', /4 requests, 2 runs each/.test(cost), true)
 
   /* And a one-run check says what it is worth. */
   const sample = P.probeLines([combine([R('a/x', 'ok', 900)])]).join(NL)
-  check('one run admits it is a sample', /sample rather than a measurement/.test(sample), true)
+  check('one run admits it is a sample', /a sample not a measurement/.test(sample), true)
 }
 
 check('two runs is the default', P.DEFAULT_RUNS, 2)
@@ -259,14 +264,20 @@ check('and there is a ceiling on asking', P.MAX_RUNS, 5)
     times: [ms, ms]
   })
 
-  /* The real catalogue, and the medians of the two real sweeps. */
+  /*
+   * The real catalogue, measured 19 Oct with the real 14.6k preamble -
+   * not the four-word probe, whose figures did not even preserve the
+   * order: nemotron-3-super was second quickest on the toy prompt and is
+   * fourth here, because prompt processing is most of the cost for a
+   * quick model and almost none of it for a slow one.
+   */
   const live = [
-    M('nvidia/nemotron-3-super-120b-a12b', 689),
-    M('gemma4:31b-cloud', 862),
-    M('z-ai/glm-5.3-flash', 1629),
-    M('nvidia/nemotron-3.5-super-vl-120b-a12b', 6690),
-    M('deepseek-ai/deepseek-v4.1-flash', 108_925),
-    M('z-ai/glm-5.3', 104_315, 'flaky')
+    M('gemma4:31b-cloud', 1781),
+    M('z-ai/glm-5.3-flash', 4577),
+    M('nvidia/nemotron-3-super-120b-a12b', 6264),
+    M('nvidia/nemotron-3.5-super-vl-120b-a12b', 10_923),
+    M('deepseek-ai/deepseek-v4.1-flash', 112_211),
+    M('z-ai/glm-5.3', 120_000, 'timeout')
   ]
   const ranked = P.recommend(live)
 
@@ -279,24 +290,44 @@ check('and there is a ceiling on asking', P.MAX_RUNS, 5)
    * one rung. A weighting that recommended it would be measuring the
    * ladder and calling it advice.
    */
-  const deep = ranked.findIndex((p) => p.model === 'deepseek-ai/deepseek-v4.1-flash')
-  check('the smartest is not the pick when it takes 109s', deep > 0, true)
-  /* Beaten by gemma4, which is four rungs worse and 126 times quicker. It
-     is not last: nemotron-3-super at 32/41 still ranks below it, because
-     seven rungs IS worth something and the weighting says so. */
-  check('beaten by a model four rungs worse', deep > ranked.findIndex((p) => p.model === 'gemma4:31b-cloud'), true)
-  check('but not by one seven rungs worse', deep < ranked.findIndex((p) => p.model === 'nvidia/nemotron-3-super-120b-a12b'), true)
+  /*
+   * DeepSeek has the highest ladder score here - 39/41, better than the
+   * winner - and is not offered at all. The log penalty alone did not do
+   * it: on these figures it scored within 0.008 of the VL model, because
+   * ten times slower costs three rungs and it is three rungs better. The
+   * arithmetic was right and the answer was absurd, so there is a floor.
+   */
+  check(
+    'the smartest is not offered at two minutes',
+    ranked.some((p) => p.model === 'deepseek-ai/deepseek-v4.1-flash'),
+    false
+  )
+  /* But it is NOT dropped from the report - it works, and someone may
+     want it. Only the suggestion has a floor. */
+  check('though the report still lists it', P.probeLines(live).join(NL).includes('deepseek'), true)
+
+  /* Below the floor the gradient still applies: seven rungs is worth
+     something, so the quickest does not simply win. */
+  check('and below the floor smartness still counts', ranked[0].model !== 'gemma4:31b-cloud', true)
+  check(
+    'the quickest is beaten by a smarter one',
+    ranked.findIndex((p) => p.model === 'z-ai/glm-5.3-flash') <
+      ranked.findIndex((p) => p.model === 'gemma4:31b-cloud'),
+    true
+  )
 
   /* And the other direction: fastest does not win either. */
-  check('nor does the quickest win on speed alone', ranked[0].model !== 'nvidia/nemotron-3-super-120b-a12b', true)
+  check('nor does a fast but weak model win', ranked[0].model !== 'nvidia/nemotron-3-super-120b-a12b', true)
 
   /* Flaky is not recommendable whatever it scores: "use this, it works
      about half the time" is not a recommendation. */
   check('a flaky model is never offered', ranked.some((p) => p.model === 'z-ai/glm-5.3'), false)
 
   const text = P.recommendLines(live, '').join(NL)
-  check('the report names one', /Use `z-ai\/glm-5\.3-flash`/.test(text), true)
-  check('with both numbers behind it', /93% of the ladder at 1\.6s/.test(text), true)
+  /* A label and the facts: "Recommended: x - 93%, 4.6s", not a sentence
+     explaining what a recommendation is. */
+  check('the report names one', /\*\*Recommended:\*\* `z-ai\/glm-5\.3-flash`/.test(text), true)
+  check('with both numbers behind it', /93%, 4\.6s/.test(text), true)
   check('and the command to take it', /\/model z-ai\/glm-5\.3-flash/.test(text), true)
 
   /*
@@ -304,12 +335,27 @@ check('and there is a ceiling on asking', P.MAX_RUNS, 5)
    * from screenshots it is often the deciding one - so when the winner is
    * blind and a seeing model answered, it is named rather than buried.
    */
-  check('a blind winner says so', /cannot read pictures/.test(text), true)
-  check('and names the best that can', /nemotron-3\.5-super-vl/.test(text), true)
+  /*
+   * Not in the table above any more, and that is the finding rather than
+   * a gap in the test: glm-5.3-flash reads images - 5/6 on the vision
+   * ladder - so the pick is no longer blind and the line correctly does
+   * not appear. Three models were marked blind by omission on 19 Oct and
+   * two of them could see all along.
+   */
+  check('no vision line when the pick can see', /For screenshots/.test(text), false)
+
+  /* So the case is built deliberately: nemotron-3-super genuinely cannot
+     take an image - the endpoint answers "multimodal processing is not
+     ..." - and here it is quick enough to win anyway. */
+  const blindWins = [M('nvidia/nemotron-3-super-120b-a12b', 2000), M('gemma4:31b-cloud', 28_000)]
+  const blindText = P.recommendLines(blindWins, '').join(NL)
+  check('a blind winner is still the pick', /Recommended:.*nemotron-3-super/.test(blindText), true)
+  check('and the best eye is named beside it', /For screenshots:.*gemma4/.test(blindText), true)
+  check('saying why it is there', /the pick above is blind/.test(blindText), true)
 
   /* Already on it: no point telling someone to switch to where they are. */
   const staying = P.recommendLines(live, 'z-ai/glm-5.3-flash').join(NL)
-  check('staying put is phrased as staying', /Stay on/.test(staying), true)
+  check('staying put is phrased as staying', /already on it/.test(staying), true)
   check('and does not hand out a switch command', /\/model z-ai/.test(staying), false)
 
   /* Nothing answered, so there is nothing to recommend - and saying so
@@ -321,7 +367,11 @@ check('and there is a ceiling on asking', P.MAX_RUNS, 5)
 
   /* The weighting itself, pinned so a future tweak is deliberate. */
   check('a tenfold slowdown costs this much share', P.SLOWNESS_COST, 0.08)
-  check('and under a second there is no penalty', P.FAST_ENOUGH_MS, 1000)
+  /* The floor sits under the quickest thing measured (1.8s), so nothing
+     is compared on a scale that starts off the end of the data. */
+  check('nothing under two seconds is penalised', P.FAST_ENOUGH_MS, 2000)
+  check('and twelve seconds is where slow starts', P.SLOW_MS, 12_000)
+  check('with a hard floor under the suggestion', P.TOO_SLOW_TO_SUGGEST_MS, 30_000)
 }
 
 /* -------------------------------------------- what the check actually costs */
@@ -365,7 +415,12 @@ check('and it is an explicit request', /IPC\.modelsProbe, async \(_e, req\?/.tes
 check('nothing polls it', /setInterval[^;]{0,120}probe/i.test(main), false)
 /* What it will cost, before it costs it: twelve requests and several
    minutes is a command somebody runs twice if nothing says so. */
-check('the panel says what it will spend first', /small requests/.test(app), true)
+/* It used to say "12 small requests", which stopped being true when the
+   probe started carrying the real 14.6k preamble - that is now the bulk
+   of what the check spends, and the note has to say so before spending
+   it. */
+check('the panel says what it will spend first', /\$\{CLOUD_MODELS\.length \* runs\} requests/.test(app), true)
+check('and that each carries the real instructions', /full instructions/.test(app), true)
 check('and how long it will take', /give it a few minutes/.test(app), true)
 
 /*

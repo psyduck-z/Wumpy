@@ -1009,12 +1009,24 @@ body {
  * A faint cut-off under a finished answer. Long replies otherwise just stop,
  * with nothing to say whether the model is done or still thinking.
  */
+/*
+ * FADED THREE TIMES OVER, which is once too many.
+ *
+ * This had opacity 0.45 on the whole row, a muted colour on the text
+ * inside it, and 9.5px type - each defensible alone and compounding into
+ * "1m 15s · 63.0 tok/s · 130 tok" that could not be read without leaning
+ * in. Reported in those words: make the words and lines a bit easier to
+ * see.
+ *
+ * The fade is now only on the rules, where it belongs: they are
+ * decoration and should stay quiet. The figures are the only reason the
+ * row exists, so they get their own weight and a readable size.
+ */
 .turn-end {
   display: flex;
   align-items: center;
   justify-content: center;
-  margin: 2px 0 0;
-  opacity: 0.45;
+  margin: 6px 0 0;
 }
 
 .turn-end::before,
@@ -1022,19 +1034,23 @@ body {
   content: "";
   flex: 1;
   height: 1px;
-  background: linear-gradient(90deg, transparent, rgb(var(--text) / 0.28));
+  background: linear-gradient(90deg, transparent, rgb(var(--text) / 0.18));
 }
 
 .turn-end::after {
-  background: linear-gradient(90deg, rgb(var(--text) / 0.28), transparent);
+  background: linear-gradient(90deg, rgb(var(--text) / 0.18), transparent);
 }
 
 .turn-end span {
-  padding: 0 10px;
-  font-size: 9.5px;
-  letter-spacing: 0.4px;
+  padding: 0 12px;
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0.2px;
+  /* Figures line up between one answer and the next instead of jittering
+     as the digits change width. */
+  font-variant-numeric: tabular-nums;
   text-transform: lowercase;
-  color: rgb(var(--muted));
+  color: rgb(var(--text) / 0.62);
   white-space: nowrap;
 }
 

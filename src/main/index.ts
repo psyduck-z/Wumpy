@@ -719,7 +719,17 @@ function registerIpc(): void {
    * same trace in `/usage` as a turn that hit it would have.
    */
   ipcMain.handle(IPC.modelsProbe, async (_e, req?: { runs?: number }) => {
-    const results = await cloud.probeModels(req?.runs ?? DEFAULT_RUNS)
+    /*
+     * The same instructions a question would carry, so the times are the
+     * times a question pays. Without them the probe measured the queue and
+     * nothing else, and called a model 1.6s that takes fifty seconds in
+     * use. `needs` is left undefined, which means everything: the heaviest
+     * preamble the app ever sends, so the figure is a ceiling rather than
+     * a best case.
+     */
+    const forProbe = currentAssistant()
+    const preamble = systemPromptFor(forProbe, forProbe.tools)
+    const results = await cloud.probeModels(req?.runs ?? DEFAULT_RUNS, undefined, preamble)
     for (const r of results) {
       if (!spent(r.state)) continue
       usage.add({

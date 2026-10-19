@@ -101,25 +101,32 @@ export const MAX_RUNS = 5
 /**
  * Past this, a working model is worth calling slow.
  *
- * Grounded in what this machine has measured for a short answer rather than
- * chosen as a round number. Measured 18 Oct 2026, to the first word:
+ * Grounded in what this machine has measured rather than chosen as a round
+ * number - and re-grounded on 19 Oct, when the probe started carrying the
+ * real preamble instead of four words. The old figures were the provider's
+ * queue with prompt processing left out, and they were not the times
+ * anyone experienced. Both sets, for the same six models:
  *
- *   741ms     nemotron-3-super-120b
- *   855ms     gemma4:31b-cloud, with no key at all
- *   2,368ms   glm-5.3-flash
- *   4,128ms   nemotron-3.5-super-vl-120b
- *   103,204ms deepseek-v4.1-flash
- *   104,315ms glm-5.3
+ *                              four words     14.6k preamble
+ *   gemma4:31b-cloud               855ms            1,781ms
+ *   glm-5.3-flash                2,368ms            4,577ms
+ *   nemotron-3-super               741ms            6,264ms
+ *   nemotron-3.5-super-vl        4,128ms           10,923ms
+ *   deepseek-v4.1-flash        103,204ms          112,211ms
+ *   glm-5.3                    104,315ms          timed out
  *
- * That is not a gradient, it is two populations with two orders of magnitude
- * between them, and the threshold sits in the empty middle. Nothing has ever
- * been measured here between 5s and 100s.
+ * Note nemotron-3-super: second quickest on the toy prompt and fourth on a
+ * real one. Prompt processing is most of the cost for the quick models and
+ * almost none of it for the slow ones, so the toy figures did not even
+ * preserve the ORDER - which is why a recommendation built on them was
+ * worse than no recommendation at all.
  *
- * A probe asks for a handful of tokens, so this is close to pure latency -
- * a real turn generating four hundred takes proportionally longer and that
- * is not what is being judged here.
+ * 12s rather than 8s, and the extra four seconds come from the user rather
+ * than from the data: asked about the VL model at around ten seconds, the
+ * verdict was "it's not that bad". A threshold that called their own
+ * working choice slow would be measuring something other than annoyance.
  */
-export const SLOW_MS = 8_000
+export const SLOW_MS = 12_000
 
 /**
  * How long a probe waits before it stops being evidence about the model.
@@ -283,17 +290,17 @@ function row(r: ProbeResult): string {
     case 'flaky':
       return `- \`${r.model}\` — **${r.why || 'did not answer every time'}**${ms ? `, ${r.ms.toLocaleString()}ms when it did` : ''}`
     case 'empty':
-      return `- \`${r.model}\` — **answered nothing**${ms}. Usually an overloaded model; worth asking again later.`
+      return `- \`${r.model}\` — **answered nothing**${ms} · usually overloaded, try later`
     case 'missing':
       return `- \`${r.model}\` — **not there**${r.why ? `: ${r.why}` : ''}`
     case 'refused':
       return `- \`${r.model}\` — **key refused**${r.why ? `: ${r.why}` : ''}`
     case 'limited':
-      return `- \`${r.model}\` — rate limited, so the model is fine${r.why ? ` (${r.why})` : ''}`
+      return `- \`${r.model}\` — rate limited, not broken${r.why ? ` (${r.why})` : ''}`
     case 'timeout':
       return `- \`${r.model}\` — **no answer in ${Math.round(PROBE_TIMEOUT_MS / 1000)}s**`
     case 'nokey':
-      return `- \`${r.model}\` — no ${r.provider || 'provider'} key, so it was not asked`
+      return `- \`${r.model}\` — no ${r.provider || 'provider'} key`
     default:
       return `- \`${r.model}\` — ${r.why || 'failed'}`
   }
@@ -322,8 +329,32 @@ function row(r: ProbeResult): string {
  */
 export const SLOWNESS_COST = 0.08
 
-/** Under this, speed stops being a differentiator at all. */
-export const FAST_ENOUGH_MS = 1_000
+/**
+ * Under this, speed stops being a differentiator at all.
+ *
+ * 2s, because with the real preamble nothing is quicker than 1.8s. A floor
+ * below the fastest thing measured charges every model a penalty and
+ * compares them on a scale that starts off the end of the data.
+ */
+export const FAST_ENOUGH_MS = 2_000
+
+/**
+ * Past this, no ladder score redeems it, and the log penalty is too kind.
+ *
+ * 0.08 per tenfold is right across the range people actually choose in and
+ * wrong at the extreme: on the real figures deepseek at 112 seconds scored
+ * within 0.008 of the VL model at 11 seconds, because ten times slower
+ * costs three rungs and deepseek is three rungs better. The arithmetic
+ * working exactly as designed and arriving somewhere absurd - nobody waits
+ * two minutes for a thing that lives in the system tray.
+ *
+ * So there is a floor under the RECOMMENDATION, and it sits in an empty
+ * part of the measurements: nothing here has ever landed between 11
+ * seconds and 112. A model past it is still listed in the report with its
+ * real time, because it works and someone may want it. It is just never
+ * the suggestion.
+ */
+export const TOO_SLOW_TO_SUGGEST_MS = 30_000
 
 /** Ladder share for a model, or null when it has never been measured here. */
 function smartness(model: string): number | null {
@@ -354,7 +385,7 @@ export interface Pick {
  */
 export function recommend(results: readonly ProbeResult[]): Pick[] {
   return results
-    .filter((r) => usable(r.state))
+    .filter((r) => usable(r.state) && r.ms > 0 && r.ms <= TOO_SLOW_TO_SUGGEST_MS)
     .map((r) => {
       const share = smartness(r.model)
       if (share === null) return null
@@ -379,14 +410,23 @@ export function recommendLines(results: readonly ProbeResult[], current = ''): s
   const best = ranked[0]
   const seconds = best.ms >= 10_000 ? `${Math.round(best.ms / 1000)}s` : `${(best.ms / 1000).toFixed(1)}s`
 
+  /*
+   * A LABEL AND THE FACTS, not a sentence explaining itself.
+   *
+   * This read "**Use `x`.** Best balance of the two: 93% of the ladder at
+   * 4.6s." - which says in sixteen words what two words and two numbers
+   * say, and buries the one thing being looked for. Asked for plainly:
+   * "instead of the best recommended model is X, say recommended: X".
+   *
+   * The numbers stay because they are the argument, and the argument is
+   * one glance long: a score and a time.
+   */
   const lines = [
     '',
     best.model === current
-      ? `**Stay on \`${best.model}\`.** Best balance here: ` +
-        `${Math.round(best.share * 100)}% of the ladder at ${seconds}.`
-      : `**Use \`${best.model}\`.** Best balance of the two: ` +
-        `${Math.round(best.share * 100)}% of the ladder at ${seconds}. ` +
-        '`/model ' + best.model + '`'
+      ? `**Recommended:** \`${best.model}\` — ${Math.round(best.share * 100)}%, ${seconds} · already on it`
+      : `**Recommended:** \`${best.model}\` — ${Math.round(best.share * 100)}%, ${seconds}` +
+        '  ·  `/model ' + best.model + '`'
   ]
 
   /*
@@ -403,9 +443,8 @@ export function recommendLines(results: readonly ProbeResult[], current = ''): s
     if (seeing) {
       const its = seeing.ms >= 10_000 ? `${Math.round(seeing.ms / 1000)}s` : `${(seeing.ms / 1000).toFixed(1)}s`
       lines.push(
-        `That one cannot read pictures. If you work from screenshots, ` +
-          `\`${seeing.model}\` is the best that can — ` +
-          `${Math.round(seeing.share * 100)}% at ${its}.`
+        `**For screenshots:** \`${seeing.model}\` — ` +
+          `${Math.round(seeing.share * 100)}%, ${its} (the pick above is blind)`
       )
     }
   }
@@ -439,13 +478,12 @@ export function probeLines(results: readonly ProbeResult[], current = ''): strin
     .reduce((n, r) => n + Math.max(1, r.runs ?? 1), 0)
   const runs = Math.max(...results.map((r) => r.runs ?? 1), 1)
 
+  /* A headline, not a paragraph: counts first, caveat only when there is
+     one worth making. */
   const lines: string[] = [
-    `**${working.length} of ${results.length} models answered${runs > 1 ? ' every time' : ''}.** ` +
-      `${asked} request${asked === 1 ? '' : 's'} spent asking` +
-      (runs > 1 ? `, ${runs} per model.` : '.') +
-      /* Said out loud, because the whole difference between this and the
-         old one-run check is the standing of the answer. */
-      (runs > 1 ? '' : ' One run each, so this is a sample rather than a measurement.')
+    `**${working.length}/${results.length} answered${runs > 1 ? ' every time' : ''}** · ` +
+      `${asked} request${asked === 1 ? '' : 's'}` +
+      (runs > 1 ? `, ${runs} runs each` : ' · one run each, so a sample not a measurement')
   ]
 
   if (working.length) {
@@ -461,11 +499,11 @@ export function probeLines(results: readonly ProbeResult[], current = ''): strin
    * the argument for running it more than once.
    */
   if (flaky.length) {
-    lines.push('', '**Unreliable — answered sometimes**', ...flaky.map(row))
+    lines.push('', '**Sometimes**', ...flaky.map(row))
   }
 
   if (broken.length) {
-    lines.push('', '**Not working right now**', ...broken.map(row))
+    lines.push('', '**Not working**', ...broken.map(row))
   }
 
   if (unasked.length) {
@@ -479,11 +517,7 @@ export function probeLines(results: readonly ProbeResult[], current = ''): strin
    */
   const mine = results.find((r) => r.model === current)
   if (mine && !usable(mine.state)) {
-    lines.push(
-      '',
-      `You are set to \`${current}\`, which is in the list above. ` +
-        'Switch with `/model <id>`, or open the picker with `/model`.'
-    )
+    lines.push('', `**Your model is in that list.** \`${current}\` — switch below.`)
   }
 
   /* The point of the whole exercise, last so it reads as the conclusion

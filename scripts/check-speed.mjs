@@ -75,5 +75,57 @@ console.log(`ok   no input produces Infinity or NaN`)
   check('while the rate still waits for real tokens', /stats\.liveTokens > 0/.test(bar), true)
 }
 
+/* ------------------------------- the clock, across a whole interaction */
+
+/*
+ * A turn ends whenever Wumpy goes and does something - a screenshot, a
+ * command, a picture opened - and the hand-back is a new turn with a new
+ * clock. So the time under an answer was the last request of several, and
+ * "1.2s" sat under something nobody waited 1.2 seconds for. Reported from
+ * use, in those words: taking a picture resets the timer.
+ */
+{
+  const chat = readFileSync('src/renderer/src/hooks/useChat.ts', 'utf8')
+  const app = readFileSync('src/renderer/src/App.tsx', 'utf8')
+
+  check('a task clock exists beside the turn clock', /taskMsSoFar/.test(chat), true)
+  /* The one line that decides it: a hand-back continues, a typed message
+     starts over. Without the guard this is just the turn clock again. */
+  check(
+    'only a message the user sent starts a new one',
+    /if \(!automatic\) taskMsSoFar\.current = 0/.test(chat),
+    true
+  )
+
+  /*
+   * ACCUMULATED, NOT WALL CLOCK. A proposal waits on screen until it is
+   * pressed, so timing first message to last would count how long someone
+   * spent deciding - a task thought about over lunch reporting four hours
+   * of work.
+   */
+  check('the turns are added up', /taskMsSoFar\.current \+= turnMs/.test(chat), true)
+  /* Outside the state updater, which React may call twice for one event. */
+  check(
+    'and added up outside the updater',
+    chat.indexOf('taskMsSoFar.current += turnMs') < chat.indexOf('lastTaskMs: taskMs'),
+    true
+  )
+
+  /* The live bar has to follow the same clock, or it still drops to zero
+     mid-task even though the final figure is right. */
+  check(
+    'the live bar counts the task too',
+    /elapsedMs: taskMsSoFar\.current \+ \(Date\.now\(\)/.test(chat),
+    true
+  )
+
+  /* Shown only when it differs, so an ordinary turn reads as it always
+     did - and named when it does, because a bare larger number invites
+     the suspicion that the model got slower. */
+  check('the total is shown when it differs', /\$\{clockOf\(task\)\} total/.test(app), true)
+  check('and the last leg beside it', /parts\.push\(`\$\{clockOf\(task\)\} total`, clockOf\(turn\)\)/.test(app), true)
+  check('with a margin, so a rounding difference is not a split', /task > turn \+ 50/.test(app), true)
+}
+
 console.log(`${String.fromCharCode(10)}${count - failed}/${count} speed checks correct`)
 process.exit(failed === 0 ? 0 : 1)

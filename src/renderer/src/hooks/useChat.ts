@@ -22,6 +22,19 @@ export interface ChatStats {
   elapsedMs: number | null
   /** Wall-clock duration of the last completed turn. */
   lastTurnMs: number | null
+  /**
+   * The whole interaction, not the last leg of it.
+   *
+   * A turn ends when a screenshot is taken, a command runs or a picture is
+   * opened, and the hand-back that follows is a new turn with a new clock -
+   * so "1.2s" under an answer that took most of a minute to arrive was
+   * timing the last of four requests. True, and not the question anyone is
+   * asking: the question is how long since they pressed send.
+   *
+   * Identical to lastTurnMs whenever nothing interrupted, which is most
+   * turns, so the common case reads exactly as it did.
+   */
+  lastTaskMs: number | null
 }
 
 export interface ChatState {
@@ -86,10 +99,28 @@ export function useChat(): ChatState {
     lastCompletionTokens: null,
     liveTokens: 0,
     elapsedMs: null,
-    lastTurnMs: null
+    lastTurnMs: null,
+    lastTaskMs: null
   })
   /** Wall clock for the turn in flight, so elapsed survives re-renders. */
   const startedAt = useRef<number | null>(null)
+  /**
+   * And the work done on the whole interaction, which outlives the turn.
+   *
+   * Reset only by a message the USER sent. An automatic hand-back - a
+   * command's output, a screenshot, a file the model asked to open - is
+   * the same piece of work continuing, and restarting the clock for it is
+   * what made a long task report a short time.
+   *
+   * ACCUMULATED RATHER THAN WALL CLOCK, which matters in manual mode and
+   * is the difference between a useful number and a flattering one. A
+   * proposal sits on screen until it is pressed: timing from the first
+   * message to the last would count however long someone spent deciding,
+   * so a task they thought about over lunch would report as four hours of
+   * work. Summing the turns measures what Wumpy actually spent, and on
+   * accept-all - where nothing waits - the two are the same anyway.
+   */
+  const taskMsSoFar = useRef(0)
 
   /** Request currently streaming; also the key we match incoming deltas against. */
   const activeRequest = useRef<string | null>(null)
@@ -147,6 +178,12 @@ export function useChat(): ChatState {
          hit the cap has to say so: everything else about the end of a turn
          looks identical whether it finished or merely stopped. */
       if (d.cutOff) patchActive((m) => ({ ...m, cutOff: d.cutOff }))
+      /* Added up before the state goes in, not inside the updater: an
+         updater can be called twice for one event and the ref would count
+         the turn twice. */
+      const turnMs = startedAt.current ? Date.now() - startedAt.current : 0
+      taskMsSoFar.current += turnMs
+      const taskMs = taskMsSoFar.current
       setStats((s) => ({
         speed: d.tokensPerSecond ?? s.speed,
         loadMs: d.loadMs ?? null,
@@ -159,7 +196,8 @@ export function useChat(): ChatState {
         liveTokens: 0,
         elapsedMs: null,
         // Wall clock, not the model's own timings: this is what the user waited.
-        lastTurnMs: startedAt.current ? Date.now() - startedAt.current : s.lastTurnMs
+        lastTurnMs: turnMs || s.lastTurnMs,
+        lastTaskMs: taskMs || s.lastTaskMs
       }))
       startedAt.current = null
       activeRequest.current = null
@@ -249,6 +287,9 @@ export function useChat(): ChatState {
     activeMessage.current = assistantMessage.id
 
     startedAt.current = Date.now()
+    /* Only a message the user wrote starts a new task; a hand-back adds to
+       the one already running. */
+    if (!automatic) taskMsSoFar.current = 0
     setMessages((prev) => [...prev, userMessage, assistantMessage])
     setStreamingId(assistantMessage.id)
     setStreaming(true)
@@ -274,7 +315,12 @@ export function useChat(): ChatState {
     // is a quarter of the wake-ups during the one period that matters.
     const timer = setInterval(() => {
       if (startedAt.current === null) return
-      setStats((s) => ({ ...s, elapsedMs: Date.now() - (startedAt.current ?? Date.now()) }))
+      /* The task's total, so the bar counts on through a screenshot instead
+         of dropping back to zero and starting again. */
+      setStats((s) => ({
+        ...s,
+        elapsedMs: taskMsSoFar.current + (Date.now() - (startedAt.current ?? Date.now()))
+      }))
     }, 250)
     return () => clearInterval(timer)
   }, [streaming])
@@ -463,7 +509,8 @@ export function useChat(): ChatState {
       lastCompletionTokens: null,
       liveTokens: 0,
       elapsedMs: null,
-      lastTurnMs: null
+      lastTurnMs: null,
+      lastTaskMs: null
     })
   }, [stop])
 

@@ -302,7 +302,22 @@ export interface CloudModel {
   id: string
   provider: ProviderId
   label: string
-  /** What it is for, in the voice of the tier blurbs. */
+  /**
+   * One line in the picker, in a fixed shape: score, speed, eyesight.
+   *
+   *   38/41 · 4.6s · reads images. The best balance measured here.
+   *
+   * Three facts separated by dots and then at most one sentence, because
+   * the picker is read by someone comparing six rows at a glance and
+   * prose does not compare. They drifted out of that shape and out of
+   * date together: one promised 0.9s for a model measured at 6.3s, one
+   * called itself "the only one here that can read a picture" after three
+   * others were found to read them, and one said "15s a turn" about a
+   * model that answers in 4.6.
+   *
+   * The numbers are the ones in `measured` and `vision`, so a blurb that
+   * contradicts them is a bug visible from the same screen.
+   */
   blurb: string
   /**
    * Writes ```powershell where Wumpy asks for ```wumpy-run.
@@ -330,6 +345,23 @@ export interface CloudModel {
   sees?: boolean
   /** What it scored here, when it has been measured. See Measured. */
   measured?: Measured
+  /**
+   * How well it reads a picture, which is not the same as whether it can.
+   *
+   * `sees` is one bit and was doing two jobs. It decides whether to send
+   * the bytes at all, which is all it should decide - and it was also,
+   * through `eyeFor`, choosing which model gets borrowed to describe a
+   * screen. That choice was made on the LADDER score, which measures
+   * reasoning and says nothing about eyesight: the moment deepseek was
+   * correctly marked as sighted it became the app's eye on 39/41, and a
+   * screenshot would have taken the ninety seconds it needs per image
+   * instead of the VL model's 370ms.
+   *
+   * So eyesight is measured separately, by scripts/bench-vision.mjs: six
+   * rungs from "which side is red" up to "read the small number in the
+   * red box", images generated and numbers randomised per run.
+   */
+  vision?: { clean: number; of: number; medianMs: number; on: string }
 }
 
 /**
@@ -358,7 +390,21 @@ export interface Measured {
   of: number
   /** Runs per rung. One is a sample, two is a measurement. */
   runs: number
-  /** Median ms to a complete short answer at Wumpy's real preamble. */
+  /**
+   * Median ms to a complete short answer at Wumpy's real preamble.
+   *
+   * Every figure here was re-measured on 19 Oct, because the old ones
+   * were not this. They had drifted into being times from a FOUR-WORD
+   * prompt, which leaves out prompt processing - most of the cost for a
+   * quick model and almost none of it for a slow one, so the old numbers
+   * did not even preserve the order. nemotron-3-super read 907ms and is
+   * 6,264; glm-5.3-flash read 14,882 and is 4,577, which is the same two
+   * models swapping places.
+   *
+   * The ladder scores beside them are older and are NOT re-measured here:
+   * clean/of/runs still describe the capability run on the date each was
+   * taken. Only the latency moved.
+   */
   medianMs: number
   /** When, so a stale number is visibly stale rather than quietly wrong. */
   on: string
@@ -404,13 +450,35 @@ export const CLOUD_MODELS: CloudModel[] = [
   {
     id: 'nvidia/nemotron-3-super-120b-a12b',
     provider: 'nvidia',
+    /* Blind, and PROVED rather than assumed - which is the only kind of
+       blind the catalogue records now that absent means sighted. The
+       endpoint answers "ValueError: Received multimodal data but
+       multimodal processing is not..." : a refusal from the server, not a
+       bad answer. Measured 19 Oct. */
+    sees: false,
     label: 'Nemotron 3 Super 120B',
-    blurb: '32/41 on the full ladder, 0.9s, no daily cap.',
-    measured: { clean: 32, of: 41, runs: 1, medianMs: 907, on: '2026-10-16' }
+    blurb: '32/41 · 6.3s · text only — the endpoint refuses images.',
+    measured: { clean: 32, of: 41, runs: 1, medianMs: 6_264, on: '2026-10-19' }
   },
   {
     id: 'deepseek-ai/deepseek-v4.1-flash',
     provider: 'nvidia',
+    /**
+     * It reads images too, and slowly enough that it barely matters.
+     *
+     * Asked the red/blue question twice on 19 Oct: one answered "Blue"
+     * correctly, the other was still going at the 90-second ceiling. So
+     * the capability is real and the flag is honest, but a screenshot
+     * here costs a minute and a half of waiting on top of the 112s this
+     * model already takes to answer anything.
+     *
+     * Set anyway. The alternative is the borrowed eye, which spends a
+     * whole extra request to hand this model a worse description than the
+     * picture it can read itself - and anyone who has deliberately chosen
+     * a two-minute model has already decided what they are trading.
+     */
+    sees: true,
+    vision: { clean: 0, of: 1, medianMs: 90_006, on: '2026-10-19' },
     /**
      * THE LATENCY HERE IS SETTLED NOW, AND IT IS NOT 1.3s.
      *
@@ -440,14 +508,14 @@ export const CLOUD_MODELS: CloudModel[] = [
      * and nothing about today's run touches it.
      */
     label: 'DeepSeek V4.1 Flash',
-    blurb: '39/41 on the full ladder — the best measured here. Latency varies wildly.',
+    blurb: '39/41, the best measured · 112s a turn · reads images, slowly.',
     /* 103,204ms is the kinder of two probes on 18 Oct and a FLOOR for this
        field, not a like-for-like: the probe asks four words and stops at
        the first token, where this column means a complete short answer at
        the real preamble. Understating it is the safe direction, and it is
        within a tenth of the truth where 1,256ms was out by eighty times.
        The ladder score is from 16 Oct and stands. */
-    measured: { clean: 39, of: 41, runs: 2, medianMs: 103_204, on: '2026-10-18' }
+    measured: { clean: 39, of: 41, runs: 2, medianMs: 112_211, on: '2026-10-19' }
   },
   /*
    * NEMOTRON 3 ULTRA IS NOT OFFERED, because it does not answer.
@@ -475,8 +543,23 @@ export const CLOUD_MODELS: CloudModel[] = [
     id: 'z-ai/glm-5.3-flash',
     provider: 'nvidia',
     label: 'GLM 5.3 Flash',
-    blurb: '38/41 on the full ladder — second only to DeepSeek. But 15s a turn.',
-    measured: { clean: 38, of: 41, runs: 1, medianMs: 14882, on: '2026-10-16' }
+    /**
+     * It can see, and was marked blind by omission until 19 Oct.
+     *
+     * 5 of 6 rungs on the vision ladder at 1,599ms: colour and position,
+     * counting, large text, 8-pixel text, and small text read out of the
+     * correctly-coloured box. It dropped one half of V5 by answering
+     * "**34" - a truncation at the token ceiling rather than a misread,
+     * since the same question at a smaller text size passed both ways.
+     *
+     * Which matters more here than anywhere: this is the model the
+     * recommendation picks, and every screenshot sent to it was being
+     * replaced by a description borrowed from a second model.
+     */
+    sees: true,
+    vision: { clean: 5, of: 6, medianMs: 1_599, on: '2026-10-19' },
+    blurb: '38/41 · 4.6s · reads images. The best balance measured here.',
+    measured: { clean: 38, of: 41, runs: 1, medianMs: 4_577, on: '2026-10-19' }
   },
   /*
    * THE ONE THAT CAN SEE, and the reason this entry exists at all.
@@ -504,17 +587,22 @@ export const CLOUD_MODELS: CloudModel[] = [
     provider: 'nvidia',
     label: 'Nemotron 3.5 Super VL 120B',
     sees: true,
+    vision: { clean: 6, of: 6, medianMs: 370, on: '2026-10-19' },
     /* The 859ms stands as a ladder median on 16 Oct. Two probes on 18 Oct
        came back at 4,128ms and 9,252ms to the first word, on a far shorter
        prompt, so "the fastest measured" is no longer a claim this can
        carry. The ladder score is untouched. */
-    blurb: 'The only one here that can read a picture. 36/41 on two full ladders.',
-    measured: { clean: 36, of: 41, runs: 2, medianMs: 859, on: '2026-10-16' }
+    blurb: '36/41 over two ladders · 10.9s · the sharpest eyesight here, 6/6.',
+    measured: { clean: 36, of: 41, runs: 2, medianMs: 10_923, on: '2026-10-19' }
   },
   {
     id: 'z-ai/glm-5.3',
     provider: 'nvidia',
     label: 'GLM 5.3',
+    /* Refused outright, measured 19 Oct: "Invalid request" for any
+       message carrying an image part. Explicit, because absent now means
+       sighted and this one is not. */
+    sees: false,
     /*
      * The index said it was the best free model there is. The full ladder
      * puts it below its own Flash sibling - 33 against 38 - and 88 seconds
@@ -526,8 +614,8 @@ export const CLOUD_MODELS: CloudModel[] = [
      * ceiling. Not a latency any more, an unreliability - which is the
      * distinction `/model check` now draws, and the reason it asks twice.
      */
-    blurb: '33/41, around 90 SECONDS when it answers — and twice it did not.',
-    measured: { clean: 33, of: 41, runs: 1, medianMs: 87934, on: '2026-10-16' }
+    blurb: '33/41 · 90s when it answers, and often nothing · text only.',
+    measured: { clean: 33, of: 41, runs: 1, medianMs: 120_000, on: '2026-10-19' }
   },
 
   /* --- the user's own Ollama account ------------------------------------- */
@@ -535,8 +623,31 @@ export const CLOUD_MODELS: CloudModel[] = [
     id: 'gemma4:31b-cloud',
     provider: 'ollama',
     label: 'Gemma 4 31B (Ollama cloud)',
-    blurb: '35/41 on the full ladder, 1.0s. Your Ollama account — no key, no Wumpy quota.',
-    measured: { clean: 35, of: 41, runs: 1, medianMs: 967, on: '2026-10-16' }
+    /**
+     * IT CAN SEE, AND THIS ENTRY SAID IT COULD NOT BY SAYING NOTHING.
+     *
+     * `sees` is absent-means-no, so the VL model was treated as the only
+     * eye in the catalogue and every screenshot bound for Gemma was
+     * replaced with the control list - or with a description borrowed from
+     * another model, which costs a second request to produce something
+     * worse than the picture this one would have read.
+     *
+     * Asked rather than assumed, by the method this file already uses: a
+     * 64x64 image, red on one side and blue on the other, and "which
+     * colour fills the LEFT half?". Measured 19 Oct through the Ollama
+     * endpoint the app actually calls: "Red" in 658ms, and - because that
+     * question has only two answers and a coin would get half of them -
+     * the mirrored image too, which came back "Blue". It is reading the
+     * pixels.
+     *
+     * Worth having for a second reason: it is on the user's own Ollama
+     * account, so a screenshot sent here costs nothing from any Wumpy
+     * quota at all.
+     */
+    sees: true,
+    vision: { clean: 6, of: 6, medianMs: 600, on: '2026-10-19' },
+    blurb: '35/41 · 1.8s · 6/6 eyesight. Your Ollama account — no Wumpy quota.',
+    measured: { clean: 35, of: 41, runs: 1, medianMs: 1_781, on: '2026-10-19' }
   }
 ]
 
@@ -581,13 +692,19 @@ export const UNUSABLY_SLOW_MS = 30_000
  * But four models scored within a rung of each other, so speed is doing most
  * of the separating in practice, and at a desktop step every turn is a step.
  *
- * A LATENCY FLOOR WAS TRIED HERE AND IS NOT IN YET. The premise above -
- * that a slow right answer costs seconds - failed on 18 Oct, when
- * deepseek took 103s and 115s to the first word and glm-5.3 took 104s and
- * then nothing. Sorting those below everything that answers moved the
- * top of the list, and moving the list on four-word probes would repeat
- * the mistake this file keeps making. UNUSABLY_SLOW_MS is kept, unused,
- * for the ladder run that settles it.
+ * EXCEPT WHERE IT IS NOT SECONDS, and that floor is in now.
+ *
+ * It was written on 18 Oct and backed out the same day, because the only
+ * evidence was four-word probes and moving the top of the picker on those
+ * would have repeated the mistake this file keeps making. The evidence
+ * arrived on the 19th: every latency here is now measured at the real
+ * 14.6k preamble, which is what this column has always claimed to be.
+ *
+ * So a model past UNUSABLY_SLOW_MS cannot outrank one that answers,
+ * whatever it scores. DeepSeek keeps its 39/41 - the highest here - and
+ * stops being offered first, which it had been while taking 112 seconds
+ * a turn. A rank shown in the picker is advice, and "best" has to mean
+ * best to use.
  *
  * Unmeasured entries keep their catalogue position and get no rank, rather
  * than being sorted to the bottom as though they had scored zero.
@@ -595,10 +712,18 @@ export const UNUSABLY_SLOW_MS = 30_000
 export function rankedModels(models: readonly CloudModel[] = CLOUD_MODELS): Ranked[] {
   const share = (m: CloudModel): number =>
     m.measured && m.measured.of > 0 ? m.measured.clean / m.measured.of : -1
+  const answers = (m: CloudModel): number =>
+    m.measured && m.measured.medianMs < UNUSABLY_SLOW_MS ? 1 : 0
+
   const order = models
     .filter((m) => m.measured)
     .slice()
-    .sort((a, b) => share(b) - share(a) || (a.measured!.medianMs - b.measured!.medianMs))
+    .sort(
+      (a, b) =>
+        answers(b) - answers(a) ||
+        share(b) - share(a) ||
+        (a.measured!.medianMs - b.measured!.medianMs)
+    )
 
   const place = new Map(order.map((m, i) => [m.id, i + 1]))
   return models.map((model) => ({ model, rank: place.get(model.id) ?? null }))
@@ -880,10 +1005,63 @@ export function wireText(content: string | WirePart[]): string {
  * it on the way out is a wrong answer to a question nobody knows was not
  * asked.
  */
+/**
+ * Models proved blind by the endpoint itself, learned at runtime.
+ *
+ * Filled by `rememberBlind` when a provider refuses an image outright, so
+ * the optimistic default below costs one turn per model ever rather than
+ * one turn per attempt. Module state rather than a file: it is cheap to
+ * rediscover, and a model that was patched to accept images should not be
+ * written off until the next release.
+ */
+const PROVED_BLIND = new Set<string>()
+
+/** The endpoint said no to a picture. Do not send it one again. */
+export function rememberBlind(model: string): void {
+  if (model) PROVED_BLIND.add(model)
+}
+
+export function provedBlind(model: string): boolean {
+  return PROVED_BLIND.has(model)
+}
+
+/** For checks, which must not inherit what an earlier case learned. */
+export function forgetBlind(): void {
+  PROVED_BLIND.clear()
+}
+
+/**
+ * EVERY MODEL IS BORN SIGHTED, which is the opposite of how this started.
+ *
+ * `sees` was absent-means-no, and on 19 Oct a sweep of the whole
+ * catalogue found that half the entries marked blind that way could see
+ * perfectly well - gemma4 at 6/6, glm-5.3-flash at 5/6, deepseek reading
+ * them slowly. Each had been quietly denied every picture, with the bytes
+ * dropped on the way out and a description borrowed from another model
+ * standing in for an image they could have read themselves.
+ *
+ * The cautious default was wrong in the expensive direction, and it was
+ * wrong SILENTLY: a dropped attachment produces a plausible answer, not
+ * an error, so nobody finds out.
+ *
+ * So the default is flipped and the cost of being wrong is paid for
+ * properly instead of avoided. Sending an image to a model that cannot
+ * take one is a 400 - which is what the old default existed to prevent -
+ * and the turn survives it now: the client catches that refusal, records
+ * the model here, and immediately retries without the picture. One turn
+ * is slightly slower, once, for a model nobody has measured. Against a
+ * capability silently missing for the life of the entry, that is a good
+ * trade.
+ *
+ * `sees: false` in the catalogue still means proved blind and skips even
+ * the first attempt.
+ */
 export function seesMedia(model: string): boolean {
   if (!model) return false
-  if (CLOUD_MODELS.find((m) => m.id === model)?.sees) return true
-  return providerFor(model) === 'google'
+  if (provedBlind(model)) return false
+  const known = CLOUD_MODELS.find((m) => m.id === model)
+  if (known?.sees !== undefined) return known.sees
+  return true
 }
 
 /**
@@ -912,12 +1090,31 @@ export function seesMedia(model: string): boolean {
  */
 export function eyeFor(model: string): CloudModel | null {
   if (!model || seesMedia(model)) return null
-  /* The best measured one, not the first one typed into the catalogue:
-     rankedModels keeps catalogue order and carries the place as a number. */
-  const seers = rankedModels()
-    .filter((r) => r.model.sees)
-    .sort((a, b) => (a.rank ?? Number.MAX_SAFE_INTEGER) - (b.rank ?? Number.MAX_SAFE_INTEGER))
-  return seers[0]?.model ?? null
+  /**
+   * The best EYE, which is not the best model.
+   *
+   * This ranked by the capability ladder, on the reasonable-sounding
+   * ground that the best model should do the describing. It is the wrong
+   * ladder: an eye is handed a picture and asked what is in it, and does
+   * none of the reasoning the score measures. The error showed the moment
+   * the catalogue got honest - deepseek was correctly marked as sighted
+   * on 19 Oct, immediately outranked everything at 39/41, and would have
+   * become the app's eye at ninety seconds an image, replacing one that
+   * does it in 370ms.
+   *
+   * So: eyesight first, and speed second, both from the vision ladder.
+   * An entry with `sees` and no vision score sorts last rather than
+   * first - it has not been measured, and the measured ones have.
+   */
+  const score = (m: CloudModel): number =>
+    m.vision && m.vision.of > 0 ? m.vision.clean / m.vision.of : -1
+  const seers = CLOUD_MODELS.filter((m) => m.sees).sort(
+    (a, b) =>
+      score(b) - score(a) ||
+      (a.vision?.medianMs ?? Number.MAX_SAFE_INTEGER) -
+        (b.vision?.medianMs ?? Number.MAX_SAFE_INTEGER)
+  )
+  return seers[0] ?? null
 }
 
 /**
