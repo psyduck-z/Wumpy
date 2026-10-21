@@ -133,6 +133,20 @@ function crc32(bytes: Uint8Array): number {
  * lines. A 300x120 test image is some 108KB raw, which would matter if
  * these were being saved and does not when they are base64'd straight
  * into one request and thrown away.
+ *
+ * "Legal" was an assumption until it was not. Decoders vary, and an
+ * image every library accepts is not the same as one a vision model
+ * reads - so both were checked on 21 Oct, against both backends the app
+ * actually uses:
+ *
+ *   zlib.inflateSync    27,744 bytes out of a 96x96, exactly as expected
+ *   Ollama, gemma4      read the number in the red box, both ways round
+ *   NVIDIA, VL model    read it too, first try
+ *
+ * Which matters more than it sounds: if the encoder were subtly wrong,
+ * every model would score zero on the vision ladder and the catalogue
+ * would record a list of blind models that can all see perfectly well.
+ * The test would fail in the direction of being believed.
  */
 function zlibStored(raw: Uint8Array): Uint8Array {
   const blocks: number[] = [0x78, 0x01]
