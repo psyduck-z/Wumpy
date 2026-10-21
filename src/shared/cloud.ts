@@ -687,7 +687,24 @@ export const CLOUD_MODELS: CloudModel[] = [
        asked yet - bench-vision.mjs settles that in six rungs. Until it
        is, `sees` is absent, which now means it gets sent pictures and
        the endpoint's own refusal decides. */
-    blurb: 'Reasoning, possibly multimodal · 1.4s · ladder stopped partway.'
+    /*
+     * IT CAN SEE, AND IT IS RATIONED.
+     *
+     * Vision, 21 Oct: it read a four-digit number out of the correctly
+     * coloured box, and large and small text besides - the hard rungs,
+     * passed. Every rung it failed failed with "ResourceExhausted:
+     * Worker local total request limit reached (16/16)", which is
+     * NVIDIA's capacity rather than the model's eyesight, so the 3/6 it
+     * scored understates it and no `vision` figure is recorded until it
+     * can be measured cleanly.
+     *
+     * The rationing is the thing worth knowing. Two ladder attempts were
+     * abandoned after it spent twenty minutes in a (busy, waiting 20s)
+     * loop around rung 20. A model that cannot be benchmarked because
+     * the provider keeps refusing it is a model that will refuse the
+     * user too, and that belongs in the blurb rather than in a log.
+     */
+    blurb: 'Reads images · 1.4s when it answers · heavily rate limited by NVIDIA.'
   },
   {
     id: 'stepfun-ai/step-5-preview',

@@ -2497,11 +2497,45 @@ function namedControls(shot: Attachment): string[] {
              */
             ...(m.sees
               ? {
+                  /*
+                   * The score, where there is one, rather than the bare
+                   * word. "vision" says a model decodes an image; it
+                   * does not say whether it can read eight-pixel text
+                   * out of the right box, and those are different
+                   * models. The ladder measures that in six rungs and
+                   * the number was sitting unused in the catalogue.
+                   *
+                   * Bare "vision" still appears for an entry nobody has
+                   * put through it - absent now means sighted, so a new
+                   * model claims eyes before anyone has checked them,
+                   * and a missing score should look missing rather than
+                   * perfect.
+                   */
+                  /*
+                   * A SCORE OUT OF ONE IS NOT A SCORE.
+                   *
+                   * deepseek reads images - proved by asking - and is
+                   * slow enough that the ladder got through a single
+                   * rung before giving up, half of which timed out. That
+                   * lands in the catalogue as 0/1, and "vision 0/1" on a
+                   * badge reads as "failed the eye test" when the truth
+                   * is the opposite: it sees, it is just too slow to
+                   * measure properly.
+                   *
+                   * So a number is shown only when enough rungs ran to
+                   * mean something, and anything thinner falls back to
+                   * the bare word - which claims only what is actually
+                   * known, that pictures get sent.
+                   */
                   badge: {
-                    text: 'vision',
+                    text: m.vision && m.vision.of >= 3 ? `vision ${m.vision.clean}/${m.vision.of}` : 'vision',
                     title:
-                      'Reads pictures directly: screenshots and image files go to this model ' +
-                      'as images. Models without this get a written description instead.'
+                      m.vision && m.vision.of >= 3
+                        ? `Read ${m.vision.clean} of ${m.vision.of} test images, ` +
+                          `${m.vision.medianMs}ms each — colour, counting, and text down to ` +
+                          `eight pixels inside a named box. Measured ${m.vision.on}.`
+                        : 'Sends pictures to this model. How well it reads them has not been ' +
+                          'measured — run the vision ladder to find out.'
                   }
                 }
               : {}),

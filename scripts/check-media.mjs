@@ -257,6 +257,26 @@ check(
  */
 check('both are equally accurate', C.CLOUD_MODELS.find((m) => m.id === 'gemma4:31b-cloud')?.vision?.clean, 6)
 check('and the quicker one is chosen', C.eyeFor('nvidia/nemotron-3-super-120b-a12b')?.vision?.medianMs, 370)
+
+/*
+ * THE BADGE SHOWS A SCORE ONLY WHEN THERE IS ONE.
+ *
+ * deepseek reads images - proved by asking - and is slow enough that the
+ * ladder got through one rung before giving up, half of which timed out.
+ * That lands as 0/1, and "vision 0/1" reads as "failed the eye test"
+ * when the truth is the opposite. Three rungs is the floor for a number;
+ * below it the badge claims only what is known, that pictures are sent.
+ */
+{
+  const app = readFileSync('src/renderer/src/App.tsx', 'utf8')
+  check('a thin score is not shown as one', /m\.vision && m\.vision\.of >= 3/.test(app), true)
+  const deep = C.CLOUD_MODELS.find((m) => m.id === 'deepseek-ai/deepseek-v4.1-flash')
+  check('deepseek has too few rungs to score', (deep?.vision?.of ?? 0) < 3, true)
+  /* And still gets pictures, which is the part that is actually known. */
+  check('but still gets the pictures', C.seesMedia('deepseek-ai/deepseek-v4.1-flash'), true)
+  const vl = C.CLOUD_MODELS.find((m) => m.id === 'nvidia/nemotron-3.5-super-vl-120b-a12b')
+  check('a full ladder does score', (vl?.vision?.of ?? 0) >= 3, true)
+}
 /* And the highest-scoring model in the whole catalogue is not it. */
 check('the smartest model is not the eye', C.eyeFor('nvidia/nemotron-3-super-120b-a12b')?.id !== 'deepseek-ai/deepseek-v4.1-flash', true)
 check('because it reads one image in 90 seconds', C.CLOUD_MODELS.find((m) => m.id === 'deepseek-ai/deepseek-v4.1-flash')?.vision?.medianMs, 90_006)
