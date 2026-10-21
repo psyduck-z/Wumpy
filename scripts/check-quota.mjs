@@ -593,11 +593,15 @@ const LITE = 'gemini-3.1-flash-lite'
   check('and why', view.rows[0].why, 'rejected')
 
   const text = Q.poolLines(view, NOW).join(NL)
-  check('the report leads with the refusal', /\*\*Keys 1, 2 and 3 were refused\*\*/.test(text), true)
-  check('and says waiting will not help', /Waiting will not fix those/.test(text), true)
-  /* Nor will tomorrow, which is the half that was missing: the refusal used
-     to vanish at midnight Pacific and the user was never told it had. */
-  check('nor tomorrow', /neither will tomorrow/.test(text), true)
+  check('the report leads with the refusal', /\*\*Keys 1, 2 and 3 refused\*\*/.test(text), true)
+  /*
+   * Waiting is not the answer, which is the half that was missing: the
+   * refusal used to vanish at midnight Pacific and the user was never
+   * told it had. Said in one clause now rather than two sentences - the
+   * four-sentence version listed causes nobody can act on differently.
+   */
+  check('and says waiting will not help', /waiting will not fix them/.test(text), true)
+  check('and that they are out of the figures', /left out of the figures above/.test(text), true)
   /* By number, so it can be typed. "Replace the whole list" risks the
      seventeen that work for the sake of the three that do not. */
   check('and what to do instead', /\/key google drop 1 2 3/.test(text), true)
@@ -613,7 +617,10 @@ const LITE = 'gemini-3.1-flash-lite'
   let pool = P.emptyPool('2026-10-12', 3)
   pool = P.restOn(pool, 1, NOW + 24 * HOUR, P.REJECTED)
   const text = Q.poolLines(P.poolView(pool, FLASH, 25, NOW, MIDNIGHT), NOW).join(NL)
-  check('one refusal reads as one', /\*\*Key 2 was refused\*\*/.test(text), true)
+  check('one refusal reads as one', /\*\*Key 2 refused\*\*/.test(text), true)
+  /* Singular all the way through the sentence, not just the heading:
+     "waiting will not fix them" about one key is a counter talking. */
+  check('and stays singular after it', /waiting will not fix it/.test(text), true)
 
   let busy = P.emptyPool('2026-10-12', 3)
   busy = P.restOn(busy, 1, NOW + 30_000, 'per-minute')

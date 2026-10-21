@@ -109,12 +109,14 @@ export function poolLines(pool: PoolView, now: number = Date.now()): string[] {
    */
   if (dead.length) {
     const key = keyCommandFor(pool.model)
+    /* Four sentences once, listing causes the reader cannot act on
+       differently. What they need is which key, that waiting is not the
+       answer, and the two commands. */
     lines.push(
-      `**${dead.length === 1 ? 'Key' : 'Keys'} ${keyList(dead)} ${dead.length === 1 ? 'was' : 'were'} refused** ` +
-        '(revoked, mistyped, or an account the provider has restricted). Waiting will not fix ' +
-        `those and neither will tomorrow — drop them with \`${key} drop ${dead.join(' ')}\`. ` +
-        'They are left out of the figures above. ' +
-        `\`${key} check\` re-asks the provider for nothing, if you think one has come back.`
+      `**${dead.length === 1 ? 'Key' : 'Keys'} ${keyList(dead)} refused** — waiting will not fix ` +
+        `${dead.length === 1 ? 'it' : 'them'}, and ${dead.length === 1 ? 'it is' : 'they are'} ` +
+        'left out of the figures above. ' +
+        `\`${key} drop ${dead.join(' ')}\` to remove, or \`${key} check\` to retry free.`
     )
   }
 
@@ -136,8 +138,11 @@ export function poolLines(pool: PoolView, now: number = Date.now()): string[] {
   if (!out.length && !resting.length && !dead.length) {
     lines.push(`Every key can answer. The day's allowance resets at ${clock(pool.resetAt)}.`)
   } else if (!out.length && !resting.length) {
+    /* "The other 1 can answer" is what a counter writes, not a person.
+       The number is already on the first line. */
     lines.push(
-      `The other ${pool.ready} can answer. The day's allowance resets at ${clock(pool.resetAt)}.`
+      `The ${pool.ready === 1 ? 'other one' : `other ${pool.ready}`} can answer. ` +
+        `Resets at ${clock(pool.resetAt)}.`
     )
   }
   if (pool.ready === 0) {
