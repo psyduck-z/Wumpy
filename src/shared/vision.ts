@@ -178,7 +178,24 @@ function chunk(type: string, data: Uint8Array): Uint8Array {
   return out
 }
 
-export function toPng(c: Canvas): Uint8Array {
+/**
+ * Squeezes the pixels, where the caller has something that can.
+ *
+ * Stored blocks keep this module free of dependencies and renderer-safe,
+ * and they cost a great deal: a 300x120 test image is 108,193 bytes
+ * stored and 816 deflated, which is 133 times the payload and about
+ * 500ms of upload per picture. Measured against gemma4, the same six
+ * rungs went from 600ms a rung to 1,119.
+ *
+ * The original note said deflate was "a dependency the renderer does not
+ * have", which is true and was beside the point: nothing in the renderer
+ * draws these. The eye test runs in the MAIN process, where zlib has
+ * been available all along. So main passes a compressor and pays 816
+ * bytes; anyone without one still gets a valid PNG.
+ */
+export type Deflate = (raw: Uint8Array) => Uint8Array
+
+export function toPng(c: Canvas, deflate?: Deflate): Uint8Array {
   const raw = new Uint8Array((c.w * 3 + 1) * c.h)
   for (let y = 0; y < c.h; y++) {
     raw[y * (c.w * 3 + 1)] = 0
@@ -193,7 +210,7 @@ export function toPng(c: Canvas): Uint8Array {
   const parts = [
     new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
     chunk('IHDR', ihdr),
-    chunk('IDAT', zlibStored(raw)),
+    chunk('IDAT', deflate ? zlibWrapped(deflate(raw), raw) : zlibStored(raw)),
     chunk('IEND', new Uint8Array(0))
   ]
   const total = parts.reduce((n, p) => n + p.length, 0)
@@ -206,9 +223,28 @@ export function toPng(c: Canvas): Uint8Array {
   return png
 }
 
-export function dataUrl(c: Canvas): string {
+/** The zlib header and checksum around an already-deflated body. */
+function zlibWrapped(body: Uint8Array, raw: Uint8Array): Uint8Array {
+  let a = 1
+  let b = 0
+  for (const byte of raw) {
+    a = (a + byte) % 65521
+    b = (b + a) % 65521
+  }
+  const out = new Uint8Array(body.length + 6)
+  out[0] = 0x78
+  out[1] = 0x01
+  out.set(body, 2)
+  out[body.length + 2] = (b >> 8) & 0xff
+  out[body.length + 3] = b & 0xff
+  out[body.length + 4] = (a >> 8) & 0xff
+  out[body.length + 5] = a & 0xff
+  return out
+}
+
+export function dataUrl(c: Canvas, deflate?: Deflate): string {
   let binary = ''
-  for (const b of toPng(c)) binary += String.fromCharCode(b)
+  for (const b of toPng(c, deflate)) binary += String.fromCharCode(b)
   return `data:image/png;base64,${btoa(binary)}`
 }
 

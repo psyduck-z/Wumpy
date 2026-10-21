@@ -65,202 +65,49 @@ const SHOW = Boolean(process.env.VISION_SHOW)
 
 /* ------------------------------------------------------------ drawing */
 
-/* A 5x7 bitmap digit, because rendering text needs either a font file or
-   ten glyphs typed out, and ten glyphs have no dependency and no licence. */
-const DIGITS = [
-  ['01110', '10001', '10011', '10101', '11001', '10001', '01110'],
-  ['00100', '01100', '00100', '00100', '00100', '00100', '01110'],
-  ['01110', '10001', '00001', '00010', '00100', '01000', '11111'],
-  ['11111', '00010', '00100', '00010', '00001', '10001', '01110'],
-  ['00010', '00110', '01010', '10010', '11111', '00010', '00010'],
-  ['11111', '10000', '11110', '00001', '00001', '10001', '01110'],
-  ['00110', '01000', '10000', '11110', '10001', '10001', '01110'],
-  ['11111', '00001', '00010', '00100', '01000', '01000', '01000'],
-  ['01110', '10001', '10001', '01110', '10001', '10001', '01110'],
-  ['01110', '10001', '10001', '01111', '00001', '00010', '01100']
-]
-
-function canvas(w, h, fill = [255, 255, 255]) {
-  const px = Buffer.alloc(w * h * 3)
-  for (let i = 0; i < w * h; i++) {
-    px[i * 3] = fill[0]
-    px[i * 3 + 1] = fill[1]
-    px[i * 3 + 2] = fill[2]
-  }
-  return { w, h, px }
-}
-
-function rect(c, x0, y0, w, h, rgb) {
-  for (let y = y0; y < y0 + h; y++) {
-    for (let x = x0; x < x0 + w; x++) {
-      if (x < 0 || y < 0 || x >= c.w || y >= c.h) continue
-      const i = (y * c.w + x) * 3
-      c.px[i] = rgb[0]
-      c.px[i + 1] = rgb[1]
-      c.px[i + 2] = rgb[2]
-    }
-  }
-}
-
-/** Digits at `scale` pixels per bitmap pixel, so 1 is 5x7 and 4 is 20x28. */
-function text(c, digits, x0, y0, scale, rgb) {
-  let x = x0
-  for (const ch of String(digits)) {
-    const glyph = DIGITS[Number(ch)]
-    for (let gy = 0; gy < 7; gy++) {
-      for (let gx = 0; gx < 5; gx++) {
-        if (glyph[gy][gx] === '1') rect(c, x + gx * scale, y0 + gy * scale, scale, scale, rgb)
-      }
-    }
-    x += (5 + 1) * scale
-  }
-}
-
-function png(c) {
-  const raw = Buffer.alloc((c.w * 3 + 1) * c.h)
-  let o = 0
-  for (let y = 0; y < c.h; y++) {
-    raw[o++] = 0
-    c.px.copy(raw, o, y * c.w * 3, (y + 1) * c.w * 3)
-    o += c.w * 3
-  }
-  const table = []
-  for (let n = 0; n < 256; n++) {
-    let x = n
-    for (let k = 0; k < 8; k++) x = x & 1 ? 0xedb88320 ^ (x >>> 1) : x >>> 1
-    table[n] = x >>> 0
-  }
-  const crc = (buf) => {
-    let r = 0xffffffff
-    for (const b of buf) r = table[(r ^ b) & 0xff] ^ (r >>> 8)
-    return (r ^ 0xffffffff) >>> 0
-  }
-  const chunk = (type, data) => {
-    const len = Buffer.alloc(4)
-    len.writeUInt32BE(data.length)
-    const td = Buffer.concat([Buffer.from(type), data])
-    const cc = Buffer.alloc(4)
-    cc.writeUInt32BE(crc(td))
-    return Buffer.concat([len, td, cc])
-  }
-  const ihdr = Buffer.alloc(13)
-  ihdr.writeUInt32BE(c.w, 0)
-  ihdr.writeUInt32BE(c.h, 4)
-  ihdr[8] = 8
-  ihdr[9] = 2
-  return Buffer.concat([
-    Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
-    chunk('IHDR', ihdr),
-    chunk('IDAT', deflateSync(raw)),
-    chunk('IEND', Buffer.alloc(0))
-  ])
-}
-
-const RED = [220, 30, 30]
-const BLUE = [30, 60, 220]
-const BLACK = [10, 10, 10]
-const GREEN = [20, 160, 60]
-
-const digits = (n) => String(Math.floor(Math.random() * 9000) + 1000).slice(0, n)
-
-/* -------------------------------------------------------------- rungs */
-
-/**
- * Each rung builds its own image and knows its own answer.
+/*
+ * IMPORTED FROM THE APP, NEVER COPIED.
  *
- * `both` runs the question twice with the sides swapped, so a model that
- * always answers "red" scores zero rather than half.
+ * The glyphs, the PNG encoder and the six questions lived here first,
+ * and were copied into @shared/vision when `/model check` needed to ask
+ * them too. Two copies of a test is how the bench ends up measuring a
+ * question the app does not ask - which this file already warns about
+ * for the prompts, in those words, because it happened.
+ *
+ * So the drawing is gone from here and comes from there. The script and
+ * the app now put the same images in front of the same models, and a
+ * rung added in one place is a rung both of them climb.
  */
-const RUNGS = [
-  {
-    level: 1,
-    name: 'colour and position',
-    both: true,
-    make(flip) {
-      const c = canvas(96, 96)
-      rect(c, 0, 0, 48, 96, flip ? BLUE : RED)
-      rect(c, 48, 0, 48, 96, flip ? RED : BLUE)
-      return { image: c, ask: 'Which colour fills the LEFT half of this image? One word.', want: flip ? /blue/i : /red/i }
-    }
-  },
-  {
-    level: 2,
-    name: 'counting shapes',
-    both: true,
-    make(flip) {
-      const c = canvas(160, 96)
-      const n = flip ? 5 : 3
-      for (let i = 0; i < n; i++) rect(c, 8 + i * 30, 36, 22, 22, BLUE)
-      return { image: c, ask: 'How many blue squares are in this image? Answer with just the number.', want: new RegExp(`\\b${n}\\b|\\b${['zero','one','two','three','four','five'][n]}\\b`, 'i') }
-    }
-  },
-  {
-    level: 3,
-    name: 'large text',
-    both: false,
-    make() {
-      const n = digits(4)
-      const c = canvas(240, 80)
-      text(c, n, 20, 12, 8, BLACK)
-      return { image: c, ask: 'What number is written in this image? Digits only.', want: new RegExp(n) }
-    }
-  },
-  {
-    level: 4,
-    name: 'small text, the size real UI becomes',
-    both: false,
-    make() {
-      const n = digits(4)
-      const c = canvas(240, 80)
-      text(c, n, 20, 30, 2, BLACK)
-      return { image: c, ask: 'What number is written in this image? Digits only.', want: new RegExp(n) }
-    }
-  },
-  {
-    level: 5,
-    name: 'text AND position, which is every real question',
-    both: true,
-    make(flip) {
-      const a = digits(4)
-      let b = digits(4)
-      while (b === a) b = digits(4)
-      const c = canvas(300, 120)
-      /* Two labels, told apart only by which coloured box they sit in -
-         the shape of "what does the red one say", which is what someone
-         asks about a screen. */
-      rect(c, 10, 10, 130, 100, flip ? BLUE : RED)
-      rect(c, 160, 10, 130, 100, flip ? RED : BLUE)
-      text(c, a, 24, 45, 4, [255, 255, 255])
-      text(c, b, 174, 45, 4, [255, 255, 255])
-      return {
-        image: c,
-        ask: 'What number is written inside the RED box? Digits only.',
-        want: new RegExp(flip ? b : a)
-      }
-    }
-  },
-  {
-    level: 6,
-    name: 'small text in the right place',
-    both: true,
-    make(flip) {
-      const a = digits(4)
-      let b = digits(4)
-      while (b === a) b = digits(4)
-      const c = canvas(300, 120)
-      rect(c, 10, 10, 130, 100, flip ? GREEN : RED)
-      rect(c, 160, 10, 130, 100, flip ? RED : GREEN)
-      text(c, a, 40, 52, 2, [255, 255, 255])
-      text(c, b, 190, 52, 2, [255, 255, 255])
-      return {
-        image: c,
-        ask: 'What number is written inside the RED box? Digits only.',
-        want: new RegExp(flip ? b : a)
-      }
-    }
-  }
-]
+const V = await (async () => {
+  const tmp = '.vision-shared.mjs'
+  await build({
+    entryPoints: ['src/shared/vision.ts'],
+    bundle: true,
+    platform: 'node',
+    format: 'esm',
+    outfile: tmp,
+    logLevel: 'error',
+    alias: { '@shared': 'src/shared' }
+  })
+  const mod = await import(pathToFileURL(tmp).href)
+  rmSync(tmp, { force: true })
+  return mod
+})()
 
+/* btoa is a browser global the shared module uses for the data URL. */
+globalThis.btoa ??= (s) => Buffer.from(s, 'binary').toString('base64')
+
+const RUNGS = V.VISION_LEVELS.map((level) => ({
+  level,
+  both: V.bothWays(level),
+  make: (flip) => {
+    const t = V.visionTask(level, flip)
+    return { image: t.image, ask: t.ask, want: t.want, name: t.name }
+  },
+  get name() {
+    return V.visionTask(level, false).name
+  }
+}))
 /* ------------------------------------------------------------- asking */
 
 const KEY = {
@@ -294,7 +141,7 @@ async function ask(provider, model, rung) {
         role: 'user',
         content: [
           { type: 'text', text: rung.ask },
-          { type: 'image_url', image_url: { url: `data:image/png;base64,${png(rung.image).toString('base64')}` } }
+          { type: 'image_url', image_url: { url: V.dataUrl(rung.image) } }
         ]
       }
     ]

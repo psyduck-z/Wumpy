@@ -745,7 +745,10 @@ export const CLOUD_MODELS: CloudModel[] = [
      * quota at all.
      */
     sees: true,
-    vision: { clean: 6, of: 6, medianMs: 600, on: '2026-10-19' },
+    /* 1,119ms when the test image was sent uncompressed and 600 when
+       it was deflated - the payload, not the model. Recorded as the
+       deflated figure, which is what the app now sends. */
+    vision: { clean: 6, of: 6, medianMs: 600, on: '2026-10-21' },
     blurb: '35/41 · 1.8s · 6/6 eyesight. Your Ollama account — no Wumpy quota.',
     measured: { clean: 35, of: 41, runs: 1, medianMs: 1_781, on: '2026-10-19' }
   }

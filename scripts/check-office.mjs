@@ -21,7 +21,7 @@
  */
 import { build } from 'esbuild'
 import { rmSync } from 'node:fs'
-import { deflateRawSync, crc32 } from 'node:zlib'
+import { deflateRawSync, inflateSync, crc32 } from 'node:zlib'
 import { pathToFileURL } from 'node:url'
 
 const out = '.office-check.mjs'
@@ -389,6 +389,81 @@ check('but footnotes do', O.headingFor('docx', 'word/footnotes.xml'), '--- Footn
   /* Compression is not a free pass for the entry filter: the 5KB of
      styles must still never be inflated. */
   check('and the furniture is still not decompressed', got.has('word/styles.xml'), false)
+}
+
+/* ------------------------------------------- the vision test's own PNGs */
+
+/*
+ * Not an office format, but the same problem solved in the same file's
+ * spirit: a hand-rolled zlib stream that has to be right or everything
+ * downstream lies. If the encoder were subtly wrong, every model would
+ * score zero on the vision ladder and the catalogue would fill with
+ * blind models that can all see - a failure that looks exactly like a
+ * finding.
+ */
+{
+  const V = await (async () => {
+    const tmp = '.vision-check.mjs'
+    await build({
+      entryPoints: ['src/shared/vision.ts'],
+      bundle: true,
+      platform: 'node',
+      format: 'esm',
+      outfile: tmp,
+      logLevel: 'error',
+      alias: { '@shared': 'src/shared' }
+    })
+    const mod = await import(pathToFileURL(tmp).href)
+    rmSync(tmp, { force: true })
+    return mod
+  })()
+  globalThis.btoa ??= (s) => Buffer.from(s, 'binary').toString('base64')
+
+  const task = V.visionTask(5, false)
+  const pixels = (task.image.w * 3 + 1) * task.image.h
+
+  const inflateIdat = (png) => {
+    const buf = Buffer.from(png)
+    let at = 8
+    const idat = []
+    while (at < buf.length) {
+      const len = buf.readUInt32BE(at)
+      if (buf.toString('ascii', at + 4, at + 8) === 'IDAT') idat.push(buf.subarray(at + 8, at + 8 + len))
+      at += 12 + len
+    }
+    return inflateSync(Buffer.concat(idat))
+  }
+
+  /* Stored blocks: no dependency, renderer-safe, and enormous. */
+  const stored = V.toPng(task.image)
+  check('the stored png has a png header', stored[0] === 0x89 && stored[1] === 0x50, true)
+  check('and inflates to exactly the pixels', inflateIdat(stored).length, pixels)
+
+  /*
+   * Deflated, which is what the main process sends. 108,193 bytes
+   * becomes about 880 - a hundred and thirty times smaller, and roughly
+   * 500ms of upload per picture. Measured on gemma4: the same six rungs
+   * went from 600ms each to 1,119 once the uncompressed encoder was in
+   * use, which is what prompted this.
+   */
+  const packed = V.toPng(task.image, (raw) => deflateRawSync(raw))
+  check('deflating shrinks it by two orders of magnitude', packed.length * 50 < stored.length, true)
+  check('and it still inflates to exactly the pixels', inflateIdat(packed).length, pixels)
+  /* Same image either way, or the two paths would be testing different
+     models with different pictures. */
+  check('both encodings carry identical pixels', inflateIdat(packed).equals(inflateIdat(stored)), true)
+
+  /* The data URL is what actually crosses the wire. */
+  check('the data url names the type', V.dataUrl(task.image).startsWith('data:image/png;base64,'), true)
+
+  /* The questions themselves: both sides asked, and the answer known
+     exactly rather than judged. */
+  const left = V.visionTask(1, false)
+  const right = V.visionTask(1, true)
+  check('the colour question has two answers', [left.want.test('Red'), right.want.test('Blue')], [true, true])
+  check('and they are not the same one', left.want.test('Blue'), false)
+  check('the hard rung asks about the red box', /RED box/.test(task.ask), true)
+  check('and wants a four-digit number', /^\d{4}$/.test(task.want.source), true)
 }
 
 console.log(`${NL}${count - failed}/${count} office checks passed`)
