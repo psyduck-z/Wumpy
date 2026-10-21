@@ -714,7 +714,24 @@ export const CLOUD_MODELS: CloudModel[] = [
      * the provider keeps refusing it is a model that will refuse the
      * user too, and that belongs in the blurb rather than in a log.
      */
-    blurb: 'Reads images · 1.4s when it answers · heavily rate limited by NVIDIA.'
+    /*
+     * Laddered 21 Oct, two runs a rung: 17 of 42, eighteen rungs broken.
+     * Mostly "no command proposed" - L2, L7, L8, L13 - which is the
+     * model answering out of its own head instead of checking the
+     * machine, the same failure that sank Lightning and the one thing
+     * this app exists to prevent.
+     *
+     * THE RATIONING COST TIME, NOT SCORE, and that distinction was worth
+     * checking before writing a number down. The run paused 39 times for
+     * twenty seconds apiece - thirteen minutes of waiting - and not one
+     * of the eighteen failures mentions capacity. The bench's retry
+     * absorbed every ResourceExhausted and scored the rung on what the
+     * model eventually said, which is exactly what it is for: a
+     * benchmark must not be the reason the thing it measures looks
+     * worse than it is.
+     */
+    measured: { clean: 17, of: 42, runs: 2, medianMs: 1_363, on: '2026-10-21' },
+    blurb: '17/42 · 1.4s · reads images, but answers from memory · rate limited.'
   },
   {
     id: 'stepfun-ai/step-5-preview',

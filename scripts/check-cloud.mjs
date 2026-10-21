@@ -511,21 +511,19 @@ check(
 )
 check('taken at two runs a rung', C.CLOUD_MODELS.find((m) => m.id.includes('nemotron-3-ultra'))?.measured?.runs, 2)
 /*
- * One is still unscored, and it is the one NVIDIA rations: nano-omni
- * answers "ResourceExhausted: Worker local total request limit reached
- * (16/16)" often enough that two ladder attempts were abandoned in a
- * (busy, waiting 20s) loop.
+ * Everything offered has been up the ladder as of 21 Oct.
  *
- * `measured` absent keeps it out of the ranking and the recommendation
- * rather than letting it be compared on nothing - which is the whole
- * reason the field is optional, and why this asserts a COUNT rather than
- * a list: the number going to zero is the ladder finishing, and going up
- * is somebody adding a model without measuring it.
+ * Named rather than counted: an empty list is the ladder having finished
+ * and a growing one is somebody adding a model without measuring it, and
+ * a count of 0 could not tell those apart. `measured` absent keeps an
+ * entry out of the ranking and the recommendation rather than letting it
+ * be compared on nothing, which is why the field stays optional even
+ * with nothing using it.
  */
 check(
-  'only the rationed one is still unscored',
+  'every offered model has been measured',
   C.CLOUD_MODELS.filter((m) => m.measured === undefined).map((m) => m.id),
-  ['nvidia/nemotron-3-nano-omni-30b-a3b-reasoning']
+  []
 )
 check('and DeepSeek', C.providerFor('deepseek-ai/deepseek-v4.1-flash'), 'nvidia')
 // Routing still works for the retired id, which is the point: a model typed in

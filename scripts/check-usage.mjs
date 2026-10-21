@@ -236,11 +236,18 @@ check('the default is ranked at all', typeof defaultRank === 'number', true)
  * reason this is RECORDED rather than required. A check demanding rank 1
  * would have failed four times today and taught nobody anything.
  *
- * It is worth saying what the number now means. The default is seventh
- * of eight scored models, behind five things that answer in under five
- * seconds, because it takes a hundred and twelve.
+ * It is worth saying what the number now means, because by the end of
+ * the day the ladder was complete and the figure stopped being noisy.
+ * The default is EIGHTH OF NINE. Behind five models that answer in
+ * under five seconds, and behind one that scores 17/42, because the
+ * ranking puts anything past the usable-speed floor below everything
+ * that answers - and deepseek takes a hundred and twelve seconds.
+ *
+ * It still holds the highest share in the catalogue, 39/41, on the
+ * shorter ladder. Both things are true and the second is why this is
+ * recorded rather than required.
  */
-check('and is ranked seventh, deliberately', defaultRank, 7)
+check('and is ranked eighth of nine, deliberately', defaultRank, 8)
 check(
   'because it still holds the highest ladder score',
   C.CLOUD_MODELS.find((m) => m.id === T.DEFAULT_MODEL)?.measured?.clean,
