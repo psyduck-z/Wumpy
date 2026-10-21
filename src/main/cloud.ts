@@ -1,3 +1,4 @@
+import { net } from 'electron'
 import type { ChatMessage } from '@shared/types'
 import type { ProviderId, WireMessage } from '@shared/cloud'
 import { KeyRotation, nextPacificMidnight } from '@shared/rotation'
@@ -359,6 +360,32 @@ export class CloudClient {
     let done = 0
 
     /*
+     * Asked before anything is spent, because the answer is free.
+     *
+     * With no connection every model fails the same way, and finding
+     * that out one model at a time means waiting for twenty DNS lookups
+     * to time out before saying the one thing that was knowable at the
+     * start. Electron keeps the answer to hand.
+     *
+     * Not a guarantee the provider is up - online says the machine has a
+     * route, not that NVIDIA is answering - so a per-model `offline`
+     * still exists for the case this misses. This is the cheap pass.
+     */
+    if (!net.isOnline()) {
+      return CLOUD_MODELS.map((entry) => ({
+        model: entry.id,
+        label: entry.label,
+        provider: entry.provider,
+        state: 'offline' as const,
+        ms: 0,
+        said: '',
+        why: '',
+        runs: 0,
+        times: []
+      }))
+    }
+
+    /*
      * Serial, one model at a time.
      *
      * Parallel would finish sooner and would also be the thing that makes
@@ -495,12 +522,17 @@ export class CloudClient {
     } catch (err) {
       const ms = Date.now() - started
       const timedOut = (err as Error)?.name === 'TimeoutError'
+      /* A connection that never opened says nothing about the model, so
+         it gets its own verdict rather than being filed as a failure of
+         the thing it never reached. */
+      const message = err instanceof Error ? err.message : String(err)
+      const unreachable = /fetch failed|ENOTFOUND|ECONNREFUSED|ENETUNREACH|EAI_AGAIN/i.test(message)
       return {
         ...base,
-        state: timedOut ? 'timeout' : 'error',
+        state: timedOut ? 'timeout' : unreachable ? 'offline' : 'error',
         ms,
         said: '',
-        why: timedOut ? '' : describe(err)
+        why: timedOut || unreachable ? '' : describe(err)
       }
     }
   }

@@ -618,6 +618,89 @@ export const CLOUD_MODELS: CloudModel[] = [
     measured: { clean: 33, of: 41, runs: 1, medianMs: 120_000, on: '2026-10-19' }
   },
 
+  /*
+   * --- found on 21 Oct, by asking the endpoint what it has ----------------
+   *
+   * `/v1/models` lists 81 ids. Twenty-eight plausible chat models were
+   * tried with the real preamble, and SEVENTEEN answered 404 - the
+   * listing is largely stale, so appearing in it proves nothing and this
+   * file only carries what has been called.
+   *
+   * These four answered. None has been up the capability ladder yet, so
+   * they have a speed and no score: `measured` is deliberately absent
+   * rather than guessed, which leaves them unranked in the picker and
+   * out of the recommendation until someone runs the ladder.
+   */
+  {
+    id: 'nvidia/nemotron-3-ultra-550b-a55b',
+    provider: 'nvidia',
+    label: 'Nemotron 3 Ultra 550B',
+    /*
+     * BACK, AND THE REASON IT LEFT NO LONGER HAPPENS.
+     *
+     * Removed on 17 Oct after three attempts failed three ways: 41 rungs
+     * of 504s, then a stream that opened and said nothing, then 503
+     * "Service temporarily overloaded". The note left behind said the
+     * routing was untouched and putting the entry back was one commit.
+     *
+     * This is that commit. Asked again on 21 Oct with the full preamble:
+     * "ready" in 1,006ms, the quickest thing measured here. The empty
+     * stream was the gateway having a bad week, which is exactly what
+     * the 5xx retry added on 18 Oct now absorbs.
+     */
+    /*
+     * Laddered 21 Oct, two runs a rung: 38 of 42 clean, breaking only on
+     * L6, L23 and L38 with L32 intermittent. The highest count anything
+     * here has posted, at the quickest time anything here has posted.
+     *
+     * Not directly comparable to deepseek's 39/41, which was taken
+     * before L42 existed - 0.905 against 0.951 as a share. What is
+     * comparable is the second column: one second against a hundred and
+     * twelve.
+     */
+    measured: { clean: 38, of: 42, runs: 2, medianMs: 1_006, on: '2026-10-21' },
+    blurb: '38/42 over two runs · 1.0s · biggest and quickest here.'
+  },
+  {
+    id: 'nvidia/nemotron-3.5-lightning-30b-a3b',
+    provider: 'nvidia',
+    label: 'Nemotron 3.5 Lightning 30B',
+    /*
+     * Laddered 21 Oct: 22 of 42, and the shape of the failures is worse
+     * than the count. Seventeen rungs broken, most of them answered "no
+     * command proposed" - L24, L25, L27, L28, L29, L30 - which is the
+     * model replying from memory instead of checking the machine.
+     *
+     * That is the one behaviour this whole app exists to prevent, and it
+     * is why a fast small model is not automatically a good one. Kept in
+     * the list with the number showing rather than dropped: it answers,
+     * it answers quickly, and the ranking buries it on its own.
+     */
+    measured: { clean: 22, of: 42, runs: 2, medianMs: 1_288, on: '2026-10-21' },
+    blurb: '22/42 · 1.3s · fast, but answers from memory instead of checking.'
+  },
+  {
+    id: 'nvidia/nemotron-3-nano-omni-30b-a3b-reasoning',
+    provider: 'nvidia',
+    label: 'Nemotron 3 Nano Omni 30B',
+    /* The "omni" naming suggests more than text, and it has not been
+       asked yet - bench-vision.mjs settles that in six rungs. Until it
+       is, `sees` is absent, which now means it gets sent pictures and
+       the endpoint's own refusal decides. */
+    blurb: 'Reasoning, possibly multimodal · 1.4s · ladder stopped partway.'
+  },
+  {
+    id: 'stepfun-ai/step-5-preview',
+    provider: 'nvidia',
+    label: 'Step 5 Preview',
+    /* Leaks its reasoning into the answer: the probe came back "The user
+       just said \"Say: rea...". The app strips reasoning where the
+       provider marks it as such, and this one does not mark it, so the
+       thinking arrives as content. Listed with the warning rather than
+       hidden. */
+    blurb: 'Fast · 2.2s · thinks out loud in the answer · not yet laddered.'
+  },
+
   /* --- the user's own Ollama account ------------------------------------- */
   {
     id: 'gemma4:31b-cloud',

@@ -463,19 +463,47 @@ check('and no provider at all is unchanged', C.maxTokensFor(384, false), 384)
 
 check('its models route there', C.providerFor('z-ai/glm-5.3'), 'nvidia')
 /*
- * Ultra keeps its routing and loses its row, like Google's entries did.
+ * Ultra lost its row on 17 Oct and has it back.
  *
- * Three attempts at a real measurement, three different failures: 41 rungs
- * of 504 on 16 Oct, then a stream that opened and said nothing, then 503
- * "Service temporarily overloaded" a minute later. An empty answer costs
- * the user the turn as completely as a 404, which is what the offered list
- * is for; typing the name by hand still reaches NVIDIA.
+ * Three attempts at a measurement failed three ways: 41 rungs of 504 on 16
+ * Oct, then a stream that opened and said nothing, then 503 "Service
+ * temporarily overloaded" a minute later. An empty answer costs the turn
+ * as completely as a 404, so it came out of the offered list - with a note
+ * saying the routing was untouched and putting it back was one commit.
+ *
+ * Asked again on 21 Oct with the full preamble: "ready" in 1,006ms, the
+ * quickest thing measured here. All three failures were the gateway having
+ * a bad week, which is also what the 5xx retry added on 18 Oct absorbs.
+ * This is the one commit.
  */
 check('including Nemotron', C.providerFor('nvidia/nemotron-3-ultra-550b-a55b'), 'nvidia')
 check(
-  'but Ultra is not offered, because it answers with nothing',
+  'and Ultra is offered again, because it answers now',
   C.CLOUD_MODELS.some((m) => m.id.includes('nemotron-3-ultra')),
-  false
+  true
+)
+/* With a speed and no score: it has not been up the ladder since coming
+   back, and `measured` absent is what keeps it out of the ranking and the
+   recommendation until it has. */
+/*
+ * Laddered the same day it came back: 38 of 42 over two runs a rung, at
+ * 1,006ms. The highest count anything here has posted and the quickest
+ * time anything here has posted - from the model that had been dropped
+ * four days earlier for answering with nothing.
+ */
+check(
+  'and it has a real score now',
+  C.CLOUD_MODELS.find((m) => m.id.includes('nemotron-3-ultra'))?.measured?.clean,
+  38
+)
+check('taken at two runs a rung', C.CLOUD_MODELS.find((m) => m.id.includes('nemotron-3-ultra'))?.measured?.runs, 2)
+/* Two of the four are still unscored - the ladder was stopped partway -
+   and `measured` absent keeps them out of the ranking and the
+   recommendation rather than letting them be compared on nothing. */
+check(
+  'two of the four are still unscored',
+  C.CLOUD_MODELS.filter((m) => m.measured === undefined).length,
+  2
 )
 check('and DeepSeek', C.providerFor('deepseek-ai/deepseek-v4.1-flash'), 'nvidia')
 // Routing still works for the retired id, which is the point: a model typed in
@@ -487,7 +515,14 @@ check(
   C.CLOUD_MODELS.some((m) => m.id.endsWith('v4-pro')),
   false
 )
-// Every model offered for NVIDIA has been called once against a real key.
+/*
+ * Every model offered for NVIDIA has been called once against a real key.
+ *
+ * Which is not a formality. `/v1/models` lists 81 ids and twenty-eight
+ * plausible chat models were tried on 21 Oct: SEVENTEEN answered 404. The
+ * listing is largely stale, so being in it is no evidence at all, and this
+ * list is the record of what was actually dialled.
+ */
 const NV_PROBED = [
   'z-ai/glm-5.3',
   'z-ai/glm-5.3-flash',
@@ -495,6 +530,9 @@ const NV_PROBED = [
   'nvidia/nemotron-3-ultra-550b-a55b',
   'nvidia/nemotron-3-super-120b-a12b',
   'nvidia/nemotron-3.5-super-vl-120b-a12b',
+  'nvidia/nemotron-3.5-lightning-30b-a3b',
+  'nvidia/nemotron-3-nano-omni-30b-a3b-reasoning',
+  'stepfun-ai/step-5-preview',
   'deepseek-ai/deepseek-v4.1-flash'
 ]
 check(

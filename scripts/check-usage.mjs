@@ -225,7 +225,10 @@ check('there is one model, and it is the chosen one', T.DEFAULT_MODEL, 'deepseek
  */
 const defaultRank = C.rankedModels().find((r) => r.model.id === T.DEFAULT_MODEL)?.rank
 check('the default is ranked at all', typeof defaultRank === 'number', true)
-check('and is ranked fifth, deliberately', defaultRank, 5)
+/* Seventh now, not fifth: two models were added above it on 21 Oct -
+   Ultra at 38/42 and one second, and Lightning. The number is recorded
+   rather than required, so this moving is information, not a failure. */
+check('and is ranked seventh, deliberately', defaultRank, 7)
 check(
   'because it still holds the highest ladder score',
   C.CLOUD_MODELS.find((m) => m.id === T.DEFAULT_MODEL)?.measured?.clean,

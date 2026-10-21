@@ -58,6 +58,16 @@ export type ProbeState =
   | 'limited'
   | 'timeout'
   | 'nokey'
+  /**
+   * The machine could not reach the provider at all.
+   *
+   * Kept apart from `error` because it is not a fact about the model and
+   * must not read as one. With the network down every model answers the
+   * same way, and the report became ten rows of "Could not reach the
+   * provider" under a headline saying 0 of 10 answered - which is true,
+   * and says the catalogue is broken when the wifi is.
+   */
+  | 'offline'
   | 'error'
 
 export interface ProbeResult {
@@ -164,7 +174,10 @@ export function verdictFor(status: number, content: string, ms: number): ProbeSt
 
 /** Did this probe spend a request? Used to say what the check cost. */
 export function spent(state: ProbeState): boolean {
-  return state !== 'nokey'
+  /* Neither costs a request: one was never sent, and the other never
+     arrived. Counting them would overstate what the check cost on the
+     one run where it cost nothing at all. */
+  return state !== 'nokey' && state !== 'offline'
 }
 
 /**
@@ -301,6 +314,8 @@ function row(r: ProbeResult): string {
       return `- \`${r.model}\` — **no answer in ${Math.round(PROBE_TIMEOUT_MS / 1000)}s**`
     case 'nokey':
       return `- \`${r.model}\` — no ${r.provider || 'provider'} key`
+    case 'offline':
+      return `- \`${r.model}\` — not reached`
     default:
       return `- \`${r.model}\` — ${r.why || 'failed'}`
   }
@@ -477,6 +492,27 @@ export function probeLines(results: readonly ProbeResult[], current = ''): strin
     .filter((r) => spent(r.state))
     .reduce((n, r) => n + Math.max(1, r.runs ?? 1), 0)
   const runs = Math.max(...results.map((r) => r.runs ?? 1), 1)
+
+  /*
+   * NOTHING WAS REACHED, SO NOTHING WAS LEARNED.
+   *
+   * Said once, first, and on its own. With the connection down every
+   * model fails identically, and the ordinary report then says "0/10
+   * answered" over ten rows of the same sentence - which reads as a
+   * catalogue full of broken models rather than as a machine that is
+   * offline. The one useful fact is the one it was burying.
+   *
+   * Checked against every model rather than some: one unreachable
+   * provider among several is a real finding about that provider, and
+   * belongs in the list with the others.
+   */
+  const reachable = results.filter((r) => r.state !== 'nokey')
+  if (reachable.length && reachable.every((r) => r.state === 'offline')) {
+    return [
+      '**No connection.** None of the models could be reached, so nothing was tested.',
+      'Nothing was spent. Try again once you are back online.'
+    ]
+  }
 
   /* A headline, not a paragraph: counts first, caveat only when there is
      one worth making. */

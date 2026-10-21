@@ -374,6 +374,62 @@ check('and there is a ceiling on asking', P.MAX_RUNS, 5)
   check('with a hard floor under the suggestion', P.TOO_SLOW_TO_SUGGEST_MS, 30_000)
 }
 
+/* ------------------------------------------------------- no connection */
+
+/*
+ * With the network down every model fails identically, and the ordinary
+ * report then reads "0/10 answered" over ten rows of the same sentence -
+ * which says the catalogue is full of broken models when the wifi is off.
+ * Asked for directly: if it cannot connect, return an error.
+ */
+{
+  const M = (model, ms, state = 'ok') => ({
+    model,
+    label: model,
+    provider: 'nvidia',
+    state,
+    ms,
+    said: '',
+    why: '',
+    runs: state === 'offline' || state === 'nokey' ? 0 : 2,
+    times: []
+  })
+  const down = [M('a/x', 0, 'offline'), M('a/y', 0, 'offline'), M('a/z', 0, 'nokey')]
+  const text = P.probeLines(down).join(NL)
+  check('one line, not ten', text.split(NL).length, 2)
+  check('and it names the cause', /\*\*No connection\.\*\*/.test(text), true)
+  /* The reassurance matters as much as the diagnosis: a failed check
+     that spent a day's quota would be worth knowing about. */
+  check('it says nothing was spent', /Nothing was spent/.test(text), true)
+  check('and nothing was', P.spent('offline'), false)
+
+  /* A model with no key is not evidence either way, so it does not stop
+     the offline verdict - and does not cause one on its own. */
+  const nokeyOnly = P.probeLines([M('a/z', 0, 'nokey')]).join(NL)
+  check('no keys at all is not offline', /No connection/.test(nokeyOnly), false)
+
+  /*
+   * ONE unreachable provider among several is a real finding about that
+   * provider, and belongs in the list beside the others rather than
+   * blanking the whole report.
+   */
+  const mixed = P.probeLines([M('a/x', 1200), M('a/y', 0, 'offline')]).join(NL)
+  check('one unreachable model is not everything', /No connection/.test(mixed), false)
+  check('it is listed like any other failure', /not reached/.test(mixed), true)
+}
+
+/* The cheap pass, before anything is spent: with no route, twenty DNS
+   lookups have to time out before saying what was knowable at the start. */
+{
+  const cloud = readFileSync('src/main/cloud.ts', 'utf8')
+  check('connectivity is checked first', /if \(!net\.isOnline\(\)\) \{/.test(cloud), true)
+  check('and nothing is sent when there is none', /state: 'offline' as const/.test(cloud), true)
+  /* Online means a route exists, not that the provider answers, so the
+     per-model verdict still has to exist for what this misses. */
+  check('a dead connection mid-probe is still caught', /ENOTFOUND\|ECONNREFUSED\|ENETUNREACH/.test(cloud), true)
+  check('and is not filed as a model failure', /unreachable \? 'offline' : 'error'/.test(cloud), true)
+}
+
 /* -------------------------------------------- what the check actually costs */
 
 const cloud = readFileSync('src/main/cloud.ts', 'utf8')
