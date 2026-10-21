@@ -90,6 +90,20 @@ export interface ProbeResult {
   times?: number[]
   /** The distinct verdicts seen, when the runs did not agree. */
   seen?: ProbeState[]
+  /**
+   * Whether it read a picture with a known answer.
+   *
+   * Undefined when it was not asked - a model that could not answer at
+   * all has nothing to prove about its eyesight, and one the catalogue
+   * records as blind is not worth a request to confirm.
+   *
+   * The question is the hardest single rung rather than the easiest: a
+   * four-digit number inside one of two coloured boxes, which is the
+   * shape of every real question about a screen. A model that passes
+   * red-versus-blue and cannot do this is marked as having eyes and will
+   * fail the only job it gets.
+   */
+  eyes?: boolean
 }
 
 /**
@@ -292,14 +306,26 @@ function spread(r: ProbeResult): string {
   return ` (${low.toLocaleString()}–${high.toLocaleString()}ms over ${times.length})`
 }
 
+/**
+ * What the picture test found, in two words or none.
+ *
+ * Absent when it was not asked, which is most of the time: a model that
+ * could not answer has nothing to prove, and one already recorded blind
+ * is not worth the request.
+ */
+function eyesOf(r: ProbeResult): string {
+  if (r.eyes === undefined) return ''
+  return r.eyes ? ' · reads images' : ' · cannot read images'
+}
+
 /** One line per model, in the order a person scans them. */
 function row(r: ProbeResult): string {
   const ms = r.ms ? ` — ${r.ms.toLocaleString()}ms` : ''
   switch (r.state) {
     case 'ok':
-      return `- \`${r.model}\`${ms}${spread(r)}`
+      return `- \`${r.model}\`${ms}${spread(r)}${eyesOf(r)}`
     case 'slow':
-      return `- \`${r.model}\`${ms}${spread(r)} — **slow**`
+      return `- \`${r.model}\`${ms}${spread(r)}${eyesOf(r)} — **slow**`
     case 'flaky':
       return `- \`${r.model}\` — **${r.why || 'did not answer every time'}**${ms ? `, ${r.ms.toLocaleString()}ms when it did` : ''}`
     case 'empty':

@@ -27,9 +27,11 @@ import {
   PROBE_TIMEOUT_MS,
   TOO_SLOW_TO_SUGGEST_MS,
   combineRuns,
+  usable,
   verdictFor
 } from '@shared/probe'
 import type { ProbeResult } from '@shared/probe'
+import { dataUrl, visionTask } from '@shared/vision'
 import type { ChatOptions, StreamFailure, StreamHandlers, StreamStats } from './stream'
 import type { KeyStore } from './keys'
 import { tokensPerSecond } from '@shared/speed'
@@ -508,7 +510,81 @@ export class CloudClient {
         break
       }
     }
-    return combineRuns(attempts)
+    const verdict = combineRuns(attempts)
+
+    /*
+     * And one picture, for a model that got this far and claims to see.
+     *
+     * Not asked of a model that could not answer at all - it has nothing
+     * to prove about its eyesight - nor of one the catalogue records as
+     * blind, where the answer is already known and the request would be
+     * spent confirming it. So this is one extra request on the models
+     * where the answer is both unknown and worth having.
+     *
+     * The hardest single rung rather than the easiest: a four-digit
+     * number inside one of two coloured boxes. A model that passes
+     * red-versus-blue and cannot do this would be marked as sighted and
+     * fail the only job it is given, which is reading something off a
+     * screenshot.
+     */
+    if (usable(verdict.state) && seesMedia(entry.id)) {
+      verdict.eyes = await this.probeEyes(entry.id, check.provider, keyIndex)
+      tick(0)
+    }
+    return verdict
+  }
+
+  /** One generated picture with a known answer. True when it read it. */
+  private async probeEyes(
+    model: string,
+    provider: ProviderId,
+    lane: number
+  ): Promise<boolean | undefined> {
+    const task = visionTask(5, Math.random() < 0.5)
+    const count = Math.max(1, this.keys.count(provider))
+    const index = this.separate(provider) ? lane % count : 0
+    await pace(provider, index, 0, this.separate(provider))
+    try {
+      const res = await fetch(`${PROVIDERS[provider].base}/chat/completions`, {
+        method: 'POST',
+        headers: this.headers(provider, index),
+        body: JSON.stringify({
+          model,
+          messages: [
+            {
+              role: 'user',
+              content: [
+                { type: 'text', text: task.ask },
+                { type: 'image_url', image_url: { url: dataUrl(task.image) } }
+              ]
+            }
+          ],
+          stream: false,
+          temperature: 0,
+          /* 64 rather than a handful: a reasoning model spends the
+             budget thinking first and returns empty content, which this
+             would otherwise read as a failure to see. */
+          max_tokens: 64,
+          ...(() => {
+            const kwargs = thinkingKwargsFor(provider, false)
+            return kwargs ? { chat_template_kwargs: kwargs } : {}
+          })()
+        }),
+        signal: AbortSignal.timeout(PROBE_TIMEOUT_MS)
+      })
+      if (!res.ok) {
+        /* Refused the image outright, which is the endpoint saying the
+           model is text-only however the catalogue has it. */
+        if (res.status === 400 || res.status === 415) return false
+        /* Anything else is the provider's bad minute and says nothing
+           about eyesight, so it goes back as "not asked". */
+        return undefined
+      }
+      const body = (await res.json()) as { choices?: Array<{ message?: { content?: string } }> }
+      return task.want.test((body.choices?.[0]?.message?.content ?? '').trim())
+    } catch {
+      return undefined
+    }
   }
 
   /** One model, with its own timeout so a hung provider cannot stall the rest. */
