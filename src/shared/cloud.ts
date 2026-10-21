@@ -382,10 +382,18 @@ export interface Measured {
   /**
    * Rungs attempted. A sample is fewer than the whole ladder.
    *
-   * The ladder grows, so this is not a constant and every score below
-   * carries the length it was measured against: everything on file is
-   * `of: 41`, and L42 was added on 18 Oct after a model told the user it
-   * could not type while holding the instructions that say it can.
+   * The ladder grows, so this is not a constant and every score carries
+   * the length it was measured against. L42 was added on 18 Oct, after a
+   * model told the user it could not type while holding the instructions
+   * saying it can - and the whole catalogue was re-run on the 21st so
+   * the column compares like with like.
+   *
+   * Two are still `of: 41` and cannot cheaply be brought over: deepseek
+   * at 112 seconds a turn and glm-5.3 at ninety-or-nothing would each
+   * take something like two and a half hours of wall clock to climb. A
+   * share out of 41 against one out of 42 is close enough to rank with
+   * and not close enough to call equal, which is exactly why the
+   * denominator is stored rather than assumed.
    */
   of: number
   /** Runs per rung. One is a sample, two is a measurement. */
@@ -510,7 +518,7 @@ export const CLOUD_MODELS: CloudModel[] = [
      * and nothing about today's run touches it.
      */
     label: 'DeepSeek V4.1 Flash',
-    blurb: '39/41, the best measured · 112s a turn · reads images, slowly.',
+    blurb: '39/41 on the shorter ladder · 112s a turn · reads images, slowly.',
     /* 103,204ms is the kinder of two probes on 18 Oct and a FLOOR for this
        field, not a like-for-like: the probe asks four words and stops at
        the first token, where this column means a complete short answer at
@@ -560,8 +568,8 @@ export const CLOUD_MODELS: CloudModel[] = [
      */
     sees: true,
     vision: { clean: 5, of: 6, medianMs: 1_599, on: '2026-10-19' },
-    blurb: '38/41 · 4.6s · reads images. The best balance measured here.',
-    measured: { clean: 38, of: 41, runs: 1, medianMs: 4_577, on: '2026-10-19' }
+    blurb: '37/42 · 4.6s · 5/6 eyesight.',
+    measured: { clean: 37, of: 42, runs: 2, medianMs: 4_577, on: '2026-10-21' }
   },
   /*
    * THE ONE THAT CAN SEE, and the reason this entry exists at all.
@@ -594,8 +602,8 @@ export const CLOUD_MODELS: CloudModel[] = [
        came back at 4,128ms and 9,252ms to the first word, on a far shorter
        prompt, so "the fastest measured" is no longer a claim this can
        carry. The ladder score is untouched. */
-    blurb: '36/41 over two ladders · 10.9s · the sharpest eyesight here, 6/6.',
-    measured: { clean: 36, of: 41, runs: 2, medianMs: 10_923, on: '2026-10-19' }
+    blurb: '38/42 · 10.9s · 6/6 eyesight — the sharpest here.',
+    measured: { clean: 38, of: 42, runs: 2, medianMs: 10_923, on: '2026-10-21' }
   },
   {
     id: 'z-ai/glm-5.3',
@@ -661,7 +669,7 @@ export const CLOUD_MODELS: CloudModel[] = [
      * twelve.
      */
     measured: { clean: 38, of: 42, runs: 2, medianMs: 1_006, on: '2026-10-21' },
-    blurb: '38/42 over two runs · 1.0s · biggest and quickest here.'
+    blurb: '38/42 · 1.0s · the best balance measured here.'
   },
   {
     id: 'nvidia/nemotron-3.5-lightning-30b-a3b',
@@ -751,8 +759,8 @@ export const CLOUD_MODELS: CloudModel[] = [
        it was deflated - the payload, not the model. Recorded as the
        deflated figure, which is what the app now sends. */
     vision: { clean: 6, of: 6, medianMs: 600, on: '2026-10-21' },
-    blurb: '35/41 · 1.8s · 6/6 eyesight. Your Ollama account — no Wumpy quota.',
-    measured: { clean: 35, of: 41, runs: 1, medianMs: 1_781, on: '2026-10-19' }
+    blurb: '35/42 · 1.8s · 6/6 eyesight. Your Ollama account — no Wumpy quota.',
+    measured: { clean: 35, of: 42, runs: 2, medianMs: 1_781, on: '2026-10-21' }
   }
 ]
 

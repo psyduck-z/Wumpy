@@ -35,7 +35,7 @@
  * Pure, so every verdict and every line of the report can be driven from a
  * check without a key, a network or a clock.
  */
-import { CLOUD_MODELS, GIVE_UP_AFTER_MS } from './cloud'
+import { CLOUD_MODELS, GIVE_UP_AFTER_MS, seesMedia } from './cloud'
 
 /** What a probe concluded about one model. */
 export type ProbeState =
@@ -437,7 +437,17 @@ export function recommend(results: readonly ProbeResult[]): Pick[] {
         share,
         ms: r.ms,
         score: share - penalty,
-        sees: CLOUD_MODELS.find((c) => c.id === r.model)?.sees === true
+        /*
+         * Asked the same way the WIRE asks it.
+         *
+         * This read `sees === true`, which was right while absent meant
+         * blind and became a disagreement the day the default flipped:
+         * nemotron-3-ultra has no `sees` entry, so wireMessage sends it
+         * pictures while the recommendation called it blind and offered
+         * an eye beside it that it does not need. One question, one
+         * answer.
+         */
+        sees: seesMedia(r.model)
       }
     })
     .filter((p): p is Pick => p !== null)

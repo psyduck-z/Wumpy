@@ -272,16 +272,18 @@ check('and there is a ceiling on asking', P.MAX_RUNS, 5)
    * quick model and almost none of it for a slow one.
    */
   const live = [
+    M('nvidia/nemotron-3-ultra-550b-a55b', 1006),
     M('gemma4:31b-cloud', 1781),
     M('z-ai/glm-5.3-flash', 4577),
-    M('nvidia/nemotron-3-super-120b-a12b', 6264),
     M('nvidia/nemotron-3.5-super-vl-120b-a12b', 10_923),
     M('deepseek-ai/deepseek-v4.1-flash', 112_211),
     M('z-ai/glm-5.3', 120_000, 'timeout')
   ]
   const ranked = P.recommend(live)
 
-  check('the best balance wins', ranked[0].model, 'z-ai/glm-5.3-flash')
+  /* Ultra: 38 of 42 at a second, which is the top score AND the top
+     speed - the first time one model has held both. */
+  check('the best balance wins', ranked[0].model, 'nvidia/nemotron-3-ultra-550b-a55b')
 
   /*
    * THE JUDGEMENT THE WHOLE THING EXISTS TO MAKE. DeepSeek has the highest
@@ -310,14 +312,14 @@ check('and there is a ceiling on asking', P.MAX_RUNS, 5)
      something, so the quickest does not simply win. */
   check('and below the floor smartness still counts', ranked[0].model !== 'gemma4:31b-cloud', true)
   check(
-    'the quickest is beaten by a smarter one',
+    'a smarter model beats a quicker one',
     ranked.findIndex((p) => p.model === 'z-ai/glm-5.3-flash') <
       ranked.findIndex((p) => p.model === 'gemma4:31b-cloud'),
     true
   )
 
   /* And the other direction: fastest does not win either. */
-  check('nor does a fast but weak model win', ranked[0].model !== 'nvidia/nemotron-3-super-120b-a12b', true)
+  check('nor does a fast but weak model win', ranked[0].model !== 'nvidia/nemotron-3.5-lightning-30b-a3b', true)
 
   /* Flaky is not recommendable whatever it scores: "use this, it works
      about half the time" is not a recommendation. */
@@ -326,9 +328,9 @@ check('and there is a ceiling on asking', P.MAX_RUNS, 5)
   const text = P.recommendLines(live, '').join(NL)
   /* A label and the facts: "Recommended: x - 93%, 4.6s", not a sentence
      explaining what a recommendation is. */
-  check('the report names one', /\*\*Recommended:\*\* `z-ai\/glm-5\.3-flash`/.test(text), true)
-  check('with both numbers behind it', /93%, 4\.6s/.test(text), true)
-  check('and the command to take it', /\/model z-ai\/glm-5\.3-flash/.test(text), true)
+  check('the report names one', /\*\*Recommended:\*\* `nvidia\/nemotron-3-ultra-550b-a55b`/.test(text), true)
+  check('with both numbers behind it', /90%, 1\.0s/.test(text), true)
+  check('and the command to take it', /\/model nvidia\/nemotron-3-ultra-550b-a55b/.test(text), true)
 
   /*
    * Vision is the axis neither number can see, and for someone working
@@ -341,6 +343,13 @@ check('and there is a ceiling on asking', P.MAX_RUNS, 5)
    * ladder - so the pick is no longer blind and the line correctly does
    * not appear. Three models were marked blind by omission on 19 Oct and
    * two of them could see all along.
+   */
+  /*
+   * The pick can see, so no alternative is offered - and `sees` here is
+   * asked the same way the wire asks it. It used to be `sees === true`,
+   * which disagreed with wireMessage the day absent started meaning
+   * sighted: Ultra has no entry, so it was sent pictures while being
+   * called blind and handed an eye it did not need.
    */
   check('no vision line when the pick can see', /For screenshots/.test(text), false)
 
@@ -370,9 +379,9 @@ check('and there is a ceiling on asking', P.MAX_RUNS, 5)
   check('saying why it is there', /the pick above is blind/.test(probe), true)
 
   /* Already on it: no point telling someone to switch to where they are. */
-  const staying = P.recommendLines(live, 'z-ai/glm-5.3-flash').join(NL)
+  const staying = P.recommendLines(live, 'nvidia/nemotron-3-ultra-550b-a55b').join(NL)
   check('staying put is phrased as staying', /already on it/.test(staying), true)
-  check('and does not hand out a switch command', /\/model z-ai/.test(staying), false)
+  check('and does not hand out a switch command', /`\/model nvidia/.test(staying), false)
 
   /* Nothing answered, so there is nothing to recommend - and saying so
      wrongly would be worse than saying nothing. */
