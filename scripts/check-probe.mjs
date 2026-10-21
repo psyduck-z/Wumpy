@@ -344,14 +344,30 @@ check('and there is a ceiling on asking', P.MAX_RUNS, 5)
    */
   check('no vision line when the pick can see', /For screenshots/.test(text), false)
 
-  /* So the case is built deliberately: nemotron-3-super genuinely cannot
-     take an image - the endpoint answers "multimodal processing is not
-     ..." - and here it is quick enough to win anyway. */
-  const blindWins = [M('nvidia/nemotron-3-super-120b-a12b', 2000), M('gemma4:31b-cloud', 28_000)]
-  const blindText = P.recommendLines(blindWins, '').join(NL)
-  check('a blind winner is still the pick', /Recommended:.*nemotron-3-super/.test(blindText), true)
-  check('and the best eye is named beside it', /For screenshots:.*gemma4/.test(blindText), true)
-  check('saying why it is there', /the pick above is blind/.test(blindText), true)
+  /*
+   * The blind-winner case cannot be built from the catalogue any more,
+   * and that is itself the finding.
+   *
+   * It used to be nemotron-3-super - genuinely refused images, quick
+   * enough to win - and NVIDIA withdrew it on 21 Oct. Every remaining
+   * model that is fast, measured and blind is now only glm-5.3, which is
+   * past the floor under the recommendation and so is never the pick.
+   *
+   * So the branch is asserted at the source rather than exercised, and
+   * the reason is written down: a test that quietly stopped covering
+   * anything is worse than one that says it cannot.
+   */
+  const blind = C.CLOUD_MODELS.filter((m) => m.sees === false && m.measured)
+  check('every blind model left is too slow to recommend', blind.length > 0, true)
+  check(
+    'so none of them can be the pick',
+    blind.every((m) => (m.measured?.medianMs ?? 0) > P.TOO_SLOW_TO_SUGGEST_MS),
+    true
+  )
+  const probe = readFileSync('src/shared/probe.ts', 'utf8')
+  check('the vision line is still there for when one is', /if \(!best\.sees\) \{/.test(probe), true)
+  check('and names the best eye beside it', /For screenshots:/.test(probe), true)
+  check('saying why it is there', /the pick above is blind/.test(probe), true)
 
   /* Already on it: no point telling someone to switch to where they are. */
   const staying = P.recommendLines(live, 'z-ai/glm-5.3-flash').join(NL)
