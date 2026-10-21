@@ -230,12 +230,17 @@ check('the default is ranked at all', typeof defaultRank === 'number', true)
  * added above it on 21 Oct, then sixth again when nemotron-3-super was
  * withdrawn by NVIDIA the same evening.
  *
- * Three moves in a day, none of them a decision about the default -
- * which is the whole reason this is RECORDED rather than required. A
- * check that demanded rank 1 would have failed three times today and
- * taught nobody anything.
+ * Four moves in a day - fifth, seventh, sixth, seventh - and not one of
+ * them a decision about the default: two models added above it, one
+ * withdrawn by NVIDIA, one laddered into place. Which is the whole
+ * reason this is RECORDED rather than required. A check demanding rank 1
+ * would have failed four times today and taught nobody anything.
+ *
+ * It is worth saying what the number now means. The default is seventh
+ * of eight scored models, behind five things that answer in under five
+ * seconds, because it takes a hundred and twelve.
  */
-check('and is ranked sixth, deliberately', defaultRank, 6)
+check('and is ranked seventh, deliberately', defaultRank, 7)
 check(
   'because it still holds the highest ladder score',
   C.CLOUD_MODELS.find((m) => m.id === T.DEFAULT_MODEL)?.measured?.clean,
