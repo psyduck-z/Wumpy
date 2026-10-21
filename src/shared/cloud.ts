@@ -1191,6 +1191,32 @@ export function eyeFor(model: string): CloudModel | null {
    */
   const score = (m: CloudModel): number =>
     m.vision && m.vision.of > 0 ? m.vision.clean / m.vision.of : -1
+  /**
+   * PREFERRING THE FREE EYE WAS TRIED ON 21 OCT AND IS NOT IN.
+   *
+   * The argument for it is good: the borrowed eye is an EXTRA request on
+   * top of the turn it is helping with, and gemma4 is the user's own
+   * Ollama account - nothing from the per-minute ceiling that the pacer,
+   * the rotation and half the quota machinery exist to respect. It and
+   * the VL model are both 6/6 on the vision ladder, at 600ms and 370ms,
+   * so sorting on speed spends an NVIDIA request to save 230ms on the
+   * one request that need not have cost anything.
+   *
+   * What killed it: a keyless provider is a DAEMON, and a daemon can be
+   * off. `ready()` calls keyless providers ready the moment they are
+   * named, because there is no key to check - so the eye would have been
+   * offered with nothing configured at all, and when Ollama was not
+   * running it would have returned nothing, quietly. The description
+   * would simply be absent and the user would never learn why.
+   *
+   * That is the exact failure this file keeps being edited to remove,
+   * and 230 milliseconds does not buy it. The checks said so first: two
+   * of them assert that an eye on a provider which cannot answer is not
+   * an eye, and they were right.
+   *
+   * It becomes correct the moment there is a liveness check for the
+   * daemon rather than an assumption, which is a different change.
+   */
   const seers = CLOUD_MODELS.filter((m) => m.sees).sort(
     (a, b) =>
       score(b) - score(a) ||

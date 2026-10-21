@@ -242,8 +242,21 @@ check(
   C.eyeFor('nvidia/nemotron-3-super-120b-a12b')?.id,
   'nvidia/nemotron-3.5-super-vl-120b-a12b'
 )
-/* Both 6/6, so speed breaks the tie: 370ms against 600ms. */
-check('even against an equally accurate one', C.CLOUD_MODELS.find((m) => m.id === 'gemma4:31b-cloud')?.vision?.clean, 6)
+/*
+ * Both 6/6, so speed breaks the tie: 370ms against 600ms.
+ *
+ * Preferring the FREE one was tried on 21 Oct and backed out. gemma4 is
+ * the user's own Ollama account and costs nothing from the per-minute
+ * ceiling, which is a good argument - but a keyless provider is a daemon
+ * and a daemon can be off. `ready()` calls keyless providers ready the
+ * moment they are named, so the eye would have been offered with nothing
+ * configured, and returned nothing quietly when Ollama was down.
+ *
+ * These two checks are what caught it, which is why they are worth
+ * keeping sharp: an eye on a provider that cannot answer is not an eye.
+ */
+check('both are equally accurate', C.CLOUD_MODELS.find((m) => m.id === 'gemma4:31b-cloud')?.vision?.clean, 6)
+check('and the quicker one is chosen', C.eyeFor('nvidia/nemotron-3-super-120b-a12b')?.vision?.medianMs, 370)
 /* And the highest-scoring model in the whole catalogue is not it. */
 check('the smartest model is not the eye', C.eyeFor('nvidia/nemotron-3-super-120b-a12b')?.id !== 'deepseek-ai/deepseek-v4.1-flash', true)
 check('because it reads one image in 90 seconds', C.CLOUD_MODELS.find((m) => m.id === 'deepseek-ai/deepseek-v4.1-flash')?.vision?.medianMs, 90_006)
