@@ -523,6 +523,9 @@ check(
  * listing is largely stale, so being in it is no evidence at all, and this
  * list is the record of what was actually dialled.
  */
+/* nemotron-3-super is absent from the offered list as of 21 Oct - 404,
+   "Function 'ac74040f-...': Not found", while Ultra answered 200 on the
+   same key a second later. Its routing is kept; the row is gone. */
 const NV_PROBED = [
   'z-ai/glm-5.3',
   'z-ai/glm-5.3-flash',

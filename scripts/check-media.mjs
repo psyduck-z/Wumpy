@@ -130,8 +130,7 @@ check('and so can the lite one', C.seesMedia('gemini-3.1-flash-lite'), true)
 check('an unmeasured model is assumed to see', C.seesMedia('codestral-latest'), true)
 check('and so is one nobody has heard of', C.seesMedia('someone/brand-new-model'), true)
 /* Proved blind, so not even tried. */
-check('a model the endpoint refused does not', C.seesMedia('nvidia/nemotron-3-super-120b-a12b'), false)
-check('nor the other one', C.seesMedia('z-ai/glm-5.3'), false)
+check('a model the endpoint refused does not', C.seesMedia('z-ai/glm-5.3'), false)
 check('and nothing is not a model', C.seesMedia(''), false)
 
 /*
@@ -167,8 +166,12 @@ check('the vision model on NVIDIA can see', C.seesMedia('nvidia/nemotron-3.5-sup
  * glm-5.3 answers "Invalid request". That is a rejection, not a bad
  * answer, so there is nothing to argue with.
  */
-check('the one it is named after cannot', C.seesMedia('nvidia/nemotron-3-super-120b-a12b'), false)
-check('nor can the big GLM', C.seesMedia('z-ai/glm-5.3'), false)
+/* nemotron-3-super stood here until NVIDIA withdrew it on 21 Oct. With
+   the row gone, `sees` is absent for it - and absent now means sighted,
+   so it is no longer an example of anything. The example has to be an
+   entry that is still offered AND still refuses. */
+check('the big GLM cannot', C.seesMedia('z-ai/glm-5.3'), false)
+check('and it is still in the list to say so', C.CLOUD_MODELS.some((m) => m.id === 'z-ai/glm-5.3'), true)
 /*
  * Exactly these, and each one asked rather than assumed.
  *
@@ -239,7 +242,7 @@ check('and that is four of the six', C.CLOUD_MODELS.filter((m) => m.sees).length
 
 check(
   'the quickest accurate eye is the one borrowed',
-  C.eyeFor('nvidia/nemotron-3-super-120b-a12b')?.id,
+  C.eyeFor('z-ai/glm-5.3')?.id,
   'nvidia/nemotron-3.5-super-vl-120b-a12b'
 )
 /*
@@ -256,7 +259,7 @@ check(
  * keeping sharp: an eye on a provider that cannot answer is not an eye.
  */
 check('both are equally accurate', C.CLOUD_MODELS.find((m) => m.id === 'gemma4:31b-cloud')?.vision?.clean, 6)
-check('and the quicker one is chosen', C.eyeFor('nvidia/nemotron-3-super-120b-a12b')?.vision?.medianMs, 370)
+check('and the quicker one is chosen', C.eyeFor('z-ai/glm-5.3')?.vision?.medianMs, 370)
 
 /*
  * THE BADGE SHOWS A SCORE ONLY WHEN THERE IS ONE.
@@ -297,7 +300,7 @@ check('the Ollama one can see', C.seesMedia('gemma4:31b-cloud'), true)
  * example has to be one the endpoint actually refuses, or this measures
  * nothing.
  */
-const BLIND = 'nvidia/nemotron-3-super-120b-a12b'
+const BLIND = 'z-ai/glm-5.3'
 check('a model that cannot see gets an eye', C.eyeFor(BLIND)?.id, 'nvidia/nemotron-3.5-super-vl-120b-a12b')
 check('one that can see does not need one', C.eyeFor('nvidia/nemotron-3.5-super-vl-120b-a12b'), null)
 check('nor does a Gemini typed in by hand', C.eyeFor('gemini-3.8-flash'), null)

@@ -447,19 +447,21 @@ export const CLOUD_MODELS: CloudModel[] = [
    * the desktop by name and not enough to answer "what does this look
    * like".
    */
-  {
-    id: 'nvidia/nemotron-3-super-120b-a12b',
-    provider: 'nvidia',
-    /* Blind, and PROVED rather than assumed - which is the only kind of
-       blind the catalogue records now that absent means sighted. The
-       endpoint answers "ValueError: Received multimodal data but
-       multimodal processing is not..." : a refusal from the server, not a
-       bad answer. Measured 19 Oct. */
-    sees: false,
-    label: 'Nemotron 3 Super 120B',
-    blurb: '32/41 · 6.3s · text only — the endpoint refuses images.',
-    measured: { clean: 32, of: 41, runs: 1, medianMs: 6_264, on: '2026-10-19' }
-  },
+  /*
+   * NEMOTRON 3 SUPER IS GONE, and the check is what found it.
+   *
+   * 32/41 on 16 Oct, 6,264ms on the morning of the 21st, and 404 that
+   * same evening: "Function 'ac74040f-...': Not found". Ultra answered
+   * 200 on the same key a second later, so it was not the key, the
+   * network or capacity - NVIDIA withdrew the deployment between one
+   * measurement and the next, which is precisely what a listing of 81
+   * ids where seventeen 404 should have led anyone to expect.
+   *
+   * Same treatment as Google's entries and DeepSeek v4-pro before it:
+   * the routing stays, so the name typed by hand still reaches NVIDIA
+   * and gets NVIDIA's own 404, and the ROW goes. A row that 404s is
+   * worse than no row, because someone picks it and loses the turn.
+   */
   {
     id: 'deepseek-ai/deepseek-v4.1-flash',
     provider: 'nvidia',
@@ -1622,8 +1624,12 @@ export function looksLikeKey(provider: ProviderId, raw: string): { ok: boolean; 
  * matches it at 9/10 and is the one to differ on if a tier needs variety.
  */
 export const FALLBACK_CLOUD_MODEL: Record<string, string> = {
-  flash: 'nvidia/nemotron-3-super-120b-a12b',
-  fast: 'nvidia/nemotron-3-super-120b-a12b',
+  /* Both pointed at nemotron-3-super until it was withdrawn on 21 Oct,
+     which would have made the FALLBACK - the thing reached when the
+     first choice already failed - a 404. Ultra is quicker than it was
+     (1,006ms against 6,264) and six rungs better. */
+  flash: 'nvidia/nemotron-3-ultra-550b-a55b',
+  fast: 'nvidia/nemotron-3-ultra-550b-a55b',
   thinker: 'deepseek-ai/deepseek-v4.1-flash',
   deep: 'deepseek-ai/deepseek-v4.1-flash'
 }
