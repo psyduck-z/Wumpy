@@ -451,6 +451,11 @@ check('and there is a ceiling on asking', P.MAX_RUNS, 5)
     true
   )
   check('nor is a model past the floor', /got\.ms > TOO_SLOW_TO_SUGGEST_MS/.test(cloud), true)
+  /* And the picture question follows the same rule. `usable` includes
+     `slow`, so without this deepseek - sighted, 112s a turn - would be
+     asked one at the ninety seconds it needs per image, handing back
+     most of the saving from not asking it twice. */
+  check('and the eye test skips it too', /verdict\.ms <= TOO_SLOW_TO_SUGGEST_MS/.test(cloud), true)
   /* The runs it skipped still count as progress, or the bar stops short
      of the end on every slow model in the list. */
   check('the skipped runs still count as done', /tick\(times - run - 1\)/.test(cloud), true)

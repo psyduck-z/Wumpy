@@ -21,6 +21,7 @@
  */
 import { build } from 'esbuild'
 import { rmSync } from 'node:fs'
+import { deflateRawSync, crc32 } from 'node:zlib'
 import { pathToFileURL } from 'node:url'
 
 const out = '.office-check.mjs'
@@ -237,6 +238,61 @@ check('but footnotes do', O.headingFor('docx', 'word/footnotes.xml'), '--- Footn
     return mod
   })()
 
+  /**
+   * A zip whose entries are DEFLATED, which is what Word actually writes.
+   *
+   * The stored-block builder below proves the directory walk and the
+   * offsets, and deliberately does not touch the platform's inflate - so
+   * for two days the reader had never once been handed a real compressed
+   * entry, and the gap was flagged twice as "should work". This closes
+   * it: zlib compresses, DecompressionStream decompresses, and the two
+   * have to agree on every byte.
+   */
+  function makeDeflatedZip(files) {
+    const enc = new TextEncoder()
+    const locals = []
+    const dir = []
+    let offset = 0
+    for (const [name, body] of files) {
+      const n = enc.encode(name)
+      const raw = Buffer.from(enc.encode(body))
+      const comp = deflateRawSync(raw)
+      const sum = crc32(raw)
+      const local = Buffer.alloc(30 + n.length + comp.length)
+      local.writeUInt32LE(0x04034b50, 0)
+      local.writeUInt16LE(20, 4)
+      local.writeUInt16LE(8, 8) // deflate
+      local.writeUInt32LE(sum, 14)
+      local.writeUInt32LE(comp.length, 18)
+      local.writeUInt32LE(raw.length, 22)
+      local.writeUInt16LE(n.length, 26)
+      local.writeUInt16LE(0, 28)
+      Buffer.from(n).copy(local, 30)
+      comp.copy(local, 30 + n.length)
+      locals.push(local)
+
+      const entry = Buffer.alloc(46 + n.length)
+      entry.writeUInt32LE(0x02014b50, 0)
+      entry.writeUInt16LE(8, 10)
+      entry.writeUInt32LE(sum, 16)
+      entry.writeUInt32LE(comp.length, 20)
+      entry.writeUInt32LE(raw.length, 24)
+      entry.writeUInt16LE(n.length, 28)
+      entry.writeUInt32LE(offset, 42)
+      Buffer.from(n).copy(entry, 46)
+      dir.push(entry)
+      offset += local.length
+    }
+    const directory = Buffer.concat(dir)
+    const end = Buffer.alloc(22)
+    end.writeUInt32LE(0x06054b50, 0)
+    end.writeUInt16LE(files.length, 8)
+    end.writeUInt16LE(files.length, 10)
+    end.writeUInt32LE(directory.length, 12)
+    end.writeUInt32LE(offset, 16)
+    return new Blob([Buffer.concat([...locals, directory, end])])
+  }
+
   /** A zip with no compression, which is a legal zip and the simplest one. */
   function makeZip(files) {
     const enc = new TextEncoder()
@@ -305,6 +361,34 @@ check('but footnotes do', O.headingFor('docx', 'word/footnotes.xml'), '--- Footn
 
   /* A zip bomb cannot be let through on the directory's own say-so. */
   check('there is a ceiling on what comes out', UNZIP.MAX_UNZIP_BYTES <= 16 * 1024 * 1024, true)
+
+  /*
+   * THE PATH A REAL WORD FILE TAKES. Everything above used stored
+   * entries, which never exercises inflate at all - so the reader had
+   * been shipped twice on "should work". Deflated here by zlib and
+   * decompressed by DecompressionStream, which is the pair that has to
+   * agree in production.
+   */
+  const paragraphs = Array.from(
+    { length: 60 },
+    (_, i) => `<w:p><w:r><w:t>Paragraph ${i} with & &lt;escapes&gt; in it</w:t></w:r></w:p>`
+  ).join('')
+  const realDocx = makeDeflatedZip([
+    ['[Content_Types].xml', '<Types/>'],
+    ['word/styles.xml', '<styles>' + 'x'.repeat(5000) + '</styles>'],
+    ['word/document.xml', `<w:body>${paragraphs}</w:body>`]
+  ])
+  const got = await UNZIP.readZipText(realDocx, (path) => O.wantedEntry('docx', path))
+  check('a deflated entry comes out', got.has('word/document.xml'), true)
+
+  const body = O.textFromDocx(got.get('word/document.xml') ?? '')
+  const lines = body.split(NL)
+  check('every paragraph survived', lines.length, 60)
+  check('the first is intact', lines[0], 'Paragraph 0 with & <escapes> in it')
+  check('and so is the last', lines[59], 'Paragraph 59 with & <escapes> in it')
+  /* Compression is not a free pass for the entry filter: the 5KB of
+     styles must still never be inflated. */
+  check('and the furniture is still not decompressed', got.has('word/styles.xml'), false)
 }
 
 console.log(`${NL}${count - failed}/${count} office checks passed`)

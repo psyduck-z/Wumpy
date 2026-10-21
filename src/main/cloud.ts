@@ -527,7 +527,23 @@ export class CloudClient {
      * fail the only job it is given, which is reading something off a
      * screenshot.
      */
-    if (usable(verdict.state) && seesMedia(entry.id)) {
+    if (
+      usable(verdict.state) &&
+      seesMedia(entry.id) &&
+      /*
+       * And not on a model already too slow to suggest.
+       *
+       * `usable` includes `slow`, so without this deepseek - sighted,
+       * and 112 seconds a turn - would be asked a picture question too,
+       * at the ninety seconds it needs per image. That is most of the
+       * saving from not asking it twice, handed straight back for a fact
+       * about a model nobody is being pointed at.
+       *
+       * The same rule as the repeat it already skips: what is learned
+       * cannot change the advice.
+       */
+      verdict.ms <= TOO_SLOW_TO_SUGGEST_MS
+    ) {
       verdict.eyes = await this.probeEyes(entry.id, check.provider, keyIndex)
       tick(0)
     }
