@@ -394,7 +394,7 @@ function systemPromptFor(
  * change between questions.
  */
 function currentAssistant(): Assistant {
-  return assistantFor(activeModel(), settings.get('shellEnabled'))
+  return assistantFor(activeModel(), settings.get('shellEnabled'), settings.get('thinking'))
 }
 
 /**

@@ -444,6 +444,20 @@ export interface WumpySettings {
   approvalMode: ApprovalMode
   /** Keep the native dialog for destructive commands even in `all`. */
   confirmRisky: boolean
+  /**
+   * Let the model reason before answering.
+   *
+   * The plumbing has been here since the first NVIDIA model - `thinking`
+   * reaches `reasoningEffortFor`, `thinkingKwargsFor` and `maxTokensFor`,
+   * each of which does something different with it - and it was wired to
+   * a constant `false`. Fast was the only setting there was.
+   *
+   * Off by default, which is what it has been doing all along. Reasoning
+   * is spent out of max_tokens BEFORE the first visible word, so it costs
+   * latency on every turn including the ones that are just chat, and the
+   * app is summoned over the top of whatever someone was already doing.
+   */
+  thinking: boolean
   /** Allow Wumpy to propose web searches. */
   searchEnabled: boolean
   /**

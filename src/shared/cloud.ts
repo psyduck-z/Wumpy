@@ -918,14 +918,36 @@ export function providerFor(model: string): ProviderId | null {
   if (name.startsWith('gemini-') || name.startsWith('models/gemini-')) return 'google'
 
   /**
-   * An Ollama CLOUD model, which is `name:tag-cloud` by their convention.
+   * ANY `name:tag` IS OLLAMA, local or cloud.
    *
-   * Only the -cloud suffix, deliberately. A plain `phi4-mini:3.8b` is a model
-   * on this laptop, and Wumpy has had no local client since it went
-   * cloud-only - so routing those here would turn "not a hosted model" into a
-   * connection attempt that fails later and less clearly.
+   * This was `-cloud` only, on the reasoning that "a plain phi4-mini:3.8b
+   * is a model on this laptop, and Wumpy has had no local client since it
+   * went cloud-only - so routing those here would turn 'not a hosted
+   * model' into a connection attempt that fails later and less clearly".
+   *
+   * That was wrong about the mechanism and is now wrong about the need.
+   * There is nothing extra to build: Ollama's OpenAI-compatible endpoint
+   * serves LOCAL and cloud models at the same URL, which is already the
+   * `ollama` provider - gemma4:31b-cloud has been reaching local hardware
+   * through it all along.
+   *
+   * And the suffix test was too narrow even for the case it was written
+   * for. Measured on this machine 21 Oct: the daemon offers
+   * `qwen3.6:35b-a3b`, a 35B local model whose own capability list
+   * includes vision, and `minimax-m3.1-flash:cloud` - note the colon.
+   * `/:.*-cloud$/` matches neither, so BOTH of the user's own models were
+   * unaddressable, and the newer cloud naming would have been missed
+   * anyway.
+   *
+   * Safe because the shapes do not overlap: every NVIDIA id has a slash,
+   * and the bare Mistral names have no colon. A colon with no slash is
+   * Ollama's convention and nobody else's.
+   *
+   * The failure the old comment feared is better now too: a daemon that
+   * is not running is a refused connection, which `/model check` reports
+   * as `offline` rather than as a broken model.
    */
-  if (!name.includes('/') && /:.*-cloud$/.test(name)) return 'ollama'
+  if (!name.includes('/') && /:/.test(name)) return 'ollama'
 
   /**
    * The vendor-prefixed forms are decided before the bare ones, because the
@@ -1702,6 +1724,27 @@ export function reasoningEffortFor(
    * provider's alwaysReasons flag exists to cover.
    */
   if (provider === 'nvidia') return null
+  /**
+   * OLLAMA TAKES 'none' AND IGNORES EVERYTHING ELSE.
+   *
+   * This fell through to 'low', which is not a smaller amount of
+   * thinking here - it is no effect at all. Measured 21 Oct on
+   * qwen3.6:35b-a3b, a 35B reasoning model running on this machine,
+   * asked to say one word:
+   *
+   *   nothing sent          19,907ms   138 tokens   542 chars of thought
+   *   think: false          19,907ms   138 tokens   542 chars   (ignored)
+   *   chat_template_kwargs  18,844ms   138 tokens   542 chars   (ignored)
+   *   reasoning_effort low  25,520ms   161 tokens   640 chars   (ignored)
+   *   reasoning_effort none    772ms     2 tokens   none
+   *
+   * Twenty-five times quicker for the same answer, and the two switches
+   * that work on the hosted providers - Ollama's own `think` flag and
+   * NVIDIA's chat_template_kwargs - both do nothing here. Which is the
+   * whole argument for `/nothink` taking a different route per provider
+   * rather than one flag sent everywhere and hoped over.
+   */
+  if (provider === 'ollama') return 'none'
   return 'low'
 }
 

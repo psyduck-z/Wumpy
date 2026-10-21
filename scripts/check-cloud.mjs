@@ -46,10 +46,23 @@ check('including one not in the catalogue', C.providerFor('gemini-9-ultra'), 'go
 check('the models/ prefix the API returns', C.providerFor('models/gemini-3.8-flash'), 'google')
 check('a gpt-oss model routes to Groq', C.providerFor('openai/gpt-oss-120b'), 'groq')
 check('as does Kimi on Groq', C.providerFor('moonshotai/kimi-k2-instruct-0905'), 'groq')
-check('an Ollama model is not cloud', C.providerFor('qwen2.5-coder:14b'), null)
-check('nor is one with a dash and a tag', C.providerFor('phi4-mini:3.8b'), null)
+/*
+ * A LOCAL OLLAMA MODEL IS ADDRESSABLE AS OF 21 OCT, and these three
+ * asserted the opposite.
+ *
+ * The rule was `-cloud` only, because "a plain phi4-mini:3.8b is a model
+ * on this laptop, and Wumpy has had no local client since it went
+ * cloud-only". Both halves were wrong: Ollama's OpenAI endpoint serves
+ * local and cloud at the same URL - the one gemma4:31b-cloud has been
+ * using all along - so there is nothing extra to build.
+ *
+ * `isCloudModel` is the odd name now and only decides whether the chosen
+ * model is one the app can reach, which a local one is.
+ */
+check('a local Ollama model routes to the daemon', C.providerFor('qwen2.5-coder:14b'), 'ollama')
+check('including one with a dash and a tag', C.providerFor('phi4-mini:3.8b'), 'ollama')
 check('nor is an empty name', C.providerFor(''), null)
-check('isCloudModel agrees', C.isCloudModel('phi4-mini:3.8b'), false)
+check('and it counts as reachable', C.isCloudModel('phi4-mini:3.8b'), true)
 check('and the other way', C.isCloudModel('gemini-3.5-flash'), true)
 
 /* ------------------------------------------------- the silently deleted prompt */
@@ -1155,5 +1168,47 @@ check('the tooltip carries how hard it was measured', /run/.test(top.title) && /
 check('an unmeasured model gets no badge', C.modelTag({ id: 'x', provider: 'nvidia', label: 'x', blurb: 'x' }, null), null)
 
 const renderer = readFileSync('src/renderer/src/App.tsx', 'utf8')
+
+/* ------------------------------------------- turning the thinking off */
+
+/*
+ * `/think` and `/nothink` only mean anything if the switch reaches the
+ * model, and every provider takes a different one. Measured 21 Oct on
+ * qwen3.6:35b-a3b, a 35B reasoning model on this machine, asked for one
+ * word: 19,907ms with nothing sent, 18,844 with NVIDIA's
+ * chat_template_kwargs, 25,520 with reasoning_effort low - and 772ms
+ * with reasoning_effort none. Twenty-five times, and only one of the
+ * three switches does anything.
+ */
+check('ollama takes none, not low', C.reasoningEffortFor('ollama', false), 'none')
+check('and nothing at all when thinking is wanted', C.reasoningEffortFor('ollama', true), null)
+/* NVIDIA ignores the field and refuses nothing, so sending it there
+   would be a comforting no-op; its switch is the template one. */
+check('nvidia still gets no effort field', C.reasoningEffortFor('nvidia', false), null)
+check('but does get the template switch', C.thinkingKwargsFor('nvidia', false) !== null, true)
+/* And Ollama gets no template switch, because it ignores that one. */
+check('ollama gets no template switch', C.thinkingKwargsFor('ollama', false), null)
+
+/* --------------------------------------- a local model is addressable */
+
+/*
+ * The routing was `-cloud` only, on the reasoning that a plain
+ * `phi4-mini:3.8b` is a local model and Wumpy has no local client. Both
+ * halves were wrong: Ollama's OpenAI endpoint serves local and cloud
+ * models at the same URL - the one `gemma4:31b-cloud` has been using all
+ * along - and the suffix test was too narrow even for cloud models.
+ *
+ * Measured on this machine: the daemon offers `qwen3.6:35b-a3b`, a 35B
+ * local model whose own capability list includes vision, and
+ * `minimax-m3.1-flash:cloud`. The old `/:.*-cloud$/` matched NEITHER.
+ */
+check('a local model routes to the daemon', C.providerFor('qwen3.6:35b-a3b'), 'ollama')
+check('and the newer cloud naming does too', C.providerFor('minimax-m3.1-flash:cloud'), 'ollama')
+check('as does the older one', C.providerFor('gemma4:31b-cloud'), 'ollama')
+/* Safe because the shapes do not overlap: every NVIDIA id has a slash,
+   and the bare Mistral names have no colon. */
+check('a slashed id is still NVIDIA', C.providerFor('nvidia/nemotron-3-ultra-550b-a55b'), 'nvidia')
+check('and a bare Mistral name is still Mistral', C.providerFor('mistral-large'), 'mistral')
+
 check('the picker orders by the measured rank', /rankedModels\(\)/.test(renderer), true)
 check('and shows the badge', /modelTag\(m, rank\)/.test(renderer), true)

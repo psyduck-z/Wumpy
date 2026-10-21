@@ -39,6 +39,11 @@ export const DEFAULT_SETTINGS: WumpySettings = {
   approvalMode: 'manual',
   confirmRisky: true,
 
+  // Off: reasoning is spent before the first visible word, so it is paid
+  // on every turn including the ones that are just chat. `/think` is one
+  // word away when a question deserves it.
+  thinking: false,
+
   // Keyless search answers encyclopedic questions. Add a Brave key for general
   // web results; nothing else in Wumpy needs an account.
   searchEnabled: true,

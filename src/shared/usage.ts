@@ -246,6 +246,20 @@ export const ALLOWANCES: Record<string, Allowance> = {
  * key is refused, the count at that moment becomes the cap.
  */
 export const PROVIDER_ALLOWANCES: Record<string, Allowance> = {
+  /*
+   * Ollama is the user's own daemon, so there is no allowance to run
+   * out of - but it stopped SAYING so when local models became
+   * addressable on 21 Oct. `noteFor` has a branch for via === 'local'
+   * reading "no limit - runs on this PC"; a model reached through the
+   * provider is recorded as via 'ollama' and fell past it to a blank
+   * note, which reads as "nobody knows" rather than "nothing to know".
+   */
+  ollama: {
+    requestsPerDay: 0,
+    tokensPerDay: 0,
+    requestsPerMinute: 0,
+    note: 'no Wumpy quota — your own Ollama'
+  },
   nvidia: {
     requestsPerDay: 0,
     tokensPerDay: 0,

@@ -179,5 +179,48 @@ for (const name of ['model', 'usage', 'pin', 'reasoning', 'dock', 'remember']) {
 
 rmSync(out, { force: true })
 
+/* ------------------------------------------- thinking, on and off */
+
+/*
+ * The plumbing was there since the first NVIDIA model and wired to a
+ * constant: `thinking` reaches reasoning_effort, the chat-template
+ * switch and the token ceiling, each doing something different with it.
+ * What was missing was a way to say so.
+ */
+{
+  const fired = (line) => {
+    const [name, ...rest] = line.replace(/^\//, '').split(' ')
+    return findCommand(name)?.run(rest.join(' ')) ?? { kind: 'missing' }
+  }
+
+  const on = fired('/think')
+  if (on.kind !== 'setting' || on.setting !== 'thinking' || on.on !== true) {
+    fail('/think does not turn thinking on')
+  }
+  if (fired('/think off').on !== false) fail('/think off does not turn it off')
+
+  /* Two names rather than an argument: the point is flipping it
+     mid-conversation without thinking about syntax. */
+  if (fired('/nothink').on !== false) fail('/nothink does not turn thinking off')
+  if (fired('/fast').on !== false) fail('/fast does not turn thinking off')
+
+  /*
+   * `reason` is deliberately nobody's alias.
+   *
+   * /think was first written with it, and it is a letter away from
+   * /reasoning while meaning something else entirely: that one shows or
+   * hides the scratchpad, this decides whether one is produced at all.
+   * Two commands that close doing different things is how someone turns
+   * off the wrong one and cannot work out why nothing changed.
+   *
+   * It is not an alias of /reasoning either - never was - so the nearest
+   * match is what catches a typo, and that is checked in check-nearest.
+   */
+  if (findCommand('reason')) fail('`reason` became a command name; it is a letter from /reasoning')
+  if (fired('/think on').kind !== 'setting') fail('/think stopped meaning the thinking')
+  if (findCommand('reasoning')?.run('on').kind !== 'reasoning') fail('/reasoning stopped showing the scratchpad')
+  console.log('ok   /think and /nothink, and `reason` is left unclaimed')
+}
+
 console.log(failed === 0 ? '\nall command checks correct' : `\n${failed} command checks FAILED`)
 process.exit(failed === 0 ? 0 : 1)

@@ -1714,8 +1714,18 @@ function namedControls(shot: Attachment): string[] {
           return
         }
         case 'setting': {
-          /* The only one so far, and it says what it costs rather than just
-             reporting a flag: the whole point of it is the number. */
+          /* Both say what they COST rather than reporting a flag: the
+             whole point of either is the trade, not the state. */
+          if (action.setting === 'thinking') {
+            const on = action.on === 'toggle' ? !settings?.thinking : action.on
+            await patch({ thinking: on })
+            chat.note(
+              on
+                ? 'Thinking on — it reasons first, so the first word takes longer.'
+                : 'Thinking off — straight to the answer.'
+            )
+            return
+          }
           const next = action.on === 'toggle' ? !settings?.leanPrompt : action.on
           await patch({ leanPrompt: next })
           chat.note(

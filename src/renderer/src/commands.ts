@@ -32,7 +32,7 @@ export type CommandAction =
   | { kind: 'pin'; pinned: boolean | 'toggle' }
   | { kind: 'voice'; setting: 'on' | 'polish' | 'autostop'; on: boolean | 'toggle' }
   /** A plain boolean in the settings file, with no machinery behind it. */
-  | { kind: 'setting'; setting: 'leanPrompt'; on: boolean | 'toggle' }
+  | { kind: 'setting'; setting: 'leanPrompt' | 'thinking'; on: boolean | 'toggle' }
   | { kind: 'open'; what: string }
   | { kind: 'engine' }
   | {
@@ -235,7 +235,9 @@ export const COMMANDS: CommandSpec[] = [
   {
     name: 'reasoning',
     aliases: ['scratchpad'],
-    hint: 'Show or hide the model’s scratchpad',
+    /* Shows the scratchpad; `/think` decides whether one is produced.
+       There is nothing to show with thinking off. */
+    hint: 'Show or hide the scratchpad (needs `/think` on)',
     arg: 'on|off',
     run: (arg) => ({ kind: 'reasoning', show: bool(arg) })
   },
@@ -470,6 +472,38 @@ export const COMMANDS: CommandSpec[] = [
      * the short form: 4,553 tokens instead of 7,059, with the thirteen rules
      * that were measured to carry the benchmark kept intact.
      */
+    /*
+     * Whether the model reasons before answering.
+     *
+     * The plumbing was always there and wired to a constant: `thinking`
+     * reaches reasoning_effort, the chat template switch and the token
+     * ceiling, each doing something different with it. What was missing
+     * was a way to say so.
+     *
+     * Two names rather than an argument, because the whole point is to
+     * flip it mid-conversation without thinking about syntax - `/think`
+     * before a hard question, `/nothink` when it is just chat.
+     */
+    name: 'think',
+    /*
+     * NOT aliased to `reason`, which `/reasoning` already owns and which
+     * means something else: that one shows or hides the scratchpad, this
+     * one decides whether there is a scratchpad at all. Two commands a
+     * letter apart doing different things is how someone turns off the
+     * wrong one and cannot work out why nothing changed.
+     */
+    aliases: ['thinking'],
+    hint: 'Reason before answering — better answers, slower first word',
+    arg: 'on|off',
+    run: (arg) => ({ kind: 'setting', setting: 'thinking', on: arg.trim() ? bool(arg) : true })
+  },
+  {
+    name: 'nothink',
+    aliases: ['fast', 'quick'],
+    hint: 'Answer straight away — for chat and quick questions',
+    run: () => ({ kind: 'setting', setting: 'thinking', on: false })
+  },
+  {
     name: 'lean',
     aliases: ['short', 'brief'],
     hint: 'Send the short instructions: ~2,500 fewer tokens every turn',

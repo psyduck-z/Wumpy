@@ -1665,10 +1665,10 @@ export function preambleTokens(shape: PromptShape): number {
   return Math.ceil(chars / 4)
 }
 
-export function assistantFor(model: string, canShell: boolean): Assistant {
+export function assistantFor(model: string, canShell: boolean, thinking = false): Assistant {
   return {
     model,
-    thinking: false,
+    thinking,
     tools: canShell ? 'full' : 'none',
     options: { num_predict: 4000, temperature: 0.4, top_p: 0.9 },
     systemPrompt: VOICE_PROMPT
