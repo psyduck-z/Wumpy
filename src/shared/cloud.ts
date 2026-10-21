@@ -730,7 +730,20 @@ export const CLOUD_MODELS: CloudModel[] = [
        provider marks it as such, and this one does not mark it, so the
        thinking arrives as content. Listed with the warning rather than
        hidden. */
-    blurb: 'Preview · 2.2s · 1M context, reads video · thinks out loud in the answer.'
+    /*
+     * Laddered 21 Oct, two runs a rung: 36 of 42, broken only on L6 and
+     * L38 with four rungs intermittent. Third on score and second on
+     * speed, from a model added that morning on the strength of one
+     * reply.
+     *
+     * The thinking-out-loud is the catch and is not cosmetic: it emits
+     * reasoning as CONTENT rather than marking it, so the app cannot
+     * separate it the way it does for every other model here. Nobody has
+     * asked whether /nothink suppresses it - NVIDIA's switch is the
+     * chat-template one, which some models honour and some ignore.
+     */
+    measured: { clean: 36, of: 42, runs: 2, medianMs: 2_182, on: '2026-10-21' },
+    blurb: 'Preview · 36/42 · 2.2s · 1M context, reads video · thinks out loud.'
   },
 
   /* --- the user's own Ollama account ------------------------------------- */
