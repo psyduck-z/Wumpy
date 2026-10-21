@@ -719,13 +719,18 @@ export const CLOUD_MODELS: CloudModel[] = [
   {
     id: 'stepfun-ai/step-5-preview',
     provider: 'nvidia',
-    label: 'Step 5 Preview',
+    /* "Step 5 Preview" names neither the maker nor the size, which every
+       other row carries at least one of - and "Step 5" alone means
+       nothing to someone scanning a list. StepFun is the lab; 600B total
+       with about 27B active is the shape. Preview moves to the blurb,
+       where the instability belongs with the other caveats. */
+    label: 'StepFun Step 5 600B',
     /* Leaks its reasoning into the answer: the probe came back "The user
        just said \"Say: rea...". The app strips reasoning where the
        provider marks it as such, and this one does not mark it, so the
        thinking arrives as content. Listed with the warning rather than
        hidden. */
-    blurb: 'Fast · 2.2s · thinks out loud in the answer · not yet laddered.'
+    blurb: 'Preview · 2.2s · 1M context, reads video · thinks out loud in the answer.'
   },
 
   /* --- the user's own Ollama account ------------------------------------- */
