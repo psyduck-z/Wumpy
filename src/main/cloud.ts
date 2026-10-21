@@ -5,7 +5,9 @@ import { KeyRotation, nextPacificMidnight } from '@shared/rotation'
 import type { PoolDay, PoolView } from '@shared/pool'
 import {
   CLOUD_MODELS,
+  PROVIDER_IDS,
   PROVIDERS,
+  budgetsFor,
   classifyLimit,
   countTokens,
   keysAreSeparate,
@@ -20,7 +22,13 @@ import {
   seesMedia
 } from '@shared/cloud'
 import type { CloudModel } from '@shared/cloud'
-import { MAX_RUNS, PROBE_TIMEOUT_MS, combineRuns, verdictFor } from '@shared/probe'
+import {
+  MAX_RUNS,
+  PROBE_TIMEOUT_MS,
+  TOO_SLOW_TO_SUGGEST_MS,
+  combineRuns,
+  verdictFor
+} from '@shared/probe'
 import type { ProbeResult } from '@shared/probe'
 import type { ChatOptions, StreamFailure, StreamHandlers, StreamStats } from './stream'
 import type { KeyStore } from './keys'
@@ -354,7 +362,6 @@ export class CloudClient {
      */
     preamble = 'Answer in one word.'
   ): Promise<ProbeResult[]> {
-    const out: ProbeResult[] = []
     const times = Math.min(MAX_RUNS, Math.max(1, Math.floor(runs)))
     const total = CLOUD_MODELS.length * times
     let done = 0
@@ -386,60 +393,137 @@ export class CloudClient {
     }
 
     /*
-     * Serial, one model at a time.
+     * ONE LANE PER INDEPENDENT BUDGET, which is usually one.
      *
-     * Parallel would finish sooner and would also be the thing that makes
-     * this check lie: every entry but one here is the same NVIDIA account,
-     * firing thirteen requests at a per-minute limit would collect 429s,
-     * and a 429 is indistinguishable from a model that is genuinely out.
-     * The point of the check is to find out which models work, so it must
-     * not be the reason they appear not to. `pace()` is honoured for the
-     * same reason.
+     * This was strictly serial, and the reasoning was right at the time:
+     * every entry but one is the same NVIDIA account, so firing them off
+     * together would collect 429s - and a 429 is indistinguishable from
+     * a model that is genuinely out. A check must not be the reason the
+     * thing it checks looks broken.
+     *
+     * What changed is that there can now be more than one account. A key
+     * on a second account has its own per-minute ceiling, so two
+     * requests on two accounts are not competing at all, and `pace`
+     * already keys its queue per account rather than per key. The lanes
+     * are exactly the number of separate budgets - which is 1 unless the
+     * user has said `/key <provider> accounts separate`, so the cautious
+     * behaviour is still what happens by default.
+     *
+     * Each lane is pinned to its own key index rather than drawing from
+     * the rotation, or two lanes would take the same key and serialise
+     * against each other through the pacer while looking parallel.
      */
-    for (const entry of CLOUD_MODELS) {
-      const check = this.ready(entry.id)
-      if (!check.ok || !check.provider) {
-        out.push({
-          model: entry.id,
-          label: entry.label,
-          provider: check.provider ?? '',
-          state: 'nokey',
-          ms: 0,
-          said: '',
-          why: check.why,
-          runs: 0,
-          times: []
-        })
-        /* Counted as all of its runs at once: nothing was asked, and a
-           progress bar that stalled on the keyless entries would be
-           describing work that is not happening. */
-        done += times
-        onEach?.(done, total)
-        continue
+    const lanes = Math.max(
+      1,
+      ...PROVIDER_IDS.map((id) =>
+        budgetsFor(id, this.keys.count(id), this.accountMode?.(id))
+      )
+    )
+
+    const queue = CLOUD_MODELS.slice()
+    const results = new Map<string, ProbeResult>()
+
+    const lane = async (keyIndex: number): Promise<void> => {
+      for (;;) {
+        const entry = queue.shift()
+        if (!entry) return
+        results.set(
+          entry.id,
+          await this.probeEntry(entry, times, preamble, keyIndex, (n = 1) => {
+            done += n
+            onEach?.(done, total)
+          })
+        )
       }
-      /*
-       * Each model's runs together rather than a whole sweep repeated.
-       *
-       * Back to back is the harder test and the fairer one: a provider
-       * that answers and then 503s does it within seconds, which is how
-       * nemotron-3-ultra was caught, and a second sweep minutes later
-       * would be asking a different question about a different moment.
-       */
-      const attempts: ProbeResult[] = []
-      for (let run = 0; run < times; run++) {
-        attempts.push(await this.probeOne(entry, check.provider, preamble))
-        onEach?.(++done, total)
-      }
-      out.push(combineRuns(attempts))
     }
-    return out
+
+    await Promise.all(Array.from({ length: lanes }, (_, i) => lane(i)))
+    /* Catalogue order, not the order they happened to finish in: the
+       report is read as a list of models, and a list that reshuffles
+       itself by whichever answered first is harder to compare. */
+    return CLOUD_MODELS.map((m) => results.get(m.id)).filter((r): r is ProbeResult => Boolean(r))
+  }
+
+  /** One catalogue entry, run `times` times on one key. */
+  private async probeEntry(
+    entry: CloudModel,
+    times: number,
+    preamble: string,
+    keyIndex: number,
+    tick: (n?: number) => void
+  ): Promise<ProbeResult> {
+    const check = this.ready(entry.id)
+    if (!check.ok || !check.provider) {
+      /* Counted as all of its runs at once: nothing was asked, and a
+         progress bar that stalled on the keyless entries would be
+         describing work that is not happening. */
+      tick(times)
+      return {
+        model: entry.id,
+        label: entry.label,
+        provider: check.provider ?? '',
+        state: 'nokey',
+        ms: 0,
+        said: '',
+        why: check.why,
+        runs: 0,
+        times: []
+      }
+    }
+
+    /*
+     * Each model's runs together rather than a whole sweep repeated.
+     *
+     * Back to back is the harder test and the fairer one: a provider
+     * that answers and then 503s does it within seconds, which is how
+     * nemotron-3-ultra was caught, and a second sweep minutes later
+     * would be asking a different question about a different moment.
+     */
+    const attempts: ProbeResult[] = []
+    for (let run = 0; run < times; run++) {
+      const got = await this.probeOne(entry, check.provider, preamble, keyIndex)
+      attempts.push(got)
+      tick()
+      /*
+       * STOP WHEN A SECOND ASK CANNOT CHANGE THE ANSWER.
+       *
+       * Two runs exist to catch a model that works only sometimes,
+       * which is a question worth asking about a CANDIDATE. It is not
+       * worth asking about a model that just took two minutes, or one
+       * the endpoint does not have: the first is already past the floor
+       * under the recommendation and the second does not exist.
+       *
+       * Measured over the ten in the catalogue: two runs each is 9.3
+       * minutes and 83% of it is deepseek at 112s and glm-5.3 timing out
+       * at 120, asked twice apiece. The other eight together are a
+       * minute and a half. The report still shows what happened; it just
+       * does not pay to confirm it.
+       */
+      const settled =
+        got.state === 'missing' || got.state === 'refused' || got.state === 'offline'
+      if (settled || got.ms > TOO_SLOW_TO_SUGGEST_MS) {
+        /* The runs it did not use are still progress, or the bar stops
+           short of the end on every slow model. */
+        tick(times - run - 1)
+        break
+      }
+    }
+    return combineRuns(attempts)
   }
 
   /** One model, with its own timeout so a hung provider cannot stall the rest. */
   private async probeOne(
     entry: CloudModel,
     provider: ProviderId,
-    preamble: string
+    preamble: string,
+    /**
+     * The key this lane owns, rather than whatever the rotation hands
+     * out next. Two lanes drawing from the rotation would sooner or
+     * later take the same key and serialise against each other through
+     * the pacer, which looks parallel and is not. Clamped, because a
+     * provider may have fewer keys than there are lanes.
+     */
+    lane = 0
   ): Promise<ProbeResult> {
     const base: Omit<ProbeResult, 'state' | 'ms' | 'said' | 'why'> = {
       model: entry.id,
@@ -450,7 +534,8 @@ export class CloudClient {
     /* Whatever key the next real turn would use, so the probe tests the
        thing being tested. Falls back to the first when all are resting:
        the resulting 429 is itself the answer, and an honest one. */
-    const index = rotation.next(Date.now(), entry.id) ?? 0
+    const count = Math.max(1, this.keys.count(provider))
+    const index = this.separate(provider) ? lane % count : (rotation.next(Date.now(), entry.id) ?? 0)
     this.remember(provider, rotation)
     await pace(provider, index, 0, this.separate(provider))
 

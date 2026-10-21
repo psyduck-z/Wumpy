@@ -430,6 +430,89 @@ check('and there is a ceiling on asking', P.MAX_RUNS, 5)
   check('and is not filed as a model failure', /unreachable \? 'offline' : 'error'/.test(cloud), true)
 }
 
+/* ------------------------------- not asking twice when once is enough */
+
+/*
+ * Two runs exist to catch a model that works only SOMETIMES, which is a
+ * question about a candidate. It is not a question worth two minutes
+ * about a model already past the floor under the recommendation, or one
+ * the endpoint does not have.
+ *
+ * Measured across the ten in the catalogue: two runs each is 9.3 minutes
+ * and 83% of it is deepseek at 112s and glm-5.3 timing out at 120, asked
+ * twice apiece. The other eight together are a minute and a half. The
+ * early exit brings it to 5.4.
+ */
+{
+  const cloud = readFileSync('src/main/cloud.ts', 'utf8')
+  check(
+    'a settled failure is not re-asked',
+    /got\.state === 'missing' \|\| got\.state === 'refused' \|\| got\.state === 'offline'/.test(cloud),
+    true
+  )
+  check('nor is a model past the floor', /got\.ms > TOO_SLOW_TO_SUGGEST_MS/.test(cloud), true)
+  /* The runs it skipped still count as progress, or the bar stops short
+     of the end on every slow model in the list. */
+  check('the skipped runs still count as done', /tick\(times - run - 1\)/.test(cloud), true)
+
+  /*
+   * A model that is merely SLOW but under the floor is still asked
+   * twice: that is the range where flakiness is worth knowing about,
+   * and where the answer changes what someone picks.
+   */
+  const slowButFine = P.recommend([
+    {
+      model: 'nvidia/nemotron-3.5-super-vl-120b-a12b',
+      label: 'x',
+      provider: 'nvidia',
+      state: 'ok',
+      ms: 10_923,
+      said: 'ready',
+      why: '',
+      runs: 2,
+      times: [10_923, 10_923]
+    }
+  ])
+  check('a slow-but-usable model is still a candidate', slowButFine.length, 1)
+  check('and the floor is where that stops', P.TOO_SLOW_TO_SUGGEST_MS, 30_000)
+}
+
+/* ------------------------------------ one lane per independent budget */
+
+/*
+ * The serial rule was right when it was written and is not a law. Every
+ * catalogue entry but one is the same NVIDIA account, so firing them off
+ * together collects 429s - and a 429 is indistinguishable from a model
+ * that is genuinely out, which would make the check the reason the thing
+ * it checks looks broken.
+ *
+ * What changed is that there can be more than one account. A key on a
+ * second account has its own per-minute ceiling, so two requests on two
+ * accounts are not competing, and `pace` already keys its queue per
+ * account rather than per key. Lanes are therefore exactly the number of
+ * SEPARATE budgets - `budgetsFor`, the same function the meter uses.
+ */
+{
+  const cloud = readFileSync('src/main/cloud.ts', 'utf8')
+  check('lanes come from the budget count', /budgetsFor\(id, this\.keys\.count\(id\)/.test(cloud), true)
+  /* One unless told otherwise, so the cautious behaviour is the default
+     and nobody gets 429s for a setting they never set. */
+  check('which is one until accounts are declared separate', C.budgetsFor('nvidia', 2), 1)
+  check('and two once they are', C.budgetsFor('nvidia', 2, 'separate'), 2)
+  check('never fewer than one', /Math\.max\(\s*1,/.test(cloud), true)
+
+  /* Each lane pinned to its own key: two lanes drawing from the rotation
+     would sooner or later take the same key and serialise through the
+     pacer while looking parallel. */
+  check('a lane owns its key', /lane % count/.test(cloud), true)
+  check('and only when the budgets are separate', /this\.separate\(provider\) \? lane % count/.test(cloud), true)
+
+  /* Order is the catalogue's, not whichever answered first: the report
+     is read as a list of models and one that reshuffles by finishing
+     order is harder to compare between runs. */
+  check('the report keeps catalogue order', /CLOUD_MODELS\.map\(\(m\) => results\.get\(m\.id\)\)/.test(cloud), true)
+}
+
 /* -------------------------------------------- what the check actually costs */
 
 const cloud = readFileSync('src/main/cloud.ts', 'utf8')
@@ -438,14 +521,21 @@ const preload = readFileSync('src/preload/index.ts', 'utf8')
 const app = readFileSync('src/renderer/src/App.tsx', 'utf8')
 
 /*
- * SERIAL, and this is a correctness matter rather than a politeness one.
- * Every catalogue entry but one is the same NVIDIA account; thirteen at once
- * against a per-minute limit collects 429s, and a 429 is indistinguishable
- * from a model that is genuinely out. The check must not be the reason a
- * model looks broken.
+ * NEVER MORE CONCURRENT THAN THERE ARE BUDGETS TO SPEND.
+ *
+ * This asserted "the probe is serial", which was the right rule while
+ * every entry but one was the same NVIDIA account: firing them off
+ * together collects 429s, and a 429 is indistinguishable from a model
+ * that is genuinely out. The check must not be the reason a model looks
+ * broken.
+ *
+ * The rule survives; the number changed. Lanes are the count of separate
+ * accounts, which is one unless the user has declared otherwise - so the
+ * old behaviour is still what happens by default, and parallelism only
+ * appears where there is genuinely a second ceiling to use.
  */
-check('the probe is serial', /for \(const entry of CLOUD_MODELS\)/.test(cloud), true)
-check('and never fanned out', /Promise\.all\([^)]*probe/i.test(cloud), false)
+check('concurrency is bounded by the budgets', /Array\.from\(\{ length: lanes \}/.test(cloud), true)
+check('and defaults to one', C.budgetsFor('nvidia', 5), 1)
 check('it honours the pacer', /await pace\(provider, index, 0, this\.separate\(provider\)\)[\s\S]{0,400}chat\/completions/.test(cloud), true)
 
 /* Small on purpose: this measures whether words come back, not how many. */
@@ -519,7 +609,7 @@ check('and the reason is written down', /NOT `exhausted`/.test(handler), true)
 /* Every catalogue entry is asked about, so the report cannot quietly omit a
    model the picker still offers. */
 check('every model in the picker is probed', C.CLOUD_MODELS.length > 0, true)
-check('the catalogue is the only source of ids', /for \(const entry of CLOUD_MODELS\)/.test(cloud), true)
+check('the catalogue is the only source of ids', /const queue = CLOUD_MODELS\.slice\(\)/.test(cloud), true)
 
 console.log(`${NL}${count - failed}/${count} probe checks passed`)
 if (failed) process.exit(1)
