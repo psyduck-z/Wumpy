@@ -374,6 +374,52 @@ check('and there is a ceiling on asking', P.MAX_RUNS, 5)
   check('with a hard floor under the suggestion', P.TOO_SLOW_TO_SUGGEST_MS, 30_000)
 }
 
+/* ------------------------------------------- what the eye test reports */
+
+/*
+ * `/model check` sends one generated picture to every model that
+ * answered and claims to see. The verdict belongs on the model's own
+ * row - it is a property of that model, not a separate report - and
+ * must be absent rather than guessed where nothing was asked.
+ */
+{
+  const E = (model, eyes) => ({
+    model,
+    label: model,
+    provider: 'nvidia',
+    state: 'ok',
+    ms: 1200,
+    said: 'ready',
+    why: '',
+    runs: 2,
+    times: [1200, 1200],
+    ...(eyes === undefined ? {} : { eyes })
+  })
+
+  const sighted = P.probeLines([E('a/sees', true)]).join(NL)
+  check('a model that read the picture says so', /reads images/.test(sighted), true)
+
+  const blind = P.probeLines([E('a/blind', false)]).join(NL)
+  check('and one that could not', /cannot read images/.test(blind), true)
+
+  /*
+   * Not asked is not the same as failed, and must not print as it. A
+   * model that could not answer at all has nothing to prove about its
+   * eyesight, and one past the floor under the recommendation is not
+   * worth ninety seconds to confirm something that cannot change the
+   * advice.
+   */
+  const unasked = P.probeLines([E('a/unknown', undefined)]).join(NL)
+  check('an unasked model claims nothing either way', /read images/.test(unasked), false)
+  check('and still appears in the list', /a\/unknown/.test(unasked), true)
+
+  /* On the model's own row rather than in a section of its own: it is a
+     property of that model, beside its time. */
+  const row = P.probeLines([E('a/sees', true)]).find((l) => l.includes('a/sees'))
+  check('the verdict sits on the row', /reads images/.test(row ?? ''), true)
+  check('beside the time', /1,200ms.*reads images/.test(row ?? ''), true)
+}
+
 /* ------------------------------------------------------- no connection */
 
 /*
