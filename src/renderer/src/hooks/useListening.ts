@@ -29,6 +29,15 @@ export interface ListeningSession {
   stop(): Promise<Listening | null>
   /** The transcript as it stands, without stopping. */
   peek(): Listening | null
+  /**
+   * Stop if running, and throw the transcript away.
+   *
+   * For `/new`. The transcript rides along on every turn while it exists,
+   * so it has to stop existing when the conversation it belongs to does -
+   * otherwise an hour of somebody's standup is silently attached to a chat
+   * about something else, and the only clue is the token count.
+   */
+  forget(): Promise<void>
 }
 
 /**
@@ -167,5 +176,13 @@ export function useListening(commands: () => string[]): ListeningSession {
     return final
   }, [snapshot])
 
-  return { on, source, session, pending, error, start, stop, peek: snapshot }
+  const forget = useCallback(async (): Promise<void> => {
+    if (live.current) await stop()
+    piecesRef.current = []
+    startedAt.current = 0
+    setSession(null)
+    setError(null)
+  }, [stop])
+
+  return { on, source, session, pending, error, start, stop, peek: snapshot, forget }
 }

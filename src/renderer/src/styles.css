@@ -2735,3 +2735,56 @@ body {
   color: rgb(var(--text));
   border-color: rgb(var(--text) / 0.16);
 }
+
+/*
+ * The meeting pill: Wumpy is listening, and every message is carrying the
+ * transcript.
+ *
+ * Shaped like the approval pill because it is the same kind of fact - a
+ * mode that is on, changing what happens to what you type, which you did
+ * not set this turn and would otherwise have to remember. It sits left of
+ * the spacer, beside the model, rather than out at the right edge with the
+ * meters: those are measurements, this is a state.
+ */
+.listening {
+  padding: 1px 7px;
+  margin-left: 6px;
+  background: none;
+  border: 1px solid rgb(var(--border));
+  border-radius: 20px;
+  color: rgb(var(--muted));
+  font: inherit;
+  font-size: 9.5px;
+  letter-spacing: 0.2px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.listening:hover {
+  color: rgb(var(--text));
+}
+
+/* Live gets the recording colour the mic already uses, and a pulse, because
+   a microphone that is open should never be a quiet fact. */
+.listening.is-live {
+  color: rgb(var(--danger));
+  border-color: rgb(var(--danger) / 0.45);
+  animation: listening-pulse 2.4s ease-in-out infinite;
+}
+
+@keyframes listening-pulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.55;
+  }
+}
+
+/* Honouring the system setting, as the rest of this file does. */
+@media (prefers-reduced-motion: reduce) {
+  .listening.is-live {
+    animation: none;
+  }
+}

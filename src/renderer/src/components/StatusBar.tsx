@@ -180,9 +180,11 @@ export function StatusBar({
   pool,
   compact,
   approvalMode,
+  listening,
   onCycleApproval,
   onCompact,
-  onQuota
+  onQuota,
+  onListening
 }: {
   model: string
   /** False when no key is saved for this model's provider. */
@@ -195,9 +197,23 @@ export function StatusBar({
   /** The panel is in its small corner shape, so drop the optional parts. */
   compact: boolean
   approvalMode: ApprovalMode
+  /**
+   * A meeting being transcribed, when one is. Words, or null.
+   *
+   * ON SCREEN BECAUSE IT IS INVISIBLE OTHERWISE, and that matters more
+   * here than for anything else in this bar: while it is listening, every
+   * message carries the transcript, so a session nobody can see is a
+   * session silently changing what each turn costs and what the model is
+   * answering from. The whole point of dropping the command arguments was
+   * that nothing should have to be remembered; a thing you can see is the
+   * other half of that.
+   */
+  listening: { words: number; live: boolean } | null
   onCycleApproval(): void
   onCompact(): void
   onQuota(): void
+  /** Click the pill to stop, or to write the notes up. */
+  onListening(): void
 }): React.JSX.Element {
   const elapsed = stats.elapsedMs !== null ? duration(stats.elapsedMs) : null
 
@@ -218,6 +234,23 @@ export function StatusBar({
       <span className={`status-model${ready ? '' : ' is-unready'}`} title={model}>
         {ready ? model : `${model} — no key`}
       </span>
+
+      {listening && (
+        <button
+          type="button"
+          className={`listening${listening.live ? ' is-live' : ''}`}
+          onClick={onListening}
+          title={
+            listening.live
+              ? `Listening — ${listening.words} words so far. Every message you send ` +
+                `carries the transcript. Click to stop.`
+              : `${listening.words} words of transcript, kept with this chat. ` +
+                `Every message you send carries it. Click to write it up.`
+          }
+        >
+          {listening.live ? 'listening' : 'transcript'}
+        </button>
+      )}
 
       <span className="spacer" />
 

@@ -113,50 +113,107 @@ export function transcriptText(session: Listening, everyMs = 60_000): string {
  *   No preamble, because this lands in a panel the user is reading, not in a
  *   letter.
  */
-export const NOTES_PROMPT = [
-  'You are writing notes from a live transcript of a meeting or call.',
+/**
+ * The rules, which are three predictable failures rather than a house style.
+ *
+ * No speakers, because the channels are mixed and there is no way to tell
+ * them apart. A model will happily write "Alice raised the budget" from a
+ * transcript that never contained a name.
+ *
+ * No filling gaps, because this is machine transcription of a far-field
+ * mix: names and numbers are exactly what it gets wrong, and a plausible
+ * correction of a misheard figure is worse than the misheard figure, which
+ * at least looks wrong.
+ *
+ * No preamble, because this lands in a panel somebody is reading.
+ *
+ * THESE ARE SENT, not merely declared. They were exported and asserted on
+ * for a day and never reached a model: `notesRequest` built a head and a
+ * transcript and left the rules in the file. Every path now goes through
+ * `meetingTurn`, which is the only thing that builds a request, so there is
+ * nowhere for a second version of them to grow.
+ */
+export const RULES = [
+  'The transcript below is automatic speech recognition of a mixed audio',
+  'stream. It has no speaker labels, it contains mistakes, and the mistakes',
+  'are concentrated in names, numbers and technical terms.',
   '',
-  'The transcript is automatic speech recognition of a mixed audio stream. It',
-  'has no speaker labels, it contains mistakes, and the mistakes are',
-  'concentrated in names, numbers and technical terms.',
-  '',
-  'Write, in this order, and leave out any heading you have nothing for:',
-  '',
-  '**Summary** — three or four sentences on what the conversation was about.',
-  '**Decisions** — what was actually settled. Not what was discussed.',
-  '**Actions** — who is doing what, only where the transcript says so.',
-  '**Details** — specific figures, dates, names and links worth keeping.',
-  '**Unclear** — anything important the transcript garbled, quoted as heard.',
-  '',
-  'Rules:',
-  '- Never attribute a line to a named person unless the transcript names them.',
-  '  The channels are mixed; you cannot tell who is speaking.',
+  '- Never attribute anything to a named person unless the transcript names',
+  '  them. The channels are mixed; you cannot tell who is speaking.',
   '- Never repair a name or a number into something more plausible. If it',
-  '  sounds wrong, quote it as heard and put it under Unclear.',
-  '- Never invent an action item to fill the heading. Omit the heading.',
-  '- No preamble, no sign-off, no offer to help further. Notes only.'
+  '  sounds wrong, quote it as heard and say it was unclear.',
+  '- Do not invent detail to fill a heading. Leave the heading out.'
 ].join('\n')
 
 /**
- * The question put to the model, transcript included.
+ * Is this message a request for the write-up rather than a question?
  *
- * `ask` is what the user typed after `/listen`, when they asked something
- * specific rather than for notes. A question about the transcript is the same
- * request with a different instruction, so it shares the prompt and the
- * guard-rails instead of having its own.
+ * Because the only word anyone was told to remember is "notes", and it
+ * arrives as an ordinary message like everything else now. Short and exact:
+ * a sentence containing the word "notes" is a sentence, and belongs in the
+ * question branch where the transcript is still attached and nothing is
+ * assumed about what was meant.
  */
-export function notesRequest(session: Listening, ask = ''): string {
+export function wantsNotes(ask: string): boolean {
+  return /^(notes?|summary|summarise|summarize|write it up|sum ?up|recap)\.?$/i.test(ask.trim())
+}
+
+/** The shape of written-up notes, used when nothing specific was asked. */
+export const NOTES_PROMPT = [
+  'Write notes from the transcript. In this order, leaving out any heading',
+  'you have nothing for:',
+  '',
+  '**Summary** — three or four sentences on what it was about.',
+  '**Decisions** — what was actually settled. Not what was discussed.',
+  '**Actions** — who is doing what, only where the transcript says so.',
+  '**Details** — specific figures, dates, names and links worth keeping.',
+  '**Unclear** — anything important it garbled, quoted as heard.',
+  '',
+  'No preamble, no sign-off, no offer to help further. Notes only.'
+].join('\n')
+
+/**
+ * One turn with the transcript attached, whatever the user typed.
+ *
+ * THE COMMAND WAS THE PROBLEM. This used to be reachable only as `/listen
+ * what did they say about the deadline`, which is a sentence nobody is going
+ * to remember - asked for in those words: "that's too long. How am I
+ * supposed to remember this?"
+ *
+ * They are right, and the fix is that there is nothing to remember. While
+ * Wumpy is listening, every message carries the transcript, so asking about
+ * the meeting is just asking. `ask` empty means they wanted the notes.
+ *
+ * The last paragraph is what makes that safe. A transcript on every turn
+ * means it is also attached to "what is the weather" - so the model is told
+ * in as many words that a message which is not about the meeting is an
+ * ordinary message, and the transcript is there to be ignored.
+ */
+export function meetingTurn(session: Listening, ask = ''): string {
   const minutes = Math.max(1, Math.round(elapsed(session) / 60_000))
-  const head = ask.trim()
-    ? `Answer this about the transcript below: ${ask.trim()}`
-    : 'Write the notes.'
+  const question = wantsNotes(ask) ? '' : ask.trim()
   return [
-    head,
+    question
+      ? 'I have Wumpy listening to a meeting. My message is at the end.'
+      : 'I have Wumpy listening to a meeting.',
     '',
-    `Transcript of about ${minutes} minute${minutes === 1 ? '' : 's'}, ` +
+    RULES,
+    '',
+    `Transcript so far — about ${minutes} minute${minutes === 1 ? '' : 's'}, ` +
       `${wordCount(session)} words:`,
     '',
-    transcriptText(session)
+    transcriptText(session),
+    '',
+    question
+      ? [
+          'My message:',
+          '',
+          question,
+          '',
+          'If it is about the meeting, answer it from the transcript. If it is',
+          'not, answer it normally and ignore the transcript entirely.'
+        ].join('\n')
+      : NOTES_PROMPT
   ].join('\n')
 }
 

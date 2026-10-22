@@ -105,6 +105,30 @@ const INTENTS: Intent[] = [
     pattern:
       /^(?:please\s+)?(?:show|list|open)\s+(?:me\s+)?(?:my\s+|the\s+)?(?:saved\s+)?(?:chats|conversations|chat history|conversation history)\.?$/i,
     build: () => ({ kind: 'resume' })
+  },
+  {
+    /*
+     * "listen to the meeting" / "start listening" / "take notes of this call"
+     *
+     * Because `/listen` is a word somebody has to have met before, and the
+     * complaint behind this whole change was about having to remember any
+     * of it. Saying what you want is the version nobody has to learn.
+     *
+     * The object is required for the same reason the rename intent needs
+     * the word "chat": a bare "listen" is a thing people say to each other
+     * in the middle of a sentence, and short-circuiting the model is only
+     * free when the phrasing cannot mean anything else.
+     */
+    pattern:
+      /^(?:please\s+)?(?:start\s+)?(?:listen(?:ing)?|take\s+notes?)\s+(?:to|of|on|in)?\s*(?:this\s+|the\s+|my\s+|a\s+)?(?:meeting|call|conversation|audio|sound|speakers?)\.?$/i,
+    build: () => ({ kind: 'listen', what: 'toggle', ask: '' })
+  },
+  {
+    /* And the other end of it, where a bare "stop listening" IS unambiguous:
+       nothing else in this app listens. */
+    pattern:
+      /^(?:please\s+)?(?:stop|end|finish)\s+(?:listening|the\s+(?:meeting|call|recording)|taking\s+notes?)\.?$/i,
+    build: () => ({ kind: 'listen', what: 'stop', ask: '' })
   }
 ]
 

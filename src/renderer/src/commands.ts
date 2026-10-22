@@ -523,37 +523,44 @@ export const COMMANDS: CommandSpec[] = [
     /*
      * Listening to the machine, for meetings.
      *
-     * Asked for as: "allow the AI to listen to computer audio... during
-     * meetings, it's able to get the summary, notes, specific details".
+     * ONE WORD, and that is the whole design now. It took an argument for
+     * a day - `/listen notes`, `/listen stop`, and worst of all `/listen
+     * what did they say about the deadline`, which was reported exactly
+     * as it deserved: "that's too long. How am I supposed to remember
+     * this?"
      *
-     * Bare `/listen` starts and stops, because that is the pair of things
-     * anyone does with it and neither should need an argument. The rest is
-     * what to do with what it heard: `notes` without stopping, or any
-     * question at all about the transcript so far.
+     * Nobody should have to. `/listen` starts it and `/listen` stops it,
+     * and while it is listening every ordinary message already carries
+     * the transcript - so asking about the meeting is asking, and the
+     * notes are "notes". See @shared/meeting.meetingTurn and the intents
+     * table, which catches "stop listening" said in English too.
+     *
+     * The old words still work, because somebody may have learned them
+     * in the day they existed, but nothing teaches them any more: `arg`
+     * is gone, so the palette no longer waits for one and Enter runs it.
      *
      * NOT aliased to `record`, which is what it is not: nothing is kept
      * but text, and a name that promises a recording would be a promise
-     * this does not make. See @shared/meeting.
+     * this does not make.
      */
     name: 'listen',
     /* NOT `notes`, which `/remember` has owned since before this existed -
        and which would be the wrong half anyway: the notes are what comes
        out, the listening is the thing being switched on. */
     aliases: ['meeting', 'call'],
-    hint: 'Transcribe what your speakers are playing — for meetings',
-    arg: 'stop|notes|question',
+    hint: 'Hear your speakers and take notes — say it again to stop',
     run: (arg) => {
-      const a = arg.trim()
-      const word = a.toLowerCase()
-      if (!a) return { kind: 'listen', what: 'toggle', ask: '' }
+      const word = arg.trim().toLowerCase()
+      if (!word) return { kind: 'listen', what: 'toggle', ask: '' }
       if (['stop', 'off', 'end', 'done'].includes(word)) return { kind: 'listen', what: 'stop', ask: '' }
       if (['notes', 'summary', 'summarise', 'summarize'].includes(word))
         return { kind: 'listen', what: 'notes', ask: '' }
       if (['mic', 'me', 'both', 'system', 'them', 'speakers'].includes(word))
         return { kind: 'listen', what: 'source', ask: word }
-      /* Anything else is a question about what has been heard, which is
-         the same request as notes with a different instruction. */
-      return { kind: 'listen', what: 'notes', ask: a }
+      /* Anything else said after the word is an ordinary message that
+         happens to begin with it, and ordinary messages already carry the
+         transcript. Nothing to parse. */
+      return { kind: 'listen', what: 'toggle', ask: '' }
     }
   },
   {

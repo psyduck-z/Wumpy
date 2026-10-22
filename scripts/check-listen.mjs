@@ -154,16 +154,123 @@ check('and the panel checks before asking', /wordCount\(heard\) < ENOUGH_WORDS/.
 
 /* ------------------------------------------- what the model is told not to do */
 
-check('no speaker may be invented', /cannot tell who is speaking/.test(M.NOTES_PROMPT), true)
-check('no name or number may be repaired', /Never repair a name or a number/.test(M.NOTES_PROMPT), true)
-check('no action item may be invented to fill a heading', /Never invent an action item/.test(M.NOTES_PROMPT), true)
-check('garbled things are quoted, not guessed', /quote it as heard/.test(M.NOTES_PROMPT), true)
+/**
+ * THE RULES ARE IN THE REQUEST, not merely in a constant.
+ *
+ * These four were asserted against `NOTES_PROMPT` for a day, and
+ * `NOTES_PROMPT` reached no model: `notesRequest` built a head and a
+ * transcript and left the rules sitting in the file. Four green checks over
+ * a prompt nothing sent, which is the exact failure a source assertion is
+ * supposed to catch.
+ *
+ * So they are checked on the string that actually goes out, and on BOTH
+ * shapes of it - the write-up and an ordinary question - because the
+ * transcript now rides along on every message and the guard-rails have to
+ * ride with it.
+ */
+for (const [shape, text] of [
+  ['the notes', M.meetingTurn(session)],
+  ['a question', M.meetingTurn(session, 'what moved?')]
+]) {
+  check(`${shape}: no speaker may be invented`, /cannot tell who is speaking/.test(text), true)
+  check(`${shape}: no name or number repaired`, /Never repair a name or a number/.test(text), true)
+  check(`${shape}: nothing invented to fill a heading`, /Do not invent detail/.test(text), true)
+  check(`${shape}: garbled things are quoted`, /quote it as heard/.test(text), true)
+  check(`${shape}: and the transcript is there`, text.includes('fourteenth'), true)
+}
 
-/* The question form shares the prompt rather than having its own, so the
-   guard-rails cannot drift apart. */
-check('a question carries the transcript too', M.notesRequest(session, 'what moved?').includes('fourteenth'), true)
-check('and says what was asked', M.notesRequest(session, 'what moved?').startsWith('Answer this about the transcript'), true)
-check('while bare asks for the notes', M.notesRequest(session).startsWith('Write the notes.'), true)
+/* The write-up asks for the headings; a question does not. */
+check('the notes ask for a summary', M.meetingTurn(session).includes('**Summary**'), true)
+check('a question does not', M.meetingTurn(session, 'what moved?').includes('**Summary**'), false)
+check('and is passed through as typed', M.meetingTurn(session, 'what moved?').includes('what moved?'), true)
+
+/*
+ * THE TRANSCRIPT IS ON EVERY MESSAGE, so it is also on "what is the
+ * weather". The model is told, in as many words, that a message which is
+ * not about the meeting is an ordinary message - without that line this
+ * feature answers unrelated questions out of somebody's standup.
+ */
+check('an off-topic message may ignore it', /ignore the transcript entirely/.test(M.meetingTurn(session, 'what is the weather')), true)
+
+/*
+ * "notes" is the one word anyone was told to remember, and it arrives as an
+ * ordinary message like everything else. It has to land on the write-up
+ * rather than being passed through as a question.
+ */
+check('notes means the write-up', M.wantsNotes('notes'), true)
+check('so does a recap', M.wantsNotes('Recap'), true)
+check('and it reaches the headings', M.meetingTurn(session, 'notes').includes('**Decisions**'), true)
+/* But a SENTENCE with the word in it is a sentence. */
+check('a question about notes is a question', M.wantsNotes('what notes did they take'), false)
+
+/* --------------------------------------------- nothing to remember */
+
+/**
+ * The complaint, in the user's words: "/listen what did they say about the
+ * deadline... that's too long. How am I supposed to remember this?"
+ *
+ * Three ways in now, and none of them is a syntax. The command takes no
+ * argument, so the palette runs it on one Enter; plain English reaches it
+ * through the intents table; and while it is listening there is nothing to
+ * type at all, because every message already carries the transcript.
+ */
+const commands = read('src/renderer/src/commands.ts')
+const listen = commands.slice(commands.indexOf("name: 'listen'"), commands.indexOf("name: 'approve'"))
+check('/listen asks for no argument', listen.includes('arg:'), false)
+check('and its hint does not teach one', /stop\|notes\|question/.test(commands), false)
+
+/* Run the matcher rather than reading its regex: a pattern that compiles
+   and matches nothing would pass a source assertion and fail a user. */
+await build({
+  entryPoints: ['src/renderer/src/intents.ts'],
+  bundle: true,
+  platform: 'node',
+  format: 'esm',
+  outfile: '.listen-intents.mjs',
+  logLevel: 'error',
+  alias: { '@shared': 'src/shared' }
+})
+const { matchIntent } = await import(pathToFileURL(join(process.cwd(), '.listen-intents.mjs')).href)
+rmSync('.listen-intents.mjs', { force: true })
+
+for (const said of [
+  'listen to the meeting',
+  'start listening to this call',
+  'listen to my speakers',
+  'take notes of this meeting',
+  'please start listening to the call'
+]) {
+  const got = matchIntent(said)
+  check(`"${said}" starts it`, got && got.kind === 'listen' && got.what === 'toggle', true)
+}
+for (const said of ['stop listening', 'stop taking notes', 'end the meeting']) {
+  const got = matchIntent(said)
+  check(`"${said}" ends it`, got && got.kind === 'listen' && got.what === 'stop', true)
+}
+/* And an ordinary sentence is still an ordinary sentence. A bare "listen"
+   is a thing people say mid-conversation, which is why the object is
+   required - short-circuiting the model is only free when the phrasing
+   cannot mean anything else. */
+for (const said of ['listen', 'listen to what I am telling you', 'can you listen to this file']) {
+  check(`"${said}" is not a command`, matchIntent(said)?.kind ?? null, null)
+}
+
+check('an ordinary message carries the transcript', /chat\.send\(meetingTurn\(heard, text\), text, images\)/.test(app), true)
+/* Only when there is enough of one to be worth the tokens. */
+check('but only once there is enough of it', /heard && wordCount\(heard\) >= ENOUGH_WORDS/.test(app), true)
+/* And it belongs to this conversation: left behind, an hour of somebody's
+   standup would ride along on an unrelated chat with no sign of it. */
+check('a new chat forgets it', /listening\.forget\(\)/.test(app), true)
+
+/*
+ * And it is on screen while it is on, which is the other half of having
+ * nothing to remember: a session you can see is one you cannot forget is
+ * running, or forget is being attached to what you type.
+ */
+const status = read('src/renderer/src/components/StatusBar.tsx')
+check('the panel shows that it is listening', /className=\{`listening/.test(status), true)
+check('with how much it has', /\$\{listening\.words\} words/.test(status), true)
+check('and says the transcript is being sent', /carries the transcript/.test(status), true)
 
 /* ------------------------------------------------------- what is said out loud */
 
@@ -174,8 +281,8 @@ check('while bare asks for the notes', M.notesRequest(session).startsWith('Write
  * story this app can offer, so it is not allowed to disappear in a tidy-up.
  */
 check('starting says what it is listening to', /Listening\*\* to \$\{what\}/.test(app), true)
-check('and that nothing is saved', /no audio is saved/.test(app), true)
-check('and that it cannot say who spoke', /cannot say who said what/.test(app), true)
+check('and that nothing is saved', /no audio/.test(app), true)
+check('and that it cannot say who spoke', /cannot say who spoke/.test(app), true)
 check('and whose permission is not Wumpy’s to give', /consent where you are/.test(app), true)
 
 console.log(`\n${failed === 0 ? `all ${0 + 1 ? '' : ''}listen checks correct` : `${failed} listen checks FAILED`}`)

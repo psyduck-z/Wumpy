@@ -56,9 +56,10 @@ import type { AudioSource } from './loopback'
 import {
   ENOUGH_WORDS,
   elapsed,
-  notesRequest,
+  meetingTurn,
   stamp,
-  wordCount
+  wordCount,
+  type Listening
 } from '@shared/meeting'
 import {
   allCommands,
@@ -93,6 +94,19 @@ function prettify(accelerator: string): string {
 }
 
 const NEWLINE = String.fromCharCode(10)
+
+/**
+ * What to say when there is a transcript but not enough of it.
+ *
+ * Better than a paragraph of invention: a model handed ten seconds of
+ * speech and asked for the key decisions will produce key decisions.
+ */
+function tooLittle(heard: Listening | null): string {
+  const words = heard ? wordCount(heard) : 0
+  return words
+    ? `Only ${words} words so far — too little to write anything from.`
+    : 'Nothing heard yet.'
+}
 
 export default function App(): React.JSX.Element {
   const chat = useChat()
@@ -378,7 +392,13 @@ export default function App(): React.JSX.Element {
     // A fresh chat is eligible for automatic titling again.
     titledFor.current = null
     setPicker(null)
-  }, [chat])
+    /* A transcript belongs to the conversation it was gathered for. Left
+       behind, it would ride along on every turn of an unrelated chat -
+       which is exactly the invisible cost the ambient attachment is
+       bounded to avoid. Stops the session too, if one is still running:
+       nothing would be listening to, and nobody would know it was. */
+    void listening.forget()
+  }, [chat, listening])
 
   /**
    * Renames the current chat.
@@ -1262,16 +1282,21 @@ function namedControls(shot: Attachment): string[] {
           : want === 'system'
             ? 'your speakers only — not your microphone'
             : 'your microphone only'
+      /*
+       * ONE THING TO REMEMBER, and it is not a command.
+       *
+       * This used to end by teaching three forms, one of them `/listen
+       * what did they say about the deadline`. Every message carries the
+       * transcript now, so the only thing worth saying is: talk to it.
+       * `/listen` again stops it, which is the word they just typed.
+       */
       chat.note(
         [
-          `**Listening** to ${what}.`,
+          `**Listening** to ${what}. Just talk to me — say **notes** for a write-up, ` +
+            'or ask anything about what was said.',
           '',
-          'It transcribes as it goes and keeps only the text — no audio is saved. ' +
-            'The channels are mixed, so the notes cannot say who said what.',
-          '',
-          '`/listen notes` writes it up without stopping, `/listen stop` ends it, ' +
-            'and you can ask it anything about what it has heard: `/listen what did they ' +
-            'say about the deadline`.',
+          `\`/listen\` again stops it. Only the text is kept, no audio, ` +
+            'and the channels are mixed so it cannot say who spoke.',
           '',
           '_Recording others may need their consent where you are._'
         ].join(NEWLINE)
@@ -1861,42 +1886,26 @@ function namedControls(shot: Attachment): string[] {
                   ? 'both'
                   : 'system'
             if (listening.on) {
-              chat.note('Already listening. `/listen stop` first, then pick a source.')
+              chat.note('Already listening. `/listen` to stop, then pick a source.')
               return
             }
             await startListening(want)
             return
           }
 
-          if (action.what === 'notes' || (action.what === 'stop' && listening.on)) {
-            const ending = action.what === 'stop'
-            const heard = ending ? await listening.stop() : listening.peek()
+          if (action.what === 'notes') {
+            const heard = listening.peek()
             if (!heard || wordCount(heard) < ENOUGH_WORDS) {
-              /* Better than a paragraph of invention. A model handed ten
-                 seconds of speech and asked for "the key decisions" will
-                 produce key decisions. */
-              chat.note(
-                heard && wordCount(heard) > 0
-                  ? `Only heard ${wordCount(heard)} words so far — too little to write notes from.` +
-                      (ending ? ' Stopped.' : '')
-                  : 'Nothing heard yet.' + (ending ? ' Stopped.' : '')
-              )
+              chat.note(tooLittle(heard))
               return
             }
-            const minutes = Math.max(1, Math.round(elapsed(heard) / 60_000))
-            chat.send(
-              notesRequest(heard, action.ask),
-              /* The transcript is thousands of words and belongs in the
-                 request, not on the screen. What the user sees is what
-                 they asked for. */
-              action.ask
-                ? `${action.ask} — from ${minutes} min of transcript`
-                : `Notes from ${minutes} min of listening${ending ? '' : ' so far'}`
-            )
+            /* Nothing else to do: an ordinary message already carries the
+               transcript, so "notes" is one. */
+            chat.send(meetingTurn(heard), 'Notes')
             return
           }
 
-          if (action.what === 'stop') {
+          if (action.what === 'stop' && !listening.on) {
             chat.note('Not listening.')
             return
           }
@@ -1907,7 +1916,8 @@ function namedControls(shot: Attachment): string[] {
             chat.note(
               words
                 ? `Stopped — ${words} words over ${stamp(elapsed(heard!))}. ` +
-                    '`/listen notes` writes them up, or ask it anything about what it heard.'
+                    'Ask me anything about it, or say **notes**. It stays with ' +
+                    'this chat until you start a new one.'
                 : 'Stopped. Nothing was heard.'
             )
             return
@@ -2017,6 +2027,34 @@ function namedControls(shot: Attachment): string[] {
         return
       }
 
+      /**
+       * WHILE IT IS LISTENING, ASKING ABOUT THE MEETING IS JUST ASKING.
+       *
+       * This was `/listen what did they say about the deadline`, and the
+       * report on that was the right one: "that's too long. How am I
+       * supposed to remember this?"
+       *
+       * Nobody should have to. A transcript Wumpy is actively building is
+       * context for the conversation, the way the screen or an attachment
+       * is - not a thing you address with a command. So every message
+       * carries it, including `notes`, and the only word left to remember
+       * is the one that started it.
+       *
+       * It costs tokens, which is why it is bounded rather than clever:
+       * only while a session exists in this chat, said out loud when it
+       * starts, and gone with `/new`. `meetingTurn` tells the model in as
+       * many words to ignore the transcript when the message is not about
+       * the meeting, because "what is the weather" will arrive with an
+       * hour of somebody's standup attached to it.
+       */
+      const heard = listening.peek()
+      if (heard && wordCount(heard) >= ENOUGH_WORDS) {
+        /* Sent wrapped, shown as typed: the transcript is thousands of
+           words and belongs in the request, not on the screen. */
+        chat.send(meetingTurn(heard, text), text, images)
+        return
+      }
+
       // Compact before sending when the context is filling up, so the model
       // never silently loses the start of the conversation.
       if (
@@ -2033,7 +2071,7 @@ function namedControls(shot: Attachment): string[] {
 
       chat.send(text, undefined, images)
     },
-    [chat, compactHistory, runCommand, settings, streaming, usage.used]
+    [chat, compactHistory, listening, runCommand, settings, streaming, usage.used]
   )
 
   /**
@@ -2983,6 +3021,17 @@ function namedControls(shot: Attachment): string[] {
         pool={pool}
         compact={compact}
         approvalMode={settings?.approvalMode ?? 'manual'}
+        listening={
+          listening.session && wordCount(listening.session) > 0
+            ? { words: wordCount(listening.session), live: listening.on }
+            : null
+        }
+        onListening={() =>
+          void runCommand(
+            { kind: 'listen', what: listening.on ? 'stop' : 'notes', ask: '' },
+            '/listen'
+          )
+        }
         onCycleApproval={() => void runCommand({ kind: 'approve', mode: 'cycle' }, '/approve')}
         onCompact={() => void compactHistory()}
         onQuota={() => void runCommand({ kind: 'usage', reset: false }, '/usage')}
