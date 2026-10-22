@@ -1,4 +1,11 @@
-import { memo, useState, isValidElement, type ReactNode } from 'react'
+import {
+  createContext,
+  memo,
+  useContext,
+  useState,
+  isValidElement,
+  type ReactNode
+} from 'react'
 import { copyText } from '../copy'
 import type {
   Attachment,
@@ -24,6 +31,68 @@ import { DoCard } from './DoCard'
 import { LinkCard } from './LinkCard'
 import { WriteCard } from './WriteCard'
 import { DEFAULT_ENGINE, type LinkApproval } from '@shared/links'
+import { readCommandChip } from '../commands'
+
+/**
+ * Whether the code being rendered is inside a fence.
+ *
+ * react-markdown calls the same `code` component for both, and a fence with
+ * no language looks exactly like inline code from inside it. The `pre`
+ * handler below renders its children through CodeBlock, which is above them,
+ * so a provider there is the one thing that always knows.
+ */
+const InFence = createContext(false)
+
+/**
+ * A command in an answer, as a button.
+ *
+ * Wumpy is told to answer "rename this chat" with `/rename` and nothing
+ * else. That is the right answer and it was a dead end - the user read a
+ * command and then typed it out. Every "did you mean /quota?" and every
+ * usage line had the same shape.
+ *
+ * Which commands may appear here is decided in commands.ts, not here: an
+ * answer is model output, and the app feeds the model web pages. Nothing on
+ * the list reaches past the app.
+ */
+function CommandChip({ command, onRun }: { command: string; onRun(c: string): void }): React.JSX.Element {
+  return (
+    <button type="button" className="cmd-chip" onClick={() => onRun(command)} title="Run it">
+      {command}
+    </button>
+  )
+}
+
+/**
+ * Inline code, which is a button when it is a command and code otherwise.
+ *
+ * A component rather than a closure in the map below, because it reads the
+ * fence context: a fence with no language reaches the same renderer, and a
+ * one-line shell snippet is not an offer to run one of Wumpy's commands.
+ */
+function InlineCode({
+  className,
+  children,
+  onCommand
+}: {
+  className?: string
+  children?: ReactNode
+  onCommand?: (command: string) => void
+}): React.JSX.Element {
+  const fenced = useContext(InFence)
+  const chip = !fenced && onCommand ? readCommandChip(plainText(children) ?? '') : null
+  if (chip) return <CommandChip command={chip} onRun={onCommand!} />
+  return <code className={className}>{children}</code>
+}
+
+/** The text of a node, when it is nothing but text. */
+function plainText(children: ReactNode): string | null {
+  if (typeof children === 'string') return children
+  if (Array.isArray(children) && children.length === 1 && typeof children[0] === 'string') {
+    return children[0]
+  }
+  return null
+}
 
 /**
  * Reads the text out of a rendered code block, for measuring it.
@@ -79,7 +148,9 @@ function CodeBlock({ children }: { children: ReactNode }): React.JSX.Element {
         </button>
       )}
       {/* Kept mounted while folded, so Copy still finds the code. */}
-      <pre hidden={long && !open}>{children}</pre>
+      <pre hidden={long && !open}>
+        <InFence.Provider value={true}>{children}</InFence.Provider>
+      </pre>
     </div>
   )
 }
@@ -368,6 +439,13 @@ export interface MarkdownProps {
   linkMode?: LinkApproval
   searchEngine?: string
   /**
+   * Runs one of Wumpy's own commands, when an answer names one.
+   *
+   * Absent in the places a button would be wrong: a compaction summary is a
+   * record of a conversation that has already happened, not an offer.
+   */
+  onCommand?: (command: string) => void
+  /**
    * Whether this model writes a plain shell fence where Wumpy asks for
    * ```wumpy-run. Declared per model in CLOUD_MODELS; see normaliseFences.
    */
@@ -436,6 +514,7 @@ export const Markdown = memo(function Markdown({
   onOpened,
   linkMode = 'manual',
   searchEngine = DEFAULT_ENGINE,
+  onCommand,
   looseFences = false
 }: MarkdownProps) {
   // The one block still being written, if any. Everything else is final, even
@@ -567,7 +646,21 @@ export const Markdown = memo(function Markdown({
           <a href={href} target="_blank" rel="noreferrer">
             {children}
           </a>
-        )
+        ),
+        /* `/engine` written as code, which is how the instructions ask for
+           it and how every usage line in this app writes it. */
+        code: ({ className, children }) => (
+          <InlineCode className={className} onCommand={onCommand}>
+            {children}
+          </InlineCode>
+        ),
+        /* And `/engine` written as a line of its own, which is what the
+           model does when it is told to reply with only the command. A
+           paragraph that says anything else stays a paragraph. */
+        p: ({ children }) => {
+          const chip = onCommand ? readCommandChip(plainText(children) ?? '') : null
+          return <p>{chip ? <CommandChip command={chip} onRun={onCommand!} /> : children}</p>
+        }
       }}
     >
       {/* Loose fences are promoted first, then the one-button rule applies

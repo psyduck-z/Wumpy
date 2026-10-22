@@ -710,7 +710,10 @@ export function parseCommand(input: string): CommandAction | null {
        "/qouta" meant "/quota", which is a real alias of /usage and works -
        answering "/usage" sends them to a word they did not reach for. */
     const did = nearest(name, COMMANDS)
-    const hint = did ? ` Did you mean /${did.via}?` : ''
+    /* As code, because the renderer offers a clickable command as a button
+       and this is the moment it is most wanted: the user has the command
+       nearly right and would otherwise retype the whole line. */
+    const hint = did ? ` Did you mean \`/${did.via}\`?` : ''
     return {
       kind: 'error',
       message: `Unknown command /${name}.${hint} Type /help to see them all.`
@@ -721,8 +724,17 @@ export function parseCommand(input: string): CommandAction | null {
 
 /** Markdown table of every command, rendered by /help. */
 export function helpText(): string {
+  /*
+   * Each name as code, so the clickable ones arrive as buttons.
+   *
+   * /help is where somebody goes to find out what exists, which makes it the
+   * worst place to end at "now type it out". The renderer turns inline code
+   * that is nothing but a command into a button - see readCommandChip - so
+   * the table is a menu for the nineteen commands that may be offered, and
+   * stays a table for /key, /delete and the rest.
+   */
   const rows = COMMANDS.map((c) => {
-    const names = [c.name, ...(c.aliases ?? [])].map((n) => `/${n}`).join(', ')
+    const names = [c.name, ...(c.aliases ?? [])].map((n) => `\`/${n}\``).join(', ')
     const arg = c.arg ? ` \`<${c.arg}>\`` : ''
     return `| ${names}${arg} | ${c.hint} |`
   })
@@ -762,4 +774,100 @@ export function helpText(): string {
     'Start it with `/also` instead and it is added as a note straight away,',
     'without interrupting: the answer carries on and the model sees it next turn.'
   ].join('\n')
+}
+
+/* ------------------------------------------------ commands you can click */
+
+/**
+ * The commands an answer may offer as a button.
+ *
+ * Wumpy is told to answer "rename this chat" with `/rename` and nothing else,
+ * which is the right answer and a dead end: the user reads a command and then
+ * has to type it. The same happens with every "did you mean" and every usage
+ * line. This list is what turns that text into one click.
+ *
+ * It is an allowlist, and the exclusions are the point. Answers are model
+ * output, and this app feeds the model web pages - so a page can propose the
+ * words in an answer, and a button is easier to click than a command is to
+ * type. Nothing here reaches past the app:
+ *
+ *   /key       takes a secret. A planted `/key nvidia <theirs>` would replace
+ *              the user's own key with somebody else's, in one click.
+ *   /approve   sets how much runs without being asked. One click to "run
+ *              everything" is the whole permission model.
+ *   /delete    destroys the chat, /quit closes the app. Both unaskable-for.
+ *   /open      opens a page in the real browser. There is already a card for
+ *              that, and it names the host and says why it refused.
+ *   /screen    sends a photograph of their screen to the model.
+ *   /remember  writes to what persists between chats, from the argument.
+ *   the prompt wrappers (/plan, /btw, ...) wrap text that is not there yet.
+ *
+ * What is left changes the app and nothing else, and every one of them is
+ * reversible by doing it again.
+ */
+export const CLICKABLE: readonly string[] = [
+  'new',
+  'resume',
+  'chats',
+  'compact',
+  'rename',
+  'model',
+  'dock',
+  'engine',
+  'usage',
+  'pin',
+  'reasoning',
+  'listen',
+  'voice',
+  'polish',
+  'autostop',
+  'think',
+  'nothink',
+  'lean',
+  'help'
+]
+
+/**
+ * The command in a line of an answer, if it is one that may be clicked.
+ *
+ * Deliberately strict about shape: only text that is nothing but a command
+ * becomes a button, so a sentence mentioning `/model` in passing stays a
+ * sentence. Aliases resolve, so `/tokens` offers the button `/usage` would.
+ *
+ * The argument is where the care goes, because "/engine changes which one
+ * opens" is a line of prose that starts with a command - and it was a button
+ * until this check caught it. Three rules, each from that one example:
+ *
+ *   the command must TAKE an argument. /engine does not, so anything after
+ *   it is prose, and a button labelled with a sentence is nobody's idea of a
+ *   command.
+ *
+ *   it must be short - three words, thirty-two characters. Values are short:
+ *   `gemma4:31b-cloud`, `bottom-right`, `Fish pie`. Explanations are not.
+ *
+ *   and it must not end like a sentence. A title does not end in a full stop
+ *   and a model name never has.
+ *
+ * A long title is missed by this, and stays text, which is where it was.
+ */
+export function readCommandChip(text: string): string | null {
+  const line = text.trim()
+  if (!line.startsWith('/') || line.length > 72 || line.includes('\n')) return null
+
+  const match = /^\/(\S+)(?:\s+(.*))?$/.exec(line)
+  if (!match) return null
+
+  const spec = findCommand(match[1])
+  if (!spec || !CLICKABLE.includes(spec.name)) return null
+
+  const arg = (match[2] ?? '').trim()
+  if (!arg) {
+    /* `/rename` bare answers with its own usage line, which is a worse
+       button than no button. */
+    return spec.argRequired ? null : line
+  }
+  if (!spec.arg) return null
+  if (arg.length > 32 || arg.split(/\s+/).length > 3) return null
+  if (/[.!?,;:]$/.test(arg)) return null
+  return line
 }

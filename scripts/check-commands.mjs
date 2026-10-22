@@ -23,8 +23,16 @@ await build({
   outfile: out,
   logLevel: 'error'
 })
-const { allCommands, findCommand, parseCommand, completions, helpText, SHORTCUT_FOR } =
-  await import(pathToFileURL(out).href)
+const {
+  allCommands,
+  findCommand,
+  parseCommand,
+  completions,
+  helpText,
+  SHORTCUT_FOR,
+  CLICKABLE,
+  readCommandChip
+} = await import(pathToFileURL(out).href)
 
 const commands = allCommands()
 let failed = 0
@@ -220,6 +228,82 @@ rmSync(out, { force: true })
   if (fired('/think on').kind !== 'setting') fail('/think stopped meaning the thinking')
   if (findCommand('reasoning')?.run('on').kind !== 'reasoning') fail('/reasoning stopped showing the scratchpad')
   console.log('ok   /think and /nothink, and `reason` is left unclaimed')
+}
+
+/* --------------------------------------------- the ones an answer may offer */
+
+/*
+ * A command named in an answer is a button, and this list decides what a web
+ * page can put in front of the user.
+ *
+ * Wumpy is told to answer "rename this chat" with `/rename` and nothing else,
+ * so the answer was a command the user then had to type out. It is a chip
+ * now. But an answer is model output and this app feeds the model web pages,
+ * so the question is not whether the model would write `/key nvidia <theirs>`
+ * - it is whether a page that asks it to can get a button for it. The ones
+ * below are what would be worth asking for.
+ */
+{
+  for (const name of CLICKABLE) {
+    if (findCommand(name)?.name !== name) fail(`/${name} is clickable but not a command`)
+  }
+
+  const NEVER = {
+    '/key nvidia nvapi-0000': 'would replace their key with somebody else’s',
+    '/key google clear': 'would throw their keys away',
+    '/approve all': 'would turn off being asked',
+    '/delete': 'would destroy the chat',
+    '/quit': 'would close the app',
+    '/open https://example.com': 'the link card exists and says what it refused',
+    '/screen': 'would photograph their screen for the model',
+    '/remember my key is 1234': 'would write what persists between chats',
+    '/plan ship it': 'a prompt wrapper, which wraps text that is not there yet'
+  }
+  for (const [line, why] of Object.entries(NEVER)) {
+    if (readCommandChip(line)) fail(`${line} became a button: ${why}`)
+  }
+
+  const OFFERED = {
+    '/engine': '/engine',
+    ' /new ': '/new',
+    '/tokens': '/tokens',
+    '/model gemma4:31b-cloud': '/model gemma4:31b-cloud',
+    '/rename Fish pie': '/rename Fish pie'
+  }
+  for (const [line, want] of Object.entries(OFFERED)) {
+    const got = readCommandChip(line)
+    if (got !== want) fail(`${JSON.stringify(line)} offered ${JSON.stringify(got)}, wanted ${want}`)
+  }
+
+  /* Prose stays prose. The one thing worse than no button is a button in the
+     middle of a sentence explaining why you might not want to press it. */
+  const PROSE = [
+    'Type /engine to change it.',
+    /* The line that caught the first version of the rule: prose that starts
+       with a command, on a command that takes no argument. */
+    '/engine changes which one opens',
+    '/model picks which one answers',
+    '/dock left.',
+    'engine',
+    '/nosuchthing',
+    /* Bare, this answers with its own usage line, which is a worse button
+       than no button at all. */
+    '/rename',
+    `/model${String.fromCharCode(10)}/dock`,
+    `/remember ${'x'.repeat(80)}`
+  ]
+  for (const line of PROSE) {
+    if (readCommandChip(line)) fail(`${JSON.stringify(line)} became a button`)
+  }
+
+  /* And every one offered actually runs. */
+  for (const name of CLICKABLE) {
+    const chip = readCommandChip(`/${name}`)
+    if (!chip) continue
+    const action = parseCommand(chip)
+    if (!action || action.kind === 'error') fail(`/${name} is offered but answers with an error`)
+  }
+  console.log(`ok   ${CLICKABLE.length} commands may be clicked, and the rest may not`)
 }
 
 console.log(failed === 0 ? '\nall command checks correct' : `\n${failed} command checks FAILED`)

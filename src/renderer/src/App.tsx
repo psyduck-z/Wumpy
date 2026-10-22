@@ -2081,6 +2081,26 @@ function namedControls(shot: Attachment): string[] {
   )
 
   /**
+   * A command named in an answer, run by clicking it.
+   *
+   * The instructions tell Wumpy to answer "rename this chat" with `/rename`
+   * and nothing else, which it does, and until now that was where it ended:
+   * the user read a command and typed it out. Same for every "did you mean"
+   * and every usage line.
+   *
+   * It goes through parseCommand like a typed line, so a chip cannot reach
+   * anything typing cannot, and `readCommandChip` has already decided the
+   * command is one that may be offered at all.
+   */
+  const runNamedCommand = useCallback(
+    (command: string): void => {
+      const action = parseCommand(command)
+      if (action) void runCommand(action, command)
+    },
+    [runCommand]
+  )
+
+  /**
    * Compacting while nothing is happening, instead of in the user's way.
    *
    * Asked for: "sometimes when context is above 60%, compact while its not
@@ -2985,6 +3005,7 @@ function namedControls(shot: Attachment): string[] {
                   onOpened={onOpened}
                   linkMode={fresh ? linkMode : 'manual'}
                   searchEngine={settings?.searchEngine ?? DEFAULT_ENGINE}
+                  onCommand={runNamedCommand}
                   looseFences={looseFences}
                 />
               )

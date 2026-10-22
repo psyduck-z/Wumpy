@@ -52,6 +52,7 @@ export const Message = memo(function Message({
   autoWrite,
   linkMode,
   searchEngine,
+  onCommand,
   looseFences
 }: {
   message: ChatMessage
@@ -87,6 +88,8 @@ export const Message = memo(function Message({
   onOpened?: (result: LinkResult, messageId: string) => void
   linkMode?: LinkApproval
   searchEngine?: string
+  /** Runs one of Wumpy's own commands, when an answer offers one. */
+  onCommand?: (command: string) => void
   /** This model writes ```powershell instead of ```wumpy-run. */
   looseFences?: boolean
   onSearch?: (
@@ -288,6 +291,7 @@ export const Message = memo(function Message({
                 onOpened={onOpened}
                 linkMode={linkMode}
                 searchEngine={searchEngine}
+                onCommand={onCommand}
                 looseFences={looseFences}
               />
             )

@@ -468,6 +468,35 @@ body {
   font-size: 12.5px;
 }
 
+/*
+ * A command named in an answer, as a button.
+ *
+ * Shaped like the inline code it replaces - same font, same size, same place
+ * in the line - because that is what it was a moment ago and what the model
+ * wrote. What marks it as something you can press is the accent border and
+ * the hover, not a different shape, so a sentence with one in it still reads
+ * as a sentence.
+ */
+.cmd-chip {
+  display: inline-flex;
+  align-items: center;
+  padding: 1px 7px;
+  background: rgb(var(--accent-soft));
+  border: 1px solid rgb(var(--accent) / 0.35);
+  border-radius: 5px;
+  color: rgb(var(--accent-text));
+  font-family: var(--mono);
+  font-size: 12.5px;
+  line-height: 1.5;
+  cursor: pointer;
+}
+
+.cmd-chip:hover,
+.cmd-chip:focus-visible {
+  background: rgb(var(--accent) / 0.22);
+  border-color: rgb(var(--accent) / 0.6);
+}
+
 .codeblock {
   position: relative;
   margin: 0 0 9px;

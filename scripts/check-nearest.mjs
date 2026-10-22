@@ -53,7 +53,10 @@ function check(name, got, want) {
 const NL = String.fromCharCode(10)
 const COMMANDS = allCommands()
 /** What the error says after "Did you mean", or null when it says nothing. */
-const suggests = (text) => /Did you mean \/(\S+)\?/.exec(parseCommand(text)?.message ?? '')?.[1] ?? null
+/* The command is in backticks so the panel offers it as a button rather than
+   as something to retype; the name inside them is what this reads. */
+const suggests = (text) =>
+  /Did you mean `\/([^`]+)`\?/.exec(parseCommand(text)?.message ?? '')?.[1] ?? null
 
 /* -------------------------------------------------------------- the distance */
 
