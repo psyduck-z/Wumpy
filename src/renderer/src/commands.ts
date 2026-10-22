@@ -1,7 +1,6 @@
 import type { Dock, ProviderName } from '@shared/types'
 import { PROVIDER_IDS, PROVIDERS, isProviderId } from '@shared/cloud'
 import { MAX_RUNS } from '@shared/probe'
-import { languageCode } from '@shared/dictation'
 import { nearest } from '@shared/nearest'
 
 /**
@@ -32,8 +31,6 @@ export type CommandAction =
   | { kind: 'reasoning'; show: boolean | 'toggle' }
   | { kind: 'pin'; pinned: boolean | 'toggle' }
   | { kind: 'voice'; setting: 'on' | 'polish' | 'autostop'; on: boolean | 'toggle' }
-  /** What language to transcribe. Null reports rather than sets. */
-  | { kind: 'language'; code: string | null }
   /** Listening to the machine's own audio. See @shared/meeting. */
   | { kind: 'listen'; what: 'toggle' | 'stop' | 'notes' | 'source'; ask: string }
   /** A plain boolean in the settings file, with no machinery behind it. */
@@ -557,35 +554,6 @@ export const COMMANDS: CommandSpec[] = [
       /* Anything else is a question about what has been heard, which is
          the same request as notes with a different instruction. */
       return { kind: 'listen', what: 'notes', ask: a }
-    }
-  },
-  {
-    /*
-     * What language dictation is in - and it is a real choice rather than
-     * a preference, because `base.en` has no other language in it. See
-     * WHISPER_MODEL_MULTILINGUAL: moving off English loads a different
-     * model, which is a download the first time and a little worse at
-     * English for ever after. The reply says so rather than hiding it.
-     *
-     * Bare `/language` reports and lists, like `/tier` and `/model`, so
-     * nobody has to know a code to find out what the options are.
-     */
-    name: 'language',
-    aliases: ['lang', 'speak'],
-    hint: 'What language you dictate in — auto, english, chinese…',
-    arg: 'auto|code',
-    run: (arg) => {
-      const want = arg.trim()
-      if (!want) return { kind: 'language', code: null }
-      const code = languageCode(want)
-      return code
-        ? { kind: 'language', code }
-        : {
-            kind: 'error',
-            message:
-              `I do not know the language "${want}". Try \`/language auto\` to detect it, ` +
-              'a name like `chinese`, or a two-letter code like `zh`.'
-          }
     }
   },
   {

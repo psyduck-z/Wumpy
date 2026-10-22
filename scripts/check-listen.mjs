@@ -127,9 +127,9 @@ check('the two sources are halved before mixing', /gain\.gain\.value = 0\.5/.tes
 const session = {
   startedAt: 0,
   pieces: [
-    { at: 0, text: 'Right, shall we start.', language: 'en' },
-    { at: 30_000, text: 'The deadline moved to the fourteenth.', language: 'en' },
-    { at: 95_000, text: 'Sam is picking up the migration.', language: 'en' }
+    { at: 0, text: 'Right, shall we start.' },
+    { at: 30_000, text: 'The deadline moved to the fourteenth.' },
+    { at: 95_000, text: 'Sam is picking up the migration.' }
   ]
 }
 
@@ -142,27 +142,14 @@ check('stamped at the start', M.transcriptText(session).startsWith('[0:00]'), tr
 check('and again a minute later', M.transcriptText(session).includes('[1:35]'), true)
 check('but not for the piece 30s in', M.transcriptText(session).includes('[0:30]'), false)
 
-/*
- * A CJK CHARACTER IS A WORD. Chinese has no spaces, so splitting on
- * whitespace calls a forty-character sentence one word - and this number
- * decides whether there is enough transcript to summarise. Getting it wrong
- * in that direction refuses to write notes of a meeting held in Chinese,
- * which is the case this was built alongside.
- */
-check('English words are counted', M.countWords('the deadline moved'), 3)
-check('and Chinese characters are too', M.countWords('我们明天开会'), 6)
-check('mixed, both', M.countWords('我们用 Electron 开发'), 6)
-check('a Chinese meeting reaches the threshold', M.wordCount({
-  startedAt: 0,
-  pieces: [{ at: 0, text: '我们明天下午三点开会讨论预算和进度安排以及下个季度的整体计划', language: 'zh' }]
-}) >= M.ENOUGH_WORDS, true)
+check('words are counted', M.countWords('the deadline moved'), 3)
 
 /*
  * Below the threshold there is nothing to summarise, and saying so beats a
  * paragraph of invention: a model given ten seconds of speech and asked for
  * "the key decisions" will produce key decisions.
  */
-check('ten seconds of speech is not a meeting', M.wordCount({ startedAt: 0, pieces: [{ at: 0, text: 'hello is this thing on', language: 'en' }] }) < M.ENOUGH_WORDS, true)
+check('ten seconds of speech is not a meeting', M.wordCount({ startedAt: 0, pieces: [{ at: 0, text: 'hello is this thing on' }] }) < M.ENOUGH_WORDS, true)
 check('and the panel checks before asking', /wordCount\(heard\) < ENOUGH_WORDS/.test(app), true)
 
 /* ------------------------------------------- what the model is told not to do */
@@ -171,7 +158,6 @@ check('no speaker may be invented', /cannot tell who is speaking/.test(M.NOTES_P
 check('no name or number may be repaired', /Never repair a name or a number/.test(M.NOTES_PROMPT), true)
 check('no action item may be invented to fill a heading', /Never invent an action item/.test(M.NOTES_PROMPT), true)
 check('garbled things are quoted, not guessed', /quote it as heard/.test(M.NOTES_PROMPT), true)
-check('and it answers in the language of the transcript', /language the transcript is mostly in/.test(M.NOTES_PROMPT), true)
 
 /* The question form shares the prompt rather than having its own, so the
    guard-rails cannot drift apart. */

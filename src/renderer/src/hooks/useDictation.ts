@@ -61,8 +61,6 @@ export function useDictation(onText: (text: string) => void, commands: string[])
 
   const live = useRef<Recording | null>(null)
   const cancelled = useRef(false)
-  /** What the pieces came back as, for the tidy pass at the end. */
-  const spokenLanguage = useRef<string>('en')
   /**
    * Pieces transcribed while the user was still talking, by position.
    *
@@ -190,10 +188,6 @@ export function useDictation(onText: (text: string) => void, commands: string[])
          */
         const partials = new Map<number, string>()
         let chain: Promise<void> = Promise.resolve()
-        /* Per recording, never carried over: what was said last time is not
-           evidence about this time, and a stale `zh` would hold the English
-           repairs off an English sentence. */
-        spokenLanguage.current = 'en'
 
         recording = await record({
           onLevel: setLevel,
@@ -213,17 +207,6 @@ export function useDictation(onText: (text: string) => void, commands: string[])
                   commandsRef.current
                 )
                 if (part.heard?.trim()) partials.set(seg.index, part.heard.trim())
-                /*
-                 * WHAT LANGUAGE THE WHOLE THING WAS, decided by the pieces.
-                 *
-                 * The join at the end goes back through the repair tables,
-                 * and those are English tables - so it has to be told what
-                 * was actually spoken or it will capitalise and de-space a
-                 * Chinese sentence. The last piece that carried words wins:
-                 * detection is per clip, and the end of an utterance is
-                 * where the detector had the most audio to work with.
-                 */
-                if (part.heard?.trim() && part.language) spokenLanguage.current = part.language
               } catch {
                 // A piece that will not transcribe is not fatal: the whole clip
                 // is kept and the end falls back to transcribing that instead.
@@ -307,7 +290,7 @@ export function useDictation(onText: (text: string) => void, commands: string[])
          * and keeps everything after it.
          */
         const result = joined
-          ? await window.wumpy.voice.tidy(joined, commandsRef.current, spokenLanguage.current)
+          ? await window.wumpy.voice.tidy(joined, commandsRef.current)
           : await window.wumpy.voice.transcribe(
               await clip.blob.arrayBuffer(),
               clip.extension,

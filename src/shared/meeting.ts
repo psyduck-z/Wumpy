@@ -28,8 +28,6 @@ export interface Heard {
   /** Milliseconds from the start of the session, so the notes can be ordered. */
   at: number
   text: string
-  /** Whisper's code for what it decided this piece was. */
-  language: string
 }
 
 /** What a listening session has gathered so far. */
@@ -49,27 +47,21 @@ export function stamp(ms: number): string {
   return `${h > 0 ? `${h}:` : ''}${mm}:${String(s).padStart(2, '0')}`
 }
 
-/** How many words are in hand, which is the honest measure of a transcript. */
+/**
+ * How many words are in hand, which is the honest measure of a transcript.
+ *
+ * Whitespace is enough, because the transcriber is `base.en` and English is
+ * the only thing it can return. A script without word spaces would need
+ * counting by character instead - see WHISPER_MODEL for why there is not
+ * one to worry about.
+ */
 export function wordCount(session: Listening): number {
   return session.pieces.reduce((n, p) => n + countWords(p.text), 0)
 }
 
-/**
- * Words, counting a CJK character as one.
- *
- * Chinese has no spaces, so splitting on whitespace reports a forty-character
- * sentence as one word - and this number is used to decide whether there is
- * enough transcript to summarise. Getting it wrong in that direction would
- * refuse to write notes of a meeting held in Chinese, which is precisely the
- * case this was built alongside.
- */
+/** Words in one piece. */
 export function countWords(text: string): number {
-  const cjk = text.match(/[぀-ヿ㐀-䶿一-鿿가-힯]/g)?.length ?? 0
-  const latin = text
-    .replace(/[぀-ヿ㐀-䶿一-鿿가-힯]/g, ' ')
-    .split(/\s+/)
-    .filter(Boolean).length
-  return cjk + latin
+  return text.split(/\s+/).filter(Boolean).length
 }
 
 /**
@@ -142,8 +134,7 @@ export const NOTES_PROMPT = [
   '- Never repair a name or a number into something more plausible. If it',
   '  sounds wrong, quote it as heard and put it under Unclear.',
   '- Never invent an action item to fill the heading. Omit the heading.',
-  '- No preamble, no sign-off, no offer to help further. Notes only.',
-  '- Answer in the language the transcript is mostly in.'
+  '- No preamble, no sign-off, no offer to help further. Notes only.'
 ].join('\n')
 
 /**

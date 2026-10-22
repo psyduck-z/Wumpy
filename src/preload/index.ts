@@ -275,8 +275,8 @@ const api = {
      * The cleanup half on its own, for text already transcribed in pieces
      * while the user was speaking. Skips Whisper, keeps everything after it.
      */
-    tidy: (text: string, commands?: string[], language?: string): Promise<Dictation> =>
-      ipcRenderer.invoke(IPC.voiceTidy, { text, commands, language }),
+    tidy: (text: string, commands?: string[]): Promise<Dictation> =>
+      ipcRenderer.invoke(IPC.voiceTidy, { text, commands }),
     onStatus: (cb: (s: VoiceStatus) => void) => on<VoiceStatus>(IPC.voiceStatusChanged, cb)
   }
 }

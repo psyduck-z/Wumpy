@@ -49,89 +49,6 @@ import { maskUrls, restoreUrls, urlsIn } from './spokenurl'
  */
 export const WHISPER_MODEL = 'base.en'
 
-/**
- * The same size with every language in it, for when English-only will not do.
- *
- * A `.en` model is not English-first, it is English-ONLY: the other languages
- * were trained out of it, and so was the detector, so `base.en` handed Chinese
- * returns confident English nonsense rather than an error. Asking for Chinese
- * is therefore asking for a different model, and this is the same size of it.
- *
- * NOT the default, and that is a measurement rather than caution. The table
- * above is `base.en`'s, and the multilingual `base` is a smaller share of the
- * same parameters spent on ninety-eight more languages - OpenAI's own figures
- * put it a few points behind on English word error. Someone who only ever
- * dictates English should keep the model that was measured for it, which is
- * what leaving the setting alone does.
- *
- * About 145MB, downloaded on first use the same way base.en was.
- */
-export const WHISPER_MODEL_MULTILINGUAL = 'base'
-
-/**
- * What the user wants transcribed: English, anything, or one named language.
- *
- * Three states rather than a switch, because pinning is not the same as
- * detecting and is usually better. Detection reads one window of audio, and a
- * dictated clip is often two seconds long - someone who knows they are about
- * to speak Chinese can say so and skip the guess entirely.
- */
-export type VoiceLanguage = 'en' | 'auto' | (string & {})
-
-/** Which Whisper size a language setting needs. */
-export function whisperModelFor(language: VoiceLanguage): string {
-  return language === 'en' ? WHISPER_MODEL : WHISPER_MODEL_MULTILINGUAL
-}
-
-/** The code to pin for the worker, or null to make it detect one. */
-export function pinnedLanguage(language: VoiceLanguage): string | null {
-  return language === 'auto' ? null : language
-}
-
-/**
- * The languages worth naming, out of the ninety-nine Whisper knows.
- *
- * A list, not a gate: `/language <code>` takes any of Whisper's codes, and
- * this is what the command offers when asked. Chinese is first because it is
- * the one that was asked for.
- */
-export const LANGUAGES: Array<{ code: string; name: string; also: string[] }> = [
-  { code: 'zh', name: 'Chinese', also: ['chinese', 'mandarin', 'cantonese', 'zh-cn', 'cn'] },
-  { code: 'en', name: 'English', also: ['english', 'en-us', 'en-gb'] },
-  { code: 'ms', name: 'Malay', also: ['malay', 'bahasa', 'malaysian'] },
-  { code: 'ja', name: 'Japanese', also: ['japanese', 'jp'] },
-  { code: 'ko', name: 'Korean', also: ['korean', 'kr'] },
-  { code: 'es', name: 'Spanish', also: ['spanish', 'espanol'] },
-  { code: 'fr', name: 'French', also: ['french', 'francais'] },
-  { code: 'de', name: 'German', also: ['german', 'deutsch'] },
-  { code: 'hi', name: 'Hindi', also: ['hindi'] },
-  { code: 'ar', name: 'Arabic', also: ['arabic'] },
-  { code: 'ru', name: 'Russian', also: ['russian'] },
-  { code: 'pt', name: 'Portuguese', also: ['portuguese'] },
-  { code: 'id', name: 'Indonesian', also: ['indonesian'] },
-  { code: 'ta', name: 'Tamil', also: ['tamil'] }
-]
-
-/** A name or a code, as the code Whisper wants. Null when it is neither. */
-export function languageCode(word: string): string | null {
-  const w = word.trim().toLowerCase()
-  if (!w) return null
-  if (w === 'auto' || w === 'detect' || w === 'any') return 'auto'
-  for (const l of LANGUAGES) {
-    if (w === l.code || l.also.includes(w) || w === l.name.toLowerCase()) return l.code
-  }
-  /* Any other two-letter code is passed through: Whisper knows ninety-nine
-     of them and this file lists fourteen, so refusing the rest would be
-     this table deciding what the user is allowed to speak. */
-  return /^[a-z]{2}$/.test(w) ? w : null
-}
-
-/** What to call a language code in a sentence. */
-export function languageName(code: string): string {
-  if (code === 'auto') return 'any language'
-  return LANGUAGES.find((l) => l.code === code)?.name ?? code
-}
-
 /** A spoken form and what it should have been, with the reason it is here. */
 interface Fix {
   from: RegExp
@@ -161,41 +78,11 @@ const NOISE = [
   /^uh+\.?$/i
 ]
 
-/**
- * The same thing in Chinese, which is worse and needs its own list.
- *
- * Whisper's multilingual training set took Chinese largely from subtitled
- * video, and a great deal of that video ended with the channel asking for
- * likes. So silence does not produce a polite "Thank you." the way English
- * does - it produces a whole subscribe-and-share appeal, or a subtitling
- * credit, at full confidence and tens of characters long.
- *
- * These are the forms that actually recur, matched loosely because the
- * endings vary: the giveaway is the fragment, not the whole sentence. They
- * only ever run against text that came back as Chinese, so a message that
- * genuinely says 請訂閱 is only at risk if that is the entire utterance.
- */
-const NOISE_ZH = [
-  /訂閱|订阅/,
-  /點贊|点赞|點讚/,
-  /字幕(由|提供|組|组)/,
-  /打赏|打賞/,
-  /明鏡|明镜/,
-  /转发|轉發/,
-  /^[。，、！？…·\s]*$/
-]
-
 /** True when the transcript is Whisper filling a silence rather than speech. */
-export function isNoise(text: string, language = 'en'): boolean {
+export function isNoise(text: string): boolean {
   const t = text.trim()
   if (!t) return true
-  if (language === 'zh' || language === 'yue') return NOISE_ZH.some((r) => r.test(t))
   return NOISE.some((r) => r.test(t))
-}
-
-/** Does this text contain Han, kana or Hangul - scripts that take no spaces? */
-export function isCJK(text: string): boolean {
-  return /[぀-ヿ㐀-䶿一-鿿豈-﫿가-힯]/.test(text)
 }
 
 /**
@@ -351,20 +238,6 @@ const BARE_WORD_SAFE = new Set(['also'])
 export interface TidyOptions {
   /** Command names, so every one of them can be spoken. */
   commands?: string[]
-  /**
-   * What was actually spoken, from the transcriber rather than guessed.
-   *
-   * EVERY RULE BELOW IS AN ENGLISH RULE, and that was invisible while English
-   * was the only possibility. "period" becomes "."; a lower-case first letter
-   * is capitalised; a space before `)` is deleted. Run those over Chinese and
-   * the best case is that nothing matches, which is luck rather than design -
-   * the worst is a vocabulary entry firing on a romanised fragment, or the
-   * capitalisation rule editing a sentence it cannot read.
-   *
-   * So the tables are gated on the language they were written for, and
-   * anything else gets only the repairs that are true of all text.
-   */
-  language?: string
 }
 
 /**
@@ -374,9 +247,7 @@ export interface TidyOptions {
  * become "Python"; slash commands last, so they see a cleaned-up line.
  */
 export function tidyTranscript(raw: string, opts: TidyOptions = {}): string {
-  const language = opts.language ?? 'en'
-  if (isNoise(raw, language)) return ''
-  if (language !== 'en') return tidyForeign(raw)
+  if (isNoise(raw)) return ''
 
   let text = raw.trim().replace(/\s+/g, ' ')
   text = text.replace(FILLER, '')
@@ -426,36 +297,6 @@ export function tidyTranscript(raw: string, opts: TidyOptions = {}): string {
   return restoreUrls(text, addresses.urls)
 }
 
-/**
- * The repairs that are true whatever was spoken.
- *
- * Deliberately almost nothing. The English pass is thirty rules deep because
- * thirty things were observed going wrong and each was checked; none of that
- * work has been done for Chinese, and inventing the equivalent from the
- * outside is how a transcript gets edited into something that was not said.
- * Leaving it alone is the honest default, and the polish pass is still there
- * for anyone who wants punctuation fixed by a model that can read it.
- *
- * Two exceptions, both mechanical rather than linguistic:
- *
- * The spaces. Whisper emits CJK segments and this app joins them with a
- * space, which in a script that has no word spaces leaves a visible gap in
- * the middle of a sentence. Only closed up BETWEEN two CJK characters, so a
- * quoted English word keeps the spaces that hold it apart.
- *
- * And the run of blanks, which is just whitespace.
- */
-function tidyForeign(raw: string): string {
-  return raw
-    .trim()
-    .replace(/\s+/g, ' ')
-    .replace(
-      /([぀-ヿ㐀-䶿一-鿿豈-﫿가-힯。，、！？；：（）「」『』])\s+(?=[぀-ヿ㐀-䶿一-鿿豈-﫿가-힯。，、！？；：（）「」『』])/g,
-      '$1'
-    )
-    .trim()
-}
-
 /* -------------------------------------------------------------- polish guard */
 
 /**
@@ -473,27 +314,9 @@ const NUMERIC =
   /^(?:\d[\d.,]*|zero|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|thirteen|fourteen|fifteen|sixteen|seventeen|eighteen|nineteen|twenty|thirty|forty|fourty|fifty|sixty|seventy|eighty|ninety|hundred|thousand|million|billion)$/
 
 function words(text: string): string[] {
-  /*
-   * A CHARACTER IS A WORD, where the script has no spaces.
-   *
-   * This stripped everything outside `[a-z0-9/.-]`, which was fine while
-   * English was the only possibility and silently disarming the moment it
-   * was not: a Chinese sentence came out as zero words, and zero words is
-   * the one case the guard below cannot judge. It refused every polish, so
-   * the feature was off rather than wrong - but a guard that cannot see
-   * what it is guarding is one bad `||` away from accepting anything.
-   *
-   * Splitting Han, kana and Hangul per character is the standard way to
-   * compare two versions of a Chinese sentence without a segmenter. The
-   * distance threshold below is a proportion, so it carries over.
-   */
-  const spaced = text.replace(
-    /([぀-ヿ㐀-䶿一-鿿豈-﫿가-힯])/g,
-    ' $1 '
-  )
-  return spaced
+  return text
     .toLowerCase()
-    .replace(/[^a-z0-9/.\- ぀-ヿ㐀-䶿一-鿿豈-﫿가-힯]/g, '')
+    .replace(/[^a-z0-9/.\- ]/g, '')
     .split(/\s+/)
     .filter(Boolean)
     .filter((w) => !NUMERIC.test(w))

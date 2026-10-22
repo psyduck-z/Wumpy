@@ -121,7 +121,7 @@ export function useListening(commands: () => string[]): ListeningSession {
                 )
                 const text = (part.text || part.heard || '').trim()
                 if (text) {
-                  piecesRef.current.push({ at: Math.max(0, at), text, language: part.language })
+                  piecesRef.current.push({ at: Math.max(0, at), text })
                   setSession(snapshot())
                 }
               } catch {

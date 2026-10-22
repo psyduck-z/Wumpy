@@ -73,7 +73,6 @@ import { forgetClaims } from './once'
 import { forgetAllLive } from './live'
 import { poolLines } from './quota'
 import { DEFAULT_RUNS, freshLatencies, probeLines } from '@shared/probe'
-import { LANGUAGES, languageName } from '@shared/dictation'
 import { copyText } from './copy'
 import { Toast } from './components/Toast'
 import { forgetActions, record } from './ledger'
@@ -1914,57 +1913,6 @@ function namedControls(shot: Attachment): string[] {
             return
           }
           await startListening('both')
-          return
-        }
-        case 'language': {
-          const now = settings?.voiceLanguage ?? 'en'
-          if (!action.code) {
-            chat.note(
-              [
-                now === 'en'
-                  ? '**English only.** That is the `base.en` model, which is the one Wumpy’s ' +
-                    'accuracy table was measured on — and which has no other language in it at all.'
-                  : now === 'auto'
-                    ? '**Detecting the language** of each clip, on the multilingual model.'
-                    : `**${languageName(now)}** (\`${now}\`), on the multilingual model.`,
-                '',
-                'Say `/language auto` to detect it per clip, or name one: ' +
-                  LANGUAGES.map((l) => `\`${l.name.toLowerCase()}\``).join(', ') +
-                  ' — or any two-letter Whisper code.'
-              ].join(NEWLINE)
-            )
-            return
-          }
-          if (action.code === now) {
-            chat.note(
-              action.code === 'auto'
-                ? 'Already detecting the language of each clip.'
-                : `Already transcribing ${languageName(action.code)}.`
-            )
-            return
-          }
-          await patch({ voiceLanguage: action.code })
-          /*
-           * THE COST IS SAID, because it is not a preference - it is a
-           * different model file. Moving off English downloads ~145MB the
-           * first time and is a few points worse at English for ever
-           * after; moving back is the reverse. Someone should know that
-           * before wondering why their English got slightly worse.
-           */
-          const sameModel =
-            (now === 'en') === (action.code === 'en')
-              ? ''
-              : action.code === 'en'
-                ? ' Back on `base.en`, which is the one measured for English.'
-                : ' This loads the multilingual `base` instead of `base.en` — about 145MB the ' +
-                  'first time, and a little worse at English than the English-only model.'
-          chat.note(
-            (action.code === 'auto'
-              ? 'Dictation will now **detect the language** of each clip. A clip too short or ' +
-                'too unclear to call falls back to English rather than guessing.'
-              : `Dictation is now **${languageName(action.code)}**. Pinned, which beats ` +
-                'detection on a short clip — the detector only hears a second or two.') + sameModel
-          )
           return
         }
         case 'pin': {

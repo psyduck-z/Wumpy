@@ -70,11 +70,6 @@ export const DEFAULT_SETTINGS: WumpySettings = {
   voicePolish: false,
   voiceAutoStop: true,
 
-  // English, because that is the model the accuracy table in dictation.ts was
-  // measured on and `.en` is a different file rather than a flag. `/language`
-  // moves it, and says what the move costs.
-  voiceLanguage: 'en',
-
   // Off: the saving is large and measured, the shorter wording is not. The
   // full text is what is known to work on this model. See WumpySettings.
   leanPrompt: false,
