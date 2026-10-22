@@ -80,6 +80,7 @@ import { forgetClaims } from './once'
 import { forgetAllLive } from './live'
 import { poolLines } from './quota'
 import { footprintLines } from '@shared/footprint'
+import { settingsLines } from './settingsreport'
 import { DEFAULT_RUNS, freshLatencies, probeLines } from '@shared/probe'
 import { copyText } from './copy'
 import { Toast } from './components/Toast'
@@ -1617,6 +1618,16 @@ function namedControls(shot: Attachment): string[] {
               ? `Opened **${result.host}**.`
               : `Could not open that: ${result.error ?? 'unknown error'}`
           )
+          return
+        }
+        case 'settings': {
+          /* Settings may not have arrived yet on a very early run; there is
+             nothing true to print until they do. */
+          if (!settings) {
+            chat.note('Still starting up — try that again in a moment.', true)
+            return
+          }
+          chat.note(settingsLines(settings, model, pool).join(NEWLINE))
           return
         }
         case 'engine':

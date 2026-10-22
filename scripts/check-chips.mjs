@@ -39,9 +39,11 @@ writeFileSync(
     "import React from 'react'",
     "import { renderToStaticMarkup } from 'react-dom/server'",
     "import { Markdown } from './src/renderer/src/components/Markdown'",
-    "import { helpText } from './src/renderer/src/commands'",
+    "import { helpText, readCommandChip } from './src/renderer/src/commands'",
+    "import { settingsRows, settingsLines } from './src/renderer/src/settingsreport'",
+    "import { DEFAULT_SETTINGS } from './src/shared/defaults'",
     'globalThis.window = { wumpy: { shell: { check: async () => ({ risk: null, allowed: true, scope: 0 }) } } }',
-    'export { helpText }',
+    'export { helpText, readCommandChip, settingsRows, settingsLines, DEFAULT_SETTINGS }',
     'export function render(text, offers = true) {',
     '  return renderToStaticMarkup(',
     '    React.createElement(Markdown, {',
@@ -58,6 +60,10 @@ writeFileSync(
 
 let render
 let helpText
+let readCommandChip
+let settingsRows
+let settingsLines
+let DEFAULT_SETTINGS
 try {
   await build({
     entryPoints: [entry],
@@ -69,7 +75,8 @@ try {
     logLevel: 'error',
     loader: { '.css': 'empty' }
   })
-  ;({ render, helpText } = await import(pathToFileURL(out).href))
+  ;({ render, helpText, readCommandChip, settingsRows, settingsLines, DEFAULT_SETTINGS } =
+    await import(pathToFileURL(out).href))
 } finally {
   rmSync(entry, { force: true })
 }
@@ -164,6 +171,43 @@ check(
   check('/help offers the clickable ones', chips(html) > 15, true)
   check('and does not offer /key', html.includes('>/key</button>'), false)
   check('but still lists it', html.includes('/key'), true)
+}
+
+/* --------------------------------------------------------- /settings */
+
+/*
+ * The sheet is the controls, or it is a list of homework.
+ *
+ * Every row names the command that changes it, and a row whose command is
+ * not one the renderer will offer is a cell that reads like a button and is
+ * not one. Two rows say something else on purpose, and that is checked too:
+ * approval has a key, because one click to "everything runs" is the whole
+ * permission model, and /key takes a secret.
+ */
+{
+  const rows = settingsRows(DEFAULT_SETTINGS, 'nvidia/nemotron-3-ultra-550b-a55b')
+  const commands = rows.map((r) => r.change).filter((c) => c.startsWith(BT))
+  const bare = commands.map((c) => c.replaceAll(BT, ''))
+
+  check('every row says what changes it', rows.every((r) => r.change.length > 0), true)
+  check(
+    'and each one is a command the panel offers',
+    bare.filter((c) => c !== '/key' && !readCommandChip(c)).join(', '),
+    ''
+  )
+  check(
+    'the permission mode is a key, not a button',
+    rows.find((r) => r.what === 'commands')?.change,
+    'Shift+Tab'
+  )
+  check('and the pin row knows which way round it is', rows.find((r) => r.what === 'stays on top')?.now, 'on')
+  check('and /key is code rather than a button', readCommandChip('/key'), null)
+
+  const html = render(settingsLines(DEFAULT_SETTINGS, 'gemma4:31b-cloud').join('\n'))
+  check('the sheet renders its buttons', chips(html) >= 7, true)
+  check('the model it is answering with', html.includes('gemma4:31b-cloud'), true)
+  check('and what it is set to now', html.includes('Google'), true)
+  check('Shift+Tab is not one of them', html.includes('>Shift+Tab</button>'), false)
 }
 
 rmSync(out, { force: true })

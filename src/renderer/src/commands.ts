@@ -37,6 +37,8 @@ export type CommandAction =
   | { kind: 'setting'; setting: 'leanPrompt' | 'thinking'; on: boolean | 'toggle' }
   | { kind: 'open'; what: string }
   | { kind: 'engine' }
+  /** What everything is set to, with the command that changes each. */
+  | { kind: 'settings' }
   | {
       kind: 'key'
       provider: ProviderName | null
@@ -304,6 +306,20 @@ export const COMMANDS: CommandSpec[] = [
     aliases: ['searchengine'],
     hint: 'Choose which search engine the browser opens',
     run: () => ({ kind: 'engine' })
+  },
+  {
+    /*
+     * What everything is set to, which the app could not say.
+     *
+     * Thirty-one commands change something and none of them showed what it
+     * was currently set to. The palette lists what exists, /usage says what
+     * has been spent, and the answer to "did you pick DuckDuckGo for me"
+     * was a conversation with a model about its own app.
+     */
+    name: 'settings',
+    aliases: ['config', 'prefs', 'preferences'],
+    hint: 'What Wumpy is set to, and what changes each one',
+    run: () => ({ kind: 'settings' })
   },
   {
     name: 'usage',
@@ -814,6 +830,7 @@ export const CLICKABLE: readonly string[] = [
   'model',
   'dock',
   'engine',
+  'settings',
   'usage',
   'pin',
   'reasoning',
