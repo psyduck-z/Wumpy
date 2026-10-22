@@ -47,7 +47,9 @@ const onOff = (on: boolean): string => (on ? 'on' : 'off')
 export function settingsRows(
   settings: WumpySettings,
   model: string,
-  pool?: { keys: number; ready: number } | null
+  pool?: { keys: number; ready: number } | null,
+  /** What the background ranking is doing, in a few words. See rankSummary. */
+  rank?: string
 ): SettingsRow[] {
   const engine = isSearchEngine(settings.searchEngine) ? settings.searchEngine : DEFAULT_ENGINE
   return [
@@ -84,6 +86,13 @@ export function settingsRows(
       change: '`/lean`'
     },
     {
+      what: 'hourly re-ranking',
+      /* The one thing in this sheet that spends a request by itself, so
+         it says what it is doing rather than just on or off. */
+      now: rank ?? 'off',
+      change: '`/rank`'
+    },
+    {
       what: 'keys',
       /* The pool behind the model being answered with, not every key
          saved: a provider nothing is routed to is not what somebody
@@ -98,14 +107,17 @@ export function settingsRows(
 export function settingsLines(
   settings: WumpySettings,
   model: string,
-  pool?: { keys: number; ready: number } | null
+  pool?: { keys: number; ready: number } | null,
+  rank?: string
 ): string[] {
   return [
     '**What Wumpy is set to**',
     '',
     '| | now | change it |',
     '| --- | --- | --- |',
-    ...settingsRows(settings, model, pool).map((r) => `| ${r.what} | ${r.now} | ${r.change} |`),
+    ...settingsRows(settings, model, pool, rank).map(
+      (r) => `| ${r.what} | ${r.now} | ${r.change} |`
+    ),
     '',
     '_Everything else is in Ctrl+K._'
   ]

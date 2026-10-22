@@ -86,5 +86,8 @@ export const DEFAULT_SETTINGS: WumpySettings = {
   // Which engine a `search:` opens. Asked for: "I prefer google". The reasoning
   // for this and for every other engine lives next to DEFAULT_ENGINE, including
   // why the in-panel `wumpy-search` still queries DuckDuckGo whatever this says.
-  searchEngine: DEFAULT_ENGINE
+  searchEngine: DEFAULT_ENGINE,
+
+  // See WumpySettings.autoRank. On, and inert without a second key.
+  autoRank: true
 }

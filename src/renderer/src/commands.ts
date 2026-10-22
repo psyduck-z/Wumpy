@@ -39,6 +39,11 @@ export type CommandAction =
   | { kind: 'engine' }
   /** What everything is set to, with the command that changes each. */
   | { kind: 'settings' }
+  /**
+   * The background re-ranking. No argument reports; on|off sets; now
+   * starts a sweep without waiting for the hour.
+   */
+  | { kind: 'rank'; set: boolean | null; now: boolean }
   | {
       kind: 'key'
       provider: ProviderName | null
@@ -320,6 +325,29 @@ export const COMMANDS: CommandSpec[] = [
     aliases: ['config', 'prefs', 'preferences'],
     hint: 'What Wumpy is set to, and what changes each one',
     run: () => ({ kind: 'settings' })
+  },
+  {
+    /*
+     * Asked for in these words: "every hour he uses the other API key to
+     * check the availability and rank all the models... but if the user
+     * runs out of 40 requests per minute, then use the second API key for
+     * the backup and pause the ranking."
+     *
+     * Bare it reports, because the first question about a thing that runs
+     * by itself is whether it is running and what it is waiting for.
+     */
+    name: 'rank',
+    aliases: ['ranking', 'autorank'],
+    hint: 'Re-measure the models in the background, on the spare key',
+    arg: 'on|off|now',
+    run: (arg) => {
+      const word = arg.trim().toLowerCase()
+      if (!word) return { kind: 'rank', set: null, now: false }
+      if (/^(on|yes|start)$/.test(word)) return { kind: 'rank', set: true, now: false }
+      if (/^(off|no|stop)$/.test(word)) return { kind: 'rank', set: false, now: false }
+      if (/^(now|check|sweep|go)$/.test(word)) return { kind: 'rank', set: null, now: true }
+      return { kind: 'error', message: 'Usage: `/rank` to see it, `/rank on`, `/rank off`, `/rank now`.' }
+    }
   },
   {
     name: 'usage',
@@ -831,6 +859,7 @@ export const CLICKABLE: readonly string[] = [
   'dock',
   'engine',
   'settings',
+  'rank',
   'usage',
   'pin',
   'reasoning',

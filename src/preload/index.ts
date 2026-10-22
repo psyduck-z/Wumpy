@@ -3,6 +3,7 @@ import { IPC } from '@shared/types'
 import type { LinkCheck } from '@shared/links'
 import type { ProbeResult } from '@shared/probe'
 import type { Footprint } from '@shared/footprint'
+import type { RankView } from '@shared/types'
 import type { LookResult } from '../main/look'
 import type {
   Attachment,
@@ -177,6 +178,15 @@ const api = {
      * see the handler. Nothing calls it but `/usage`.
      */
     footprint: (): Promise<Footprint> => ipcRenderer.invoke(IPC.usageFootprint)
+  },
+  /**
+   * The background re-ranking: one key measuring the models while the
+   * other answers questions. See @shared/ranking for when it may run.
+   */
+  rank: {
+    state: (): Promise<RankView> => ipcRenderer.invoke(IPC.rankState),
+    set: (req: { on?: boolean; now?: boolean }): Promise<boolean> =>
+      ipcRenderer.invoke(IPC.rankSet, req)
   },
   look: {
     /**

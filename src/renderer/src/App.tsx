@@ -81,6 +81,7 @@ import { forgetAllLive } from './live'
 import { poolLines } from './quota'
 import { footprintLines } from '@shared/footprint'
 import { settingsLines } from './settingsreport'
+import { rankLines, rankSummary } from '@shared/ranking'
 import { DEFAULT_RUNS, freshLatencies, probeLines } from '@shared/probe'
 import { copyText } from './copy'
 import { Toast } from './components/Toast'
@@ -1627,7 +1628,34 @@ function namedControls(shot: Attachment): string[] {
             chat.note('Still starting up — try that again in a moment.', true)
             return
           }
-          chat.note(settingsLines(settings, model, pool).join(NEWLINE))
+          /* The ranking's line comes from the main process, because only
+             it knows what the job is actually doing. */
+          const rank = await window.wumpy.rank.state()
+          chat.note(
+            settingsLines(
+              settings,
+              model,
+              pool,
+              rankSummary(rank, rank.traffic, rank.lastSweepMs)
+            ).join(NEWLINE)
+          )
+          return
+        }
+        case 'rank': {
+          if (action.set !== null) await window.wumpy.rank.set({ on: action.set })
+          if (action.now) await window.wumpy.rank.set({ now: true })
+          const view = await window.wumpy.rank.state()
+          /* The count of models measured is the catalogue less what is
+             left, which is the honest figure mid-sweep as well as after. */
+          const measured = Math.max(0, CLOUD_MODELS.length - view.left)
+          chat.note(
+            [
+              action.now ? '_Starting a sweep — it still waits for you._' : '',
+              ...rankLines(view, view.traffic, view.lastSweepMs, measured)
+            ]
+              .filter(Boolean)
+              .join(NEWLINE)
+          )
           return
         }
         case 'engine':

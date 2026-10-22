@@ -18,16 +18,18 @@ import type {
 } from '@shared/types'
 import { DEFAULT_MODEL, assistantFor, assemblePrompt, type PromptShape } from '@shared/assistant'
 import type { Footprint } from '@shared/footprint'
+import type { RankView } from '@shared/types'
+import { Ranker } from './ranker'
 import { SettingsStore } from './store'
 import { capDiskCache, reclaimCache } from './disk'
 import { ChatStore } from './chats'
 import { InputHistory } from './history'
-import { CloudClient } from './cloud'
+import { CloudClient, requestsInLastMinute, sinceLimited } from './cloud'
 import { KeyStore } from './keys'
 import { UsageStore } from './usage'
 import { PoolStore } from './pool'
 import { perKeyCapFor } from '@shared/usage'
-import { DEFAULT_RUNS, spent, usable } from '@shared/probe'
+import { DEFAULT_RUNS, freshLatencies, spent, usable } from '@shared/probe'
 import { lookAtFile } from './look'
 import { needsFor, type Capability } from '@shared/needs'
 import { trimPictures } from '@shared/pressure'
@@ -127,6 +129,16 @@ let keys: KeyStore
 let notes: ContextStore
 let usage: UsageStore
 let pools: PoolStore
+let ranker: Ranker
+/**
+ * When the turn the user is waiting on started, and when the last one ended.
+ *
+ * Only the background ranker reads these, and only to get out of the way.
+ * Module scope rather than inside the handler because the ranker ticks on
+ * its own timer and has to be able to ask at any moment.
+ */
+let turnStartedAt: number | null = null
+let lastTurnEndedAt = 0
 /**
  * Hosted models that have said they are out for the day.
  *
@@ -530,6 +542,10 @@ function registerIpc(): void {
 
     // Stand aside for the duration of the turn: tokens matter more than UI.
     priority.yieldToModel()
+    /* And the background ranking stops dead, mid-request if it is in one.
+       Not after this model, not at the next tick: the user is waiting. */
+    turnStartedAt = Date.now()
+    ranker.cancel()
 
     /**
      * Runs one turn on one model, and says whether the local model should be
@@ -668,6 +684,8 @@ function registerIpc(): void {
     }
 
     priority.restore()
+    turnStartedAt = null
+    lastTurnEndedAt = Date.now()
   })
 
   /**
@@ -713,6 +731,42 @@ function registerIpc(): void {
   }
 
   ipcMain.handle(IPC.usageGet, () => report())
+
+  /**
+   * What the background ranking is doing, and what is stopping it.
+   *
+   * The traffic goes over with it rather than a verdict: the rules are
+   * pure and the panel runs the same ones, so `/rank` can say "paused -
+   * you are using the account" without main having to format a sentence.
+   */
+  ipcMain.handle(IPC.rankState, (): RankView => {
+    const view = ranker.view()
+    const provider = providerFor(activeModel())
+    const gap = provider ? PROVIDERS[provider].minGapMs : 0
+    return {
+      on: view.on,
+      keys: view.keys,
+      sinceProbeMs: view.sinceProbeMs,
+      sinceSweepMs: view.sinceSweepMs,
+      left: view.left,
+      lastSweepMs: view.lastSweepMs,
+      traffic: {
+        busy: turnStartedAt !== null,
+        sinceTurnMs: lastTurnEndedAt ? Date.now() - lastTurnEndedAt : Infinity,
+        lastMinute: provider ? requestsInLastMinute(provider) : 0,
+        perMinute: gap > 0 ? Math.round(60_000 / gap) : 0,
+        sinceLimitedMs: provider ? sinceLimited(provider) : Infinity
+      }
+    }
+  })
+
+  ipcMain.handle(IPC.rankSet, (_e, req: { on?: boolean; now?: boolean }) => {
+    if (typeof req?.on === 'boolean') settings.patch({ autoRank: req.on })
+    /* `now` still obeys every rule about the user's traffic - it moves the
+       hour, not the right of way. */
+    if (req?.now) ranker.sweepNow()
+    return true
+  })
 
   /**
    * What Wumpy costs the machine, measured rather than estimated.
@@ -1699,6 +1753,70 @@ void app.whenReady().then(async () => {
   panel = new Panel(settings)
 
   priority = new PriorityManager(() => panel.browserWindow)
+
+  /**
+   * The background re-ranking, which is subordinate to everything.
+   *
+   * Asked for: one key measures the models about once an hour, the other
+   * answers questions, and the measuring stops the moment the user needs
+   * the account. Every rule about when it may go is in @shared/ranking;
+   * what is wired here is the four things it cannot know by itself - what
+   * a real preamble looks like, how many keys there are, what the user's
+   * traffic is doing, and where the numbers are kept.
+   */
+  ranker = new Ranker({
+    probe: (id, preamble, key, signal) => cloud.probeModel(id, preamble, key, signal),
+    preamble: () => {
+      const forProbe = currentAssistant()
+      return systemPromptFor(forProbe, forProbe.tools)
+    },
+    state: () => {
+      const provider = providerFor(activeModel())
+      return {
+        on: settings.get('autoRank'),
+        keys: provider ? keys.count(provider) : 0
+      }
+    },
+    traffic: () => {
+      const provider = providerFor(activeModel())
+      const gap = provider ? PROVIDERS[provider].minGapMs : 0
+      return {
+        busy: turnStartedAt !== null,
+        sinceTurnMs: lastTurnEndedAt ? Date.now() - lastTurnEndedAt : Infinity,
+        lastMinute: provider ? requestsInLastMinute(provider) : 0,
+        /* The pacer's own ceiling rather than a second number to keep in
+           step with it: minGapMs is what the app believes the account
+           allows, and the ranker should believe the same thing. */
+        perMinute: gap > 0 ? Math.round(60_000 / gap) : 0,
+        sinceLimitedMs: provider ? sinceLimited(provider) : Infinity
+      }
+    },
+    record: (result) => {
+      /* The ledger first, because this spent one of the user's requests
+         and `/usage` is where they look to find out what did. Same rule
+         as `/model check`: a probe that never reached the provider is not
+         a request. */
+      if (spent(result.state)) {
+        usage.add({
+          model: result.model,
+          via: result.provider || 'unknown',
+          generatingMs: result.ms,
+          error: !usable(result.state),
+          limited: result.state === 'limited'
+        })
+        usage.flush()
+      }
+      /* Merged, never replaced: a sweep measures one model at a time and
+         the other eight numbers are still the best known. */
+      settings.patch({
+        latencies: {
+          ...settings.get('latencies'),
+          ...freshLatencies([result], usage.today().date)
+        }
+      })
+    }
+  })
+  ranker.start()
   speech = new Speech()
 
   /**

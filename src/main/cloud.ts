@@ -108,6 +108,45 @@ function spentInLastMinute(provider: ProviderId): number {
   return kept.reduce((sum, t) => sum + t.tokens, 0)
 }
 
+/**
+ * When each request went out, per provider, so the ranker can tell whether
+ * the user is using the account.
+ *
+ * Requests rather than tokens, because the ceiling that matters on NVIDIA is
+ * forty a minute and there is no token ceiling at all. Recorded in `pace`,
+ * which every request goes through whoever asked for it - a count that
+ * missed the background ones would be the ranker measuring its own
+ * innocence.
+ */
+const recentRequests = new Map<ProviderId, number[]>()
+
+/** Requests on this provider's account in the last minute. */
+export function requestsInLastMinute(provider: ProviderId): number {
+  const cutoff = Date.now() - 60_000
+  const kept = (recentRequests.get(provider) ?? []).filter((at) => at > cutoff)
+  recentRequests.set(provider, kept)
+  return kept.length
+}
+
+/**
+ * When the provider last refused for quota, per provider.
+ *
+ * The ranker reads this and stays out of the way for a while: a 429 means
+ * the account is at its ceiling, and the ranking is the least important
+ * thing asking for room.
+ */
+const limitedAt = new Map<ProviderId, number>()
+
+export function noteLimited(provider: ProviderId): void {
+  limitedAt.set(provider, Date.now())
+}
+
+/** Milliseconds since the last refusal, or Infinity if there has been none. */
+export function sinceLimited(provider: ProviderId): number {
+  const at = limitedAt.get(provider)
+  return at === undefined ? Infinity : Date.now() - at
+}
+
 export function recordSpend(provider: ProviderId, tokens: number): void {
   if (tokens <= 0) return
   const list = recentTokens.get(provider) ?? []
@@ -178,6 +217,10 @@ async function pace(
   }
 
   lastRequestAt.set(slot, Date.now())
+  /* Every request, whoever asked. See recentRequests. */
+  const seen = recentRequests.get(provider) ?? []
+  seen.push(Date.now())
+  recentRequests.set(provider, seen)
 }
 
 export class CloudClient {
@@ -447,13 +490,44 @@ export class CloudClient {
     return CLOUD_MODELS.map((m) => results.get(m.id)).filter((r): r is ProbeResult => Boolean(r))
   }
 
+  /**
+   * One model, on a key of the caller's choosing, cancellable.
+   *
+   * The background ranker's entry point, and deliberately not a sweep. A
+   * whole `/model check` is nine minutes of requests; as a background burst
+   * that would be nine minutes during which every question the user asks is
+   * queued behind a measurement. One model at a time can be stopped between
+   * models, and it is the same probe either way - same preamble, same
+   * verdicts - so the numbers are comparable with the ones `/model check`
+   * produces.
+   */
+  async probeModel(
+    id: string,
+    preamble: string,
+    key: number,
+    signal?: AbortSignal
+  ): Promise<ProbeResult | null> {
+    const entry = CLOUD_MODELS.find((m) => m.id === id)
+    if (!entry) return null
+    return this.probeEntry(entry, 1, preamble, key, () => {}, { pin: true, signal })
+  }
+
   /** One catalogue entry, run `times` times on one key. */
   private async probeEntry(
     entry: CloudModel,
     times: number,
     preamble: string,
     keyIndex: number,
-    tick: (n?: number) => void
+    tick: (n?: number) => void,
+    /**
+     * The background ranker's two needs, which a sweep does not have.
+     *
+     * `pin` takes the key it was given rather than whatever the rotation
+     * would hand out, because the whole point is to be on the key the next
+     * question is NOT about to use. `signal` is how a turn starting cancels
+     * a probe already in flight.
+     */
+    opts?: { pin?: boolean; signal?: AbortSignal }
   ): Promise<ProbeResult> {
     const check = this.ready(entry.id)
     if (!check.ok || !check.provider) {
@@ -484,7 +558,7 @@ export class CloudClient {
      */
     const attempts: ProbeResult[] = []
     for (let run = 0; run < times; run++) {
-      const got = await this.probeOne(entry, check.provider, preamble, keyIndex)
+      const got = await this.probeOne(entry, check.provider, preamble, keyIndex, opts)
       attempts.push(got)
       tick()
       /*
@@ -622,7 +696,8 @@ export class CloudClient {
      * the pacer, which looks parallel and is not. Clamped, because a
      * provider may have fewer keys than there are lanes.
      */
-    lane = 0
+    lane = 0,
+    opts?: { pin?: boolean; signal?: AbortSignal }
   ): Promise<ProbeResult> {
     const base: Omit<ProbeResult, 'state' | 'ms' | 'said' | 'why'> = {
       model: entry.id,
@@ -634,7 +709,14 @@ export class CloudClient {
        thing being tested. Falls back to the first when all are resting:
        the resulting 429 is itself the answer, and an honest one. */
     const count = Math.max(1, this.keys.count(provider))
-    const index = this.separate(provider) ? lane % count : (rotation.next(Date.now(), entry.id) ?? 0)
+    /* Pinned when the ranker asked: it chose this key precisely because
+       it is not the one the next question will take, and letting the
+       rotation overrule that would put the background work back in
+       front of the user. */
+    const index =
+      opts?.pin || this.separate(provider)
+        ? lane % count
+        : (rotation.next(Date.now(), entry.id) ?? 0)
     this.remember(provider, rotation)
     await pace(provider, index, 0, this.separate(provider))
 
@@ -682,7 +764,13 @@ export class CloudClient {
             return kwargs ? { chat_template_kwargs: kwargs } : {}
           })()
         }),
-        signal: AbortSignal.timeout(PROBE_TIMEOUT_MS)
+        /* Two ways to stop: the probe's own ceiling, and the caller's,
+           which is a turn starting. A background probe that outlives the
+           moment somebody asked for something is the exact thing this is
+           trying not to be. */
+        signal: opts?.signal
+          ? AbortSignal.any([AbortSignal.timeout(PROBE_TIMEOUT_MS), opts.signal])
+          : AbortSignal.timeout(PROBE_TIMEOUT_MS)
       })
       const ms = Date.now() - started
 
@@ -975,6 +1063,11 @@ export class CloudClient {
        * `restAll`/`outAll` and `Provider.quotaPerKey`.
        */
       if (verdict.kind === 'exhausted' || verdict.kind === 'throttle') {
+        /* The account is at its ceiling, which the background ranker reads
+           as "stay out of this for a while". Noted here rather than at the
+           caller because this is the one place that knows a 429 was about
+           quota rather than about the model. */
+        noteLimited(provider)
         const daily = /PerDay/i.test(detail) || /per day/i.test(verdict.message)
         const shared = !this.separate(provider)
         /* Before the rest, or it reads as zero on the key that just died. */

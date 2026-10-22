@@ -573,6 +573,15 @@ export interface WumpySettings {
   screenEnabled: boolean
   /** Which engine `/open` and a proposed search use. */
   searchEngine: string
+  /**
+   * Re-measure the models in the background, about once an hour.
+   *
+   * Asked for: one key does the ranking, the other answers questions, and
+   * the ranking stops the moment the user needs the account. On unless
+   * turned off, and it does nothing at all with fewer than two keys - see
+   * @shared/ranking, which holds every rule about when it may go.
+   */
+  autoRank: boolean
 }
 
 /* ---------------------------------------------------------------- messaging */
@@ -748,6 +757,16 @@ export const IPC = {
    * the app asks for it unless the user does.
    */
   usageFootprint: 'usage:footprint',
+  /**
+   * The background re-ranking: what it is doing, and whether it may.
+   *
+   * Read by `/rank` and by the settings sheet. The decision itself is pure
+   * and lives in @shared/ranking; this hands over the three things it
+   * needs that only the main process knows.
+   */
+  rankState: 'rank:state',
+  /** Turn it on or off, or start a sweep now. */
+  rankSet: 'rank:set',
   usageReset: 'usage:reset',
   /**
    * Ask every model in the catalogue whether it answers.
@@ -808,6 +827,23 @@ export const IPC = {
  * in it; the only code that handles the plaintext is the fetch that sends it.
  */
 /** What `/usage` shows. */
+/** What `/rank` and the settings sheet are told about the background ranking. */
+export interface RankView {
+  on: boolean
+  keys: number
+  sinceProbeMs: number
+  sinceSweepMs: number
+  left: number
+  lastSweepMs: number
+  traffic: {
+    busy: boolean
+    sinceTurnMs: number
+    lastMinute: number
+    perMinute: number
+    sinceLimitedMs: number
+  }
+}
+
 export interface UsageReport {
   lines: import('./usage').UsageLine[]
   /** The model currently answering, so the report names what it is counting. */
