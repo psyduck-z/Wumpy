@@ -97,6 +97,21 @@ export interface RecorderOptions extends RecorderEvents {
   minSegmentMs?: number
   /** Cut here regardless, for someone who does not pause. */
   maxSegmentMs?: number
+  /**
+   * Record this instead of opening the microphone.
+   *
+   * For `/listen`, which captures what the speakers are playing - alone or
+   * mixed with the microphone - and assembles that stream itself. See
+   * ./loopback. Everything after the stream is identical: the same level
+   * meter, the same pause detector, the same segments, so a meeting is
+   * transcribed by the machinery dictation was already using rather than by
+   * a second copy of it.
+   *
+   * The caller that supplies a stream also stops it. This function stops
+   * only the tracks it opened, because a stream it was handed may be a
+   * mixing graph with more to tear down than tracks.
+   */
+  stream?: MediaStream
 }
 
 export interface Recording {
@@ -137,16 +152,21 @@ export async function record(opts: RecorderOptions = {}): Promise<Recording> {
   const format = pickFormat()
   if (!format) throw new Error('This build cannot record audio.')
 
-  const stream = await navigator.mediaDevices.getUserMedia({
-    audio: {
-      channelCount: 1,
-      // Whisper was trained on ordinary recordings, and these are what makes a
-      // laptop microphone in a room sound like one.
-      echoCancellation: true,
-      noiseSuppression: true,
-      autoGainControl: true
-    }
-  })
+  /* Handed one, or open the microphone. Only the one opened here is closed
+     here; see RecorderOptions.stream. */
+  const ours = !opts.stream
+  const stream =
+    opts.stream ??
+    (await navigator.mediaDevices.getUserMedia({
+      audio: {
+        channelCount: 1,
+        // Whisper was trained on ordinary recordings, and these are what makes a
+        // laptop microphone in a room sound like one.
+        echoCancellation: true,
+        noiseSuppression: true,
+        autoGainControl: true
+      }
+    }))
 
   /**
    * One MediaRecorder per piece, rather than slicing one long one.
@@ -309,7 +329,7 @@ export async function record(opts: RecorderOptions = {}): Promise<Recording> {
         const ms = performance.now() - startedAt
         const tail = chunks
         const tailMs = performance.now() - segmentStart
-        for (const track of stream.getTracks()) track.stop()
+        if (ours) for (const track of stream.getTracks()) track.stop()
         void audio.close()
         opts.onStop?.(reason)
 

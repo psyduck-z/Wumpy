@@ -59,7 +59,12 @@ import {
 } from '@shared/cloud'
 import type { CloudModel, ProviderId } from '@shared/cloud'
 import { checkLink, isSearchEngine } from '@shared/links'
-import { POLISH_PROMPT, polishAcceptable, tidyTranscript } from '@shared/dictation'
+import {
+  POLISH_PROMPT,
+  pinnedLanguage,
+  polishAcceptable,
+  tidyTranscript
+} from '@shared/dictation'
 import { captureConsole, logPath } from './log'
 import { captureScreen } from './screen'
 
@@ -932,7 +937,8 @@ function registerIpc(): void {
     heard: string,
     commands: string[],
     confidence: number,
-    ms: number
+    ms: number,
+    language = 'en'
   ): Promise<{
     text: string
     heard: string
@@ -940,12 +946,16 @@ function registerIpc(): void {
     polishRefused: boolean
     confidence: number
     ms: number
+    language: string
   }> {
-    const bare = { text: '', heard, polished: false, polishRefused: false, confidence, ms }
+    const bare = { text: '', heard, polished: false, polishRefused: false, confidence, ms, language }
 
     // The command list comes from the panel, which owns it, so a command added
     // later is dictatable without this file having to hear about it.
-    const tidied = tidyTranscript(heard, { commands })
+    //
+    // The language rides along because every rule in that table is an
+    // English rule; see TidyOptions.language.
+    const tidied = tidyTranscript(heard, { commands, language })
     if (!tidied) return bare
     if (!settings.get('voicePolish')) return { ...bare, text: tidied }
 
@@ -978,8 +988,19 @@ function registerIpc(): void {
   ipcMain.handle(
     IPC.voiceTranscribe,
     async (_e, req: { audio: ArrayBuffer; extension?: string; commands?: string[] }) => {
-      const clip = await speech.transcribe(new Uint8Array(req.audio), req.extension ?? 'webm')
-      return finishTranscript(clip.text.trim(), req.commands ?? [], clip.confidence, clip.ms)
+      speech.using(settings.get('voiceLanguage'))
+      const clip = await speech.transcribe(
+        new Uint8Array(req.audio),
+        req.extension ?? 'webm',
+        pinnedLanguage(settings.get('voiceLanguage'))
+      )
+      return finishTranscript(
+        clip.text.trim(),
+        req.commands ?? [],
+        clip.confidence,
+        clip.ms,
+        clip.language
+      )
     }
   )
 
@@ -992,8 +1013,10 @@ function registerIpc(): void {
    * clip did, because the seams between pieces are where a capital or a full
    * stop goes missing. This is that half of the pipeline on its own.
    */
-  ipcMain.handle(IPC.voiceTidy, async (_e, req: { text: string; commands?: string[] }) =>
-    finishTranscript((req.text ?? '').trim(), req.commands ?? [], 1, 0)
+  ipcMain.handle(
+    IPC.voiceTidy,
+    async (_e, req: { text: string; commands?: string[]; language?: string }) =>
+      finishTranscript((req.text ?? '').trim(), req.commands ?? [], 1, 0, req.language ?? 'en')
   )
 
   /**

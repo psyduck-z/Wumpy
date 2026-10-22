@@ -51,6 +51,15 @@ import {
   seesMedia
 } from '@shared/cloud'
 import { useChat, nextId, type ChatStats } from './hooks/useChat'
+import { useListening } from './hooks/useListening'
+import type { AudioSource } from './loopback'
+import {
+  ENOUGH_WORDS,
+  elapsed,
+  notesRequest,
+  stamp,
+  wordCount
+} from '@shared/meeting'
 import {
   allCommands,
   parseCommand,
@@ -64,6 +73,7 @@ import { forgetClaims } from './once'
 import { forgetAllLive } from './live'
 import { poolLines } from './quota'
 import { DEFAULT_RUNS, freshLatencies, probeLines } from '@shared/probe'
+import { LANGUAGES, languageName } from '@shared/dictation'
 import { copyText } from './copy'
 import { Toast } from './components/Toast'
 import { forgetActions, record } from './ledger'
@@ -88,6 +98,16 @@ const NEWLINE = String.fromCharCode(10)
 export default function App(): React.JSX.Element {
   const chat = useChat()
   const { messages, streaming, streamingId, stats } = chat
+
+  /**
+   * A meeting being transcribed, if one is. See @shared/meeting.
+   *
+   * Here rather than in the composer, where dictation lives, because this
+   * one outlives everything around it: the session survives the panel being
+   * hidden, a new chat being started and the composer being re-rendered,
+   * and the only thing with that lifetime is App.
+   */
+  const listening = useListening(useCallback(() => allCommands().map((c) => c.name), []))
 
   /**
    * What the model is doing, read off the reply as it arrives.
@@ -1219,6 +1239,48 @@ function namedControls(shot: Attachment): string[] {
     live.send(asked.content, undefined, withoutBytes(asked.images) as typeof asked.images)
   }, [messages, streaming])
 
+  /**
+   * Start a listening session, and say what that means.
+   *
+   * The sentence is not decoration. This opens a tap on everything the
+   * machine is playing and, by default, on the microphone as well - which
+   * in a call means every other person in it. Someone should be told that
+   * in plain words at the moment it starts, once, rather than discovering
+   * it from a transcript later. It is also the only honest place to
+   * mention that whether they may do this is not Wumpy's call: one line,
+   * no lecture, and never again for the same session.
+   */
+  const startListening = useCallback(
+    async (want: AudioSource): Promise<void> => {
+      const ok = await listening.start(want)
+      if (!ok) {
+        chat.note(listening.error ?? 'Could not start listening.', true)
+        return
+      }
+      const what =
+        want === 'both'
+          ? 'your speakers **and** your microphone'
+          : want === 'system'
+            ? 'your speakers only — not your microphone'
+            : 'your microphone only'
+      chat.note(
+        [
+          `**Listening** to ${what}.`,
+          '',
+          'It transcribes as it goes and keeps only the text — no audio is saved. ' +
+            'The channels are mixed, so the notes cannot say who said what.',
+          '',
+          '`/listen notes` writes it up without stopping, `/listen stop` ends it, ' +
+            'and you can ask it anything about what it has heard: `/listen what did they ' +
+            'say about the deadline`.',
+          '',
+          '_Recording others may need their consent where you are._'
+        ].join(NEWLINE)
+      )
+    },
+    [chat, listening]
+  )
+
   /* --------------------------------------------------------------- commands */
 
   const runCommand = useCallback(
@@ -1791,6 +1853,120 @@ function namedControls(shot: Attachment): string[] {
           )
           return
         }
+        case 'listen': {
+          if (action.what === 'source') {
+            const want: AudioSource =
+              action.ask === 'mic' || action.ask === 'me'
+                ? 'mic'
+                : action.ask === 'both'
+                  ? 'both'
+                  : 'system'
+            if (listening.on) {
+              chat.note('Already listening. `/listen stop` first, then pick a source.')
+              return
+            }
+            await startListening(want)
+            return
+          }
+
+          if (action.what === 'notes' || (action.what === 'stop' && listening.on)) {
+            const ending = action.what === 'stop'
+            const heard = ending ? await listening.stop() : listening.peek()
+            if (!heard || wordCount(heard) < ENOUGH_WORDS) {
+              /* Better than a paragraph of invention. A model handed ten
+                 seconds of speech and asked for "the key decisions" will
+                 produce key decisions. */
+              chat.note(
+                heard && wordCount(heard) > 0
+                  ? `Only heard ${wordCount(heard)} words so far — too little to write notes from.` +
+                      (ending ? ' Stopped.' : '')
+                  : 'Nothing heard yet.' + (ending ? ' Stopped.' : '')
+              )
+              return
+            }
+            const minutes = Math.max(1, Math.round(elapsed(heard) / 60_000))
+            chat.send(
+              notesRequest(heard, action.ask),
+              /* The transcript is thousands of words and belongs in the
+                 request, not on the screen. What the user sees is what
+                 they asked for. */
+              action.ask
+                ? `${action.ask} — from ${minutes} min of transcript`
+                : `Notes from ${minutes} min of listening${ending ? '' : ' so far'}`
+            )
+            return
+          }
+
+          if (action.what === 'stop') {
+            chat.note('Not listening.')
+            return
+          }
+
+          if (listening.on) {
+            const heard = await listening.stop()
+            const words = heard ? wordCount(heard) : 0
+            chat.note(
+              words
+                ? `Stopped — ${words} words over ${stamp(elapsed(heard!))}. ` +
+                    '`/listen notes` writes them up, or ask it anything about what it heard.'
+                : 'Stopped. Nothing was heard.'
+            )
+            return
+          }
+          await startListening('both')
+          return
+        }
+        case 'language': {
+          const now = settings?.voiceLanguage ?? 'en'
+          if (!action.code) {
+            chat.note(
+              [
+                now === 'en'
+                  ? '**English only.** That is the `base.en` model, which is the one Wumpy’s ' +
+                    'accuracy table was measured on — and which has no other language in it at all.'
+                  : now === 'auto'
+                    ? '**Detecting the language** of each clip, on the multilingual model.'
+                    : `**${languageName(now)}** (\`${now}\`), on the multilingual model.`,
+                '',
+                'Say `/language auto` to detect it per clip, or name one: ' +
+                  LANGUAGES.map((l) => `\`${l.name.toLowerCase()}\``).join(', ') +
+                  ' — or any two-letter Whisper code.'
+              ].join(NEWLINE)
+            )
+            return
+          }
+          if (action.code === now) {
+            chat.note(
+              action.code === 'auto'
+                ? 'Already detecting the language of each clip.'
+                : `Already transcribing ${languageName(action.code)}.`
+            )
+            return
+          }
+          await patch({ voiceLanguage: action.code })
+          /*
+           * THE COST IS SAID, because it is not a preference - it is a
+           * different model file. Moving off English downloads ~145MB the
+           * first time and is a few points worse at English for ever
+           * after; moving back is the reverse. Someone should know that
+           * before wondering why their English got slightly worse.
+           */
+          const sameModel =
+            (now === 'en') === (action.code === 'en')
+              ? ''
+              : action.code === 'en'
+                ? ' Back on `base.en`, which is the one measured for English.'
+                : ' This loads the multilingual `base` instead of `base.en` — about 145MB the ' +
+                  'first time, and a little worse at English than the English-only model.'
+          chat.note(
+            (action.code === 'auto'
+              ? 'Dictation will now **detect the language** of each clip. A clip too short or ' +
+                'too unclear to call falls back to English rather than guessing.'
+              : `Dictation is now **${languageName(action.code)}**. Pinned, which beats ` +
+                'detection on a short clip — the detector only hears a second or two.') + sameModel
+          )
+          return
+        }
         case 'pin': {
           const next = action.pinned === 'toggle' ? !pinned : action.pinned
           await patch({ hideOnBlur: !next })
@@ -1831,7 +2007,7 @@ function namedControls(shot: Attachment): string[] {
           return
       }
     },
-    [chat, newChat, openChat, patch, pinned, refreshChats, retitle, settings]
+    [chat, listening, newChat, openChat, patch, pinned, refreshChats, retitle, settings, startListening]
   )
 
   const onSend = useCallback(

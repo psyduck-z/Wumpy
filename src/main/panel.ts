@@ -1,4 +1,4 @@
-import { BrowserWindow, screen, app } from 'electron'
+import { BrowserWindow, desktopCapturer, screen, app } from 'electron'
 import { log } from './log'
 import { openLink } from './browser'
 import { join } from 'node:path'
@@ -148,6 +148,56 @@ export class Panel {
         const types = (details as { mediaTypes?: string[] }).mediaTypes
         done(types === undefined ? true : types.length === 1 && types[0] === 'audio')
       }
+    )
+
+    /**
+     * What the speakers are playing, for `/listen`.
+     *
+     * Chromium routes `getDisplayMedia` through the embedder rather than
+     * showing its own picker in Electron, and the handler decides what is
+     * actually shared. `audio: 'loopback'` is the WASAPI loopback tap: the
+     * mix Windows is already sending to the output device, which is what
+     * makes a meeting audible to the transcriber without a virtual cable or
+     * a driver to install.
+     *
+     * THE SCREEN IS NOT SHARED, and that is the whole care here. A display
+     * source has to be named because `getDisplayMedia` is a video API and
+     * refuses a request with no video in it - so the renderer takes the
+     * stream, stops the video track at once and keeps the audio. Nothing
+     * reads a frame, nothing encodes one, and `/listen` never produces an
+     * image. The screen already has its own route through `screenEnabled`,
+     * its own consent and its own command, and this must not become a
+     * second one nobody asked for.
+     */
+    this.window.webContents.session.setDisplayMediaRequestHandler(
+      (request, callback) => {
+        if (request.frame?.url && !request.frame.url.startsWith('file:')) {
+          /* Only our own page. A remote frame asking to record the machine
+             is not a request this app has any reason to grant. */
+          callback({})
+          return
+        }
+        desktopCapturer
+          .getSources({ types: ['screen'] })
+          .then((sources) => {
+            if (!sources.length) {
+              callback({})
+              return
+            }
+            callback({ video: sources[0], audio: 'loopback' })
+          })
+          .catch(() => callback({}))
+      },
+      /*
+       * No picker. Windows' own share dialog would ask which window to
+       * share - a question about video, for a command that wants none,
+       * put to someone who asked to transcribe a meeting.
+       *
+       * 'loopback' rather than 'loopbackWithMute' for the same reason:
+       * the user is IN the meeting and still has to hear it. Muting the
+       * speakers to transcribe them would be an odd way to take notes.
+       */
+      { useSystemPicker: false }
     )
 
     this.traceVisibility(this.window)

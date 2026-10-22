@@ -4,7 +4,10 @@ import { join } from 'node:path'
 import { app } from 'electron'
 import { resourcePath } from './tray'
 import type { VoiceStatus, Transcript } from '@shared/types'
-import { WHISPER_MODEL } from '@shared/dictation'
+import { whisperModelFor, type VoiceLanguage } from '@shared/dictation'
+
+/** Written out, because a literal backslash-n in source is a hazard here. */
+const NEWLINE = String.fromCharCode(10)
 
 /**
  * Drives the local transcriber.
@@ -38,12 +41,36 @@ export class Speech {
   >()
 
   /**
-   * No constructor argument: the model is fixed. See WHISPER_MODEL for the
-   * measurements that settled it.
+   * The language setting, because the SIZE follows it.
+   *
+   * It used to be a constant, and could be while English was the only
+   * possibility: a `.en` model has no other language in it and no detector
+   * either, so asking for Chinese means loading a different file. The
+   * worker therefore has to be restarted when this changes, which `using`
+   * does - see there for why that is a restart rather than a flag.
    */
+  private language: VoiceLanguage = 'en'
 
   status(): VoiceStatus {
     return this.state
+  }
+
+  /**
+   * Point it at a language, restarting the worker if the size changed.
+   *
+   * Only if the SIZE changed: moving between `auto` and `zh` is a different
+   * argument to the same loaded model and costs nothing, while moving
+   * either of them to `en` swaps `base` for `base.en` and has to reload.
+   * Checking which kind of change it is turns most of them free.
+   */
+  using(language: VoiceLanguage): void {
+    const before = whisperModelFor(this.language)
+    this.language = language
+    if (whisperModelFor(language) !== before && this.child) {
+      this.stop()
+      this.stopping = false
+      this.state = { kind: 'unknown' }
+    }
   }
 
   /**
@@ -110,7 +137,8 @@ export class Speech {
         windowsHide: true,
         env: {
           ...process.env,
-          WUMPY_WHISPER_MODEL: process.env.WUMPY_WHISPER_MODEL ?? WHISPER_MODEL,
+          WUMPY_WHISPER_MODEL:
+            process.env.WUMPY_WHISPER_MODEL ?? whisperModelFor(this.language),
           WUMPY_WHISPER_MODELS: this.modelsDir(),
           HF_HUB_DISABLE_SYMLINKS_WARNING: '1'
         }
@@ -203,7 +231,9 @@ export class Speech {
       text: String(msg.text ?? ''),
       ms: Number(msg.ms ?? 0),
       audioSeconds: Number(msg.audio ?? 0),
-      confidence: Number(msg.confidence ?? 0)
+      confidence: Number(msg.confidence ?? 0),
+      language: String(msg.language ?? 'en'),
+      languageConfidence: Number(msg.language_confidence ?? 1)
     })
   }
 
@@ -213,7 +243,11 @@ export class Speech {
    * The audio arrives as whatever the renderer's MediaRecorder produced, which
    * it decodes itself - no conversion step, and so no ffmpeg to find.
    */
-  async transcribe(audio: Uint8Array, extension = 'webm'): Promise<Transcript> {
+  async transcribe(
+    audio: Uint8Array,
+    extension = 'webm',
+    language: string | null = 'en'
+  ): Promise<Transcript> {
     const ok = await this.start()
     if (!ok)
       throw new Error(
@@ -235,7 +269,7 @@ export class Speech {
           reject(new Error('the transcriber did not answer in time'))
         }, 120_000)
         this.waiting.set(id, { resolve, reject, timer })
-        this.child?.stdin?.write(`${JSON.stringify({ id, path })}\n`)
+        this.child?.stdin?.write(`${JSON.stringify({ id, path, language })}${NEWLINE}`)
       })
     } finally {
       try {

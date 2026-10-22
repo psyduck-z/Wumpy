@@ -291,7 +291,19 @@ check('and halves the core count to get it', /min\(8, cores \/\/ 2\)/.test(worke
 
 check('silence is cut before the model sees it', /vad_filter=True/.test(worker), true)
 check('each utterance stands alone', /condition_on_previous_text=False/.test(worker), true)
-check("the app's vocabulary is given to Whisper", /initial_prompt=VOCABULARY/.test(worker), true)
+/*
+ * The vocabulary still reaches Whisper, but only for the language it is
+ * written in.
+ *
+ * An initial prompt is prepended to the decoder's context, so it steers
+ * the words that come out in whatever language it is written in. Handing
+ * a Chinese utterance a line of English product names biases the decoding
+ * back towards English - which is the one thing that must not happen to
+ * the feature that exists so Chinese comes out as Chinese. So the prompt
+ * is looked up by language AFTER the language is known.
+ */
+check("the app's vocabulary is given to Whisper", /PROMPTS = \{"en": VOCABULARY\}/.test(worker), true)
+check('and chosen by language, not regardless', /initial_prompt=PROMPTS\.get\(/.test(worker), true)
 check('Wumpy and Ollama are in that vocabulary', /Wumpy, Ollama/.test(worker), true)
 check('int8, because this app only has the CPU', /compute_type="int8"/.test(worker), true)
 
@@ -515,6 +527,126 @@ check('the joined text still gets the cleanup', dictationHook.includes('voice.ti
   check('held back to an outline', /\.mic-idle[\s\S]{0,160}danger[^)]*\) \/ 0\.45\)/.test(css), true)
   /* Ready and live differ by FILL, not by existence. */
   check('and listening is the filled one', /\.mic-recording[\s\S]{0,120}background: rgb\(var\(--danger/.test(css), true)
+}
+
+/* --------------------------------------------- a language other than English */
+
+/**
+ * Asked for as: "when transcribing, allow it to detect different languages
+ * and type it to the machine, for example, chinese".
+ *
+ * The typing half already worked and is checked in check-keyboard: the hook
+ * sends characters with KEYEVENTF_UNICODE and everything crossing the pipe
+ * is base64 UTF-8, so Chinese reaches a window intact. What could not
+ * happen was PRODUCING it - `base.en` has no other language in it and no
+ * detector either, so handed Chinese it returns confident English nonsense.
+ *
+ * What these defend is the half that is easy to get wrong afterwards: every
+ * repair in this file is an English repair, written against twelve English
+ * sentences, and running them over Chinese is how a transcript gets edited
+ * into something that was not said.
+ */
+{
+  const D = await import(pathToFileURL(out).href)
+  const zh = '我们明天下午三点开会讨论预算'
+
+  /* The size follows the setting, because a `.en` model is a different file
+     rather than a flag. */
+  check('English keeps the measured model', D.whisperModelFor('en'), 'base.en')
+  check('and anything else needs the multilingual one', D.whisperModelFor('zh'), 'base')
+  check('including detection', D.whisperModelFor('auto'), 'base')
+  /* Pinning beats detecting on a two-second clip, so both are offered. */
+  check('a pinned language is passed through', D.pinnedLanguage('zh'), 'zh')
+  check('and auto asks the worker to decide', D.pinnedLanguage('auto'), null)
+
+  check('a name becomes a code', D.languageCode('Chinese'), 'zh')
+  check('so does the code itself', D.languageCode('zh'), 'zh')
+  check('and the ways people say it', D.languageCode('mandarin'), 'zh')
+  check('auto is a language setting too', D.languageCode('auto'), 'auto')
+  /* Whisper knows ninety-nine and this file lists fourteen; refusing the
+     rest would be the table deciding what the user may speak. */
+  check('an unlisted two-letter code still works', D.languageCode('sv'), 'sv')
+  check('but a word that is not a language is refused', D.languageCode('bananas'), null)
+
+  /* THE ENGLISH TABLES DO NOT RUN. Not "do not match" - do not run. */
+  check('Chinese comes back as it was heard', D.tidyTranscript(zh, { language: 'zh' }), zh)
+  /* The capitalisation rule is the clearest case: it would edit a sentence
+     it cannot read. An English transcript still gets it. */
+  check(
+    'English still gets its first capital',
+    D.tidyTranscript('hello there', { language: 'en' }),
+    'Hello there'
+  )
+  /* Joining segments with a space leaves a gap mid-sentence in a script
+     that has no word spaces. Closed up only between two CJK characters. */
+  check('the seam between pieces is closed up', D.tidyTranscript('我们 明天 开会', { language: 'zh' }), '我们明天开会')
+  check(
+    'but a Latin word inside keeps its spaces',
+    D.tidyTranscript('我们用 Electron 开发', { language: 'zh' }),
+    '我们用 Electron 开发'
+  )
+
+  /*
+   * Whisper's Chinese training data was largely subtitled video, so silence
+   * does not produce a polite "Thank you." the way English does - it
+   * produces the channel asking for likes, at full confidence.
+   */
+  check('the subscribe spam is noise', D.isNoise('请不吝点赞订阅转发打赏支持明镜与点点栏目', 'zh'), true)
+  check('so is a subtitling credit', D.isNoise('字幕由Amara.org社区提供', 'zh'), true)
+  check('real speech is not', D.isNoise(zh, 'zh'), false)
+  /* And the English list does not fire on Chinese, nor the reverse. */
+  check('English noise is still noise', D.isNoise('Thank you.', 'en'), true)
+  check('and a Chinese sentence is not English noise', D.isNoise(zh, 'en'), false)
+
+  /*
+   * The polish guard could not see CJK at all: `words()` stripped it, both
+   * sides came out empty, and empty is the one case it cannot judge. It
+   * refused every polish - safe, but a guard that cannot see what it is
+   * guarding is one bad condition away from accepting anything.
+   */
+  check(
+    'punctuating a Chinese line is allowed',
+    D.polishAcceptable(zh, '我们明天下午三点开会，讨论预算。'),
+    true
+  )
+  check(
+    'but rewriting it is not',
+    D.polishAcceptable(zh, '今天上午十点取消会议不用讨论任何东西了好吗'),
+    false
+  )
+  check(
+    'nor is answering it',
+    D.polishAcceptable(zh, '好的，我已经帮你把会议安排好了。'),
+    false
+  )
+}
+
+/* ------------------------------------------------- what the worker is told */
+
+{
+  check('the worker takes a language per clip', /req\.get\("language", "en"\)/.test(worker), true)
+  check('null means detect it', /if wanted is None:/.test(worker), true)
+  check('and detection happens before the prompt is chosen', worker.indexOf('language, confidence = detect(') < worker.indexOf('initial_prompt=PROMPTS.get('), true)
+  /*
+   * UNSURE MEANS ENGLISH. Detection reads one window, and a dictated clip
+   * is often two seconds of it - Whisper will call a short English phrase
+   * Welsh at middling confidence, and a transcript in the wrong language
+   * is not a near miss, it is unusable.
+   */
+  check('an unsure detection falls back to English', /confidence < 0\.5/.test(worker), true)
+  check('and the language comes back with the text', /"language": spoken/.test(worker), true)
+  /* An old faster-whisper loses detection and keeps dictation, rather than
+     losing dictation. */
+  check('detection is optional, not fatal', /optional capability, never fatal/.test(worker), true)
+
+  const main = readFileSync('src/main/index.ts', 'utf8')
+  check('main passes the setting down', /pinnedLanguage\(settings\.get\('voiceLanguage'\)\)/.test(main), true)
+  check('and the tables are told what was spoken', /tidyTranscript\(heard, \{ commands, language \}\)/.test(main), true)
+  const speech = readFileSync('src/main/speech.ts', 'utf8')
+  /* Moving between `auto` and `zh` is the same loaded model; moving either
+     to `en` swaps the file and has to reload. Checking which turns most of
+     them free. */
+  check('the worker reloads only when the size changes', /whisperModelFor\(language\) !== before/.test(speech), true)
 }
 
 console.log(`\n${failed === 0 ? 'all' : `${failed} FAILED of`} dictation checks`)

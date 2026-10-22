@@ -2,6 +2,7 @@
 
 import type { AttachKind } from './attach'
 import type { Fresh } from './cloud'
+import type { VoiceLanguage } from './dictation'
 
 export type { AttachKind }
 
@@ -529,6 +530,16 @@ export interface WumpySettings {
   /** Stop recording by itself once you stop talking. */
   voiceAutoStop: boolean
   /**
+   * What to transcribe: 'en', 'auto', or a Whisper language code.
+   *
+   * 'en' is not merely a default, it is a different model - see
+   * WHISPER_MODEL_MULTILINGUAL. Leaving it alone keeps the English-only
+   * `base.en` that this app's accuracy table was measured on; anything else
+   * loads the multilingual `base`, which is a little worse at English and
+   * the only one that knows any other language exists.
+   */
+  voiceLanguage: VoiceLanguage
+  /**
    * Send the short form of the instructions.
    *
    * The preamble is the largest single cost of every turn, and most of what
@@ -854,6 +865,16 @@ export interface Transcript {
   audioSeconds: number
   /** 0..1, from the model's own per-token log probabilities. */
   confidence: number
+  /**
+   * What language it turned out to be, as a Whisper code.
+   *
+   * Always present, and equal to what was pinned when something was. It
+   * decides which repair tables may run - see TidyOptions.language - so it
+   * travels with the text rather than being inferred from it later.
+   */
+  language: string
+  /** 0..1 in how sure the detector was. 1 when the language was pinned. */
+  languageConfidence: number
 }
 
 /** A finished dictation, ready for the composer. */
@@ -874,6 +895,15 @@ export interface Dictation {
   confidence: number
   /** Transcription time only, excluding polish. */
   ms: number
+  /**
+   * The language it came back in, as a Whisper code.
+   *
+   * Carried out to the panel so the pieces of one dictation can be tidied
+   * under the language they were spoken in rather than under English: the
+   * segments are transcribed while the user is still talking, and only the
+   * join at the end knows what the whole thing was.
+   */
+  language: string
 }
 
 /* -------------------------------------------------------------------- links */

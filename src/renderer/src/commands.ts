@@ -1,6 +1,7 @@
 import type { Dock, ProviderName } from '@shared/types'
 import { PROVIDER_IDS, PROVIDERS, isProviderId } from '@shared/cloud'
 import { MAX_RUNS } from '@shared/probe'
+import { languageCode } from '@shared/dictation'
 import { nearest } from '@shared/nearest'
 
 /**
@@ -31,6 +32,10 @@ export type CommandAction =
   | { kind: 'reasoning'; show: boolean | 'toggle' }
   | { kind: 'pin'; pinned: boolean | 'toggle' }
   | { kind: 'voice'; setting: 'on' | 'polish' | 'autostop'; on: boolean | 'toggle' }
+  /** What language to transcribe. Null reports rather than sets. */
+  | { kind: 'language'; code: string | null }
+  /** Listening to the machine's own audio. See @shared/meeting. */
+  | { kind: 'listen'; what: 'toggle' | 'stop' | 'notes' | 'source'; ask: string }
   /** A plain boolean in the settings file, with no machinery behind it. */
   | { kind: 'setting'; setting: 'leanPrompt' | 'thinking'; on: boolean | 'toggle' }
   | { kind: 'open'; what: string }
@@ -516,6 +521,72 @@ export const COMMANDS: CommandSpec[] = [
     hint: 'Stop dictating by itself when you stop talking',
     arg: 'on|off',
     run: (arg) => ({ kind: 'voice', setting: 'autostop', on: bool(arg) })
+  },
+  {
+    /*
+     * Listening to the machine, for meetings.
+     *
+     * Asked for as: "allow the AI to listen to computer audio... during
+     * meetings, it's able to get the summary, notes, specific details".
+     *
+     * Bare `/listen` starts and stops, because that is the pair of things
+     * anyone does with it and neither should need an argument. The rest is
+     * what to do with what it heard: `notes` without stopping, or any
+     * question at all about the transcript so far.
+     *
+     * NOT aliased to `record`, which is what it is not: nothing is kept
+     * but text, and a name that promises a recording would be a promise
+     * this does not make. See @shared/meeting.
+     */
+    name: 'listen',
+    /* NOT `notes`, which `/remember` has owned since before this existed -
+       and which would be the wrong half anyway: the notes are what comes
+       out, the listening is the thing being switched on. */
+    aliases: ['meeting', 'call'],
+    hint: 'Transcribe what your speakers are playing — for meetings',
+    arg: 'stop|notes|question',
+    run: (arg) => {
+      const a = arg.trim()
+      const word = a.toLowerCase()
+      if (!a) return { kind: 'listen', what: 'toggle', ask: '' }
+      if (['stop', 'off', 'end', 'done'].includes(word)) return { kind: 'listen', what: 'stop', ask: '' }
+      if (['notes', 'summary', 'summarise', 'summarize'].includes(word))
+        return { kind: 'listen', what: 'notes', ask: '' }
+      if (['mic', 'me', 'both', 'system', 'them', 'speakers'].includes(word))
+        return { kind: 'listen', what: 'source', ask: word }
+      /* Anything else is a question about what has been heard, which is
+         the same request as notes with a different instruction. */
+      return { kind: 'listen', what: 'notes', ask: a }
+    }
+  },
+  {
+    /*
+     * What language dictation is in - and it is a real choice rather than
+     * a preference, because `base.en` has no other language in it. See
+     * WHISPER_MODEL_MULTILINGUAL: moving off English loads a different
+     * model, which is a download the first time and a little worse at
+     * English for ever after. The reply says so rather than hiding it.
+     *
+     * Bare `/language` reports and lists, like `/tier` and `/model`, so
+     * nobody has to know a code to find out what the options are.
+     */
+    name: 'language',
+    aliases: ['lang', 'speak'],
+    hint: 'What language you dictate in — auto, english, chinese…',
+    arg: 'auto|code',
+    run: (arg) => {
+      const want = arg.trim()
+      if (!want) return { kind: 'language', code: null }
+      const code = languageCode(want)
+      return code
+        ? { kind: 'language', code }
+        : {
+            kind: 'error',
+            message:
+              `I do not know the language "${want}". Try \`/language auto\` to detect it, ` +
+              'a name like `chinese`, or a two-letter code like `zh`.'
+          }
+    }
   },
   {
     name: 'approve',

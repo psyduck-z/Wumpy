@@ -8,10 +8,15 @@ context between turns.
 
 Protocol, one JSON object per line each way:
 
-    in   {"id": 1, "path": "C:/.../clip.webm"}
+    in   {"id": 1, "path": "C:/.../clip.webm", "language": "en"}
     out  {"ready": true, "model": "base.en", "load_ms": 1200}
-         {"id": 1, "text": "...", "ms": 420, "audio": 2.1, "confidence": 0.82}
+         {"id": 1, "text": "...", "ms": 420, "audio": 2.1, "confidence": 0.82,
+          "language": "en", "language_confidence": 0.99}
          {"id": 1, "error": "..."}
+
+`language` is a code to pin, or null to detect it per clip. Null needs a
+multilingual model: the `.en` sizes have no other language in them and no
+detector either, so the app picks the size from the same setting.
 
 Exits when stdin closes, so it cannot outlive the app.
 """
@@ -40,15 +45,51 @@ VOCABULARY = (
     "www.example.com/signup?code=408217"
 )
 
+# THE PROMPT ABOVE IS ENGLISH, AND A PROMPT IS NOT A HINT.
+#
+# An initial prompt is prepended to the decoder's context, so it steers style
+# and vocabulary in whatever language it is written in. Handing a Chinese
+# utterance a line of English product names biases the decoding towards
+# English - the one thing that must not happen to the feature that exists so
+# Chinese comes out as Chinese.
+#
+# The detection pass itself is unaffected: it runs on the mel features before
+# any decoding, so the prompt cannot reach it. What it can reach is the words
+# that come out afterwards, which is why the prompt is chosen AFTER the
+# language is known rather than passed in regardless.
+PROMPTS = {"en": VOCABULARY}
+
 
 def send(obj):
     sys.stdout.write(json.dumps(obj) + "\n")
     sys.stdout.flush()
 
 
+def detect(model, audio, vad):
+    """The spoken language and how sure the model is, or None when it cannot.
+
+    A separate pass rather than `transcribe(language=None)`, for one reason:
+    this way the language is known BEFORE the prompt is chosen. See PROMPTS.
+
+    It costs one encoder forward over the first window - measured at about a
+    third of a second for `base` on this machine - and only happens when the
+    user asked for detection. Pinning a language skips it entirely.
+
+    Wrapped because it is the one call here that depends on a faster-whisper
+    newer than the floor in scripts/install-speech.mjs. An older one loses
+    detection and keeps everything else, rather than losing dictation.
+    """
+    try:
+        lang, prob, _ = model.detect_language(audio=audio, vad_filter=True, vad_parameters=vad)
+        return lang, round(float(prob), 2)
+    except Exception:  # noqa: BLE001 - optional capability, never fatal
+        return None, 0.0
+
+
 def main():
-    # Fixed, not configurable. src/shared/dictation.ts holds the measurements
-    # that settled on this size; the variable is for overriding it by hand.
+    # The size follows the language setting, because the two are one choice:
+    # a `.en` model has no other language in it and cannot detect one. The app
+    # passes it; the variable still overrides both by hand.
     size = os.environ.get("WUMPY_WHISPER_MODEL") or "base.en"
     root = os.environ.get("WUMPY_WHISPER_MODELS") or None
 
@@ -107,20 +148,48 @@ def main():
             send({"id": rid, "error": "no path"})
             continue
 
+        # A code to pin, or absent/null to work it out from the audio. Absent
+        # is read as English so an older app talking to a newer worker keeps
+        # the behaviour it was written against.
+        wanted = req.get("language", "en")
+
         t1 = time.time()
         try:
+            vad = {"min_silence_duration_ms": 400}
+            clip = path
+            language = wanted
+            confidence = 1.0
+            if wanted is None:
+                # Decoded once and reused: detection and transcription both
+                # want 16kHz mono floats, and decoding a clip twice is the
+                # kind of waste that turns a third of a second into two.
+                from faster_whisper.audio import decode_audio
+
+                clip = decode_audio(path, sampling_rate=16000)
+                language, confidence = detect(model, clip, vad)
+                # UNSURE MEANS ENGLISH, NOT A GUESS.
+                #
+                # Detection reads the first window, and a dictated clip is
+                # often two seconds of it. Whisper will call a short English
+                # phrase Welsh or Dutch with middling confidence, and a
+                # transcript in the wrong language is not a near miss - it is
+                # unusable, where falling back costs nothing to someone
+                # speaking English anyway.
+                if not language or confidence < 0.5:
+                    language, confidence = "en", confidence
             segments, info = model.transcribe(
-                path,
-                language="en",
+                clip,
+                language=language,
                 beam_size=5,
                 # Silence is where Whisper invents things, so it is cut before
                 # the model ever sees it rather than filtered out afterwards.
                 vad_filter=True,
-                vad_parameters={"min_silence_duration_ms": 400},
+                vad_parameters=vad,
                 # Each utterance stands alone. Conditioning on the previous one
                 # is what makes Whisper repeat a phrase forever.
                 condition_on_previous_text=False,
-                initial_prompt=VOCABULARY,
+                # Chosen by language, never regardless of it. See PROMPTS.
+                initial_prompt=PROMPTS.get(language or ""),
                 no_speech_threshold=0.6,
             )
             parts = []
@@ -129,12 +198,20 @@ def main():
                 parts.append(s.text)
                 logprobs.append(s.avg_logprob)
             text = " ".join(p.strip() for p in parts).strip()
+            # `info` carries what the model settled on, which is the same as
+            # the detection above except when an old faster-whisper made the
+            # detection a no-op. Preferring it keeps the two from disagreeing.
+            spoken = getattr(info, "language", None) or language or "en"
             send(
                 {
                     "id": rid,
                     "text": text,
                     "ms": int((time.time() - t1) * 1000),
                     "audio": round(info.duration, 2),
+                    "language": spoken,
+                    "language_confidence": round(
+                        float(getattr(info, "language_probability", 0.0) or confidence), 2
+                    ),
                     # Mean per-token log probability, mapped to 0..1. Low means
                     # the model was guessing, which the app can say out loud
                     # rather than presenting a guess as a transcript.
