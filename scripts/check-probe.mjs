@@ -687,5 +687,90 @@ check('and the reason is written down', /NOT `exhausted`/.test(handler), true)
 check('every model in the picker is probed', C.CLOUD_MODELS.length > 0, true)
 check('the catalogue is the only source of ids', /const queue = CLOUD_MODELS\.slice\(\)/.test(cloud), true)
 
+/* ------------------------------------- the measurement is kept, not printed */
+
+/**
+ * "when it does this it should change the ranking in /model".
+ *
+ * The check spends eighteen real requests and several minutes measuring
+ * the median time at the app's real preamble - which is precisely the
+ * column `rankedModels` sorts on - and used to print it and forget it.
+ *
+ * What these pin is WHICH results become evidence. A model that was never
+ * asked, or that the wifi prevented reaching, or that the account's
+ * allowance refused, has told us nothing about its speed; recording a
+ * zero for any of them would rank it bottom for something that is not
+ * its fault, and would be remembered until the next full check.
+ */
+{
+  const at = (model, state, ms, runs = 2) => ({
+    model,
+    label: model,
+    provider: 'nvidia',
+    state,
+    ms,
+    said: '',
+    why: '',
+    runs
+  })
+  const real = 'deepseek-ai/deepseek-v4.1-flash'
+  const other = 'z-ai/glm-5.3-flash'
+
+  const kept = P.freshLatencies(
+    [
+      at(real, 'ok', 6_213),
+      at(other, 'slow', 37_323),
+      at('nvidia/nemotron-3-ultra-550b-a55b', 'empty', 0),
+      at('z-ai/glm-5.3', 'limited', 900),
+      at('gemma4:31b-cloud', 'nokey', 0),
+      at('stepfun-ai/step-5-preview', 'offline', 0),
+      at('someone/typed-this-by-hand', 'ok', 500)
+    ],
+    '2026-10-22'
+  )
+
+  check('a working model keeps its time', kept[real], { ms: 6_213, runs: 2, on: '2026-10-22', ok: true })
+  check('slow still counts - it answered', kept[other].ok, true)
+  check('an empty answer is recorded as a failure', kept['nvidia/nemotron-3-ultra-550b-a55b'].ok, false)
+  /* Quota is the account's, not the model's, and the round trip to a
+     refusal is not a speed. */
+  check('a 429 teaches nothing about speed', kept['z-ai/glm-5.3'], undefined)
+  check('nor does a model nobody asked', kept['gemma4:31b-cloud'], undefined)
+  check('nor does the wifi being off', kept['stepfun-ai/step-5-preview'], undefined)
+  /* The ranking is of the catalogue; a hand-typed id has no row to move. */
+  check('a hand-typed id has nothing to re-rank', kept['someone/typed-this-by-hand'], undefined)
+  /* A pass with no clock on it would sort to the top at zero milliseconds. */
+  check('a pass with no time is not a measurement', P.freshLatencies([at(real, 'ok', 0)], '2026-10-22')[real], undefined)
+
+  /* And the report says what it did, rather than leaving the user to go
+     and look at the list. */
+  check('nothing measured, nothing claimed', P.rerankLines({}), [])
+  const moved = P.rerankLines({
+    [real]: { ms: 6_213, runs: 2, on: '2026-10-22', ok: true },
+    'nvidia/nemotron-3.5-super-vl-120b-a12b': { ms: 40_417, runs: 2, on: '2026-10-22', ok: true }
+  })
+  check('the re-rank is announced', moved.length, 2)
+  check('and names what came first', /is now first/.test(moved[1]), true)
+  check('and how much moved', /rows moved/.test(moved[1]), true)
+  /* Times that change nothing say nothing: the line is news or absent. */
+  const same = Object.fromEntries(
+    C.CLOUD_MODELS.filter((m) => m.measured).map((m) => [
+      m.id,
+      { ms: m.measured.medianMs, runs: 2, on: '2026-10-22', ok: true }
+    ])
+  )
+  check('an unchanged order is not announced', P.rerankLines(same), [])
+
+  /* It reaches the report the user actually reads. */
+  const report = P.probeLines([at(real, 'ok', 6_213)], real, {
+    [real]: { ms: 6_213, runs: 2, on: '2026-10-22', ok: true }
+  })
+  check('the report carries the re-rank', report.some((l) => /re-ranked/.test(l)), true)
+
+  /* And the renderer keeps it, rather than letting it die with the reply. */
+  check('the renderer records what was measured', /patch\(\{ latencies: fresh \}\)/.test(app), true)
+  check('merged, so a skipped model keeps its last time', /\.\.\.\(settings\?\.latencies \?\? \{\}\)/.test(app), true)
+}
+
 console.log(`${NL}${count - failed}/${count} probe checks passed`)
 if (failed) process.exit(1)

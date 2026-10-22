@@ -40,7 +40,16 @@ import {
 import { refusedAttachment, sendsBytes, withoutBytes } from '@shared/attach'
 import { needsFor } from '@shared/needs'
 import { shouldRetitle } from '@shared/titles'
-import { CLOUD_MODELS, PROVIDERS, eyeReady, modelTag, providerFor, rankedModels, seesMedia } from '@shared/cloud'
+import {
+  CLOUD_MODELS,
+  PROVIDERS,
+  eyeReady,
+  freshNote,
+  modelTag,
+  providerFor,
+  rankedModels,
+  seesMedia
+} from '@shared/cloud'
 import { useChat, nextId, type ChatStats } from './hooks/useChat'
 import {
   allCommands,
@@ -54,7 +63,7 @@ import { newestPending } from './pending'
 import { forgetClaims } from './once'
 import { forgetAllLive } from './live'
 import { poolLines } from './quota'
-import { DEFAULT_RUNS, probeLines } from '@shared/probe'
+import { DEFAULT_RUNS, freshLatencies, probeLines } from '@shared/probe'
 import { copyText } from './copy'
 import { Toast } from './components/Toast'
 import { forgetActions, record } from './ledger'
@@ -1403,7 +1412,22 @@ function namedControls(shot: Attachment): string[] {
               `${CLOUD_MODELS.length * runs} real requests, a few minutes.`
           )
           const results = await window.wumpy.models.probe(runs)
-          chat.note(probeLines(results, model).join(NEWLINE))
+          /*
+           * KEPT, not just printed. The check measures the one number the
+           * picker's order turns on and used to throw it away: see
+           * cloud.Fresh for the afternoon where that put the report's
+           * recommendation eighth in the list it was recommending from.
+           *
+           * Merged rather than replaced, so a run that skipped a model -
+           * no key that day, or the id typed by hand - leaves its last
+           * known time standing instead of silently deleting it.
+           */
+          const fresh = {
+            ...(settings?.latencies ?? {}),
+            ...freshLatencies(results, new Date().toISOString().slice(0, 10))
+          }
+          await patch({ latencies: fresh })
+          chat.note(probeLines(results, model, fresh).join(NEWLINE))
           return
         }
 
@@ -2488,16 +2512,31 @@ function namedControls(shot: Attachment): string[] {
        * chosen between here IS how good they are, and that used to be a
        * clause halfway through the blurb.
        */
-      const cloudItems = rankedModels()
+      /*
+       * …and re-ordered by whatever `/model check` last found, which is the
+       * same measurement taken more recently on this machine. See
+       * cloud.Fresh: the catalogue's times are from one October afternoon,
+       * and two of them had already crossed the usable/unusable line by the
+       * next day.
+       */
+      const latencies = settings?.latencies ?? {}
+      const cloudItems = rankedModels(CLOUD_MODELS, latencies)
         .slice()
         .sort((a, b) => (a.rank ?? 99) - (b.rank ?? 99))
         .map(({ model: m, rank }) => {
           const ready = usable(m.provider)
-          const tag = modelTag(m, rank)
+          const tag = modelTag(m, rank, latencies)
+          /* Beside the blurb, never instead of it: the blurb is a sentence
+             somebody wrote and the fresh time is a number somebody measured,
+             and rewriting the first from the second is how a caveat
+             disappears. Only when they disagree - see freshNote. */
+          const note = ready ? freshNote(m, latencies) : null
           return {
             id: m.id,
             title: m.label,
-            meta: `${PROVIDERS[m.provider].label}  ·  ${ready ? m.blurb : 'needs a key — /key ' + m.provider}`,
+            meta:
+              `${PROVIDERS[m.provider].label}  ·  ${ready ? m.blurb : 'needs a key — /key ' + m.provider}` +
+              (note ? `  ·  ${note}` : ''),
             ...(tag ? { tag } : {}),
             /*
              * Which ones can actually see. It was only findable by reading

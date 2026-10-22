@@ -418,6 +418,49 @@ export interface Measured {
   on: string
 }
 
+/**
+ * A latency `/model check` measured here, which beats the one in the file.
+ *
+ * THE CHECK WAS MEASURING THE THING THE RANKING TURNS ON AND THROWING IT
+ * AWAY. `Measured.medianMs` is a figure taken on one afternoon and shipped;
+ * the probe takes the same figure, against the same preamble, on the user's
+ * own keys, today - and then printed it in a report and forgot it, while
+ * the picker went on ordering by the shipped number.
+ *
+ * That is not a cosmetic gap. The run on 22 Oct put the VL model at 40.4s
+ * against the 10.9s in the catalogue and deepseek at 6.2s against 112.2s:
+ * both cross UNUSABLY_SLOW_MS, in opposite directions, so the picker's #2
+ * was unusable that afternoon and the row it buried at #8 was the one the
+ * same report recommended. Two readings of the same machine disagreeing on
+ * the same screen.
+ *
+ * ONLY THE LATENCY. The probe asks for one short answer; it does not climb
+ * the capability ladder, so `clean`/`of` keep coming from the catalogue and
+ * nothing here can invent a score. That is the same split `recommend()` has
+ * always used: the score is published, the speed is what just happened.
+ */
+export interface Fresh {
+  /** Median ms over the probe's runs, at Wumpy's real preamble. */
+  ms: number
+  /** How many times it was asked. One is a sample, two is a measurement. */
+  runs: number
+  /** The day it was asked, so an old check reads as old. */
+  on: string
+  /**
+   * Did it answer every run?
+   *
+   * False for empty, missing, refused, timeout, flaky and error alike -
+   * the ranking only needs to know that choosing it would not have
+   * worked, and the report beside it says which way it failed. A model
+   * that did not answer cannot outrank one that did, which is the rule
+   * UNUSABLY_SLOW_MS already applies to a model that answers too late.
+   */
+  ok: boolean
+}
+
+/** What the last check found, by model id. Absent means never checked. */
+export type Latencies = Readonly<Record<string, Fresh>>
+
 export const CLOUD_MODELS: CloudModel[] = [
   /*
    * GOOGLE IS OUT, for now. Asked for in those words: "remove gemini and
@@ -856,25 +899,88 @@ export const UNUSABLY_SLOW_MS = 30_000
  *
  * Unmeasured entries keep their catalogue position and get no rank, rather
  * than being sorted to the bottom as though they had scored zero.
+ *
+ * `fresh` is what `/model check` last found, and it REPLACES the catalogue's
+ * latency wherever it exists. See Fresh for why: the shipped number is from
+ * an afternoon in October and the probe's is from this machine today, so the
+ * newer one is simply the better evidence about the same quantity. A model
+ * that failed the check is ranked as not answering, which is the rule the
+ * slow ones already live under.
  */
-export function rankedModels(models: readonly CloudModel[] = CLOUD_MODELS): Ranked[] {
+export function rankedModels(
+  models: readonly CloudModel[] = CLOUD_MODELS,
+  fresh: Latencies = {}
+): Ranked[] {
   const share = (m: CloudModel): number =>
     m.measured && m.measured.of > 0 ? m.measured.clean / m.measured.of : -1
-  const answers = (m: CloudModel): number =>
-    m.measured && m.measured.medianMs < UNUSABLY_SLOW_MS ? 1 : 0
+  const speed = (m: CloudModel): number => fresh[m.id]?.ms ?? m.measured?.medianMs ?? Infinity
+  const answers = (m: CloudModel): number => {
+    const live = fresh[m.id]
+    if (live) return live.ok && live.ms < UNUSABLY_SLOW_MS ? 1 : 0
+    return m.measured && m.measured.medianMs < UNUSABLY_SLOW_MS ? 1 : 0
+  }
 
   const order = models
     .filter((m) => m.measured)
     .slice()
-    .sort(
-      (a, b) =>
-        answers(b) - answers(a) ||
-        share(b) - share(a) ||
-        (a.measured!.medianMs - b.measured!.medianMs)
-    )
+    .sort((a, b) => answers(b) - answers(a) || share(b) - share(a) || speed(a) - speed(b))
 
   const place = new Map(order.map((m, i) => [m.id, i + 1]))
   return models.map((model) => ({ model, rank: place.get(model.id) ?? null }))
+}
+
+/**
+ * The speed to show for a model, and whether anyone checked it lately.
+ *
+ * One answer to "how fast is this", so the badge, the row and the ranking
+ * cannot quote three different numbers at each other.
+ */
+export function speedOf(
+  model: CloudModel,
+  fresh: Latencies = {}
+): { ms: number; runs: number; on: string; live: boolean; ok: boolean } | null {
+  const live = fresh[model.id]
+  if (live) return { ms: live.ms, runs: live.runs, on: live.on, live: true, ok: live.ok }
+  const m = model.measured
+  if (!m) return null
+  return { ms: m.medianMs, runs: m.runs, on: m.on, live: false, ok: m.medianMs < UNUSABLY_SLOW_MS }
+}
+
+/** Seconds, at the precision the size deserves: 1.3s, but 40s. */
+export function secs(ms: number): string {
+  return ms >= 10_000 ? `${Math.round(ms / 1000)}s` : `${(ms / 1000).toFixed(1)}s`
+}
+
+/**
+ * How far a fresh reading has to move before the row mentions it.
+ *
+ * A third either way, in log terms, because the blurbs are written to one
+ * decimal place and a model that reads 4.6s one day and 5.1s the next has
+ * not changed - saying so on every row would be noise with the shape of
+ * news. A third is comfortably outside the run-to-run spread the probe
+ * itself reports (the 22 Oct check spread 685-1,488ms on one model) and
+ * comfortably inside the gaps that matter.
+ */
+const WORTH_SAYING = 0.125 // log10(4/3) ≈ 0.125
+
+/**
+ * What the last check found, as a clause for the picker row - or null when
+ * it agrees with the blurb and there is nothing to add.
+ *
+ * The blurb is prose somebody wrote and it carries a time in it. Rewriting
+ * that sentence from a measurement is how a hand-written caveat gets eaten
+ * by a regex, so the fresh number arrives BESIDE it and the reader can see
+ * both. When they agree, only one is shown.
+ */
+export function freshNote(model: CloudModel, fresh: Latencies = {}): string | null {
+  const live = fresh[model.id]
+  if (!live) return null
+  if (!live.ok) return 'did not answer when last checked'
+  const was = model.measured?.medianMs
+  const crossed =
+    was !== undefined && was < UNUSABLY_SLOW_MS !== live.ms < UNUSABLY_SLOW_MS
+  const moved = was === undefined || Math.abs(Math.log10(live.ms / Math.max(1, was))) > WORTH_SAYING
+  return crossed || moved ? `${secs(live.ms)} when last checked` : null
 }
 
 /** What the badge beside a model's name says, and how loudly. */
@@ -893,18 +999,34 @@ export interface ModelTag {
  * still #1. The bands are drawn where the measurements actually fall rather
  * than at round numbers.
  */
-export function modelTag(model: CloudModel, rank: number | null): ModelTag | null {
+export function modelTag(
+  model: CloudModel,
+  rank: number | null,
+  fresh: Latencies = {}
+): ModelTag | null {
   const m = model.measured
   if (!m || !rank) return null
   const share = m.of > 0 ? m.clean / m.of : 0
-  const tone = rank === 1 ? 'top' : share >= 0.8 ? 'good' : share >= 0.6 ? 'fair' : 'weak'
-  const seconds = m.medianMs >= 10_000 ? `${Math.round(m.medianMs / 1000)}s` : `${(m.medianMs / 1000).toFixed(1)}s`
+  const live = fresh[model.id]
+  /*
+   * A model that just failed its check is not a good one today, whatever
+   * it scored in October. The band is about what the user is about to get,
+   * and the ladder cannot see that the endpoint has stopped answering.
+   */
+  const tone =
+    live && !live.ok ? 'weak' : rank === 1 ? 'top' : share >= 0.8 ? 'good' : share >= 0.6 ? 'fair' : 'weak'
+  const ladder =
+    `${m.clean} of ${m.of} ladder rungs clean at ${m.runs} run${m.runs === 1 ? '' : 's'} each, ` +
+    `${secs(m.medianMs)} median to a short answer. Measured ${m.on}.`
   return {
     text: `#${rank} · ${m.clean}/${m.of}`,
     tone,
-    title:
-      `${m.clean} of ${m.of} ladder rungs clean at ${m.runs} run${m.runs === 1 ? '' : 's'} each, ` +
-      `${seconds} median to a short answer. Measured ${m.on}.`
+    title: live
+      ? `${ladder} Checked again ${live.on}: ` +
+        (live.ok
+          ? `${secs(live.ms)} over ${live.runs} run${live.runs === 1 ? '' : 's'}, which is what the order above uses.`
+          : 'it did not answer, so it is ranked below everything that did.')
+      : ladder
   }
 }
 

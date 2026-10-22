@@ -1,6 +1,7 @@
 /** Shared contracts between the main process, preload bridge and renderer. */
 
 import type { AttachKind } from './attach'
+import type { Fresh } from './cloud'
 
 export type { AttachKind }
 
@@ -487,6 +488,15 @@ export interface WumpySettings {
    * encrypted blob needs migrating.
    */
   keyAccounts: Partial<Record<ProviderName, 'shared' | 'separate'>>
+  /**
+   * What `/model check` last measured, by model id. See cloud.Fresh.
+   *
+   * Kept in settings rather than recomputed, because the check costs real
+   * requests - eighteen of them, and several minutes - and the answer it
+   * buys should outlive the reply it was printed in. The picker reads it
+   * on the next launch exactly as it does on the next keystroke.
+   */
+  latencies: Record<string, Fresh>
   /** Working directory for commands. Empty means the user's home directory. */
   shellCwd: string
   /**

@@ -54,6 +54,10 @@ export const DEFAULT_SETTINGS: WumpySettings = {
   // WumpySettings.keyAccounts.
   keyAccounts: {},
 
+  // Empty until `/model check` has run once, which is the honest starting
+  // state: the catalogue's own figures are all anyone has measured here.
+  latencies: {},
+
   // Better another model than none, so long as the answer says which it is.
   apiFallback: true,
   // Off until asked for with /voice. It is not only a microphone button: with it

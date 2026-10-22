@@ -1217,5 +1217,94 @@ check('as does the older one', C.providerFor('gemma4:31b-cloud'), 'ollama')
 check('a slashed id is still NVIDIA', C.providerFor('nvidia/nemotron-3-ultra-550b-a55b'), 'nvidia')
 check('and a bare Mistral name is still Mistral', C.providerFor('mistral-large'), 'mistral')
 
-check('the picker orders by the measured rank', /rankedModels\(\)/.test(renderer), true)
-check('and shows the badge', /modelTag\(m, rank\)/.test(renderer), true)
+check('the picker orders by the measured rank', /rankedModels\(CLOUD_MODELS, latencies\)/.test(renderer), true)
+check('and shows the badge', /modelTag\(m, rank, latencies\)/.test(renderer), true)
+
+/* --------------------------------------- the check re-ranks the picker */
+
+/**
+ * Asked for in one sentence, pointing at a screenshot of `/model check`:
+ * "when it does this it should change the ranking in /model".
+ *
+ * It did not. The command measured the exact quantity the order is sorted
+ * on - the median time at Wumpy's real preamble, on the user's own keys,
+ * today - printed it, and dropped it, while the picker went on sorting by
+ * figures taken on 21 Oct and shipped in the file.
+ *
+ * The 22 Oct run is the case these are built from, because both directions
+ * happened at once and neither was marginal: the VL model measured 40.4s
+ * against 10.9s in the catalogue, and deepseek 6.2s against 112.2s. Both
+ * cross UNUSABLY_SLOW_MS. So the picker had an unusable model at #2 and
+ * had buried, at #8, the model the same report was recommending - two
+ * readings of one machine disagreeing on one screen.
+ *
+ * What is defended here is that a measurement beats a constant, that only
+ * the LATENCY does - the ladder score cannot be invented by a probe that
+ * never climbed it - and that a model which did not answer today cannot
+ * outrank one that did, whatever it scored in October.
+ */
+{
+  const slow = C.CLOUD_MODELS.find((m) => m.id === 'nvidia/nemotron-3.5-super-vl-120b-a12b')
+  const deep = C.CLOUD_MODELS.find((m) => m.id === 'deepseek-ai/deepseek-v4.1-flash')
+  check('the two models the 22 Oct run turned over are both still listed', !!slow && !!deep, true)
+
+  const rankOf = (list, id) => list.find((r) => r.model.id === id).rank
+  const before = C.rankedModels()
+  /* Exactly what /model check reported that afternoon. */
+  const after = C.rankedModels(C.CLOUD_MODELS, {
+    'nvidia/nemotron-3.5-super-vl-120b-a12b': { ms: 40_417, runs: 2, on: '2026-10-22', ok: true },
+    'deepseek-ai/deepseek-v4.1-flash': { ms: 6_213, runs: 2, on: '2026-10-22', ok: true }
+  })
+
+  check('the catalogue had the slow one near the top', rankOf(before, slow.id) <= 2, true)
+  check('and today it is below everything that answers in time', rankOf(after, slow.id) > rankOf(before, slow.id), true)
+  check('the highest scorer was buried while it took two minutes', rankOf(before, deep.id) >= 8, true)
+  check('and leads once it is measured at six seconds', rankOf(after, deep.id), 1)
+
+  /* The ladder is NOT touched. A probe asks for one short answer; it has
+     no business moving a capability score, and a `fresh` entry that could
+     would be a way to promote a model by being quick. */
+  check('the score behind the order is still the catalogue’s', deep.measured.clean / deep.measured.of, 39 / 41)
+
+  /* A model that did not answer. It keeps its row and its score - it may
+     be back tomorrow - and it cannot sit above one that worked. */
+  const dead = C.rankedModels(C.CLOUD_MODELS, {
+    'nvidia/nemotron-3-ultra-550b-a55b': { ms: 0, runs: 2, on: '2026-10-22', ok: false }
+  })
+  const ultra = 'nvidia/nemotron-3-ultra-550b-a55b'
+  check('the catalogue has the best balance first', rankOf(before, ultra), 1)
+  check('and a model that answered nothing is not first', rankOf(dead, ultra) > 1, true)
+  check('but it is still ranked, not dropped', typeof rankOf(dead, ultra), 'number')
+  check('and the badge stops calling it good', C.modelTag(C.CLOUD_MODELS.find((m) => m.id === ultra), rankOf(dead, ultra), { [ultra]: { ms: 0, runs: 2, on: '2026-10-22', ok: false } }).tone, 'weak')
+
+  /* With nothing measured, nothing changes: the default is the file. */
+  check('no check run means the shipped order', JSON.stringify(C.rankedModels(C.CLOUD_MODELS, {}).map((r) => r.rank)), JSON.stringify(before.map((r) => r.rank)))
+}
+
+/* ----------------------------------- saying so, without eating the blurb */
+
+/**
+ * The blurb carries a time in a hand-written sentence. The fresh number
+ * goes BESIDE it, because rewriting prose from a measurement is how a
+ * caveat gets deleted by a regex - and only when the two disagree, or the
+ * rows all grow by six characters to say what they already said.
+ */
+{
+  const m = C.CLOUD_MODELS.find((x) => x.id === 'z-ai/glm-5.3-flash')
+  const at = (ms, ok = true) => C.freshNote(m, { [m.id]: { ms, runs: 2, on: '2026-10-22', ok } })
+  check('nothing to add when no one has checked', C.freshNote(m, {}), null)
+  check('nor when the check agrees with the blurb', at(m.measured.medianMs), null)
+  check('nor for ordinary run-to-run wobble', at(Math.round(m.measured.medianMs * 1.2)), null)
+  check('but a real change is said', at(Math.round(m.measured.medianMs * 2)), '9.2s when last checked')
+  /* Past ten seconds the decimal stops being information, so it goes. */
+  check('and a big one reads whole', at(Math.round(m.measured.medianMs * 3)), '14s when last checked')
+  check('and a failure is said plainly', at(0, false), 'did not answer when last checked')
+  /* Crossing the usable line is always worth saying, even if the ratio is
+     small - it is the one change that moves the row in the list. */
+  const slowish = C.CLOUD_MODELS.find((x) => x.id === 'z-ai/glm-5.3')
+  check(
+    'and so is crossing back under the slow line',
+    C.freshNote(slowish, { [slowish.id]: { ms: 29_000, runs: 2, on: '2026-10-22', ok: true } }),
+    '29s when last checked'
+  )
+}

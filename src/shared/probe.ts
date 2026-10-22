@@ -35,7 +35,14 @@
  * Pure, so every verdict and every line of the report can be driven from a
  * check without a key, a network or a clock.
  */
-import { CLOUD_MODELS, GIVE_UP_AFTER_MS, seesMedia } from './cloud'
+import {
+  CLOUD_MODELS,
+  GIVE_UP_AFTER_MS,
+  rankedModels,
+  seesMedia,
+  type Fresh,
+  type Latencies
+} from './cloud'
 
 /** What a probe concluded about one model. */
 export type ProbeState =
@@ -503,6 +510,73 @@ export function recommendLines(results: readonly ProbeResult[], current = ''): s
 }
 
 /**
+ * The times this run measured, in the shape the picker ranks by.
+ *
+ * Asked for in one sentence: "when it does this it should change the
+ * ranking in /model". It did not, and the gap was wide enough to see on a
+ * single screen - the 22 Oct check recommended deepseek at 6.2s while the
+ * picker three keystrokes away still had it eighth on a 112.2s figure from
+ * the day before, and had the VL model second on 10.9s after measuring it
+ * at 40.4s. See cloud.Fresh.
+ *
+ * What is and is not recorded, which is the whole care in this function:
+ *
+ *   nokey, offline   never reached the provider, so they are not evidence
+ *                    about the model. Recording a zero would rank a model
+ *                    bottom for the crime of the wifi being off.
+ *   limited          a 429 is the account's allowance, not the model's
+ *                    speed, and the round trip to a refusal is not a time
+ *                    anything should be ranked on.
+ *   a hand-typed id  nothing in the catalogue to re-rank.
+ *   everything else  recorded, including the failures: `ok` false is the
+ *                    useful half of the news.
+ */
+export function freshLatencies(results: readonly ProbeResult[], on: string): Record<string, Fresh> {
+  const out: Record<string, Fresh> = {}
+  for (const r of results) {
+    if (r.state === 'nokey' || r.state === 'offline' || r.state === 'limited') continue
+    if (!CLOUD_MODELS.some((m) => m.id === r.model)) continue
+    const ok = usable(r.state)
+    /* A pass with no time on it is a bookkeeping slip, not a measurement,
+       and would put the model top of the order at zero milliseconds. */
+    if (ok && r.ms <= 0) continue
+    out[r.model] = { ms: r.ms, runs: Math.max(1, r.runs ?? 1), on, ok }
+  }
+  return out
+}
+
+/**
+ * What the new times did to the list, said out loud.
+ *
+ * A check that silently rewrites the order is a check the user has to go
+ * and verify by opening the picker. One line, and only when something
+ * actually moved - "nothing changed" is worth knowing too, but not worth a
+ * line every time, since that is the common case on a healthy day.
+ */
+export function rerankLines(fresh: Latencies): string[] {
+  const ids = Object.keys(fresh)
+  if (!ids.length) return []
+
+  const before = new Map(rankedModels().map(({ model, rank }) => [model.id, rank]))
+  const after = rankedModels(CLOUD_MODELS, fresh)
+  const moved = after.filter(({ model, rank }) => rank !== null && before.get(model.id) !== rank)
+  if (!moved.length) return []
+
+  const first = after.find((r) => r.rank === 1)
+  if (!first) return []
+  const was = before.get(first.model.id)
+  const rows = `${moved.length} row${moved.length === 1 ? '' : 's'} moved`
+  return [
+    '',
+    was === 1
+      ? `\`/model\` re-ranked on these times — ${rows}, **${first.model.label}** still first.`
+      : `\`/model\` re-ranked on these times — **${first.model.label}** is now first` +
+        (was ? ` (was #${was})` : '') +
+        `, ${rows}.`
+  ]
+}
+
+/**
  * The whole report, as markdown the panel already knows how to print.
  *
  * Working models first and named with their time, because the question
@@ -513,7 +587,11 @@ export function recommendLines(results: readonly ProbeResult[], current = ''): s
  * `/model <id>` is spelled out at the end on purpose: a list of ids with no
  * way to act on them is a diagnostic, and this is meant to be a decision.
  */
-export function probeLines(results: readonly ProbeResult[], current = ''): string[] {
+export function probeLines(
+  results: readonly ProbeResult[],
+  current = '',
+  fresh: Latencies = {}
+): string[] {
   if (!results.length) return ['Nothing to check: the catalogue is empty.']
 
   const working = results.filter((r) => usable(r.state))
@@ -603,6 +681,10 @@ export function probeLines(results: readonly ProbeResult[], current = ''): strin
   const advice = recommendLines(results, current)
   if (advice.length) lines.push(...advice)
   else if (working.length) lines.push('', 'Switch with `/model <id>`.')
+
+  /* After the recommendation, because it is the consequence of it: the
+     suggestion says what to use and this says the list now agrees. */
+  lines.push(...rerankLines(fresh))
 
   return lines
 }
