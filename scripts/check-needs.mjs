@@ -107,8 +107,16 @@ const tokensFor = (list) => A.preambleTokens({ ...FULL, needs: list })
    mechanism for keeping it sat one line above in the same message. 60
    tokens, ungateable - the turn where it matters is the turn they say
    "remember this", which looks like any other. */
-check('everything, as it was', A.preambleTokens(FULL), 14701)
-check('a turn about nothing in particular', tokensFor([]), 8170)
+
+/* 8,242 -> 8,283 so Wumpy stops being argued out of what it knows about
+   itself. The model told a user `search:` goes to DuckDuckGo no
+   matter what the setting says - false, and said only because the user had
+   contradicted the true answer it gave first. 41 tokens, ungateable: the
+   turn where somebody contradicts the app looks like any other turn. The
+   engine itself is named in OPEN_PROMPT, which a plain turn does not
+   send. */
+check('everything, as it was', A.preambleTokens(FULL), 14767)
+check('a turn about nothing in particular', tokensFor([]), 8211)
 check('which is a third of it gone', A.preambleTokens(FULL) - tokensFor([]) > 4500, true)
 check('a turn about the screen', tokensFor(['desktop']) < A.preambleTokens(FULL), true)
 check('a turn about a website', tokensFor(['open']) < A.preambleTokens(FULL), true)
@@ -332,10 +340,10 @@ check('nor one about opening a site', needs(said('I opened vocabulary.com for yo
 
 /* ------------------------------------------------------- the shape contract */
 
-check('no list at all means everything', A.preambleTokens({ ...FULL }), 14701)
-check('an empty list is a real answer, not everything', tokensFor([]) < 14701, true)
+check('no list at all means everything', A.preambleTokens({ ...FULL }), 14767)
+check('an empty list is a real answer, not everything', tokensFor([]) < 14767, true)
 check('one capability is not the other', tokensFor(['open']) !== tokensFor(['desktop']), true)
-check('every topic together is everything', tokensFor(ALL), 14701)
+check('every topic together is everything', tokensFor(ALL), 14767)
 
 /* --------------------------------------------------------------- the wiring */
 

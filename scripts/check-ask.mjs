@@ -384,6 +384,26 @@ check('because guessed options are still guessing', /still guessing/.test(prompt
    * standing in for. The plain-turn bound is deliberately tight: it is the
    * one most turns pay, so anything added to the always-sent half has to be
    * argued for here rather than absorbed.
+   *
+   * 25% -> 26% and 45% -> 46%, once, and here is the argument.
+   *
+   * Both bounds were round numbers that the real figures happened to sit a
+   * tenth of a percent under - 8,170 against 8,192, and 14,701 against
+   * 14,745. That is not headroom, it is luck, and it meant the next true
+   * sentence anybody added to the prompt would break them whatever it said.
+   *
+   * What was added: 41 tokens saying that on how Wumpy itself works these
+   * instructions are the evidence and the user's guess is not, and 25 saying
+   * which search engine a `search:` opens. Wumpy had told a user the second
+   * one wrong - "`search:` in Wumpy goes to DuckDuckGo specifically" - after
+   * first getting it right and then being contradicted. The engine half is
+   * in OPEN_PROMPT, so a plain turn does not pay for it; the general half
+   * cannot be gated, because the turn where somebody contradicts the app
+   * looks like any other turn.
+   *
+   * The bounds are still bounds: a point of the window is 328 tokens, and
+   * this spent 41 of them. The next thing added to the always-sent half
+   * should buy its room by gating something, not by moving these again.
    */
   /*
    * quota: true although NVIDIA turns that section off (see promptShape:
@@ -398,12 +418,12 @@ check('because guessed options are still guessing', /still guessing/.test(prompt
   const everything = T.preambleTokens(FULL)
   check(
     `a plain turn pays ~${plain}, ${((plain / T.CONTEXT_TOKENS) * 100).toFixed(0)}% of the window`,
-    plain / T.CONTEXT_TOKENS <= 0.25,
+    plain / T.CONTEXT_TOKENS <= 0.26,
     true
   )
   check(
     `every capability on pays ~${everything}, ${((everything / T.CONTEXT_TOKENS) * 100).toFixed(0)}%`,
-    everything / T.CONTEXT_TOKENS <= 0.45,
+    everything / T.CONTEXT_TOKENS <= 0.46,
     true
   )
   /* And the gating has to be worth having, or the two numbers above are the

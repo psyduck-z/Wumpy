@@ -1,5 +1,6 @@
 import type { WumpySettings } from './types'
 import { DEFAULT_MODEL } from './assistant'
+import { DEFAULT_ENGINE } from './links'
 
 export const DEFAULT_SETTINGS: WumpySettings = {
   // The one model. Chosen by measurement, not by name - see assistant.ts.
@@ -82,7 +83,8 @@ export const DEFAULT_SETTINGS: WumpySettings = {
   // depends on the approval mode, the same way a command does.
   browserEnabled: true,
   screenEnabled: true,
-  // DuckDuckGo because it needs no account and does not follow you, which is the
-  // same reason the in-panel search falls back to it.
-  searchEngine: 'duckduckgo'
+  // Which engine a `search:` opens. Asked for: "I prefer google". The reasoning
+  // for this and for every other engine lives next to DEFAULT_ENGINE, including
+  // why the in-panel `wumpy-search` still queries DuckDuckGo whatever this says.
+  searchEngine: DEFAULT_ENGINE
 }

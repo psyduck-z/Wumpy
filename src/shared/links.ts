@@ -149,6 +149,25 @@ export const SEARCH_ENGINES = {
 
 export type SearchEngine = keyof typeof SEARCH_ENGINES
 
+/**
+ * The one that is used until the user says otherwise.
+ *
+ * Google, because they said so: "I prefer google". It was DuckDuckGo, chosen
+ * here for needing no account and not following anybody - a good default for a
+ * stranger, and not the person this is installed for.
+ *
+ * Named rather than written out because it used to be written out in six
+ * places: the default setting, this function's parameter, the main process's
+ * fallback, and three `?? 'duckduckgo'`s in the panel. Five of those were only
+ * reachable with a missing or invalid setting, which is exactly how a default
+ * drifts without anybody noticing.
+ *
+ * It does NOT decide what `wumpy-search` queries. That is DuckDuckGo's Instant
+ * Answer API and Wikipedia, because they answer a machine for free and Google
+ * does not - a different thing, and changing this does not move it.
+ */
+export const DEFAULT_ENGINE: SearchEngine = 'google'
+
 export function isSearchEngine(name: string): name is SearchEngine {
   return name in SEARCH_ENGINES
 }
@@ -160,7 +179,7 @@ export function isSearchEngine(name: string): name is SearchEngine {
  * contain anything, and a `#` would otherwise silently truncate it while a
  * `&` would add parameters the caller never wrote.
  */
-export function searchUrl(query: string, engine: SearchEngine = 'duckduckgo'): string {
+export function searchUrl(query: string, engine: SearchEngine = DEFAULT_ENGINE): string {
   return SEARCH_ENGINES[engine].url + encodeURIComponent(query.trim())
 }
 

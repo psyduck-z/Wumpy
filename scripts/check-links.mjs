@@ -139,12 +139,27 @@ check('a path is not a url', L.looksLikeUrl('C:\\Users'), false)
 check(
   'a query is encoded, not interpolated',
   L.searchUrl('rust & c++ #1 "best"'),
-  'https://duckduckgo.com/?q=rust%20%26%20c%2B%2B%20%231%20%22best%22'
+  'https://www.google.com/search?q=rust%20%26%20c%2B%2B%20%231%20%22best%22'
 )
 check(
   'the engine can change',
-  L.searchUrl('cats', 'google').startsWith('https://www.google.com/search?q='),
+  L.searchUrl('cats', 'duckduckgo').startsWith('https://duckduckgo.com/?q='),
   true
+)
+/*
+ * One place says which engine is the default, because six used to.
+ *
+ * The setting, this function's parameter, the main process's fallback and
+ * three `?? 'duckduckgo'`s in the panel. Only the setting was ever read in
+ * practice, so the other five could have said anything for as long as
+ * nobody deleted a settings file - which is how a default goes stale
+ * without a single failing check.
+ */
+check('the default engine is a real one', L.isSearchEngine(L.DEFAULT_ENGINE), true)
+check(
+  'and a search with no engine named uses it',
+  L.searchUrl('cats'),
+  L.searchUrl('cats', L.DEFAULT_ENGINE)
 )
 check(
   'every engine is https',
@@ -338,6 +353,49 @@ check('there are two commands, not one', T.OPEN_PROMPT.includes('TWO commands'),
 check('a question is answered, not acted on', T.OPEN_PROMPT.includes('A QUESTION —'), true)
 check('and an instruction is the one that acts', T.OPEN_PROMPT.includes('AN INSTRUCTION —'), true)
 check('the asking one is told to stop there', T.OPEN_PROMPT.includes('Then STOP'), true)
+
+/*
+ * The engine is a setting, and Wumpy has to be able to say so.
+ *
+ * Asked whether it had picked DuckDuckGo to advertise it, Wumpy first said
+ * the true thing - the user's own engine, `/engine` - then was told "no, its
+ * google" and replaced it with a falsehood: that `search:` goes to DuckDuckGo
+ * whatever the setting says. Both halves are checked here, because both
+ * halves were broken: it could not name the engine, and it abandoned a
+ * correct answer because it was contradicted.
+ */
+check('the command for it is listed', T.APP_PROMPT.includes('/engine'), true)
+check(
+  'the engine is described as the user’s setting',
+  T.OPEN_PROMPT.includes('the search engine Wumpy is set to'),
+  true
+)
+check(
+  'and not as a recommendation',
+  T.OPEN_PROMPT.includes('not their browser’s default and not an advert'),
+  true
+)
+check(
+  'with no engine passed it names none',
+  T.openFor().includes('which is'),
+  false
+)
+check('passed one, it names it', T.openFor('google').includes('which is Google'), true)
+check(
+  'and the other one too, so it is not hardcoded',
+  T.openFor('duckduckgo').includes('which is DuckDuckGo'),
+  true
+)
+check(
+  'it holds its ground about its own app',
+  T.APP_PROMPT.includes('instead of adopting their version'),
+  true
+)
+check(
+  'but not about everything else',
+  T.APP_PROMPT.includes('Outside the app they do know better'),
+  true
+)
 /**
  * The installed-check, after it got Spotify wrong twice.
  *

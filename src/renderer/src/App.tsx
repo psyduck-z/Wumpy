@@ -18,7 +18,13 @@ import type {
 } from '@shared/types'
 import { isTall } from '@shared/types'
 import type { PoolView } from '@shared/pool'
-import { looksLikeUrl, SEARCH_ENGINES, type LinkApproval } from '@shared/links'
+import {
+  DEFAULT_ENGINE,
+  isSearchEngine,
+  looksLikeUrl,
+  SEARCH_ENGINES,
+  type LinkApproval
+} from '@shared/links'
 import { clippedOutput, commandFeedback } from '@shared/parsefail'
 import {
   desktopLine,
@@ -2806,14 +2812,18 @@ function namedControls(shot: Attachment): string[] {
         onClose: close,
         onPick: (id) => {
           void patch({ searchEngine: id })
-          chat.note(`Searches will open in **${SEARCH_ENGINES[id as 'duckduckgo'].label}**.`)
+          chat.note(
+            `Searches will open in **${
+              SEARCH_ENGINES[isSearchEngine(id) ? id : DEFAULT_ENGINE].label
+            }**.`
+          )
           close()
         },
         items: Object.entries(SEARCH_ENGINES).map(([id, e]) => ({
           id,
           title: e.label,
           meta: new URL(e.url).hostname,
-          active: id === (settings?.searchEngine ?? 'duckduckgo')
+          active: id === (settings?.searchEngine ?? DEFAULT_ENGINE)
         }))
       }
     }
@@ -2974,7 +2984,7 @@ function namedControls(shot: Attachment): string[] {
                   onOpenSearch={openSearch}
                   onOpened={onOpened}
                   linkMode={fresh ? linkMode : 'manual'}
-                  searchEngine={settings?.searchEngine ?? 'duckduckgo'}
+                  searchEngine={settings?.searchEngine ?? DEFAULT_ENGINE}
                   looseFences={looseFences}
                 />
               )

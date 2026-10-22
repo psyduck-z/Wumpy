@@ -1,6 +1,8 @@
 import { useEffect, useRef, useState } from 'react'
 import {
   checkLink,
+  DEFAULT_ENGINE,
+  isSearchEngine,
   linkOpensItself,
   readLinkRequest,
   searchUrl,
@@ -50,7 +52,7 @@ export function LinkCard({
   // A search is checked against the URL this app would build, not the query, so
   // the card describes the page that will actually open.
   const check = checkLink(
-    query ? searchUrl(query, isEngine(engine) ? engine : 'duckduckgo') : (target ?? '')
+    query ? searchUrl(query, isSearchEngine(engine) ? engine : DEFAULT_ENGINE) : (target ?? '')
   )
   const source = query ? 'search' : 'model'
 
@@ -151,6 +153,3 @@ export function LinkCard({
   )
 }
 
-function isEngine(name: string): name is 'duckduckgo' | 'google' | 'bing' | 'startpage' {
-  return name === 'duckduckgo' || name === 'google' || name === 'bing' || name === 'startpage'
-}

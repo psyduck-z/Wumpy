@@ -58,7 +58,7 @@ import {
   siblingModel
 } from '@shared/cloud'
 import type { CloudModel, ProviderId } from '@shared/cloud'
-import { checkLink, isSearchEngine } from '@shared/links'
+import { checkLink, DEFAULT_ENGINE, isSearchEngine } from '@shared/links'
 import { POLISH_PROMPT, polishAcceptable, tidyTranscript } from '@shared/dictation'
 import { captureConsole, logPath } from './log'
 import { captureScreen } from './screen'
@@ -331,6 +331,7 @@ function promptShape(
   scope: 'none' | 'read' | 'full',
   needs?: readonly Capability[]
 ): PromptShape {
+  const engine = settings.get('searchEngine')
   return {
     scope,
     base: assistant.systemPrompt,
@@ -348,6 +349,10 @@ function promptShape(
      * about a limit this turn cannot hit - paid for on every single turn.
      */
     quota: providerFor(activeModel()) === 'google' && keys.count('google') > 0,
+    /* So it can say which, instead of guessing from the last card it saw.
+       Validated here rather than trusted: the settings file is typed as a
+       string and a hand-edited one may say anything. */
+    engine: isSearchEngine(engine) ? engine : DEFAULT_ENGINE,
     needs,
     /* An environment variable as well, because the benchmarks set it and a
        bench should not have to write the user's settings file to run. */
@@ -894,7 +899,7 @@ function registerIpc(): void {
       return { opened: false, url: '', host: '', error: 'Opening pages is turned off in settings.' }
     }
     const engine = settings.get('searchEngine')
-    return openSearch(query, isSearchEngine(engine) ? engine : 'duckduckgo')
+    return openSearch(query, isSearchEngine(engine) ? engine : DEFAULT_ENGINE)
   })
 
   /** What the panel needs to describe a link before anything is opened. */

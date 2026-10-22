@@ -23,7 +23,7 @@ import { LookCard } from './LookCard'
 import { DoCard } from './DoCard'
 import { LinkCard } from './LinkCard'
 import { WriteCard } from './WriteCard'
-import type { LinkApproval } from '@shared/links'
+import { DEFAULT_ENGINE, type LinkApproval } from '@shared/links'
 
 /**
  * Reads the text out of a rendered code block, for measuring it.
@@ -435,7 +435,7 @@ export const Markdown = memo(function Markdown({
   onOpenSearch,
   onOpened,
   linkMode = 'manual',
-  searchEngine = 'duckduckgo',
+  searchEngine = DEFAULT_ENGINE,
   looseFences = false
 }: MarkdownProps) {
   // The one block still being written, if any. Everything else is final, even
