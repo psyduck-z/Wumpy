@@ -79,6 +79,7 @@ import { newestPending } from './pending'
 import { forgetClaims } from './once'
 import { forgetAllLive } from './live'
 import { poolLines } from './quota'
+import { footprintLines } from '@shared/footprint'
 import { DEFAULT_RUNS, freshLatencies, probeLines } from '@shared/probe'
 import { copyText } from './copy'
 import { Toast } from './components/Toast'
@@ -1633,13 +1634,24 @@ function namedControls(shot: Attachment): string[] {
            */
           const poolReport = report.pool ? poolLines(report.pool) : []
 
+          /*
+           * And what the app itself costs, because that is the other half of
+           * "how much is this using" and the only place to see it was Task
+           * Manager, where Wumpy is five rows called Electron.
+           *
+           * Half a second, sampled here rather than kept: a number that is
+           * always on screen has to be produced by something always running.
+           */
+          const footprint = footprintLines(await window.wumpy.usage.footprint())
+
           if (!report.lines.length) {
             chat.note(
               [
                 action.reset
                   ? 'Usage cleared.'
                   : `Nothing used yet today. Answering with \`${report.model}\`.`,
-                ...(poolReport.length ? ['', ...poolReport] : [])
+                ...(poolReport.length ? ['', ...poolReport] : []),
+                ...(footprint.length ? ['', ...footprint] : [])
               ].join(NEWLINE)
             )
             return
@@ -1683,7 +1695,8 @@ function namedControls(shot: Attachment): string[] {
               ...rows,
               '',
               ...report.lines.filter((l) => l.note).map((l) => `_${l.model}: ${l.note}_`),
-              ...(poolReport.length ? ['', ...poolReport] : [])
+              ...(poolReport.length ? ['', ...poolReport] : []),
+              ...(footprint.length ? ['', ...footprint] : [])
             ].join(String.fromCharCode(10))
           )
           return

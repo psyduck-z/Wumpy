@@ -1,5 +1,5 @@
 import { app, clipboard, dialog, ipcMain, nativeImage, session, Tray } from 'electron'
-import { homedir } from 'node:os'
+import { cpus, homedir } from 'node:os'
 import { IPC } from '@shared/types'
 import type {
   Attachment,
@@ -17,6 +17,7 @@ import type {
   WumpySettings
 } from '@shared/types'
 import { DEFAULT_MODEL, assistantFor, assemblePrompt, type PromptShape } from '@shared/assistant'
+import type { Footprint } from '@shared/footprint'
 import { SettingsStore } from './store'
 import { capDiskCache, reclaimCache } from './disk'
 import { ChatStore } from './chats'
@@ -712,6 +713,45 @@ function registerIpc(): void {
   }
 
   ipcMain.handle(IPC.usageGet, () => report())
+
+  /**
+   * What Wumpy costs the machine, measured rather than estimated.
+   *
+   * Two readings, because Electron's `percentCPUUsage` is the share of a
+   * core since the LAST time this was asked - so a single call reports the
+   * average since the process started, which for an app that launched at
+   * login is a number from hours ago. The first reading is thrown away and
+   * exists only to start the clock; the second is the half second that just
+   * happened.
+   *
+   * Sampled only when the user asks. Half a second of waiting is nothing on
+   * a command somebody typed, and a background sampler would be the exact
+   * thing this is meant to measure.
+   */
+  /* Long enough that a timer firing in it does not read as a busy app, short
+     enough to sit inside a command the user typed. */
+  const SAMPLE_MS = 500
+
+  ipcMain.handle(IPC.usageFootprint, async (): Promise<Footprint> => {
+    app.getAppMetrics()
+    const began = Date.now()
+    await new Promise((r) => setTimeout(r, SAMPLE_MS))
+    const metrics = app.getAppMetrics()
+    return {
+      processes: metrics.map((m) => ({
+        pid: m.pid,
+        type: m.type,
+        name: m.name,
+        memoryKb: m.memory?.workingSetSize ?? 0,
+        cpuPercent: Math.max(0, m.cpu?.percentCPUUsage ?? 0)
+      })),
+      cores: cpus().length,
+      sampledMs: Date.now() - began,
+      /* The main process, which is the one that has been up since login.
+         A renderer is younger whenever the panel has been reloaded. */
+      upMs: Math.round(process.uptime() * 1000)
+    }
+  })
 
   ipcMain.handle(IPC.usageReset, () => {
     usage.reset()

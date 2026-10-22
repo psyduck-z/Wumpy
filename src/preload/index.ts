@@ -2,6 +2,7 @@ import { contextBridge, ipcRenderer } from 'electron'
 import { IPC } from '@shared/types'
 import type { LinkCheck } from '@shared/links'
 import type { ProbeResult } from '@shared/probe'
+import type { Footprint } from '@shared/footprint'
 import type { LookResult } from '../main/look'
 import type {
   Attachment,
@@ -168,7 +169,14 @@ const api = {
   usage: {
     /** Today's totals, per model. Counts only — no prompt text is kept. */
     get: (): Promise<UsageReport> => ipcRenderer.invoke(IPC.usageGet),
-    reset: (): Promise<UsageReport> => ipcRenderer.invoke(IPC.usageReset)
+    reset: (): Promise<UsageReport> => ipcRenderer.invoke(IPC.usageReset),
+    /**
+     * What Wumpy itself costs: memory and CPU per process.
+     *
+     * Takes half a second, because it is two readings rather than one -
+     * see the handler. Nothing calls it but `/usage`.
+     */
+    footprint: (): Promise<Footprint> => ipcRenderer.invoke(IPC.usageFootprint)
   },
   look: {
     /**

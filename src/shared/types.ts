@@ -740,6 +740,14 @@ export const IPC = {
   writeFile: 'write:file',
   writeCheck: 'write:check',
   usageGet: 'usage:get',
+  /**
+   * What Wumpy costs the machine: memory and CPU, per process.
+   *
+   * Sampled on demand and nowhere else. Reading it takes two readings half
+   * a second apart, which is a measurement rather than a poll - nothing in
+   * the app asks for it unless the user does.
+   */
+  usageFootprint: 'usage:footprint',
   usageReset: 'usage:reset',
   /**
    * Ask every model in the catalogue whether it answers.
