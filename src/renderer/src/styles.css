@@ -1505,6 +1505,73 @@ body {
   color: rgb(var(--muted) / 0.8);
 }
 
+/*
+ * The three ways to read the model list.
+ *
+ * Sized and coloured like the filter box above it rather than like a row,
+ * because it is a control and the rows are the content. The caption under
+ * it carries the claim each tab makes about its own numbers, which is the
+ * reason the tabs exist at all - so it is ordinary readable text and not a
+ * 9px hint.
+ */
+.picker-tabs {
+  padding: 0 2px 8px;
+}
+
+.picker-tabrow {
+  display: flex;
+  gap: 4px;
+  background: rgb(var(--surface));
+  border: 1px solid rgb(var(--border));
+  border-radius: 8px;
+  padding: 3px;
+}
+
+.picker-tab {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  min-width: 0;
+  background: none;
+  border: none;
+  border-radius: 6px;
+  padding: 4px 6px;
+  color: rgb(var(--muted));
+  font: inherit;
+  font-size: 11px;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.picker-tab:hover {
+  color: rgb(var(--text));
+  background: rgb(var(--raised) / 0.6);
+}
+
+.picker-tab.is-on {
+  background: rgb(var(--raised));
+  color: rgb(var(--text));
+  font-weight: 600;
+}
+
+/* Only ever on the recommended one, so it does not need a second colour to
+   mean "this is the one to take". */
+.picker-tabtag {
+  font-size: 8.5px;
+  font-weight: 500;
+  letter-spacing: 0.02em;
+  color: rgb(var(--accent-text) / 0.9);
+}
+
+.picker-note {
+  margin: 6px 2px 0;
+  font-size: 10px;
+  line-height: 1.45;
+  color: rgb(var(--muted));
+}
+
 .picker-foot kbd {
   background: rgb(var(--raised));
   border-radius: 4px;

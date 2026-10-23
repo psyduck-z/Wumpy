@@ -30,6 +30,10 @@ const U = await load('src/shared/usage.ts', 'u')
 const T = await load('src/shared/assistant.ts', 't')
 const P = await load('src/shared/parsefail.ts', 'p')
 const C = await load('src/shared/cloud.ts', 'c')
+/* The three orders the picker can be read in. The default's RANK is
+   recorded below, and which order it is a rank in is now a question with
+   three answers - so it names the one it means. */
+const O = await load('src/shared/order.ts', 'o')
 
 let failures = 0
 function check(label, actual, expected) {
@@ -223,7 +227,7 @@ check('there is one model, and it is the chosen one', T.DEFAULT_MODEL, 'deepseek
  * must be something that works - and the rank is RECORDED rather than
  * required, so the day it moves is visible right here.
  */
-const defaultRank = C.rankedModels().find((r) => r.model.id === T.DEFAULT_MODEL)?.rank
+const defaultRank = O.rankedModels(C.CLOUD_MODELS, {}, 'balanced').find((r) => r.model.id === T.DEFAULT_MODEL)?.rank
 check('the default is ranked at all', typeof defaultRank === 'number', true)
 /*
  * Sixth now. It was fifth, then seventh when Ultra and Lightning were

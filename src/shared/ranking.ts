@@ -252,7 +252,16 @@ export function rankLines(
     '',
     '_One model at a time, about once an hour, on the key the next question ' +
       'is least likely to want. It stops mid-request the moment you send ' +
-      'something and throws that measurement away._'
+      'something and throws that measurement away._',
+    '',
+    /* WHAT IT DOES NOT MEASURE, said here because this is where somebody
+       would assume otherwise. "Re-ranking the models" sounds like it
+       re-ranks them, and the picker has a tab called Smartest whose
+       numbers this never touches: a probe asks for one short answer and
+       cannot climb a 42-rung ladder. The speed is from today, the score
+       is from the day somebody ran the bench. */
+    '_It measures speed only. The ladder score behind `/model smarts` is ' +
+      'run by hand and nothing here can move it._'
   )
   return lines
 }

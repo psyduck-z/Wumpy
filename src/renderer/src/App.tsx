@@ -53,9 +53,16 @@ import {
   freshNote,
   modelTag,
   providerFor,
-  rankedModels,
   seesMedia
 } from '@shared/cloud'
+import {
+  DEFAULT_ORDERING,
+  ORDERINGS,
+  isOrdering,
+  orderNote,
+  rankedModels,
+  type Ordering
+} from '@shared/order'
 import { useChat, nextId, type ChatStats } from './hooks/useChat'
 import { useListening } from './hooks/useListening'
 import type { AudioSource } from './loopback'
@@ -1522,7 +1529,29 @@ function namedControls(shot: Attachment): string[] {
             ...freshLatencies(results, new Date().toISOString().slice(0, 10))
           }
           await patch({ latencies: fresh })
-          chat.note(probeLines(results, model, fresh).join(NEWLINE))
+          chat.note(
+            probeLines(
+              results,
+              model,
+              fresh,
+              /* The order the report talks about has to be the order the
+                 user will see when they open the list. */
+              isOrdering(settings?.modelOrder) ? settings.modelOrder : DEFAULT_ORDERING
+            ).join(NEWLINE)
+          )
+          return
+        }
+
+        /**
+         * `/model smarts` - change the question the list answers, and show it.
+         *
+         * No note in the transcript: the picker opens on the tab with its
+         * caption under it, which says more about what just changed than a
+         * sentence could, and `/settings` carries it afterwards.
+         */
+        case 'modelorder': {
+          await patch({ modelOrder: action.ordering })
+          setPicker('model')
           return
         }
 
@@ -2759,13 +2788,26 @@ function namedControls(shot: Attachment): string[] {
        * and two of them had already crossed the usable/unusable line by the
        * next day.
        */
+      /*
+       * …and sorted on whichever of the two numbers the user asked for.
+       *
+       * The list had one order, and it was the compromise: score first,
+       * speed charged gently, nothing past the usable floor. A good
+       * default and a bad only option, because the cleverest model here
+       * takes a hundred and twelve seconds and the quickest gets twenty
+       * of forty-two rungs wrong - so "best" depended on a question
+       * nobody had been asked. Three tabs now ask it. See @shared/order.
+       */
       const latencies = settings?.latencies ?? {}
-      const cloudItems = rankedModels(CLOUD_MODELS, latencies)
+      const ordering: Ordering = isOrdering(settings?.modelOrder)
+        ? settings.modelOrder
+        : DEFAULT_ORDERING
+      const cloudItems = rankedModels(CLOUD_MODELS, latencies, ordering)
         .slice()
         .sort((a, b) => (a.rank ?? 99) - (b.rank ?? 99))
         .map(({ model: m, rank }) => {
           const ready = usable(m.provider)
-          const tag = modelTag(m, rank, latencies)
+          const tag = modelTag(m, rank, latencies, ordering)
           /* Beside the blurb, never instead of it: the blurb is a sentence
              somebody wrote and the fresh time is a number somebody measured,
              and rewriting the first from the second is how a caveat
@@ -2837,6 +2879,19 @@ function namedControls(shot: Attachment): string[] {
         placeholder: 'Filter models…',
         emptyText: 'No models. Add a key with `/key`.',
         onClose: close,
+        /* The order is remembered, not asked again every visit: somebody
+           who wants the quickest thing on the list wants it next week
+           too. Nothing else about the picker is a setting, which is why
+           the tabs look like a control rather than like rows. */
+        tabs: {
+          items: ORDERINGS.map((o) => ({ id: o.id, label: o.label, tag: o.tag })),
+          active: ordering,
+          note: orderNote(ordering, CLOUD_MODELS, latencies),
+          onPick: (id) => {
+            if (!isOrdering(id) || id === ordering) return
+            void patch({ modelOrder: id })
+          }
+        },
         onPick: (name) => {
           const hosted = CLOUD_MODELS.find((m) => m.id === name)
           if (hosted && !usable(hosted.provider)) {

@@ -26,6 +26,11 @@ export type ProviderId = 'google' | 'groq' | 'mistral' | 'nvidia' | 'ollama'
  * drop it on the next read as an unrecognised provider name.
  */
 import { foldAttachments, type Attached } from './attach'
+/* Type only, and it has to stay that way: @shared/order imports this file
+   for the catalogue and the usable-speed floor, so a value imported back
+   from it would be a cycle. The one thing needed here is the NAME of an
+   order, for a sentence in a tooltip. */
+import type { Ordering } from './order'
 
 export const PROVIDER_IDS = ['google', 'groq', 'mistral', 'nvidia', 'ollama'] as const
 
@@ -850,13 +855,6 @@ export const CLOUD_MODELS: CloudModel[] = [
  * the colon, which is what separates `qwen2.5-coder:14b` from
  * `openai/gpt-oss-120b`.
  */
-/** A catalogue entry with its place in the measured order. */
-export interface Ranked {
-  model: CloudModel
-  /** 1 is best. Null when the model has never been measured here. */
-  rank: number | null
-}
-
 /**
  * Time past which a right answer has stopped being worth waiting for.
  *
@@ -871,63 +869,17 @@ export interface Ranked {
  * So there is a floor now, and it is drawn well clear of anything in
  * normal territory: the slowest entry below it is 15s, the quickest above
  * it is 88s. Nothing has ever been measured here in between.
+ *
+ * WHICH ORDER IT IS A FLOOR UNDER is now a question with an answer. It
+ * governs the balanced tab of the picker and the recommendation at the end
+ * of `/model check`, and it is deliberately not applied to the smartest
+ * and fastest tabs: those two answer a narrower question than "what should
+ * I use", and are allowed to answer it. Every rule about the sorting lives
+ * in @shared/order, which is also where this constant's one-line
+ * consequence - a slow model cannot be the recommendation - is written out
+ * as arithmetic.
  */
 export const UNUSABLY_SLOW_MS = 30_000
-
-/**
- * The catalogue in measured order, best first.
- *
- * Score decides, then speed breaks the tie - which is the right way round
- * for this app and worth saying why. A wrong answer costs the user the turn
- * and then another turn correcting it; a slow right answer costs seconds.
- * But four models scored within a rung of each other, so speed is doing most
- * of the separating in practice, and at a desktop step every turn is a step.
- *
- * EXCEPT WHERE IT IS NOT SECONDS, and that floor is in now.
- *
- * It was written on 18 Oct and backed out the same day, because the only
- * evidence was four-word probes and moving the top of the picker on those
- * would have repeated the mistake this file keeps making. The evidence
- * arrived on the 19th: every latency here is now measured at the real
- * 14.6k preamble, which is what this column has always claimed to be.
- *
- * So a model past UNUSABLY_SLOW_MS cannot outrank one that answers,
- * whatever it scores. DeepSeek keeps its 39/41 - the highest here - and
- * stops being offered first, which it had been while taking 112 seconds
- * a turn. A rank shown in the picker is advice, and "best" has to mean
- * best to use.
- *
- * Unmeasured entries keep their catalogue position and get no rank, rather
- * than being sorted to the bottom as though they had scored zero.
- *
- * `fresh` is what `/model check` last found, and it REPLACES the catalogue's
- * latency wherever it exists. See Fresh for why: the shipped number is from
- * an afternoon in October and the probe's is from this machine today, so the
- * newer one is simply the better evidence about the same quantity. A model
- * that failed the check is ranked as not answering, which is the rule the
- * slow ones already live under.
- */
-export function rankedModels(
-  models: readonly CloudModel[] = CLOUD_MODELS,
-  fresh: Latencies = {}
-): Ranked[] {
-  const share = (m: CloudModel): number =>
-    m.measured && m.measured.of > 0 ? m.measured.clean / m.measured.of : -1
-  const speed = (m: CloudModel): number => fresh[m.id]?.ms ?? m.measured?.medianMs ?? Infinity
-  const answers = (m: CloudModel): number => {
-    const live = fresh[m.id]
-    if (live) return live.ok && live.ms < UNUSABLY_SLOW_MS ? 1 : 0
-    return m.measured && m.measured.medianMs < UNUSABLY_SLOW_MS ? 1 : 0
-  }
-
-  const order = models
-    .filter((m) => m.measured)
-    .slice()
-    .sort((a, b) => answers(b) - answers(a) || share(b) - share(a) || speed(a) - speed(b))
-
-  const place = new Map(order.map((m, i) => [m.id, i + 1]))
-  return models.map((model) => ({ model, rank: place.get(model.id) ?? null }))
-}
 
 /**
  * The speed to show for a model, and whether anyone checked it lately.
@@ -1002,7 +954,22 @@ export interface ModelTag {
 export function modelTag(
   model: CloudModel,
   rank: number | null,
-  fresh: Latencies = {}
+  fresh: Latencies = {},
+  /**
+   * Which order the `#` is a place in.
+   *
+   * The tooltip used to end "which is what the order above uses", which was
+   * true of the only order there was. On the smartest tab it is the
+   * opposite: the list is sorted on the ladder and the fresh time is
+   * exactly what is being set aside. One screen quoting two readings of the
+   * same machine at each other is the failure this file keeps a diary of,
+   * so the sentence names which one it is.
+   *
+   * Optional, and absent reads as the default order rather than as a
+   * fourth case: every caller that does not care is showing a list sorted
+   * the way it always was.
+   */
+  ordering?: Ordering
 ): ModelTag | null {
   const m = model.measured
   if (!m || !rank) return null
@@ -1024,7 +991,10 @@ export function modelTag(
     title: live
       ? `${ladder} Checked again ${live.on}: ` +
         (live.ok
-          ? `${secs(live.ms)} over ${live.runs} run${live.runs === 1 ? '' : 's'}, which is what the order above uses.`
+          ? `${secs(live.ms)} over ${live.runs} run${live.runs === 1 ? '' : 's'}, which ` +
+            (ordering === 'smarts'
+              ? 'this list is deliberately not sorted on.'
+              : 'is what the order above uses.')
           : 'it did not answer, so it is ranked below everything that did.')
       : ladder
   }

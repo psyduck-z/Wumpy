@@ -152,6 +152,11 @@ check('and hours, once it has been a while', R.ago(3 * 3600_000), '3 h ago')
   check('and what the ceiling is', lines.includes('of about 35'), true)
   check('and when it pauses', lines.includes('pauses at 18'), true)
   check('and that it throws cancelled work away', lines.includes('throws that measurement away'), true)
+  /* The picker has a tab called Smartest and this never touches its
+     numbers. "Re-ranking the models" sounds like it re-ranks all of
+     them, so the report says which half it is. */
+  check('and that it only measures speed', lines.includes('measures speed only'), true)
+  check('naming where the other number comes from', lines.includes('run by hand'), true)
 }
 {
   /* One key is the case the whole design falls over in, so it says so

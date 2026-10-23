@@ -1,6 +1,7 @@
 import type { Dock, ProviderName } from '@shared/types'
 import { PROVIDER_IDS, PROVIDERS, isProviderId } from '@shared/cloud'
 import { MAX_RUNS } from '@shared/probe'
+import { readOrdering, type Ordering } from '@shared/order'
 import { nearest } from '@shared/nearest'
 
 /**
@@ -27,6 +28,13 @@ export type CommandAction =
    * times each. Undefined means DEFAULT_RUNS.
    */
   | { kind: 'models'; runs?: number }
+  /**
+   * `/model smarts` - which question the list is sorted on, and open it.
+   *
+   * A setting rather than a sort applied once, so it is a command of its
+   * own kind rather than an argument to the picker: the tabs remember.
+   */
+  | { kind: 'modelorder'; ordering: Ordering }
   | { kind: 'dock'; dock: Dock | null }
   | { kind: 'reasoning'; show: boolean | 'toggle' }
   | { kind: 'pin'; pinned: boolean | 'toggle' }
@@ -260,8 +268,8 @@ export const COMMANDS: CommandSpec[] = [
   {
     name: 'model',
     aliases: ['models', 'gemini'],
-    hint: 'Choose the model, or `check` which ones still answer',
-    arg: 'name | check [runs]',
+    hint: 'Choose the model, or rank the list by `balanced`, `smarts` or `speed`',
+    arg: 'name | order | check [runs]',
     // With a name it sets directly, which is quicker than the picker once you
     // know what you want and is the only way to reach a model not in the list.
     run: (arg) => {
@@ -289,6 +297,21 @@ export const COMMANDS: CommandSpec[] = [
         }
         return { kind: 'models', runs }
       }
+      /*
+       * `/model smarts` opens the list already on that tab.
+       *
+       * Same reasoning as `check` above and the same reason it cannot
+       * collide: these are single bare words, and every id in the
+       * catalogue carries a slash or a colon. A model genuinely called
+       * "speed" would still be reachable from the picker, and from
+       * `/model <provider>/speed`.
+       *
+       * Worth a command at all because the tabs are a setting: somebody
+       * who always wants the quickest thing says so once, and the answer
+       * that tells them about it can offer the word as a button.
+       */
+      const ordering = readOrdering(name)
+      if (ordering) return { kind: 'modelorder', ordering }
       return { kind: 'model', name }
     }
   },

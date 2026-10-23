@@ -38,11 +38,18 @@
 import {
   CLOUD_MODELS,
   GIVE_UP_AFTER_MS,
-  rankedModels,
+  UNUSABLY_SLOW_MS,
   seesMedia,
   type Fresh,
   type Latencies
 } from './cloud'
+import {
+  FAST_ENOUGH_MS,
+  SLOWNESS_COST,
+  balanceScore,
+  rankedModels,
+  type Ordering
+} from './order'
 
 /** What a probe concluded about one model. */
 export type ProbeState =
@@ -356,35 +363,17 @@ function row(r: ProbeResult): string {
 
 /* ------------------------------------------------- which one to use */
 
-/**
- * How much a tenfold slowdown is allowed to cost, in ladder share.
+/*
+ * THE TRADE BETWEEN SMART AND QUICK NOW LIVES IN ONE PLACE.
  *
- * The two numbers being traded are not on the same scale and it matters:
- * the ladder shares sit between 0.78 and 0.95, a band of 0.17, while the
- * latencies run from 637ms to 115,000ms - a factor of 180. Added together
- * raw, speed decides everything and the score is decoration.
- *
- * So speed is charged on a log scale and at a deliberately gentle rate.
- * 0.08 per tenfold means a model ten times slower has to be about three
- * ladder rungs better to make up for it, and a hundred times slower about
- * six. That is "smartness slightly ahead", which is what was asked for:
- * fast enough wins ties, and nothing else.
- *
- * Measured against the real numbers this lands where a person would:
- * deepseek at 39/41 and 110 seconds scores below nemotron-3-super at
- * 32/41 and 0.7s, because two orders of magnitude is not worth seven
- * rungs - and that is the judgement the whole feature exists to make.
+ * Both constants and the arithmetic they feed moved to @shared/order,
+ * because the picker grew a tab that makes exactly this judgement and two
+ * formulas doing it on one screen is a disagreement waiting to be
+ * screenshotted. They are re-exported rather than re-explained: the
+ * reasoning for 0.08 a tenfold, and for not charging anything under two
+ * seconds, is written out beside them there.
  */
-export const SLOWNESS_COST = 0.08
-
-/**
- * Under this, speed stops being a differentiator at all.
- *
- * 2s, because with the real preamble nothing is quicker than 1.8s. A floor
- * below the fastest thing measured charges every model a penalty and
- * compares them on a scale that starts off the end of the data.
- */
-export const FAST_ENOUGH_MS = 2_000
+export { SLOWNESS_COST, FAST_ENOUGH_MS }
 
 /**
  * Past this, no ladder score redeems it, and the log penalty is too kind.
@@ -401,8 +390,13 @@ export const FAST_ENOUGH_MS = 2_000
  * seconds and 112. A model past it is still listed in the report with its
  * real time, because it works and someone may want it. It is just never
  * the suggestion.
+ *
+ * THE SAME FLOOR THE PICKER USES, and now by construction rather than by
+ * coincidence: this was its own `30_000` beside cloud.UNUSABLY_SLOW_MS,
+ * two literals for one rule, and the day one of them moved the report
+ * would have recommended a model the list had already given up on.
  */
-export const TOO_SLOW_TO_SUGGEST_MS = 30_000
+export const TOO_SLOW_TO_SUGGEST_MS = UNUSABLY_SLOW_MS
 
 /** Ladder share for a model, or null when it has never been measured here. */
 function smartness(model: string): number | null {
@@ -437,13 +431,15 @@ export function recommend(results: readonly ProbeResult[]): Pick[] {
     .map((r) => {
       const share = smartness(r.model)
       if (share === null) return null
-      const slower = Math.max(1, r.ms) / FAST_ENOUGH_MS
-      const penalty = slower <= 1 ? 0 : SLOWNESS_COST * Math.log10(slower)
       return {
         model: r.model,
         share,
         ms: r.ms,
-        score: share - penalty,
+        /* The picker's balanced tab, scored on the time this run just
+           measured rather than on the catalogue's. Same function, so the
+           report cannot recommend one model while the list it sends the
+           user to puts another first. */
+        score: balanceScore(share, r.ms),
         /*
          * Asked the same way the WIRE asks it.
          *
@@ -553,12 +549,19 @@ export function freshLatencies(results: readonly ProbeResult[], on: string): Rec
  * actually moved - "nothing changed" is worth knowing too, but not worth a
  * line every time, since that is the common case on a healthy day.
  */
-export function rerankLines(fresh: Latencies): string[] {
+export function rerankLines(fresh: Latencies, ordering?: Ordering): string[] {
   const ids = Object.keys(fresh)
   if (!ids.length) return []
 
-  const before = new Map(rankedModels().map(({ model, rank }) => [model.id, rank]))
-  const after = rankedModels(CLOUD_MODELS, fresh)
+  /* The order the user is actually looking at, not the default one.
+     Someone on the smartest tab has asked for a list these times barely
+     move, and telling them their list was re-ranked when it was not is
+     the kind of small untruth that makes the rest of the report
+     unbelievable. */
+  const before = new Map(
+    rankedModels(CLOUD_MODELS, {}, ordering).map(({ model, rank }) => [model.id, rank])
+  )
+  const after = rankedModels(CLOUD_MODELS, fresh, ordering)
   const moved = after.filter(({ model, rank }) => rank !== null && before.get(model.id) !== rank)
   if (!moved.length) return []
 
@@ -590,7 +593,9 @@ export function rerankLines(fresh: Latencies): string[] {
 export function probeLines(
   results: readonly ProbeResult[],
   current = '',
-  fresh: Latencies = {}
+  fresh: Latencies = {},
+  /** Which tab of the picker the user has open. See rerankLines. */
+  ordering?: Ordering
 ): string[] {
   if (!results.length) return ['Nothing to check: the catalogue is empty.']
 
@@ -684,7 +689,7 @@ export function probeLines(
 
   /* After the recommendation, because it is the consequence of it: the
      suggestion says what to use and this says the list now agrees. */
-  lines.push(...rerankLines(fresh))
+  lines.push(...rerankLines(fresh, ordering))
 
   return lines
 }

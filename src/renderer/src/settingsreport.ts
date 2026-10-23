@@ -1,5 +1,6 @@
 import type { WumpySettings } from '@shared/types'
 import { SEARCH_ENGINES, isSearchEngine, DEFAULT_ENGINE } from '@shared/links'
+import { DEFAULT_ORDERING, isOrdering, orderingSpec } from '@shared/order'
 
 /**
  * What Wumpy is set to, in one place.
@@ -52,8 +53,18 @@ export function settingsRows(
   rank?: string
 ): SettingsRow[] {
   const engine = isSearchEngine(settings.searchEngine) ? settings.searchEngine : DEFAULT_ENGINE
+  const order = isOrdering(settings.modelOrder) ? settings.modelOrder : DEFAULT_ORDERING
   return [
     { what: 'answering with', now: model, change: '`/model`' },
+    {
+      /* Directly under the model, because it is how the list that chooses
+         the model is read - and because a #1 badge means something
+         different on each tab, which is worth knowing before trusting
+         one. */
+      what: 'model list ranked by',
+      now: orderingSpec(order).summary,
+      change: '`/model`'
+    },
     {
       what: 'searches open in',
       now: SEARCH_ENGINES[engine].label,

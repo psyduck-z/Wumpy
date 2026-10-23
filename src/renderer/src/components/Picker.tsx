@@ -31,12 +31,36 @@ export interface PickerItem {
   active?: boolean
 }
 
+/**
+ * A few ways to read the same list, above it.
+ *
+ * Added for the model picker, where the thing being chosen between has two
+ * measurements that disagree - the cleverest model here is the slowest by
+ * two orders of magnitude - and one list cannot be sorted on both. Tabs
+ * rather than a sort menu because there are three and they are the whole
+ * question: "smartest", "fastest", and the compromise that used to be the
+ * only order without saying so.
+ *
+ * `note` is under the tabs rather than in a tooltip because each one makes
+ * a claim about where its numbers come from, and that claim is the reason
+ * somebody picks a tab.
+ */
+export interface PickerTabs {
+  items: Array<{ id: string; label: string; tag?: string; title?: string }>
+  active: string
+  /** What the showing tab means, in one sentence. Markdown-free. */
+  note?: string
+  onPick(id: string): void
+}
+
 export interface PickerProps {
   heading: string
   placeholder: string
   items: PickerItem[]
   onPick(id: string): void
   onClose(): void
+  /** Ways to order or group the list. Absent for every list with one order. */
+  tabs?: PickerTabs
   /** When given, rows can be removed and Enter confirms rather than picks. */
   onRemove?: (id: string) => void
   /** Enter removes instead of picking. Used by /delete. */
@@ -58,6 +82,7 @@ export function Picker({
   items,
   onPick,
   onClose,
+  tabs,
   onRemove,
   removeMode = false,
   emptyText
@@ -79,6 +104,10 @@ export function Picker({
 
   useEffect(() => inputRef.current?.focus(), [])
   useEffect(() => setCursor(0), [filter])
+  /* Switching tabs re-sorts the rows under the cursor, so the highlight
+     would stay on row four and mean something else. Back to the top, which
+     is where the answer to "which is best on this one" now is. */
+  useEffect(() => setCursor(0), [tabs?.active])
 
   useEffect(() => {
     if (!armed) return
@@ -117,7 +146,30 @@ export function Picker({
     }
   }
 
+  /** The next tab round, or the previous one. */
+  const stepTab = (delta: 1 | -1): void => {
+    if (!tabs || tabs.items.length < 2) return
+    const at = tabs.items.findIndex((t) => t.id === tabs.active)
+    const next = tabs.items[(Math.max(0, at) + delta + tabs.items.length) % tabs.items.length]
+    tabs.onPick(next.id)
+  }
+
   const onKeyDown = (e: React.KeyboardEvent): void => {
+    /*
+     * Tab moves between tabs, which is what the key is for.
+     *
+     * stopPropagation, not just preventDefault: Shift+Tab cycles approval
+     * mode from a listener on the window, and cycling the permission model
+     * because somebody was reading the model list backwards would be a
+     * surprise of the worst kind. React's handler runs before the event
+     * reaches the window, so stopping it here is enough.
+     */
+    if (e.key === 'Tab' && tabs && !e.ctrlKey && !e.altKey) {
+      e.preventDefault()
+      e.stopPropagation()
+      stepTab(e.shiftKey ? -1 : 1)
+      return
+    }
     if (e.key === 'ArrowDown') {
       e.preventDefault()
       move(1)
@@ -157,6 +209,28 @@ export function Picker({
           Back
         </button>
       </div>
+
+      {tabs && tabs.items.length > 1 && (
+        <div className="picker-tabs">
+          <div className="picker-tabrow" role="tablist">
+            {tabs.items.map((t) => (
+              <button
+                key={t.id}
+                type="button"
+                role="tab"
+                aria-selected={t.id === tabs.active}
+                title={t.title}
+                className={`picker-tab ${t.id === tabs.active ? 'is-on' : ''}`}
+                onClick={() => tabs.onPick(t.id)}
+              >
+                {t.label}
+                {t.tag && <span className="picker-tabtag">{t.tag}</span>}
+              </button>
+            ))}
+          </div>
+          {tabs.note && <p className="picker-note">{tabs.note}</p>}
+        </div>
+      )}
 
       {visible.length === 0 ? (
         <p className="picker-empty">
@@ -228,6 +302,12 @@ export function Picker({
       <div className="picker-foot">
         <kbd>&uarr;</kbd>
         <kbd>&darr;</kbd> move &middot; <kbd>Enter</kbd> {removeMode ? 'delete (twice)' : 'choose'}
+        {tabs && tabs.items.length > 1 && (
+          <>
+            {' '}
+            &middot; <kbd>Tab</kbd> order
+          </>
+        )}
         {onRemove && !removeMode && (
           <>
             {' '}

@@ -1,6 +1,7 @@
 import type { WumpySettings } from './types'
 import { DEFAULT_MODEL } from './assistant'
 import { DEFAULT_ENGINE } from './links'
+import { DEFAULT_ORDERING } from './order'
 
 export const DEFAULT_SETTINGS: WumpySettings = {
   // The one model. Chosen by measurement, not by name - see assistant.ts.
@@ -87,6 +88,11 @@ export const DEFAULT_SETTINGS: WumpySettings = {
   // for this and for every other engine lives next to DEFAULT_ENGINE, including
   // why the in-panel `wumpy-search` still queries DuckDuckGo whatever this says.
   searchEngine: DEFAULT_ENGINE,
+
+  // Which way the model list is sorted. Balanced is the recommendation and
+  // is what the single order used to approximate; the other two tabs answer
+  // a narrower question. See @shared/order for all three and their captions.
+  modelOrder: DEFAULT_ORDERING,
 
   // See WumpySettings.autoRank. On, and inert without a second key.
   autoRank: true

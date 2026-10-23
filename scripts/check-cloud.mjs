@@ -17,16 +17,24 @@ import { readFileSync } from 'node:fs'
 /** Source is read in several places below; declared here so all of them can. */
 const read = (f) => readFileSync(f, 'utf8')
 
-const out = join(process.cwd(), '.cloud-check.mjs')
-await build({
-  entryPoints: ['src/shared/cloud.ts'],
-  bundle: true,
-  platform: 'node',
-  format: 'esm',
-  outfile: out,
-  logLevel: 'error'
-})
-const C = await import(pathToFileURL(out).href)
+async function load(entry, name) {
+  const out = join(process.cwd(), `.cloud-check-${name}.mjs`)
+  await build({
+    entryPoints: [entry],
+    bundle: true,
+    platform: 'node',
+    format: 'esm',
+    outfile: out,
+    logLevel: 'error'
+  })
+  return import(pathToFileURL(out).href)
+}
+const C = await load('src/shared/cloud.ts', 'c')
+/* The sorting moved to a module of its own the day it stopped being one
+   sort - three tabs now, and @shared/order holds all three. The rank
+   assertions below stay here, because what they defend is that the badge
+   beside a name cannot disagree with the list it is in. */
+const O = await load('src/shared/order.ts', 'o')
 
 let failures = 0
 function check(label, actual, expected) {
@@ -1109,7 +1117,7 @@ process.exitCode = failures ? 1 : 0
  * at one run and 9/10 on the same ten at two; and the order on screen is
  * computed from those numbers rather than typed, so it cannot drift from them.
  */
-const ranked = C.rankedModels()
+const ranked = O.rankedModels()
 check('every catalogue model is ranked or explicitly not', ranked.length, C.CLOUD_MODELS.length)
 
 const measured = ranked.filter((r) => r.model.measured)
@@ -1121,23 +1129,36 @@ check('someone is first', measured.some((r) => r.rank === 1), true)
  * Usable first, then score, then speed - asserted on the real catalogue
  * so a future edit that sorts by speed alone is caught.
  *
- * The first clause is new on 19 Oct and is the one with a story. It was
+ * The first clause is from 19 Oct and is the one with a story. It was
  * score-then-speed, which put deepseek at the top of the picker on 39/41
  * while taking 112 seconds a turn - a #1 badge beside a model the
  * recommendation refuses to suggest, on the same screen. A rank shown to
  * someone choosing is advice, so "best" has to mean best to use.
+ *
+ * THE SECOND CLAUSE CHANGED ON 23 OCT, when the one order became three.
+ * Within the answering group it was score first and speed only as a
+ * tie-break, which is not the same judgement the report at the end of
+ * `/model check` was making two inches away: that one charged slowness on
+ * a log scale and had done since the day the recommendation existed. Two
+ * formulas ranking the same models on one screen, and the difference was
+ * visible - the list put the VL model second on 38/42 at eleven seconds
+ * while the report recommended Step 5 on 36/42 at two.
+ *
+ * So the balanced tab IS that formula now, and the thing checked here is
+ * the ordering it produces rather than a rule retyped alongside it. The
+ * other two tabs are checked in check-order.mjs, where their captions
+ * are.
  */
 const byRank = measured.slice().sort((a, b) => a.rank - b.rank)
 const answers = (m) => m.medianMs < C.UNUSABLY_SLOW_MS
+const points = (m) => O.balanceScore(m.clean / m.of, m.medianMs)
 for (let i = 1; i < byRank.length; i++) {
   const prev = byRank[i - 1].model.measured
   const here = byRank[i].model.measured
-  const better = prev.clean / prev.of > here.clean / here.of
-  const same = prev.clean / prev.of === here.clean / here.of
   check(
     `#${i} is not beaten by #${i + 1}`,
     (answers(prev) && !answers(here)) ||
-      (answers(prev) === answers(here) && (better || (same && prev.medianMs <= here.medianMs))),
+      (answers(prev) === answers(here) && points(prev) >= points(here)),
     true
   )
 }
@@ -1217,8 +1238,12 @@ check('as does the older one', C.providerFor('gemma4:31b-cloud'), 'ollama')
 check('a slashed id is still NVIDIA', C.providerFor('nvidia/nemotron-3-ultra-550b-a55b'), 'nvidia')
 check('and a bare Mistral name is still Mistral', C.providerFor('mistral-large'), 'mistral')
 
-check('the picker orders by the measured rank', /rankedModels\(CLOUD_MODELS, latencies\)/.test(renderer), true)
-check('and shows the badge', /modelTag\(m, rank, latencies\)/.test(renderer), true)
+check('the picker orders by the measured rank', /rankedModels\(CLOUD_MODELS, latencies, ordering\)/.test(renderer), true)
+check('and shows the badge', /modelTag\(m, rank, latencies, ordering\)/.test(renderer), true)
+/* The badge is a place in a particular order, so the tooltip is told
+   which one. Without this the row could say "#1" on the smartest tab and
+   explain it with a latency the tab is deliberately ignoring. */
+check('and the badge knows which order it is a place in', /ordering\?: Ordering/.test(read('src/shared/cloud.ts')), true)
 
 /* --------------------------------------- the check re-ranks the picker */
 
@@ -1249,14 +1274,17 @@ check('and shows the badge', /modelTag\(m, rank, latencies\)/.test(renderer), tr
   check('the two models the 22 Oct run turned over are both still listed', !!slow && !!deep, true)
 
   const rankOf = (list, id) => list.find((r) => r.model.id === id).rank
-  const before = C.rankedModels()
+  const before = O.rankedModels()
   /* Exactly what /model check reported that afternoon. */
-  const after = C.rankedModels(C.CLOUD_MODELS, {
+  const after = O.rankedModels(C.CLOUD_MODELS, {
     'nvidia/nemotron-3.5-super-vl-120b-a12b': { ms: 40_417, runs: 2, on: '2026-10-22', ok: true },
     'deepseek-ai/deepseek-v4.1-flash': { ms: 6_213, runs: 2, on: '2026-10-22', ok: true }
   })
 
-  check('the catalogue had the slow one near the top', rankOf(before, slow.id) <= 2, true)
+  /* Fourth of nine on the catalogue's figures, and it was second until
+     the balanced tab started charging for the eleven seconds. Either way
+     the point is the same: it was somewhere a person would pick from. */
+  check('the catalogue had the slow one in the top half', rankOf(before, slow.id) <= 4, true)
   check('and today it is below everything that answers in time', rankOf(after, slow.id) > rankOf(before, slow.id), true)
   check('the highest scorer was buried while it took two minutes', rankOf(before, deep.id) >= 8, true)
   check('and leads once it is measured at six seconds', rankOf(after, deep.id), 1)
@@ -1268,7 +1296,7 @@ check('and shows the badge', /modelTag\(m, rank, latencies\)/.test(renderer), tr
 
   /* A model that did not answer. It keeps its row and its score - it may
      be back tomorrow - and it cannot sit above one that worked. */
-  const dead = C.rankedModels(C.CLOUD_MODELS, {
+  const dead = O.rankedModels(C.CLOUD_MODELS, {
     'nvidia/nemotron-3-ultra-550b-a55b': { ms: 0, runs: 2, on: '2026-10-22', ok: false }
   })
   const ultra = 'nvidia/nemotron-3-ultra-550b-a55b'
@@ -1278,7 +1306,7 @@ check('and shows the badge', /modelTag\(m, rank, latencies\)/.test(renderer), tr
   check('and the badge stops calling it good', C.modelTag(C.CLOUD_MODELS.find((m) => m.id === ultra), rankOf(dead, ultra), { [ultra]: { ms: 0, runs: 2, on: '2026-10-22', ok: false } }).tone, 'weak')
 
   /* With nothing measured, nothing changes: the default is the file. */
-  check('no check run means the shipped order', JSON.stringify(C.rankedModels(C.CLOUD_MODELS, {}).map((r) => r.rank)), JSON.stringify(before.map((r) => r.rank)))
+  check('no check run means the shipped order', JSON.stringify(O.rankedModels(C.CLOUD_MODELS, {}).map((r) => r.rank)), JSON.stringify(before.map((r) => r.rank)))
 }
 
 /* ----------------------------------- saying so, without eating the blurb */

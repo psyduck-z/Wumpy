@@ -574,6 +574,20 @@ export interface WumpySettings {
   /** Which engine `/open` and a proposed search use. */
   searchEngine: string
   /**
+   * Which question the model list is sorted on: balanced, smarts or speed.
+   *
+   * Asked for as tabs - "one of them is on smartness, one is on speed, and
+   * one of them is balanced, so balance is basically the recommended one" -
+   * and it is a setting rather than a per-visit choice because picking a
+   * model is rare and the way somebody reads the list is not. A person who
+   * wants the fastest thing on the list wants it next week too.
+   *
+   * A string, like `searchEngine`, and validated where it is read: a
+   * settings file is a file, and the one thing a type cannot stop is
+   * somebody editing it. See @shared/order.isOrdering.
+   */
+  modelOrder: string
+  /**
    * Re-measure the models in the background, about once an hour.
    *
    * Asked for: one key does the ranking, the other answers questions, and
