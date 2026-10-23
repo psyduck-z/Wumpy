@@ -36,6 +36,17 @@ export interface RankerDeps {
    * background work is costing them.
    */
   record(result: ProbeResult): void
+  /**
+   * A sweep is over: this many models measured, out of this many asked, in
+   * this long.
+   *
+   * For the timeline behind `/log`. "Re-rank all the models" was one of the
+   * two things the user named wanting to look up afterwards, and until this
+   * existed a sweep left nothing behind but nine lines in wumpy.log and
+   * nine changed numbers in settings.json. Optional, because the ranker
+   * works perfectly well with nobody listening.
+   */
+  swept?(sweep: { models: number; asked: number; tookMs: number }): void
 }
 
 /**
@@ -58,6 +69,11 @@ export class Ranker {
   /** Set while a probe is being cancelled, so its result is discarded. */
   private cancelled = false
   private running = false
+  /** When the sweep that is running took its first measurement. */
+  private sweepStartedAt = 0
+  /** Measured in this sweep, and asked for. A model can fail or be dropped. */
+  private measured = 0
+  private asked = 0
 
   constructor(private readonly deps: RankerDeps) {}
 
@@ -66,9 +82,35 @@ export class Ranker {
     /* The catalogue is due the moment the app starts, but the first tick is
        a tick away: a sweep beginning during startup would compete with the
        panel loading and the keys being read. */
-    this.left = CLOUD_MODELS.map((m) => m.id)
+    this.begin()
     this.timer = setInterval(() => void this.tick(), TICK_MS)
     this.timer.unref?.()
+  }
+
+  /**
+   * A fresh queue of models to measure, and a fresh count of what it did.
+   *
+   * The clock is NOT started here. A sweep can sit in the queue for hours
+   * waiting for the user to stop typing - that is the feature working - and
+   * reporting "ranked nine models in five hours" would describe the
+   * waiting, not the work. It starts at the first measurement.
+   */
+  private begin(): void {
+    this.left = CLOUD_MODELS.map((m) => m.id)
+    this.asked = this.left.length
+    this.measured = 0
+    this.sweepStartedAt = 0
+  }
+
+  /** The queue is empty: the sweep is over, whether or not it all worked. */
+  private finish(): void {
+    this.lastSweepAt = Date.now()
+    this.deps.swept?.({
+      models: this.measured,
+      asked: this.asked,
+      tookMs: this.sweepStartedAt ? Date.now() - this.sweepStartedAt : 0
+    })
+    this.sweepStartedAt = 0
   }
 
   stop(): void {
@@ -97,7 +139,7 @@ export class Ranker {
 
   /** `/rank now`: start a sweep without waiting for the hour. */
   sweepNow(): void {
-    this.left = CLOUD_MODELS.map((m) => m.id)
+    this.begin()
     this.lastProbeAt = 0
     void this.tick()
   }
@@ -123,7 +165,7 @@ export class Ranker {
     const view = this.view()
     /* The hour, which is the only rule that adds work rather than refusing
        it: a finished sweep becomes an unfinished one once it is due. */
-    if (!view.left && view.sinceSweepMs >= EVERY_MS) this.left = CLOUD_MODELS.map((m) => m.id)
+    if (!view.left && view.sinceSweepMs >= EVERY_MS) this.begin()
 
     const verdict = mayRank(this.view(), this.deps.traffic())
     if (!verdict.go) return
@@ -145,15 +187,19 @@ export class Ranker {
       if (this.cancelled) return
 
       this.lastProbeAt = Date.now()
+      /* The sweep's clock starts at its first completed measurement, not at
+         the moment the queue was filled. See begin(). */
+      if (!this.sweepStartedAt) this.sweepStartedAt = startedAt
       this.left = this.left.filter((m) => m !== id)
       if (result) {
+        this.measured++
         this.deps.record(result)
         console.log(
           `[wumpy] ranked ${result.model} on key ${verdict.key + 1}: ` +
             `${result.state} in ${result.ms}ms, ${this.left.length} left this sweep`
         )
       }
-      if (!this.left.length) this.lastSweepAt = Date.now()
+      if (!this.left.length) this.finish()
     } catch {
       /* A probe that throws is a probe that learned nothing. It is dropped
          from this sweep rather than retried in a loop: the next hour will
@@ -161,7 +207,7 @@ export class Ranker {
          exactly what a user wants the ranking to have noticed anyway. */
       this.lastProbeAt = Date.now()
       this.left = this.left.filter((m) => m !== id)
-      if (!this.left.length) this.lastSweepAt = Date.now()
+      if (!this.left.length) this.finish()
     } finally {
       /* Paced from when the request RETURNED, not when it started: a model
          that took two minutes has already been two minutes of traffic. */

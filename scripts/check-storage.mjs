@@ -110,7 +110,10 @@ const SOURCES = {
   'input history': 'src/main/history.ts',
   'the notes file': 'src/main/context.ts',
   'the API keys': 'src/main/keys.ts',
-  'chats': 'src/main/chats.ts'
+  'chats': 'src/main/chats.ts',
+  /* The timeline behind `/log`. A torn write here reads back as no history
+     at all, which is the one failure that makes a record worse than none. */
+  'the timeline': 'src/main/journal.ts'
 }
 for (const [what, path] of Object.entries(SOURCES)) {
   const src = readFileSync(path, 'utf8')

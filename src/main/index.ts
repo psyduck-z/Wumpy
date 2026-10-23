@@ -24,8 +24,10 @@ import { SettingsStore } from './store'
 import { capDiskCache, reclaimCache } from './disk'
 import { ChatStore } from './chats'
 import { InputHistory } from './history'
-import { CloudClient, requestsInLastMinute, sinceLimited } from './cloud'
+import { CloudClient, requestsInLastMinute, sinceLimited, whenLimited } from './cloud'
 import { KeyStore } from './keys'
+import { JournalStore } from './journal'
+import { diffSettings, sweepLine, type Entry } from '@shared/journal'
 import { UsageStore } from './usage'
 import { PoolStore } from './pool'
 import { perKeyCapFor } from '@shared/usage'
@@ -130,6 +132,14 @@ let notes: ContextStore
 let usage: UsageStore
 let pools: PoolStore
 let ranker: Ranker
+/**
+ * What Wumpy has done, with the time. Read by `/log`.
+ *
+ * In this process because the interesting things happen with no window
+ * watching: the hourly ranking, the tray menu, a provider's refusal. See
+ * @shared/journal.
+ */
+let journal: JournalStore
 /**
  * When the turn the user is waiting on started, and when the last one ended.
  *
@@ -482,6 +492,26 @@ function registerIpc(): void {
   // it, so what the status bar shows is what this process will actually do.
   settings.onChange((next) => panel.send(IPC.settingsChanged, next))
 
+  /**
+   * And the timeline hears about it too, from the same place.
+   *
+   * Written off a DIFF rather than off the commands, because the commands
+   * are not the only writer: the tray menu sets the approval mode with no
+   * window open, the panel patches the dock when the hotkey moves it, and
+   * the Google migration changed the model on one boot and told nobody. A
+   * journal built from `/model` and friends would have been silent for
+   * exactly the changes nobody saw happen.
+   *
+   * The latencies the ranker writes every few minutes are not in the
+   * watched list, so a sweep does not produce nine lines of noise here -
+   * it produces one 'rank' line of its own. See @shared/journal.
+   */
+  let known = settings.all()
+  settings.onChange((next) => {
+    for (const change of diffSettings(known, next)) journal.add(change.kind, change.what)
+    known = next
+  })
+
   ipcMain.handle(IPC.settingsSet, (_e, patch: Partial<WumpySettings>) => {
     const next = settings.patch(patch)
     if (patch.hotkeys) applyHotkeys()
@@ -769,6 +799,29 @@ function registerIpc(): void {
   })
 
   /**
+   * The timeline, oldest first. `/log` does the ordering and the wording.
+   *
+   * A plain read: no argument, nothing to filter on this side, and nothing
+   * in the reply that is not already in the panel - see @shared/journal for
+   * what is deliberately never recorded.
+   */
+  ipcMain.handle(IPC.journalGet, (): Entry[] => [...journal.all()])
+
+  /**
+   * Forget it, and say how much there was to forget.
+   *
+   * Nothing is written in its place. A 'cleared' line would need a word in
+   * the table that means neither of the two things the columns say, and the
+   * person who just typed `/log clear` is not the person who needs telling
+   * that they did.
+   */
+  ipcMain.handle(IPC.journalClear, (): number => {
+    const had = journal.all().length
+    journal.clear()
+    return had
+  })
+
+  /**
    * What Wumpy costs the machine, measured rather than estimated.
    *
    * Two readings, because Electron's `percentCPUUsage` is the share of a
@@ -963,7 +1016,12 @@ function registerIpc(): void {
         error: 'Commands are turned off.'
       }
     }
-    return writeProposedFile(req.path, req.content, settings.get('shellCwd') || homedir())
+    const result = writeProposedFile(req.path, req.content, settings.get('shellCwd') || homedir())
+    /* Where it landed, not where it was asked for: the two differ whenever a
+       relative path was resolved, and the resolved one is the file that now
+       exists. Only on success - a refused write left nothing behind. */
+    if (result.written) journal.add('write', result.path)
+    return result
   })
 
   ipcMain.handle(IPC.writeCheck, (_e, path: string) =>
@@ -985,7 +1043,12 @@ function registerIpc(): void {
     if (!settings.get('browserEnabled')) {
       return { opened: false, url: '', host: '', error: 'Opening pages is turned off in settings.' }
     }
-    return openLink(raw)
+    const result = await openLink(raw)
+    /* The host, which is what the card showed and what somebody would
+       recognise. Never the full URL: a link can carry a session token in
+       its query string, and this file is not the place for one. */
+    if (result.opened) journal.add('open', result.host)
+    return result
   })
 
   ipcMain.handle(IPC.linkSearch, async (_e, query: string) => {
@@ -993,7 +1056,9 @@ function registerIpc(): void {
       return { opened: false, url: '', host: '', error: 'Opening pages is turned off in settings.' }
     }
     const engine = settings.get('searchEngine')
-    return openSearch(query, isSearchEngine(engine) ? engine : DEFAULT_ENGINE)
+    const result = await openSearch(query, isSearchEngine(engine) ? engine : DEFAULT_ENGINE)
+    if (result.opened) journal.add('search', `${query} (in ${result.host})`)
+    return result
   })
 
   /** What the panel needs to describe a link before anything is opened. */
@@ -1373,6 +1438,20 @@ function registerIpc(): void {
      */
     const after =
       result.refused === null && settings.get('screenEnabled') ? await shotWithNames('step') : null
+    /* Clicks and keystrokes played into somebody else's app are the thing
+       in here most worth being able to look up afterwards, so the line says
+       how many steps and how many of them worked. The steps themselves are
+       in the card in the transcript; what the timeline needs is that it
+       happened, and when. */
+    if (result.refused === null && result.ran.length) {
+      const ok = result.ran.filter((s) => s.ok).length
+      journal.add(
+        'desktop',
+        ok === result.ran.length
+          ? `${result.ran.length} step${result.ran.length === 1 ? '' : 's'}`
+          : `${ok} of ${result.ran.length} steps worked`
+      )
+    }
     return { ...result, problems: plan.problems, after }
   })
 
@@ -1381,7 +1460,11 @@ function registerIpc(): void {
       return { results: [], provider: 'none', error: 'Search is turned off in settings.' }
     }
     console.log(`[wumpy] searching: ${query}`)
-    return webSearch(query, settings.get('searchApiKey') || undefined)
+    const result = await webSearch(query, settings.get('searchApiKey') || undefined)
+    /* The same rule as the chat's own ledger: a search that errored did not
+       happen, so it is not recorded as though it had. */
+    if (!result.error) journal.add('search', query)
+    return result
   })
 
   /**
@@ -1523,9 +1606,32 @@ ${command}`
        * a few minutes later anyway - it just stops being a secret until then.
        */
       const runId = req.runId
-      return runCommand(command, req.shell, settings.get('shellCwd') || undefined, (text) => {
-        if (runId) panel.send(IPC.shellProgress, { runId, text })
-      })
+      const result = await runCommand(
+        command,
+        req.shell,
+        settings.get('shellCwd') || undefined,
+        (text) => {
+          if (runId) panel.send(IPC.shellProgress, { runId, text })
+        }
+      )
+      /*
+       * Recorded as it happens, by the code that ran it.
+       *
+       * The same reason renderer/ledger.ts exists - "I did not run
+       * anything" is the worst sentence this app could produce - and here
+       * as well as there, because the ledger is cleared with the chat and
+       * the question is often asked a day later. A non-zero exit is kept
+       * too: a command that ran and failed still ran.
+       */
+      journal.add(
+        'command',
+        result.timedOut
+          ? `${command} (timed out)`
+          : result.exitCode === 0
+            ? command
+            : `${command} (exit ${result.exitCode})`
+      )
+      return result
     }
   )
 
@@ -1585,6 +1691,10 @@ ${command}`
     if (!verdict.ok) return { ok: false, why: verdict.why }
     const total = keys.add(provider, req.key)
     void refreshModels()
+    /* The provider and the count. NOTHING ELSE EVER: not the key, not a
+       masked form of it, not its length. This boundary is one-way in the
+       preload and it is one-way onto the disk too. */
+    journal.add('key', `${PROVIDERS[provider].label}: added, ${total} in all`)
     return { ok: true, why: '', label: PROVIDERS[provider].label, total }
   })
 
@@ -1603,6 +1713,10 @@ ${command}`
 
     keys.set(provider, req.key.trim())
     void refreshModels()
+    journal.add(
+      'key',
+      `${PROVIDERS[provider].label}: replaced, ${keys.count(provider)} in all`
+    )
     return { ok: true, why: '', label: PROVIDERS[provider].label, total: keys.count(provider) }
   })
 
@@ -1643,6 +1757,11 @@ ${command}`
       return { ok: false, why: `There ${before === 1 ? 'is' : 'are'} only ${before} key(s).` }
     }
     void refreshModels()
+    journal.add(
+      'key',
+      `${PROVIDERS[provider].label}: dropped ${removed.map((n) => `#${n}`).join(', ')}, ` +
+        `${total} left`
+    )
     return { ok: true, why: '', removed, total, label: PROVIDERS[provider].label }
   })
 
@@ -1654,6 +1773,7 @@ ${command}`
     // A tier pointed at that provider has just become unavailable, and the
     // status bar should say so rather than failing at send time.
     void refreshModels()
+    journal.add('key', `${PROVIDERS[req.provider].label}: all removed`)
     return { ok: true, why: '' }
   })
 
@@ -1699,9 +1819,20 @@ ${command}`
     (_e, chat: { id: string; title?: string; messages: ChatMessage[] }) => chats.save(chat)
   )
   ipcMain.handle(IPC.chatsRename, (_e, id: string, title: string) => chats.rename(id, title))
-  ipcMain.handle(IPC.chatsDelete, (_e, id: string) =>
-    id === '*' ? chats.deleteAll() : chats.delete(id)
-  )
+  ipcMain.handle(IPC.chatsDelete, (_e, id: string) => {
+    /* Counts, not titles. A conversation's title is written from its first
+       message, so recording it would put a piece of what somebody said into
+       a file that promises not to hold any. "Where did my chat go" is
+       answered by the fact and the time. */
+    if (id === '*') {
+      const removed = chats.deleteAll()
+      if (removed) journal.add('chat', `${removed} conversation${removed === 1 ? '' : 's'} deleted`)
+      return removed
+    }
+    const gone = chats.delete(id)
+    if (gone) journal.add('chat', 'one conversation deleted')
+    return gone
+  })
 }
 
 /**
@@ -1750,6 +1881,17 @@ void app.whenReady().then(async () => {
      answer: are these keys on one account or several. See keyAccounts. */
   cloud = new CloudClient(keys, pools, (p) => settings.get('keyAccounts')[p])
   usage = new UsageStore()
+  journal = new JournalStore()
+  /* First line of every session. The gaps between these are what explain
+     gaps in the timeline: Wumpy was not running. */
+  journal.add('start', `version ${app.getVersion()}`)
+  /* A refusal is worth a line: it is the usual reason an answer came from a
+     different model than the one the status bar was showing. Repeats inside
+     a minute are folded - one turn against twenty keys can produce a dozen
+     of these, all of them the same fact. See QUIET_REPEATS. */
+  whenLimited((provider, note) =>
+    journal.add('limit', `${PROVIDERS[provider].label}: ${note || 'refused for quota'}`)
+  )
   panel = new Panel(settings)
 
   priority = new PriorityManager(() => panel.browserWindow)
@@ -1814,7 +1956,11 @@ void app.whenReady().then(async () => {
           ...freshLatencies([result], usage.today().date)
         }
       })
-    }
+    },
+    /* One line per sweep for `/log`, which is where "they re-rank all the
+       models" is answered. Not one per model: nine lines an hour would be
+       most of the history. */
+    swept: (sweep) => journal.add('rank', sweepLine(sweep))
   })
   ranker.start()
   speech = new Speech()

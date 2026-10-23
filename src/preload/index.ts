@@ -3,6 +3,7 @@ import { IPC } from '@shared/types'
 import type { LinkCheck } from '@shared/links'
 import type { ProbeResult } from '@shared/probe'
 import type { Footprint } from '@shared/footprint'
+import type { Entry } from '@shared/journal'
 import type { RankView } from '@shared/types'
 import type { LookResult } from '../main/look'
 import type {
@@ -178,6 +179,16 @@ const api = {
      * see the handler. Nothing calls it but `/usage`.
      */
     footprint: (): Promise<Footprint> => ipcRenderer.invoke(IPC.usageFootprint)
+  },
+  /**
+   * What Wumpy has done, with the time. Read-only but for `/log clear`,
+   * and nothing in here is a secret: see @shared/journal for what is
+   * deliberately never recorded.
+   */
+  journal: {
+    get: (): Promise<Entry[]> => ipcRenderer.invoke(IPC.journalGet),
+    /** Resolves to how many lines there were to forget. */
+    clear: (): Promise<number> => ipcRenderer.invoke(IPC.journalClear)
   },
   /**
    * The background re-ranking: one key measuring the models while the

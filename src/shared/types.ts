@@ -783,6 +783,23 @@ export const IPC = {
   rankSet: 'rank:set',
   usageReset: 'usage:reset',
   /**
+   * What Wumpy has done, with the time it happened. Read by `/log`.
+   *
+   * Kept by the main process, because the things worth looking up happen
+   * where no page is watching - the hourly ranking, the tray menu, a
+   * provider's refusal. See @shared/journal.
+   */
+  journalGet: 'journal:get',
+  /**
+   * Forget it.
+   *
+   * Reachable only from `/log clear`, typed out. `/log` is offered as a
+   * button in an answer and this deliberately is not: the list exists so
+   * that what the app did is not a matter of opinion, and a one-click way
+   * to erase it would be the first thing worth planting in a web page.
+   */
+  journalClear: 'journal:clear',
+  /**
    * Ask every model in the catalogue whether it answers.
    *
    * Costs one real request per model, so there is deliberately no caller but

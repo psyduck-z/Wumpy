@@ -2,6 +2,7 @@ import type { Dock, ProviderName } from '@shared/types'
 import { PROVIDER_IDS, PROVIDERS, isProviderId } from '@shared/cloud'
 import { MAX_RUNS } from '@shared/probe'
 import { readOrdering, type Ordering } from '@shared/order'
+import { readKind, type EventKind } from '@shared/journal'
 import { nearest } from '@shared/nearest'
 
 /**
@@ -70,6 +71,15 @@ export type CommandAction =
   | { kind: 'accounts'; provider: ProviderName; mode: 'shared' | 'separate' | null }
   | { kind: 'remember'; value: string; clear: boolean }
   | { kind: 'usage'; reset: boolean }
+  /**
+   * `/log` — what Wumpy has done, with the time.
+   *
+   * Called 'journal' here and `/log` out there, because the app already has
+   * a thing called the log - wumpy.log, the debugging file - and the two
+   * must not be confused in the source even though `/log` is the word
+   * somebody reaches for. See @shared/journal.
+   */
+  | { kind: 'journal'; all: boolean; clear: boolean; only: EventKind | null }
   | { kind: 'approve'; mode: 'manual' | 'auto' | 'all' | 'cycle' }
   | { kind: 'compact' }
   | { kind: 'stop' }
@@ -99,6 +109,18 @@ export interface CommandSpec {
    * answers with its own usage line. Those keep the old behaviour.
    */
   argRequired?: boolean
+  /**
+   * May be offered as a button bare, and never with an argument.
+   *
+   * One command so far, and it earns the field. `/log` is worth clicking -
+   * it is the answer to "when did that happen" - but `/log clear` destroys
+   * the record of what the app did, and CLICKABLE exists precisely because
+   * an answer is model output and this app feeds the model web pages. A
+   * page that can get `/log clear` rendered as a button can get the
+   * receipt erased in one click, which is the first thing worth planting in
+   * one. Typed out, it is the user's own hand.
+   */
+  clickBareOnly?: boolean
   run(arg: string): CommandAction
 }
 
@@ -378,6 +400,48 @@ export const COMMANDS: CommandSpec[] = [
     hint: 'What today has cost, per model',
     arg: 'reset',
     run: (arg) => ({ kind: 'usage', reset: /^reset$|^clear$/i.test(arg.trim()) })
+  },
+  {
+    /*
+     * Asked for in these words: "add like a command like slash log, to
+     * basically it has all the logs of what you've done. So then, you know,
+     * for example, at like the time, for example, they re-rank all the
+     * models, or for example, change model at this time."
+     *
+     * Both examples are things that happen with nobody watching, which is
+     * why neither `/rank` nor `/settings` could answer them: those say what
+     * is true NOW. This is the only question a timeline answers - what
+     * changed while I was not looking, and when.
+     */
+    name: 'log',
+    /* Not `history`: that is already an alias of `/chats`, and the saved
+       conversations are a different thing from what the app has been doing. */
+    aliases: ['logs', 'activity', 'timeline'],
+    hint: 'What Wumpy has done, and when',
+    arg: 'all | clear | model | ran',
+    /* Offered as a button, but never with its argument: see clickBareOnly. */
+    clickBareOnly: true,
+    run: (arg) => {
+      const word = arg.trim().toLowerCase()
+      if (!word) return { kind: 'journal', all: false, clear: false, only: null }
+      if (/^(all|everything|full|more)$/.test(word)) {
+        return { kind: 'journal', all: true, clear: false, only: null }
+      }
+      if (/^(clear|forget|wipe|reset|delete)$/.test(word)) {
+        return { kind: 'journal', all: false, clear: true, only: null }
+      }
+      /* A kind, in whichever word came to mind: `/log model`, `/log ran`,
+         `/log commands` all work. Filtered views are never truncated -
+         the filter has already done the narrowing. */
+      const only = readKind(word)
+      if (only) return { kind: 'journal', all: true, clear: false, only }
+      return {
+        kind: 'error',
+        message:
+          'Usage: `/log` for the recent ones, `/log all` for everything kept, ' +
+          '`/log model` or `/log ran` for one sort, `/log clear` to forget it.'
+      }
+    }
   },
   {
     name: 'remember',
@@ -800,10 +864,30 @@ export function helpText(): string {
    * the table is a menu for the nineteen commands that may be offered, and
    * stays a table for /key, /delete and the rest.
    */
+  /*
+   * A PIPE IN AN ARGUMENT IS A COLUMN SEPARATOR, backticks or not.
+   *
+   * Twelve of these rows take `on|off`, and GFM splits a table row on its
+   * pipes BEFORE it parses anything inline - so `<on|off>` made a four-cell
+   * row in a two-column table, and a renderer drops the cells past the
+   * header. The description was silently gone from a third of /help, and
+   * /key's row read `google` and nothing else. Invisible in the source,
+   * invisible in the markdown, visible only in the panel.
+   *
+   * `\|` is the escape GFM defines for exactly this, and it survives inside
+   * a code span: the cell renders with a real pipe in it.
+   *
+   * The HINTS need it too, and that is what found the last two: `/dock` says
+   * "left | right | top-right" and `/approve` says "manual | auto | all",
+   * both of them cut off mid-sentence in the panel. The strings are left
+   * alone - the Ctrl+K palette shows them as plain text, where a pipe is
+   * just a pipe - and escaped here, where a pipe is punctuation.
+   */
+  const bar = (text: string): string => text.replace(/\|/g, '\\|')
   const rows = COMMANDS.map((c) => {
     const names = [c.name, ...(c.aliases ?? [])].map((n) => `\`/${n}\``).join(', ')
-    const arg = c.arg ? ` \`<${c.arg}>\`` : ''
-    return `| ${names}${arg} | ${c.hint} |`
+    const arg = c.arg ? ` \`<${bar(c.arg)}>\`` : ''
+    return `| ${names}${arg} | ${bar(c.hint)} |`
   })
   return [
     '**Commands**',
@@ -884,6 +968,8 @@ export const CLICKABLE: readonly string[] = [
   'settings',
   'rank',
   'usage',
+  /* Bare only - the argument is where `clear` lives. See clickBareOnly. */
+  'log',
   'pin',
   'reasoning',
   'listen',
@@ -935,7 +1021,7 @@ export function readCommandChip(text: string): string | null {
        button than no button. */
     return spec.argRequired ? null : line
   }
-  if (!spec.arg) return null
+  if (!spec.arg || spec.clickBareOnly) return null
   if (arg.length > 32 || arg.split(/\s+/).length > 3) return null
   if (/[.!?,;:]$/.test(arg)) return null
   return line

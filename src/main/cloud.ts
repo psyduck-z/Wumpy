@@ -137,8 +137,23 @@ export function requestsInLastMinute(provider: ProviderId): number {
  */
 const limitedAt = new Map<ProviderId, number>()
 
-export function noteLimited(provider: ProviderId): void {
+/**
+ * Whoever wants to hear about a refusal, told once per refusal.
+ *
+ * A listener rather than a store this file writes to, because a refusal is
+ * also a line in the timeline behind `/log` - "the answer took a detour and
+ * here is why" - and this module has no business knowing that the timeline
+ * exists. Set from index.ts, where everything else is wired together.
+ */
+let limitListener: ((provider: ProviderId, note: string) => void) | null = null
+
+export function whenLimited(cb: (provider: ProviderId, note: string) => void): void {
+  limitListener = cb
+}
+
+export function noteLimited(provider: ProviderId, note = ''): void {
   limitedAt.set(provider, Date.now())
+  limitListener?.(provider, note)
 }
 
 /** Milliseconds since the last refusal, or Infinity if there has been none. */
@@ -1063,13 +1078,17 @@ export class CloudClient {
        * `restAll`/`outAll` and `Provider.quotaPerKey`.
        */
       if (verdict.kind === 'exhausted' || verdict.kind === 'throttle') {
-        /* The account is at its ceiling, which the background ranker reads
-           as "stay out of this for a while". Noted here rather than at the
-           caller because this is the one place that knows a 429 was about
-           quota rather than about the model. */
-        noteLimited(provider)
         const daily = /PerDay/i.test(detail) || /per day/i.test(verdict.message)
         const shared = !this.separate(provider)
+        /* The account is at its ceiling, which the background ranker reads
+           as "stay out of this for a while" and `/log` records as the usual
+           reason an answer took a detour. Noted here rather than at the
+           caller because this is the one place that knows a 429 was about
+           quota rather than about the model - and said in the words that
+           tell the two apart, because they mean different things to
+           somebody reading them later: a daily cap takes one model out
+           until midnight, a per-minute throttle is over in seconds. */
+        noteLimited(provider, daily ? `out of ${model} for the day` : 'rate limited')
         /* Before the rest, or it reads as zero on the key that just died. */
         const spentHere = rotation.requests(index, model)
         const until = Date.now() + Math.max(1000, verdict.waitMs)

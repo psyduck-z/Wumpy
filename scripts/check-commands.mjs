@@ -108,6 +108,31 @@ for (const key of ['Ctrl+K', 'Ctrl+N', 'Ctrl+R', 'Ctrl+D', 'Shift+Tab', 'PageUp'
 }
 console.log('ok   /help lists every command and every key')
 
+/**
+ * EVERY ROW IS TWO CELLS, which is not the same as every row being written
+ * with two cells.
+ *
+ * GFM splits a table row on its pipes before it parses anything inline, so
+ * `<on|off>` is four cells even inside backticks - and a renderer throws away
+ * the cells past the header. Twelve commands take `on|off` or similar, and
+ * every one of them was rendering with no description at all: /key's row read
+ * `google` and stopped. Nothing in the markdown looks wrong, and nothing but
+ * the panel ever showed it.
+ *
+ * Counted on unescaped pipes only, which is the thing the renderer does.
+ */
+{
+  const rows = help.split(String.fromCharCode(10)).filter((l) => l.startsWith('|'))
+  for (const row of rows) {
+    const cells = (row.match(/(?<!\\)\|/g) ?? []).length - 1
+    if (cells !== 2) fail(`a /help row renders as ${cells} cells, not 2: ${row}`)
+  }
+  /* And the escaping is not hiding the argument: a pipe still reaches the
+     reader, it is just no longer a column. */
+  if (!help.includes('on\\|off')) fail('/help no longer shows the on|off arguments')
+  console.log(`ok   ${rows.length} /help rows are two cells, arguments and all`)
+}
+
 /* -------------------------------------------------------------- the parser */
 
 const PARSES = [
@@ -116,6 +141,12 @@ const PARSES = [
   ['  /new  ', 'new'],
   ['/rename maths', 'rename'],
   ['/nonsense', 'error'],
+  /* The timeline, and the three shapes of it: bare, filtered by a word that
+     is not the kind's own name, and a word that is neither. */
+  ['/log', 'journal'],
+  ['/log commands', 'journal'],
+  ['/log clear', 'journal'],
+  ['/log sideways', 'error'],
   ['not a command', null],
   ['/', null]
 ]
@@ -257,6 +288,16 @@ rmSync(out, { force: true })
     '/open https://example.com': 'the link card exists and says what it refused',
     '/screen': 'would photograph their screen for the model',
     '/remember my key is 1234': 'would write what persists between chats',
+    /*
+     * The receipt, erased in one click.
+     *
+     * `/log` itself is a button and should be - it is the answer to "when
+     * did that happen". Its argument is not, because `clear` is in there,
+     * and a page that can get this rendered has found the one button that
+     * destroys the record of what the app did. See clickBareOnly.
+     */
+    '/log clear': 'would erase the record of what Wumpy has done',
+    '/log all': 'the argument is where clear lives, so none of it is offered',
     '/plan ship it': 'a prompt wrapper, which wraps text that is not there yet'
   }
   for (const [line, why] of Object.entries(NEVER)) {
@@ -268,7 +309,10 @@ rmSync(out, { force: true })
     ' /new ': '/new',
     '/tokens': '/tokens',
     '/model gemma4:31b-cloud': '/model gemma4:31b-cloud',
-    '/rename Fish pie': '/rename Fish pie'
+    '/rename Fish pie': '/rename Fish pie',
+    /* Bare, it is a report and worth one press. */
+    '/log': '/log',
+    '/timeline': '/timeline'
   }
   for (const [line, want] of Object.entries(OFFERED)) {
     const got = readCommandChip(line)

@@ -89,6 +89,7 @@ import { poolLines } from './quota'
 import { footprintLines } from '@shared/footprint'
 import { settingsLines } from './settingsreport'
 import { rankLines, rankSummary } from '@shared/ranking'
+import { journalLines } from '@shared/journal'
 import { DEFAULT_RUNS, freshLatencies, probeLines } from '@shared/probe'
 import { copyText } from './copy'
 import { Toast } from './components/Toast'
@@ -1766,6 +1767,36 @@ function namedControls(shot: Attachment): string[] {
               ...(poolReport.length ? ['', ...poolReport] : []),
               ...(footprint.length ? ['', ...footprint] : [])
             ].join(String.fromCharCode(10))
+          )
+          return
+        }
+        /**
+         * `/log` — the timeline, read from the main process.
+         *
+         * Fetched when asked rather than kept in state: it is a dozen lines
+         * of text, it changes when nothing in the panel is happening, and a
+         * subscription would mean a message crossing the bridge every time
+         * the ranking measured a model.
+         */
+        case 'journal': {
+          if (action.clear) {
+            const had = await window.wumpy.journal.clear()
+            chat.note(
+              had
+                ? `Forgot ${had} line${had === 1 ? '' : 's'} of history. ` +
+                    'New ones start from now.'
+                : 'There was nothing to forget.'
+            )
+            return
+          }
+          const entries = await window.wumpy.journal.get()
+          chat.note(
+            journalLines(entries, {
+              /* `/log` shows the recent ones; `/log all` and any filtered
+                 view show everything kept. */
+              limit: action.all ? null : undefined,
+              only: action.only
+            }).join(NEWLINE)
           )
           return
         }
