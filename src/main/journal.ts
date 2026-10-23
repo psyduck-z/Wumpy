@@ -2,7 +2,7 @@ import { app } from 'electron'
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { writeAtomic } from './atomic'
-import { entry, isRepeat, keep, prune, type Entry, type EventKind } from '@shared/journal'
+import { amended, entry, isRepeat, keep, prune, type Entry, type EventKind } from '@shared/journal'
 
 /**
  * The timeline behind `/log`, on the disk.
@@ -66,6 +66,26 @@ export class JournalStore {
     this.flush()
   }
 
+  /**
+   * Finishes a line that was written while the thing was still happening.
+   *
+   * One caller: a ranking sweep, which writes `measuring 9 models…` at its
+   * first measurement and becomes `9 models in 8 min` at its last. The time
+   * stays the time it started, which is the time somebody is looking for.
+   *
+   * False when there was no such line - cleared, or aged out of a sweep
+   * that ran across midnight - so the caller can write the finished line
+   * fresh rather than drop the event. See @shared/journal amended for why
+   * this is the only rewriting anything here does.
+   */
+  amend(kind: EventKind, from: string, to: string): boolean {
+    const next = amended(this.entries, kind, from, to)
+    if (!next) return false
+    this.entries = next
+    this.flush()
+    return true
+  }
+
   /** Oldest first, as stored. The report does its own ordering. */
   all(): readonly Entry[] {
     this.entries = prune(this.entries)
@@ -79,7 +99,10 @@ export class JournalStore {
 
   private flush(): void {
     try {
-      writeAtomic(this.file, `${JSON.stringify({ entries: this.entries }, null, 2)}\n`)
+      /* Not indented, unlike the other stores. Those are small and worth
+         reading by hand; this one is a thousand lines of three fields, and
+         the indentation would be half the file. `/log` is how it is read. */
+      writeAtomic(this.file, `${JSON.stringify({ entries: this.entries })}\n`)
     } catch {
       // Losing a line of history is not worth troubling anyone about.
     }

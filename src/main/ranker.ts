@@ -1,6 +1,14 @@
 import { CLOUD_MODELS } from '@shared/cloud'
 import type { ProbeResult } from '@shared/probe'
-import { EVERY_MS, GAP_MS, mayRank, type RankerState, type Traffic } from '@shared/ranking'
+import {
+  DURABLE,
+  EVERY_MS,
+  GAP_MS,
+  mayRank,
+  type RankerState,
+  type Traffic,
+  type Verdict
+} from '@shared/ranking'
 
 /**
  * Keeps the model ranking fresh, one model at a time, out of the way.
@@ -37,6 +45,15 @@ export interface RankerDeps {
    */
   record(result: ProbeResult): void
   /**
+   * A sweep has started measuring: this many models to go.
+   *
+   * Reported at the first measurement rather than when the queue was
+   * filled, because the queue is filled the moment the app starts and the
+   * sweep may not get a quiet moment for an hour. "Log when the auto rerank
+   * happened" means this time, not either of those.
+   */
+  began?(sweep: { asked: number }): void
+  /**
    * A sweep is over: this many models measured, out of this many asked, in
    * this long.
    *
@@ -47,6 +64,15 @@ export interface RankerDeps {
    * works perfectly well with nobody listening.
    */
   swept?(sweep: { models: number; asked: number; tookMs: number }): void
+  /**
+   * It cannot run, for a reason that will not clear on its own - or it can
+   * again, which is `null`.
+   *
+   * Only the durable reasons, and only when the answer changes. Every other
+   * refusal in @shared/ranking is a few minutes of weather and reporting
+   * those would be a log of the feature working. See DURABLE.
+   */
+  stoodDown?(why: 'off' | 'onekey' | null): void
 }
 
 /**
@@ -74,6 +100,8 @@ export class Ranker {
   /** Measured in this sweep, and asked for. A model can fail or be dropped. */
   private measured = 0
   private asked = 0
+  /** The durable reason last reported, so only changes are. */
+  private standing: 'off' | 'onekey' | null = null
 
   constructor(private readonly deps: RankerDeps) {}
 
@@ -100,6 +128,26 @@ export class Ranker {
     this.asked = this.left.length
     this.measured = 0
     this.sweepStartedAt = 0
+  }
+
+  /**
+   * Notices when the ranking has stopped being able to run, and when it can
+   * again.
+   *
+   * Changes only, and only the two reasons that are a decision rather than
+   * weather - otherwise this would report 'cooling' and 'paced' every
+   * fifteen seconds, which is the feature working. The one that matters is
+   * 'onekey': switching to a provider with a single key stands the whole
+   * thing down, and nothing anywhere said so until this line existed.
+   */
+  private watch(verdict: Verdict): void {
+    const why = !verdict.go && DURABLE.includes(verdict.why) ? verdict.why : null
+    /* Narrowed by DURABLE, which is the two of them; the cast is the type
+       system not following a runtime list. */
+    const next = why as 'off' | 'onekey' | null
+    if (next === this.standing) return
+    this.standing = next
+    this.deps.stoodDown?.(next)
   }
 
   /** The queue is empty: the sweep is over, whether or not it all worked. */
@@ -168,6 +216,7 @@ export class Ranker {
     if (!view.left && view.sinceSweepMs >= EVERY_MS) this.begin()
 
     const verdict = mayRank(this.view(), this.deps.traffic())
+    this.watch(verdict)
     if (!verdict.go) return
 
     const id = this.left[0]
@@ -188,8 +237,13 @@ export class Ranker {
 
       this.lastProbeAt = Date.now()
       /* The sweep's clock starts at its first completed measurement, not at
-         the moment the queue was filled. See begin(). */
-      if (!this.sweepStartedAt) this.sweepStartedAt = startedAt
+         the moment the queue was filled. See begin(). The timeline is told
+         here for the same reason, and with the same timestamp: this is when
+         the re-ranking actually happened. */
+      if (!this.sweepStartedAt) {
+        this.sweepStartedAt = startedAt
+        this.deps.began?.({ asked: this.asked })
+      }
       this.left = this.left.filter((m) => m !== id)
       if (result) {
         this.measured++

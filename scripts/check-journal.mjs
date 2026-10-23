@@ -185,6 +185,59 @@ check(
 )
 check('a sweep with no clock on it', J.sweepLine({ models: 9, asked: 9, tookMs: 0 }), '9 models')
 
+/**
+ * The line while it is still going, and the rewrite that finishes it.
+ *
+ * Asked for after the first version: "also log when the auto rerank
+ * happened". A sweep waits for quiet moments, so there can be an hour
+ * between its first measurement and its last - recording it at the end
+ * stamps it with the wrong time, and a restart in between left no trace at
+ * all. So the line is written at the first measurement and finished in
+ * place, which keeps the time it happened AND keeps a sweep to one line.
+ */
+check('a sweep in progress says so', J.sweepOpen(9), 'measuring 9 models…')
+check('and one model is not "1 models"', J.sweepOpen(1), 'measuring 1 model…')
+{
+  const other = J.entry('command', 'npm run build', NOW - 5 * MINUTE)
+  const open = J.entry('rank', J.sweepOpen(9), NOW - 4 * MINUTE)
+  const list = [other, open]
+  const done = J.amended(list, 'rank', J.sweepOpen(9), '9 models in 4 min')
+  check('finishing it does not add a line', done.length, 2)
+  check('it reads as finished', done[1].what, '9 models in 4 min')
+  /* The whole point of amending rather than appending: the time stays the
+     time the re-ranking started. */
+  check('and keeps the time it started', done[1].at, open.at)
+  check('nothing else is touched', done[0], other)
+  /* No open line - cleared, or the sweep ran across the age limit - and the
+     caller is told so it can write the finished line fresh instead. */
+  check('with nothing to finish it says so', J.amended([other], 'rank', J.sweepOpen(9), 'x'), null)
+  /* And it will not rewrite a line it did not write: only the exact text. */
+  check(
+    'it rewrites its own text and nothing else',
+    J.amended([J.entry('rank', '9 models in 4 min', NOW)], 'rank', J.sweepOpen(9), 'x'),
+    null
+  )
+}
+
+/**
+ * And the times it did NOT run, which is the other half of the question.
+ *
+ * On this machine the ranking is standing down right now: the model being
+ * answered with is the Ollama one, that provider has a single key, and the
+ * feature is "one key measures while the other answers". Switching model
+ * turned it off as a side effect and nothing said so - `/rank` had to be
+ * typed to find out. The model is named because the model is the cause.
+ */
+check(
+  'standing down names the model that caused it',
+  J.rankNote('onekey', 'Gemma 4 31B (Ollama cloud)'),
+  'standing down — Gemma 4 31B (Ollama cloud) has only one key, and it is the one answering'
+)
+check('turned off is just turned off', J.rankNote('off', 'anything'), 'switched off')
+/* A line saying it stopped and no line saying it started again is worse
+   than neither. */
+check('and coming back is a line too', J.rankNote(null, 'anything'), 'ready again')
+
 /* --------------------------------------------------------------- the report */
 
 const DAYS = [
@@ -212,7 +265,7 @@ const STORED = [...DAYS].reverse()
     lines.find((l) => l.includes('20:14')),
     '| 20:14 | model | GLM 5.3 Flash → DeepSeek V4.1 Flash |'
   )
-  check('a sweep reads as a sweep', text.includes('| ranked | 9 models in 8 min |'), true)
+  check('a sweep reads as a sweep', text.includes('| ranking | 9 models in 8 min |'), true)
   /* The promise, made every time. A list of what somebody has been doing is
      the one place in this app where "where does this go" deserves an answer
      before it is asked. */
@@ -407,7 +460,11 @@ check('nor the window furniture', changed({ compactWidth: 462, smoothText: true 
 
   try {
     const sweeps = []
+    const starts = []
+    const stood = []
     let failFrom = null
+    let keys = 2
+    let on = true
     const make = (probeMs) =>
       new Ranker({
         probe: async (id) => {
@@ -416,7 +473,7 @@ check('nor the window furniture', changed({ compactWidth: 462, smoothText: true 
           return { model: id, provider: 'nvidia', state: 'ok', ms: probeMs }
         },
         preamble: () => 'preamble',
-        state: () => ({ on: true, keys: 2 }),
+        state: () => ({ on, keys }),
         traffic: () => ({
           busy: false,
           sinceTurnMs: Infinity,
@@ -425,7 +482,9 @@ check('nor the window furniture', changed({ compactWidth: 462, smoothText: true 
           sinceLimitedMs: Infinity
         }),
         record: () => {},
-        swept: (s) => sweeps.push(s)
+        began: (s) => starts.push(s),
+        swept: (s) => sweeps.push(s),
+        stoodDown: (why) => stood.push(why)
       })
 
     /** One tick per model, with enough fake time in between to be allowed. */
@@ -441,6 +500,10 @@ check('nor the window furniture', changed({ compactWidth: 462, smoothText: true 
     const r = make(2_000)
     r.sweepNow()
     await run(r)
+    /* The line the user asked for: written when the first measurement
+       landed, not when the ninth did. */
+    check('the sweep is announced when it starts', starts.length, 1)
+    check('with the whole catalogue to do', starts[0]?.asked, catalogue)
     check('a sweep is announced once', sweeps.length, 1)
     check('with every model in the catalogue', sweeps[0]?.asked, catalogue)
     check('and every one of them measured', sweeps[0]?.models, catalogue)
@@ -496,6 +559,45 @@ check('nor the window furniture', changed({ compactWidth: 462, smoothText: true 
     await run(r4)
     r4.stop()
     check('a sweep that waited hours reports only the work', sweeps[0]?.tookMs < 6 * MINUTE, true)
+
+    /**
+     * And the times it does not run at all.
+     *
+     * This is the state the machine is in right now: the model being
+     * answered with is the Ollama one, which has a single key, so the
+     * ranking stands down - correctly, and until now silently. Reported on
+     * the CHANGE only, or a rule consulted every fifteen seconds would
+     * write four lines a minute.
+     */
+    stood.length = 0
+    sweeps.length = 0
+    keys = 1
+    const r5 = make(2_000)
+    r5.sweepNow()
+    await run(r5)
+    check('one key is reported once', stood, ['onekey'])
+    check('and nothing was measured on it', sweeps.length, 0)
+    await run(r5)
+    check('and not again while it is still true', stood, ['onekey'])
+
+    /* A second key arrives: it says so, and gets on with the sweep that was
+       queued all along. */
+    keys = 2
+    await run(r5)
+    check('and when it can run again, that too', stood, ['onekey', null])
+    check('and it does run', sweeps.length, 1)
+
+    /* Switched off is the other durable one. Everything else - busy,
+       cooling, crowded, paced - is weather, and is never reported. */
+    stood.length = 0
+    on = false
+    const r6 = make(2_000)
+    r6.sweepNow()
+    await run(r6)
+    check('off is reported', stood, ['off'])
+    on = true
+    await run(r6)
+    check('and so is coming back on', stood, ['off', null])
   } finally {
     Date.now = realNow
     console.log = realLog
@@ -535,8 +637,29 @@ check('nor the window furniture', changed({ compactWidth: 462, smoothText: true 
     /settings\.onChange\(\(next\) => \{[\s\S]*?diffSettings\(known, next\)/.test(main),
     true
   )
-  /* A sweep is one line, not nine. */
-  check('a finished sweep is recorded once', /swept: \(sweep\) => journal\.add\('rank'/.test(main), true)
+  /* A sweep is one line, not nine - and not two: the line it opens with is
+     the line it finishes, so the time stays the time it happened. */
+  check(
+    'a sweep opens a line when it starts',
+    /began: \(sweep\) => journal\.add\('rank', sweepOpen/.test(main),
+    true
+  )
+  check(
+    'and finishes that same line',
+    /journal\.amend\('rank', sweepOpen\(sweep\.asked\), done\)/.test(main),
+    true
+  )
+  /* With a fallback, so an interrupted or aged-out sweep still records that
+     it finished rather than dropping the event. */
+  check('or writes it fresh if there is none', /\)\) journal\.add\('rank', done\)/.test(main), true)
+  /* And the times it did not run, with the model that is the reason. */
+  check(
+    'standing down is recorded with the model',
+    /stoodDown: \(why\) => journal\.add\('rank', rankNote\(why, modelLabel\(activeModel\(\)\)\)\)/.test(
+      main
+    ),
+    true
+  )
   /* The receipt the whole thing is for: recorded by the code that ran it,
      after it ran, not by the renderer that asked. */
   check(

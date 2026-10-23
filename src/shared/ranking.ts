@@ -123,6 +123,21 @@ export type Why =
 export type Verdict = { go: true; key: number } | { go: false; why: Why }
 
 /**
+ * The refusals that are a decision rather than weather.
+ *
+ * Everything else here clears on its own within minutes - a turn ends, the
+ * quiet window passes, the pacing gap closes, the hour comes round - and a
+ * record of those would be a record of the feature working. These two do
+ * not clear until somebody changes something, and one of them is reached by
+ * accident: switching to a provider with a single key stands the ranking
+ * down, with nothing anywhere saying so. That is worth a line in `/log`.
+ *
+ * 'limited' is deliberately not here. It clears in ten minutes, and the
+ * refusal that caused it is already recorded by the client that saw it.
+ */
+export const DURABLE: readonly Why[] = ['off', 'onekey']
+
+/**
  * Is there anything to measure: models left in this sweep, or an hour gone
  * since the last one finished.
  */

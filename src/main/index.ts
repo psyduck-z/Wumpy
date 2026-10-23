@@ -27,7 +27,14 @@ import { InputHistory } from './history'
 import { CloudClient, requestsInLastMinute, sinceLimited, whenLimited } from './cloud'
 import { KeyStore } from './keys'
 import { JournalStore } from './journal'
-import { diffSettings, sweepLine, type Entry } from '@shared/journal'
+import {
+  diffSettings,
+  modelLabel,
+  rankNote,
+  sweepLine,
+  sweepOpen,
+  type Entry
+} from '@shared/journal'
 import { UsageStore } from './usage'
 import { PoolStore } from './pool'
 import { perKeyCapFor } from '@shared/usage'
@@ -1957,10 +1964,23 @@ void app.whenReady().then(async () => {
         }
       })
     },
-    /* One line per sweep for `/log`, which is where "they re-rank all the
-       models" is answered. Not one per model: nine lines an hour would be
-       most of the history. */
-    swept: (sweep) => journal.add('rank', sweepLine(sweep))
+    /*
+     * ONE LINE PER SWEEP, written when it starts and finished in place when
+     * it ends - so `/log` says when the re-ranking happened rather than
+     * when it got round to the last model, and a sweep interrupted by a
+     * restart still shows that it ran. Not one line per model: nine an hour
+     * would be most of the history, and what each model measured is in
+     * `/model`, which is where somebody looking for a number goes.
+     */
+    began: (sweep) => journal.add('rank', sweepOpen(sweep.asked)),
+    swept: (sweep) => {
+      const done = sweepLine(sweep)
+      if (!journal.amend('rank', sweepOpen(sweep.asked), done)) journal.add('rank', done)
+    },
+    /* And the times it did not run. The reason is formatted here because
+       only this side knows which model is answering, which is the cause
+       nothing about the ranking mentions. */
+    stoodDown: (why) => journal.add('rank', rankNote(why, modelLabel(activeModel())))
   })
   ranker.start()
   speech = new Speech()

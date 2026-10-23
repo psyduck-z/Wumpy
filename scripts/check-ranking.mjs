@@ -182,6 +182,23 @@ check(
   'on, starting a sweep'
 )
 check('thirty seconds ago is just now', R.ago(30_000), 'just now')
+
+/**
+ * Which refusals are a decision and which are weather.
+ *
+ * `/log` records the durable ones, because "the ranking has not run since
+ * Tuesday" needs a reason and the reason is reachable by accident: picking
+ * a model whose provider has one key stands the whole thing down. The rest
+ * clear by themselves in minutes, and a line for each would be a log of the
+ * feature working - the rules are consulted every fifteen seconds.
+ *
+ * 'limited' is deliberately out: ten minutes, and the refusal that caused
+ * it is already recorded where it happened.
+ */
+check('two refusals outlast the moment', R.DURABLE, ['off', 'onekey'])
+for (const why of ['busy', 'cooling', 'crowded', 'paced', 'waiting', 'limited']) {
+  check(`${pad(why, 8)} is weather, not a decision`, R.DURABLE.includes(why), false)
+}
 check(
   'and says what it is waiting for',
   R.rankSummary(CLEAR.state, { ...CLEAR.traffic, busy: true }, 20 * 60_000),

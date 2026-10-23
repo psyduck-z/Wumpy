@@ -89,12 +89,17 @@ export const MAX_DETAIL = 120
 /**
  * How many lines are kept at all.
  *
- * Enough for a busy week - a day of real use is a few dozen - and small
- * enough that the file is tens of kilobytes. See disk.ts for why that
- * matters: Wumpy's own records were 236 KB of a 38 MB user data directory
- * and the goal is to keep them that way.
+ * Enough for a busy week and small enough that the file stays tens of
+ * kilobytes - see disk.ts for why that matters: Wumpy's own records were
+ * 236 KB of a 38 MB user data directory and the goal is to keep them that
+ * way. A thousand lines written without indentation is about 55 KB.
+ *
+ * The number has to be a week's worth of a BUSY day rather than an average
+ * one, because the ranking alone can be two dozen: a sweep an hour for as
+ * long as the machine is on. That is also why a sweep is one line and not
+ * two - see amended.
  */
-export const MAX_ENTRIES = 500
+export const MAX_ENTRIES = 1000
 
 /**
  * And how long.
@@ -180,7 +185,9 @@ export const WORD: Record<EventKind, string> = {
   start: 'started',
   model: 'model',
   setting: 'setting',
-  rank: 'ranked',
+  /* 'ranking' rather than 'ranked', because the line is written when the
+     sweep STARTS and finished in place when it ends. See sweepOpen. */
+  rank: 'ranking',
   key: 'key',
   command: 'ran',
   write: 'wrote',
@@ -406,6 +413,24 @@ export function took(ms: number): string {
 }
 
 /**
+ * A sweep that has started, which is the line that answers the question.
+ *
+ * Asked for after the first version: "also log when the auto rerank
+ * happened". It recorded the sweep when it FINISHED, which is a different
+ * time and sometimes no time at all - a sweep waits for quiet moments, so
+ * it can be an hour between the first measurement and the last, and a
+ * restart in the middle means the whole thing left no trace. The user had
+ * been told the ranking runs hourly and `/log` had nothing to show for it.
+ *
+ * So this is written when the first measurement lands, at the moment it
+ * happened, and `amended` turns it into the finished line in place when the
+ * sweep ends. One line per sweep, stamped when the sweep began.
+ */
+export function sweepOpen(asked: number): string {
+  return `measuring ${asked} model${asked === 1 ? '' : 's'}…`
+}
+
+/**
  * A finished ranking sweep, in one line.
  *
  * "9 models in 8 min" when everything answered; "7 of 9 models" when it did
@@ -424,6 +449,63 @@ export function sweepLine(sweep: { models: number; asked: number; tookMs: number
       : `${sweep.models} of ${sweep.asked} models`
   const long = took(sweep.tookMs)
   return long ? `${count} in ${long}` : count
+}
+
+/**
+ * Why the ranking is not running, when the reason will not clear by itself.
+ *
+ * The second half of "log when the auto rerank happened" is the times it
+ * did not. On this machine it is standing down right now and the only way
+ * to find that out is to type `/rank`: the model being answered with is the
+ * Ollama one, that provider has a single key, and the whole feature is "one
+ * key measures while the other answers". Switching model turned the ranking
+ * off as a side effect, hours before anybody wondered why nothing had been
+ * measured.
+ *
+ * `null` is the other direction - it can run again - because a line saying
+ * it stopped and no line saying it started again is worse than neither.
+ *
+ * The model is named because the model is the cause and nothing about the
+ * ranking says so.
+ */
+export function rankNote(why: 'off' | 'onekey' | null, model: string): string {
+  if (why === null) return 'ready again'
+  if (why === 'off') return 'switched off'
+  return `standing down — ${model} has only one key, and it is the one answering`
+}
+
+/**
+ * The newest line of this kind reading `from`, rewritten to `to`.
+ *
+ * Null when there is no such line, so the caller can write a fresh one
+ * rather than lose the event.
+ *
+ * THE ONE PLACE ANYTHING IN HERE IS REWRITTEN, and the limits are the
+ * point: the time is kept, the kind is kept, and the only text it will
+ * replace is text this module wrote itself - an open sweep's own line,
+ * becoming the same sweep's finished line. A sweep is one event and it has
+ * one time, the time it started; recording it twice would be two lines
+ * saying one thing, and at a sweep an hour that is most of a week's
+ * history.
+ *
+ * Nothing a person or a model did is ever amended. A command that ran is
+ * written once, by the code that ran it, and stays as written - see
+ * QUIET_REPEATS for the same rule from the other side.
+ */
+export function amended(
+  entries: readonly Entry[],
+  kind: EventKind,
+  from: string,
+  to: string
+): Entry[] | null {
+  for (let i = entries.length - 1; i >= 0; i--) {
+    const e = entries[i]
+    if (e.kind !== kind || e.what !== from) continue
+    const next = entries.slice()
+    next[i] = { ...e, what: detailOf(to) }
+    return next
+  }
+  return null
 }
 
 /* ------------------------------------------------------ what changed in the settings */
