@@ -554,27 +554,11 @@ body {
   padding: 0;
 }
 
-.codeblock .copy {
-  position: absolute;
-  top: 6px;
-  right: 6px;
-  opacity: 0;
-  background: rgb(255 255 255 / 0.1);
-  border: 1px solid rgb(255 255 255 / 0.18);
-  color: #e6edf3;
-  font: inherit;
-  font-size: 10.5px;
-  padding: 3px 7px;
-  border-radius: 6px;
-  cursor: pointer;
-}
-
-.codeblock:hover .copy {
-  opacity: 1;
-}
-.codeblock .copy:hover {
-  background: rgb(255 255 255 / 0.18);
-}
+/*
+ * A code block's own Copy button was here, over the top-right corner on
+ * hover. Removed on request - see CodeBlock in Markdown.tsx for what still
+ * copies, which is everything that did.
+ */
 
 .picker-heading {
   font-size: 11px;

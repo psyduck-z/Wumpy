@@ -6,7 +6,6 @@ import {
   isValidElement,
   type ReactNode
 } from 'react'
-import { copyText } from '../copy'
 import type {
   Attachment,
   DesktopResult,
@@ -110,44 +109,42 @@ function codeTextOf(children: ReactNode): string {
   return ''
 }
 
+/**
+ * A fenced block, with no Copy button on it.
+ *
+ * There was one, floating over the top-right corner on hover, and it is
+ * gone because it was asked for: "remove the copy opt". It had started to
+ * earn its keep less and cost more - `/log` renders into one of these, and
+ * a button that appears over the first line of a listing somebody is
+ * reading is a thing in the way rather than a thing offered.
+ *
+ * NOTHING THAT COULD BE COPIED HAS STOPPED BEING COPYABLE. The answer that
+ * contains the block still has its own Copy in the gutter above it, and
+ * Ctrl+Shift+C still takes the last answer whole; selecting the lines and
+ * pressing Ctrl+C works as it does anywhere. What went is a second button
+ * for the same text, in the one place it overlapped what it was offering.
+ */
 function CodeBlock({ children }: { children: ReactNode }): React.JSX.Element {
-  const [copied, setCopied] = useState(false)
-
   /**
    * A whole program in a 460px panel buries the sentence explaining it.
    *
    * Folded by default past the threshold in bulk.ts, with the size on the
    * fold so the user knows what they are opening. Collapsed rather than
-   * truncated: the text is all still there, and Copy still copies the lot
-   * whether it is open or not, because it reads the DOM beneath.
+   * truncated: the text is all still there.
    */
   const source = codeTextOf(children)
   const long = foldsCode(source)
   const [open, setOpen] = useState(false)
 
-  const copy = (e: React.MouseEvent<HTMLButtonElement>): void => {
-    const code = e.currentTarget.parentElement?.querySelector('code')
-    if (!code?.textContent) return
-    /* Main process, not the page: writeText needs document focus and this
-       window often does not have it. */
-    void copyText(code.textContent).then((ok) => {
-      if (!ok) return
-      setCopied(true)
-      setTimeout(() => setCopied(false), 1400)
-    })
-  }
-
   return (
     <div className={`codeblock ${long && !open ? 'is-folded' : ''}`}>
-      <button className="copy" onClick={copy} type="button">
-        {copied ? 'Copied' : 'Copy'}
-      </button>
       {long && (
         <button className="fold" type="button" onClick={() => setOpen((v) => !v)}>
           {open ? 'Hide' : `Show (${summarise(source)})`}
         </button>
       )}
-      {/* Kept mounted while folded, so Copy still finds the code. */}
+      {/* Hidden rather than unmounted: the block is already parsed and
+          highlighted, and toggling it should not be that work again. */}
       <pre hidden={long && !open}>
         <InFence.Provider value={true}>{children}</InFence.Provider>
       </pre>

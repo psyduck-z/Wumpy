@@ -181,12 +181,26 @@ const messageSrc = readFileSync('src/renderer/src/components/Message.tsx', 'utf8
 const markdownSrc = readFileSync('src/renderer/src/components/Markdown.tsx', 'utf8')
 for (const [name, src] of [
   ['the shortcut', appSrc],
-  ['a message', messageSrc],
-  ['a code block', markdownSrc]
+  ['a message', messageSrc]
 ]) {
   check(`${name} uses it`, /copyText\(/.test(src), true)
   check(`${name} does not write the clipboard itself`, /navigator\.clipboard\.writeText/.test(src), false)
 }
+/**
+ * A code block had its own Copy and no longer does - "remove the copy opt".
+ * It floated over the top-right of the block on hover, which over a `/log`
+ * listing is a button in the way of the thing it is offering.
+ *
+ * Asserted as nothing at all rather than dropped from the list, so that the
+ * day one comes back it has to come back through copyText like the other
+ * two: this file exists because `navigator.clipboard.writeText` needs
+ * document focus and this window frequently does not have it.
+ */
+check('a code block offers no copy of its own', /copyText\(|clipboard/.test(markdownSrc), false)
+/* And what still copies, which is everything that did: the answer the block
+   is in, and the shortcut. */
+check('the answer it sits in still copies', /copyText\(/.test(messageSrc), true)
+check('and so does the shortcut', /copyText\(/.test(appSrc), true)
 check('and the shortcut only claims success when it worked', /ok \? 'Copied the last answer\.'/.test(appSrc), true)
 check('the badge waits for the same answer', /then\(\(ok\) => \{\s*if \(!ok\) return/.test(messageSrc), true)
 
