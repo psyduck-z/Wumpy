@@ -319,6 +319,19 @@ body {
   display: flex;
   flex-direction: column;
   max-width: 100%;
+  /*
+   * And it may be narrower than what is in it.
+   *
+   * A flex item's min-width is `auto`, which means "at least as wide as my
+   * content wants to be" - so one wide line inside a message widened the
+   * message, which widened the column, which gave the WHOLE transcript a
+   * horizontal scrollbar. That is the second bar in the screenshot that
+   * started this, the one under everything rather than under the block, and
+   * it is why `overflow-x: auto` on the block alone never contained it:
+   * .scroll sets overflow-y, which makes the x axis `auto` by the same
+   * rule, and then something was always there to scroll.
+   */
+  min-width: 0;
 }
 
 .msg-user {
@@ -508,6 +521,27 @@ body {
   border: 1px solid rgb(var(--border));
   border-radius: 10px;
   padding: 10px 11px;
+  /*
+   * WRAPPED, NOT SCROLLED SIDEWAYS.
+   *
+   * Asked for: "try to reduce all scrolling that especially includes the
+   * bar, especially side to side", with a screenshot of `/log` carrying two
+   * horizontal scrollbars - one inside the block and one under the whole
+   * transcript.
+   *
+   * A sideways scrollbar is the wrong answer in a panel four hundred pixels
+   * wide. It hides the end of every long line behind a gesture, it costs a
+   * row of pixels at the bottom of the block, and in a transcript that
+   * already scrolls downwards it is a second axis to think about. Command
+   * output next door has wrapped since it was written - see .cmd-output pre
+   * - and this is the same decision for the same reason.
+   *
+   * `overflow-x: auto` stays as the floor: a single unbreakable token wider
+   * than the panel - a 300-character URL with no spaces in it - still has
+   * somewhere to go rather than being cut off.
+   */
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
   overflow-x: auto;
   font-family: var(--mono);
   font-size: 12.5px;

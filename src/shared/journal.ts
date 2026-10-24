@@ -342,11 +342,29 @@ function safe(what: string): string {
   return what.replace(/`{4,}/g, (run) => "'".repeat(run.length))
 }
 
-/** How wide a detail may be before it is folded onto the next line. */
-const WIDTH = 40
+/**
+ * How wide the whole listing is allowed to be, in characters.
+ *
+ * Measured off the panel rather than chosen: at the default width the block
+ * has about 337px inside its padding, and the mono face it is set in runs
+ * close to 7px a character - about 48. Forty-four leaves room for the panel
+ * to be a little narrower than the default without a single line reaching
+ * the edge.
+ *
+ * Reported with a screenshot of two horizontal scrollbars: "try to reduce
+ * all scrolling that especially includes the bar, especially side to side".
+ * The rule across each day was 52 characters, which is what was hanging off
+ * the right of the block. The CSS now wraps rather than scrolls, so a line
+ * over this is untidy instead of unreachable - but untidy is still worth
+ * not having.
+ */
+const LINE = 44
 
 /** Where a folded detail picks up again: under the detail, not the time. */
-const INDENT = 16
+const INDENT = 15
+
+/** How wide a detail may be before it is folded onto the next line. */
+const WIDTH = LINE - INDENT
 
 /**
  * One entry, as the lines it occupies.
@@ -356,15 +374,18 @@ const INDENT = 16
  * would be a line nobody reads the end of; broken at a space with a hanging
  * indent it reads like `ps` output, which is the oldest style there is.
  */
-function entryLines(e: Entry): string[] {
+function entryLines(e: Entry, times = 1): string[] {
   /* Nine, not eight: the longest word is `searched`, and padding to its own
      length leaves no gap at all - "searchedelectron 44 release notes" is
      what that looks like. The head is then exactly INDENT wide, which is
      what a folded line lines up under. */
-  const head = `${clock(e.at)}  ${WORD[e.kind].padEnd(9)}`
+  const head = `${clock(e.at)} ${WORD[e.kind].padEnd(9)}`
   const out: string[] = []
   let line = ''
-  for (const word of safe(e.what).split(' ')) {
+  /* "last message repeated 4 times", which is how a log has said this for
+     fifty years - see collapsing in journalLines for why it is honest. */
+  const detail = times > 1 ? `${safe(e.what)} ×${times}` : safe(e.what)
+  for (const word of detail.split(' ')) {
     if (!line) line = word
     else if (`${line} ${word}`.length <= WIDTH) line = `${line} ${word}`
     else {
@@ -386,7 +407,7 @@ function entryLines(e: Entry): string[] {
  */
 function rule(heading: string): string {
   const head = `─── ${heading} `
-  return `${head}${'─'.repeat(Math.max(3, 52 - head.length))}`
+  return `${head}${'─'.repeat(Math.max(3, LINE - head.length))}`
 }
 
 export interface JournalView {
@@ -447,18 +468,37 @@ export function journalLines(entries: readonly Entry[], view: JournalView = {}):
    * the other half of what was asked for: a log that cannot be mistaken for
    * the conversation carrying on around it.
    */
-  const lines = [head, '', FENCE]
-  let day = ''
+  /*
+   * Grouped by day, and a run of the same thing collapsed into one line.
+   *
+   * "Try to reduce all scrolling." The screenshot that came with it had
+   * `desktop 1 step` four times and `one conversation deleted` twice, one
+   * under the other, which is four lines saying what one line and a count
+   * say better - and the count is what keeps it honest, the same bargain
+   * `last message repeated 4 times` has always made. Only a RUN of them,
+   * and only inside one day, so the sequence is never reordered and nothing
+   * that happened between two of them is hidden behind either.
+   */
+  const sections: Array<{ heading: string; rows: Array<{ e: Entry; times: number }> }> = []
   for (const e of shown) {
     const heading = dayHeading(e.at, now)
-    if (heading !== day) {
-      /* A blank line before every section but the first, so the rule has
-         air above it and the block does not open on one. */
-      if (day) lines.push('')
-      day = heading
-      lines.push(rule(heading))
+    let section = sections[sections.length - 1]
+    if (!section || section.heading !== heading) {
+      section = { heading, rows: [] }
+      sections.push(section)
     }
-    lines.push(...entryLines(e))
+    const last = section.rows[section.rows.length - 1]
+    if (last && last.e.kind === e.kind && last.e.what === e.what) last.times += 1
+    else section.rows.push({ e, times: 1 })
+  }
+
+  const lines = [head, '', FENCE]
+  for (const [i, section] of sections.entries()) {
+    /* A blank line before every section but the first, so the rule has air
+       above it and the block does not open on one. */
+    if (i > 0) lines.push('')
+    lines.push(rule(section.heading))
+    for (const row of section.rows) lines.push(...entryLines(row.e, row.times))
   }
   lines.push(FENCE, '')
   if (shown.length < matching.length) {
@@ -470,10 +510,12 @@ export function journalLines(entries: readonly Entry[], view: JournalView = {}):
   /* Said every time, because a list of what somebody has been doing is the
      one feature in this app where "where does this go?" deserves an answer
      before it is asked. */
+  /* Two lines of footer under a block this size was most of a panel, so it
+     says the same two things in a third of the words: where it lives, and
+     that it holds what was DONE and not what was said. */
   lines.push(
-    '_Seven days, on this machine, never sent to a model: what was run, ' +
-      'written, opened or changed — never your messages, the answers, or a ' +
-      'key. `/log clear` forgets it._'
+    '_Seven days on this machine, never sent to a model: what was done, ' +
+      'never what was said. `/log clear` forgets it._'
   )
   return lines
 }

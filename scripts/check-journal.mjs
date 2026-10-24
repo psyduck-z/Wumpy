@@ -274,15 +274,27 @@ const STORED = [...DAYS].reverse()
   check(
     'the time, the sort of thing, and the thing',
     lines.find((l) => l.includes('20:14')),
-    '20:14  model    GLM 5.3 Flash → DeepSeek V4.1 Flash'
+    '20:14 model    GLM 5.3 Flash → DeepSeek V4.1'
   )
-  /* The columns line up, which is the whole of why it is monospace. */
+  /* The columns line up, which is the whole of why it is monospace: every
+     entry's detail starts in the same place, and so does every folded
+     line's. */
+  const bodies = lines.filter((l) => /^\d\d:\d\d /.test(l) || /^ {15}\S/.test(l))
   check(
-    'every entry starts its detail in the same column',
-    new Set(lines.filter((l) => /^\d\d:\d\d /.test(l)).map((l) => l.search(/\S/u) + 16)).size,
+    'every detail starts in the same column',
+    new Set(bodies.map((l) => l.length - l.slice(15).length)).size,
     1
   )
-  check('a sweep reads as a sweep', text.includes('19:58  ranking  9 models in 8 min'), true)
+  check('a sweep reads as a sweep', text.includes('19:58 ranking  9 models in 8 min'), true)
+  /**
+   * And nothing in the block reaches the edge of the panel.
+   *
+   * Reported with a screenshot of two horizontal scrollbars: "try to reduce
+   * all scrolling that especially includes the bar, especially side to
+   * side". The rule across each day was the widest thing in it.
+   */
+  const fenced = text.split('````')[1].split(NL).filter((l) => l.trim())
+  check('no line is wider than the panel', Math.max(...fenced.map((l) => [...l].length)), 44)
 
   /**
    * And the block is fenced, once, with four backticks.
@@ -301,7 +313,7 @@ const STORED = [...DAYS].reverse()
   /* The promise, made every time. A list of what somebody has been doing is
      the one place in this app where "where does this go" deserves an answer
      before it is asked. */
-  check('it says what is not in it', text.includes('never your messages, the answers, or a key'), true)
+  check('it says what is not in it', text.includes('what was done, never what was said'), true)
   check('and that it never leaves', text.includes('never sent to a model'), true)
   check('and how to be rid of it', text.includes('`/log clear`'), true)
 }
@@ -330,8 +342,8 @@ const STORED = [...DAYS].reverse()
     /* The entry's own lines: the one that starts with a time, and any that
        picked it up again under the detail column. Joined back with the
        single space the folding broke it at. */
-    const body = lines.filter((l) => /^\d\d:\d\d/.test(l) || /^ {16}\S/.test(l))
-    const printed = body.map((l) => l.slice(16)).join(' ')
+    const body = lines.filter((l) => /^\d\d:\d\d/.test(l) || /^ {15}\S/.test(l))
+    const printed = body.map((l) => l.slice(15)).join(' ')
     check(`printed as it happened: ${what.slice(0, 26)}`, printed, what)
   }
 }
@@ -349,9 +361,9 @@ const STORED = [...DAYS].reverse()
     NOW
   )
   const lines = J.journalLines([long], { now: NOW }).filter((l) => /\S/.test(l))
-  const body = lines.filter((l) => /^\d\d:\d\d/.test(l) || /^\s{16}\S/.test(l))
+  const body = lines.filter((l) => /^\d\d:\d\d/.test(l) || /^\s{15}\S/.test(l))
   check('it takes more than one line', body.length > 1, true)
-  check('and the second starts under the first', body[1].search(/\S/), 16)
+  check('and the second starts under the first', body[1].search(/\S/), 15)
   /* Nothing is lost to the folding: the words are all still there, in
      order. */
   check(
@@ -359,7 +371,7 @@ const STORED = [...DAYS].reverse()
     body.map((l) => l.trim()).join(' ').replace(/^\S+\s+\S+\s+/, ''),
     'npm run typecheck -- --some-long-flag and another one after it'
   )
-  check('and no line is wider than the panel', Math.max(...body.map((l) => l.length)) <= 56, true)
+  check('and no line is wider than the panel', Math.max(...body.map((l) => l.length)) <= 44, true)
 }
 
 /**
@@ -404,7 +416,7 @@ const STORED = [...DAYS].reverse()
 /* One sort of thing only. */
 {
   const only = J.journalLines(STORED, { now: NOW, only: 'model', limit: null }).join(NL)
-  check('a filter keeps its own', only.includes('DeepSeek V4.1 Flash'), true)
+  check('a filter keeps its own', only.includes('GLM 5.3 Flash → DeepSeek'), true)
   check('and drops the rest', only.includes('npm run build'), false)
   const none = J.journalLines(STORED, { now: NOW, only: 'write', limit: null }).join(NL)
   check('a filter that matches nothing says so', none.includes('Nothing of that sort'), true)
