@@ -96,6 +96,14 @@ import { Toast } from './components/Toast'
 import { forgetActions, record } from './ledger'
 import { matchIntent } from './intents'
 import { AUTO_RUN_LIMIT, autoRunEligible } from './autorun'
+import {
+  circlingNote,
+  screenPrint,
+  shortStep,
+  stuck,
+  trailLines,
+  type Visit
+} from '@shared/circling'
 import { DOCK_CYCLE, Header } from './components/Header'
 import { Message } from './components/Message'
 import { Composer } from './components/Composer'
@@ -659,6 +667,28 @@ export default function App(): React.JSX.Element {
      */
     const picture = shot.picture !== false
     const nothing = !picture && !(shot.elements ?? []).length
+    /*
+     * A look joins the trail too.
+     *
+     * The loop that made this necessary alternated acting and looking, and
+     * the looks are the half that reaches a model with no memory of them:
+     * KEEP_PICTURES is 2, so the third look at the passage is the first one
+     * the model cannot compare with anything. Counted here, so "the same
+     * screen as step 4" can be said at all - and so a run of nothing but
+     * looks reaches the same ceiling a run of steps does.
+     *
+     * The picture is still attached when the trail says to stop. Dropping it
+     * would save 1,100 tokens and make the paragraph above it untrue, which
+     * is the trade this file has already got wrong once.
+     */
+    trailRef.current.push({
+      step: 'looked at the screen',
+      screen: screenPrint(shot.elements, shot.bytes),
+      controls: shot.elements?.length ?? 0
+    })
+    const trail = trailLines(trailRef.current)
+    const circling = circlingNote(trailRef.current)
+    const halted = stuck(trailRef.current)
     chatRef.current.send(
       [
         ...(picture
@@ -710,8 +740,13 @@ export default function App(): React.JSX.Element {
               'Nothing could be read: desktop control is off, so there is no control',
               'list either. Say so and ask them to turn it on in settings.'
             ]
-          : namedControls(shot))
-      ].join(String.fromCharCode(10)),
+          : namedControls(shot)),
+        ...(trail.length ? ['', ...trail] : []),
+        circling ? `${NEWLINE}${circling}` : '',
+        halted ? `${NEWLINE}STOP: ${halted}` : ''
+      ]
+        .filter(Boolean)
+        .join(String.fromCharCode(10)),
       picture ? 'Shared my screen' : 'Looked at my screen',
       /* Nothing is attached when there is no picture: an empty data URL
          through the wire is an attachment that renders as a broken image. */
@@ -776,7 +811,32 @@ function namedControls(shot: Attachment): string[] {
   /** Only with browser control on; the main process enforces that too. */
   const canDrive = settings?.browserEnabled ?? false
 
-  const runDesktop = useCallback((body: string) => window.wumpy.desktop.run(body), [])
+  /**
+   * Where this run of automatic steps has already been.
+   *
+   * In a ref for the reason the unattended-run budget is: a card decides
+   * whether to act in an effect the moment it appears, and state lands a
+   * render later. Reset when the user types - see onSend - which makes
+   * typing both the rule and the way out of it.
+   */
+  const trailRef = useRef<Visit[]>([])
+
+  /**
+   * Runs a plan, unless the trail says the plan is going in circles.
+   *
+   * Refused here rather than in main, because the thing being judged is the
+   * SEQUENCE and only this side has it: main sees one plan at a time and
+   * answers it correctly every time. Reported as a refusal and not as a
+   * question - accept-all means nothing stops to ask, and this does not ask,
+   * it declines and says why. The user's next message starts a fresh chain.
+   */
+  const runDesktop = useCallback(async (body: string): Promise<DesktopResult> => {
+    const why = stuck(trailRef.current)
+    if (why) {
+      return { ran: [], refused: why, stopped: null, problems: [], after: null }
+    }
+    return window.wumpy.desktop.run(body)
+  }, [])
 
   /**
    * Hands the result, and the screen afterwards, back as the user's turn.
@@ -813,6 +873,32 @@ function namedControls(shot: Attachment): string[] {
         `Wumpy's own panel was in front, so the steps acted on the window behind it: "${result.acting}".`
       )
     }
+    /*
+     * The trail, which is the memory the pictures cannot be.
+     *
+     * One entry per step that actually ran, so a refusal adds nothing: the
+     * chain is already stopped and a line saying "did not go anywhere" would
+     * be a step that never happened. KEEP_PICTURES is 2, deliberately, so
+     * from the third step on this is the ONLY thing standing between the
+     * model and scrolling back to a screen it read four steps ago.
+     */
+    if (!result.refused) {
+      /* The LAST step of the plan, because that is the one that left the
+         screen in the state the print describes. Nearly every plan in this
+         loop is one step anyway - that is what makes it a loop. */
+      const last = result.ran[result.ran.length - 1]
+      trailRef.current.push({
+        step: shortStep(last?.step ?? 'a step'),
+        screen: screenPrint(after?.elements, after?.bytes ?? 0),
+        controls: after?.elements?.length ?? 0
+      })
+    }
+    const trail = trailLines(trailRef.current)
+    const circling = circlingNote(trailRef.current)
+    /* Asked before the next card gets the chance, so the report can say the
+       sequence is over in the same breath as saying what the step did. */
+    const halted = stuck(trailRef.current)
+
     const report = [
       'The plan was carried out automatically. This is a report, not the user',
       'speaking - they have said nothing. What each step did:',
@@ -825,7 +911,14 @@ function namedControls(shot: Attachment): string[] {
         : after
           ? 'No picture was taken - you cannot read one. These are the controls on screen now.'
           : '',
-      ...(after ? namedControls(after) : [])
+      ...(after ? namedControls(after) : []),
+      /* Last, and in this order: where it has been, that it is back
+         somewhere it has been, and whether anything further will run. A
+         model reads the end of a report; this is the part it has to act
+         on. */
+      ...(trail.length ? ['', ...trail] : []),
+      circling ? `${NEWLINE}${circling}` : '',
+      halted ? `${NEWLINE}STOP: ${halted}` : ''
     ]
       .filter(Boolean)
       .join(String.fromCharCode(10))
@@ -2094,6 +2187,11 @@ function namedControls(shot: Attachment): string[] {
       setAutoRuns(0)
       autoRunsRef.current = 0
       ranCommandsRef.current = []
+      /* And the trail of where a plan of clicks has been, for the same
+         reason and with one more: a sequence that was stopped for going in
+         circles is stopped until they say something, so this is the way out
+         of it. "Carry on" is a fresh chain. See @shared/circling. */
+      trailRef.current = []
 
       // Something said while the model is still writing. /also is for when the
       // answer is going the right way and you have one more fact to add: the

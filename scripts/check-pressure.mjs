@@ -255,9 +255,22 @@ check(
 
 /*
  * The cut takes everything from the list's first line to the END of the
- * message, which is exact only while the list is written last. It is, at all
- * three places that write one - so this fails the day something is appended
- * after it, rather than silently throwing that something away.
+ * message, so whatever is written after a control list goes when the list
+ * goes. That used to be nothing, at all three places that write one.
+ *
+ * It is no longer nothing: @shared/circling appends the trail of where a
+ * plan of clicks has been, the note saying the newest screen is one it has
+ * already seen, and the line stopping a sequence that is going in circles.
+ * Those are RIGHT to be cut, and that is the only reason they are allowed
+ * here: every one of them describes the chain as it stands, the newest
+ * message always carries the whole trail, and twenty stale copies of it in
+ * a conversation that is already at its context limit is the cost this
+ * function exists to avoid.
+ *
+ * So the rule is an allowlist rather than "nothing follows". Anything new
+ * appended after a control list fails this, which is the tripwire the old
+ * form was - and the day something appended there must survive, it goes
+ * BEFORE the list instead.
  */
 {
   const lines = readFileSync('src/renderer/src/App.tsx', 'utf8').split(NL)
@@ -265,11 +278,29 @@ check(
     .map((line, i) => ({ line, i }))
     .filter(({ line }) => line.includes('namedControls(') && !line.includes('function namedControls'))
   check('every control list is written', calls.length, 3)
+  /** What may follow a control list, because it is stale once the list is. */
+  const CUTTABLE = [/^\.\.\.\(trail\.length/, /^circling \?/, /^halted \?/]
   const trailing = calls.filter(({ i }) => {
-    const next = lines.slice(i + 1).find((l) => l.trim())
-    return (next ?? '').trim().startsWith(']')
+    /* Comments and blanks are not content - including the middle lines of a
+       block comment, which in this file are prose and start with a word. */
+    let inComment = false
+    for (const line of lines.slice(i + 1)) {
+      const text = line.trim()
+      if (inComment) {
+        if (text.endsWith('*/')) inComment = false
+        continue
+      }
+      if (!text || text.startsWith('//')) continue
+      if (text.startsWith('/*')) {
+        if (!text.endsWith('*/')) inComment = true
+        continue
+      }
+      if (text.startsWith(']')) return true
+      if (!CUTTABLE.some((ok) => ok.test(text))) return false
+    }
+    return false
   })
-  check('and every one of them is written last', trailing.length, calls.length)
+  check('and what follows one is only ever cuttable', trailing.length, calls.length)
 }
 
 check('main trims before it sends', /trimPictures\(/.test(readFileSync('src/main/index.ts', 'utf8')), true)
