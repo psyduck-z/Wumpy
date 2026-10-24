@@ -112,8 +112,17 @@ export const MAX_ENTRIES = 1000
  */
 export const MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000
 
-/** How many the bare command shows. The rest are a word away with `/log all`. */
-export const RECENT = 24
+/**
+ * How many the bare command shows. The rest are a word away with `/log all`.
+ *
+ * Sixteen rather than a round twenty-four, because of where the listing
+ * ends up: a fenced block folds itself behind a "N lines" button past
+ * CODE_LINES, which is 30. Sixteen entries, their day rules and the odd
+ * folded detail come to the mid-twenties, so the answer to `/log` is
+ * readable where it lands. `/log all` is allowed to fold - somebody who
+ * asked for everything can open it.
+ */
+export const RECENT = 16
 
 /** Tidies a detail into one line of at most MAX_DETAIL characters. */
 export function detailOf(what: string): string {
@@ -297,32 +306,87 @@ export function dayHeading(at: number, now = Date.now()): string {
 }
 
 /**
- * A detail safe to put in a table cell.
+ * The fence the whole listing sits in, and why it is four backticks.
  *
- * Every line in here is machine text - a command, a Windows path, a search
- * somebody typed - going into a markdown table that is rendered as markdown.
- * Two ways that goes wrong, both of them silent:
+ * Asked for: "don't make it a table, make it look more old style, like, you
+ * know, more basic. More like, you know, not like a table style." A log is
+ * one of the oldest formats there is - a time, a word, a thing - and a
+ * markdown table with its rules and header separators is the opposite of
+ * that.
  *
- *   a PIPE is the column separator, and a PowerShell pipeline is the one
- *   thing in here that routinely contains one. `Get-Process | Where-Object`
- *   would be rendered as two more columns of nonsense.
+ * It also settles something a table could only paper over. Every line in
+ * here is machine text: a command, a Windows path, a search somebody typed.
+ * In a table cell a PIPE splits the row, so `Get-Process | Where-Object`
+ * became three columns of nonsense; `C:\Users\_me_\x` lost both underscores
+ * to emphasis and rendered as a path that points nowhere; `echo <html>`
+ * lost the tag altogether, because the panel renders markdown with raw HTML
+ * off. Each of those needed escaping, and escaping is a thing that can be
+ * got wrong silently - this repo has had that bug four times. Inside a
+ * fence nothing is interpreted at all, so the log can do what a log should
+ * and print what happened, verbatim.
  *
- *   and the EMPHASIS characters quietly eat themselves. `C:\Users\_me_\x`
- *   loses both underscores and italicises what is between them; a path with
- *   a `*` in it loses that too. Backslashes are escaped for the same reason
- *   one step further back: `\_` is an escape in markdown, so leaving them
- *   alone is how `C:\_private` renders as `C:_private` - a path that looks
- *   right, points nowhere, and is the fourth appearance of that bug in this
- *   repo. See check-controlchars.mjs.
- *
- * The angle brackets and the ampersand are in the list for the same reason
- * one layer up: the panel renders markdown with raw HTML OFF, so `echo
- * <html>` loses the tag entirely rather than showing it. All of these are
- * ASCII punctuation, and a backslash in front of ASCII punctuation renders
- * as the character itself - so the cell says what the command said.
+ * FOUR backticks, because the one thing a fence cannot survive is a fence.
+ * A recorded command may contain three of them, and three would end the
+ * block there and spill the rest of the log into the page as markdown.
  */
-function cell(what: string): string {
-  return what.replace(/([\\`*_~[\]|<>&])/g, '\\$1')
+const FENCE = '````'
+
+/**
+ * A detail that cannot end the block it is in.
+ *
+ * The only change made to a line, and it is for the one sequence that could
+ * escape: four or more backticks. Anything else is left exactly as it was
+ * recorded, which is the whole point of the fence.
+ */
+function safe(what: string): string {
+  return what.replace(/`{4,}/g, (run) => "'".repeat(run.length))
+}
+
+/** How wide a detail may be before it is folded onto the next line. */
+const WIDTH = 40
+
+/** Where a folded detail picks up again: under the detail, not the time. */
+const INDENT = 16
+
+/**
+ * One entry, as the lines it occupies.
+ *
+ * Folded rather than left to run off the side. A code block scrolls
+ * sideways and the panel is four hundred pixels wide, so a long command
+ * would be a line nobody reads the end of; broken at a space with a hanging
+ * indent it reads like `ps` output, which is the oldest style there is.
+ */
+function entryLines(e: Entry): string[] {
+  /* Nine, not eight: the longest word is `searched`, and padding to its own
+     length leaves no gap at all - "searchedelectron 44 release notes" is
+     what that looks like. The head is then exactly INDENT wide, which is
+     what a folded line lines up under. */
+  const head = `${clock(e.at)}  ${WORD[e.kind].padEnd(9)}`
+  const out: string[] = []
+  let line = ''
+  for (const word of safe(e.what).split(' ')) {
+    if (!line) line = word
+    else if (`${line} ${word}`.length <= WIDTH) line = `${line} ${word}`
+    else {
+      out.push(line)
+      line = word
+    }
+  }
+  if (line) out.push(line)
+  return out.map((text, i) => (i === 0 ? `${head}${text}` : `${' '.repeat(INDENT)}${text}`))
+}
+
+/**
+ * The rule above a day's entries.
+ *
+ * Asked for in the same breath as the plainer format: "just make it hard,
+ * like it's a separate section". A bold heading between two tables was a
+ * change of weight; this is a line drawn across the block, which is the
+ * thing an eye actually stops at.
+ */
+function rule(heading: string): string {
+  const head = `─── ${heading} `
+  return `${head}${'─'.repeat(Math.max(3, 52 - head.length))}`
 }
 
 export interface JournalView {
@@ -375,18 +439,28 @@ export function journalLines(entries: readonly Entry[], view: JournalView = {}):
      ones, which is the opposite of what reading the first page would give. */
   const shown = (limit === null ? matching.slice() : matching.slice(-limit)).reverse()
 
-  const lines = [head]
+  /*
+   * One block, with the days as sections inside it.
+   *
+   * The fence is opened once rather than per day, so the whole listing is a
+   * single thing in the transcript with a hard edge at each end - which is
+   * the other half of what was asked for: a log that cannot be mistaken for
+   * the conversation carrying on around it.
+   */
+  const lines = [head, '', FENCE]
   let day = ''
   for (const e of shown) {
     const heading = dayHeading(e.at, now)
     if (heading !== day) {
+      /* A blank line before every section but the first, so the rule has
+         air above it and the block does not open on one. */
+      if (day) lines.push('')
       day = heading
-      lines.push('', `**${heading}**`, '', '| | | |', '| --- | --- | --- |')
+      lines.push(rule(heading))
     }
-    lines.push(`| ${clock(e.at)} | ${WORD[e.kind]} | ${cell(e.what)} |`)
+    lines.push(...entryLines(e))
   }
-
-  lines.push('')
+  lines.push(FENCE, '')
   if (shown.length < matching.length) {
     lines.push(
       `_The last ${shown.length} of ${matching.length}, newest first. ` +
@@ -471,7 +545,10 @@ export function sweepLine(sweep: { models: number; asked: number; tookMs: number
 export function rankNote(why: 'off' | 'onekey' | null, model: string): string {
   if (why === null) return 'ready again'
   if (why === 'off') return 'switched off'
-  return `standing down — ${model} has only one key, and it is the one answering`
+  /* Short, because it is a log line and `/rank` is where the explanation
+     lives. The model is named because the model is the cause and nothing
+     about the ranking says so. */
+  return `standing down — ${model} has one key`
 }
 
 /**

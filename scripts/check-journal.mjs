@@ -231,7 +231,7 @@ check('and one model is not "1 models"', J.sweepOpen(1), 'measuring 1 model…')
 check(
   'standing down names the model that caused it',
   J.rankNote('onekey', 'Gemma 4 31B (Ollama cloud)'),
-  'standing down — Gemma 4 31B (Ollama cloud) has only one key, and it is the one answering'
+  'standing down — Gemma 4 31B (Ollama cloud) has one key'
 )
 check('turned off is just turned off', J.rankNote('off', 'anything'), 'switched off')
 /* A line saying it stopped and no line saying it started again is worse
@@ -254,18 +254,50 @@ const STORED = [...DAYS].reverse()
   const lines = J.journalLines(STORED, { now: NOW })
   const text = lines.join(NL)
   check('the report names itself', lines[0], '**What Wumpy has done**')
-  check('today is a heading', text.includes('**Today**'), true)
-  check('so is yesterday', text.includes('**Yesterday**'), true)
+  /**
+   * Asked for: "don't make it a table, make it look more old style... more
+   * basic. More like, not like a table style." So: no table anywhere in it,
+   * and the day sections are a rule drawn across the block rather than a
+   * heading in bold - "just make it hard, like it's a separate section".
+   */
+  check('nothing in it is a table', text.includes('| --- |'), false)
+  check('today is a rule across the block', text.includes('─── Today ────'), true)
+  check('so is yesterday', text.includes('─── Yesterday ────'), true)
   /* Spelled out rather than taken from Intl, so the wording can be checked
      at all. 20 Oct 2026 was a Tuesday. */
-  check('and an older day is dated', text.includes('**Tue 20 Oct**'), true)
+  check('and an older day is dated', text.includes('─── Tue 20 Oct ────'), true)
+  /* Every rule the same width, or they do not read as one set of sections. */
+  const rules = lines.filter((l) => l.startsWith('───'))
+  check('three days, three rules', rules.length, 3)
+  check('all the same width', new Set(rules.map((r) => [...r].length)).size, 1)
   check('newest first', text.indexOf('20:14') < text.indexOf('19:58'), true)
   check(
     'the time, the sort of thing, and the thing',
     lines.find((l) => l.includes('20:14')),
-    '| 20:14 | model | GLM 5.3 Flash → DeepSeek V4.1 Flash |'
+    '20:14  model    GLM 5.3 Flash → DeepSeek V4.1 Flash'
   )
-  check('a sweep reads as a sweep', text.includes('| ranking | 9 models in 8 min |'), true)
+  /* The columns line up, which is the whole of why it is monospace. */
+  check(
+    'every entry starts its detail in the same column',
+    new Set(lines.filter((l) => /^\d\d:\d\d /.test(l)).map((l) => l.search(/\S/u) + 16)).size,
+    1
+  )
+  check('a sweep reads as a sweep', text.includes('19:58  ranking  9 models in 8 min'), true)
+
+  /**
+   * And the block is fenced, once, with four backticks.
+   *
+   * The fence is what makes it a separate thing in the transcript rather
+   * than text the conversation runs into - and four because the one thing a
+   * fence cannot survive is a fence: a recorded command may contain three.
+   */
+  check('the listing is one fenced block', lines.filter((l) => l === '````').length, 2)
+  check('opened before the first rule', lines.indexOf('````') < lines.findIndex((l) => l.startsWith('───')), true)
+  {
+    const sneaky = J.journalLines([J.entry('command', 'echo ```` stop', NOW)], { now: NOW })
+    check('a command cannot end the block early', sneaky.filter((l) => l === '````').length, 2)
+    check('and what it typed is still legible', sneaky.join(NL).includes("echo '''' stop"), true)
+  }
   /* The promise, made every time. A list of what somebody has been doing is
      the one place in this app where "where does this go" deserves an answer
      before it is asked. */
@@ -275,58 +307,83 @@ const STORED = [...DAYS].reverse()
 }
 
 /**
- * A pipe is the column separator, and a PowerShell pipeline is the one thing
- * in here that routinely contains one. Unescaped, `Get-Process | Where-Object`
- * renders as two columns of nonsense in the middle of the table.
- */
-{
-  const piped = J.entry('command', 'Get-Process | Where-Object Name -eq wumpy', NOW)
-  const row = J.journalLines([piped], { now: NOW }).find((l) => l.includes('Get-Process'))
-  /* Four unescaped pipes: the two edges and the two between the columns. The
-     one in the command itself must not be counted, which is the whole point. */
-  check('a pipeline does not break the table', (row.match(/(?<!\\)\|/g) ?? []).length, 4)
-  check('and it is still readable', row.includes('Get-Process \\| Where-Object'), true)
-}
-/**
- * The other half of the same problem, and the quieter half.
+ * VERBATIM, which is what the fence bought.
  *
- * A Windows path goes into a markdown table that is rendered as markdown.
- * `C:\Users\_me_\notes.md` left alone renders as `C:Usersmenotes.md` in
- * italics: a path that looks like a path, points nowhere, and matches the
- * backslash-eating bug this repo has now had four times.
+ * These lines all used to need escaping, and each was a bug first: a
+ * PowerShell pipeline split the row into extra columns, `C:\Users\_me_\x`
+ * lost both underscores to emphasis and rendered as a path that points
+ * nowhere, `echo <html>` lost the tag because raw HTML is off in the panel.
+ * The table needed a rule for every one of them. A fence needs none, and a
+ * log that prints something other than what happened is not a log - so the
+ * assertion is equality, not the absence of damage.
  */
 {
-  const path = String.raw`C:\Users\_me_\notes.md`
-  const row = J.journalLines([J.entry('write', path, NOW)], { now: NOW }).find((l) =>
-    l.includes('notes')
-  )
-  check('a path keeps its backslashes', row.includes(String.raw`C:\\Users\\\_me\_\\notes.md`), true)
-  check('and its underscores', (row.match(/_/g) ?? []).length, 2)
-}
-/**
- * The rest of the set, which is not guesswork: these five lines were run
- * through the panel's own markdown pipeline - remark-parse with remark-gfm,
- * the same two react-markdown uses - and every one came back out of the
- * renderer byte for byte. Raw HTML is off in the panel, which is why the
- * angle brackets are in the list: `echo <html>` loses the tag otherwise.
- */
-{
-  const hazards = [
+  const verbatim = [
+    String.raw`Get-Process | Where-Object Name -eq wumpy`,
+    String.raw`C:\Users\_me_\notes.md`,
     String.raw`echo <html> & dir *.ts`,
     String.raw`git log --oneline | head -5 && echo ` + '`done`',
     String.raw`D:\Dev\[archive]\~old~\file.txt`
   ]
-  for (const what of hazards) {
-    const row = J.journalLines([J.entry('command', what, NOW)], { now: NOW }).find((l) =>
-      l.startsWith('| ')
-    )
-    /* Nothing markdown acts on is left unescaped, and nothing else is
-       touched: every hazardous character in the cell has a backslash in
-       front of it. */
-    const detail = row.split(/(?<!\\)\|/)[3]
-    const loose = detail.match(/(?<!\\)[`*_~[\]<>&]/g)
-    check(`nothing is left to the renderer: ${what.slice(0, 24)}`, loose, null)
+  for (const what of verbatim) {
+    const lines = J.journalLines([J.entry('command', what, NOW)], { now: NOW })
+    /* The entry's own lines: the one that starts with a time, and any that
+       picked it up again under the detail column. Joined back with the
+       single space the folding broke it at. */
+    const body = lines.filter((l) => /^\d\d:\d\d/.test(l) || /^ {16}\S/.test(l))
+    const printed = body.map((l) => l.slice(16)).join(' ')
+    check(`printed as it happened: ${what.slice(0, 26)}`, printed, what)
   }
+}
+
+/**
+ * A long one folds under its own column rather than running off the side.
+ *
+ * A code block scrolls sideways and the panel is four hundred pixels wide,
+ * so a line nobody can read the end of is a line nobody reads.
+ */
+{
+  const long = J.entry(
+    'command',
+    'npm run typecheck -- --some-long-flag and another one after it',
+    NOW
+  )
+  const lines = J.journalLines([long], { now: NOW }).filter((l) => /\S/.test(l))
+  const body = lines.filter((l) => /^\d\d:\d\d/.test(l) || /^\s{16}\S/.test(l))
+  check('it takes more than one line', body.length > 1, true)
+  check('and the second starts under the first', body[1].search(/\S/), 16)
+  /* Nothing is lost to the folding: the words are all still there, in
+     order. */
+  check(
+    'with every word still in it',
+    body.map((l) => l.trim()).join(' ').replace(/^\S+\s+\S+\s+/, ''),
+    'npm run typecheck -- --some-long-flag and another one after it'
+  )
+  check('and no line is wider than the panel', Math.max(...body.map((l) => l.length)) <= 56, true)
+}
+
+/**
+ * And the default answer does not fold itself.
+ *
+ * A fenced block past CODE_LINES is replaced by a "N lines" button, which
+ * for the answer to `/log` would mean asking twice to see it. Measured
+ * against the real constant rather than a number copied here, so RECENT and
+ * the fold rule cannot drift apart silently.
+ */
+{
+  const bulkFile = await bundleShared('bulk')
+  const bulk = await import(pathToFileURL(bulkFile).href)
+  rmSync(bulkFile, { force: true })
+  /* A busy day: the newest RECENT of them, each a line, with day rules. */
+  const busy = []
+  for (let i = 0; i < 60; i++) {
+    busy.push(J.entry('command', `npm run something-${i}`, NOW - i * 20 * MINUTE))
+  }
+  const fenced = J.journalLines(busy, { now: NOW })
+    .join(NL)
+    .split('````')[1]
+  check('the bare report is not folded away', bulk.foldsCode(fenced), false)
+  check('and it is close enough to the limit to matter', bulk.measure(fenced).lines > 15, true)
 }
 
 /* Truncation, and the way out of it. */
@@ -336,11 +393,11 @@ const STORED = [...DAYS].reverse()
   const brief = J.journalLines(many, { now: NOW }).join(NL)
   check('the bare report is the recent ones', brief.includes(`The last ${J.RECENT} of 60`), true)
   check('the newest is in it', brief.includes('run 59'), true)
-  check('the oldest is not', brief.includes('run 0 |'), false)
+  check('the oldest is not', brief.includes('run 0'), false)
   check('and it says how to see the rest', brief.includes('`/log all`'), true)
 
   const full = J.journalLines(many, { now: NOW, limit: null }).join(NL)
-  check('all of it is all of it', full.includes('run 0 |'), true)
+  check('all of it is all of it', full.includes('run 0'), true)
   check('and then there is nothing to announce', full.includes('for the rest'), false)
 }
 
