@@ -896,5 +896,96 @@ check(
   true
 )
 
+/* ------------------------------------------- what is already in the box */
+
+/**
+ * Reported: "it erased my entire signature (built different) and replaced
+ * it with the content, but my signature is supposed to stay there".
+ *
+ * The log is one line, and it reports success: `Put "HI" in "Message Body"
+ * -> FILL ok "Message Body" now says "HI"`. What it does not say is that
+ * emptying the box first deleted everything the user had written in it. The
+ * step did exactly what it was designed to do, so the design was what had
+ * to change: `fill` is for putting text in a box, and deleting what is
+ * already there is now a thing somebody has to ask for by name.
+ */
+{
+  const [fill] = S.readPlan('fill "Message Body" HI').steps
+  check('fill does not ask to delete anything', fill.force, false)
+  const [replace] = S.readPlan('replace "Message Body" HI').steps
+  check('replace is the same step with the deleting asked for', replace.kind, 'fill')
+  check('and it says so', replace.force, true)
+  check('the text still arrives', replace.text, 'HI')
+
+  /* The card is the whole of the review on accept-all, so the word that
+     distinguishes them has to be in the sentence it shows. */
+  check('the card says what is put where', S.describe(fill), 'Put "HI" in "Message Body" and check it')
+  check(
+    'and says plainly when something is being deleted',
+    S.describe(replace),
+    'Replace everything in "Message Body" with "HI" and check it'
+  )
+  /* A secret is still not written down in either form. */
+  const [secret] = S.readPlan('replace "Password" hunter2').steps
+  check('a secret is hidden in the destructive form too', S.describe(secret).includes('hunter2'), false)
+  check('and the card still says it is destructive', S.describe(secret).startsWith('Replace everything in'), true)
+
+  const src = readFileSync('src/main/input.ts', 'utf8')
+  check(
+    'a box with something in it is refused, not emptied',
+    /if \(held\.trim\(\)\.length > 0 && !step\.force\) \{/.test(src),
+    true
+  )
+  /* Refused BEFORE the backspaces, or the guard would be a report of the
+     damage rather than the thing that stopped it. */
+  check(
+    'and refused before anything is deleted',
+    src.indexOf('!step.force') < src.indexOf("await send('KEY ctrl+end'"),
+    true
+  )
+  /* The refusal has to teach both ways out, in its own words: the model
+     reads this and nothing else at the moment it matters. */
+  for (const phrase of ['FILL REFUSED', 'signature', '`focus', '`replace', 'inserts at the caret']) {
+    check(`the refusal names ${JSON.stringify(phrase)}`, src.includes(phrase), true)
+  }
+}
+
+/* --------------------------------------------- which of the two Stanleys */
+
+/**
+ * Reported, with a screenshot of Gmail offering two Stanley Lees - one at
+ * schools.example.edu.au, one at gmail.com: "next time, it should ask me
+ * which email that is showing to send it to, as both are called stanley".
+ *
+ * Typing a partial name into the To box is right; guessing which match it
+ * raised is not, and the guess is one keystroke. This is the one field in a
+ * message where being wrong cannot be taken back.
+ */
+check(
+  'a half-typed recipient raises the question',
+  S.pickingRecipient('To recipients', 'stanley').includes('ask the user which address'),
+  true
+)
+check(
+  'and says not to take the first one',
+  S.pickingRecipient('To recipients', 'stanley').includes('Do NOT press Enter'),
+  true
+)
+for (const box of ['To recipients', 'Cc recipients', 'Bcc recipients', 'To', 'Send to']) {
+  check(`${box} is a box where the wrong one is sent to`, Boolean(S.pickingRecipient(box, 'stanley')), true)
+}
+/* A full address is not ambiguous, and a warning on every correct
+   recipient is a warning nobody reads. */
+check('a whole address raises nothing', S.pickingRecipient('To recipients', 'stanley@example.com'), '')
+check('nor does one with a long domain', S.pickingRecipient('To', 'stanley.lee517@schools.example.edu.au'), '')
+/* And it is about recipients, not about every box a name goes in. */
+check('a subject line is not a recipient', S.pickingRecipient('Subject', 'stanley'), '')
+check('nor is a search box', S.pickingRecipient('Search mail', 'stanley'), '')
+check(
+  'the warning rides on the step that typed it',
+  /pickingRecipient\(step\.name, step\.text\)/.test(readFileSync('src/main/input.ts', 'utf8')),
+  true
+)
+
 console.log(`${NL}${count - failed}/${count} desktop checks passed`)
 if (failed) process.exit(1)

@@ -96,7 +96,30 @@ export type Step =
    * could not, which stops the plan instead of typing the next thing into
    * the void.
    */
-  | { kind: 'fill'; name: string; text: string }
+  | {
+      kind: 'fill'
+      name: string
+      text: string
+      /**
+       * Whether deleting what is already in the box was asked for.
+       *
+       * `fill` does not, and `replace` does, and the difference is a user's
+       * email signature.
+       *
+       * Reported: "it erased my entire signature (built different) and
+       * replaced it with the content, but my signature is supposed to stay
+       * there". The log is one line - `Put "HI" in "Message Body" -> FILL
+       * ok "Message Body" now says "HI"` - and what that line does not say
+       * is that emptying the box first deleted everything the user had in
+       * it. The step was carried out exactly as designed.
+       *
+       * So the design was wrong, in the way a default is wrong: the common
+       * case is a box that is empty, where this changes nothing at all, and
+       * the case it got wrong is the one where somebody's own writing is in
+       * there. A verb that destroys text should be a verb somebody chose.
+       */
+      force: boolean
+    }
 
 export interface Plan {
   /** The `# why` line, for the card. */
@@ -279,7 +302,7 @@ export function readPlan(raw: string): Plan {
       continue
     }
 
-    if (verb === 'fill') {
+    if (verb === 'fill' || verb === 'replace') {
       /*
        * `fill "To recipients" stanley@example.com`
        *
@@ -312,7 +335,9 @@ export function readPlan(raw: string): Plan {
       steps.push({
         kind: 'fill',
         name,
-        text: value.replace(/\\n/g, NL).replace(/\\t/g, TAB)
+        text: value.replace(/\\n/g, NL).replace(/\\t/g, TAB),
+        /* The word the model used IS the permission. See Step.force. */
+        force: verb === 'replace'
       })
       continue
     }
@@ -414,6 +439,47 @@ export function isSecretField(name: string): boolean {
   return SECRET_FIELD.test(name ?? '')
 }
 
+/** A box whose value is a person, where the wrong one is a message sent. */
+const ADDRESS_FIELD = /\b(to|cc|bcc|recipient|recipients|addressee|send to)\b/i
+
+/** Something with an @ and a dot after it: an address, not a search for one. */
+const LOOKS_LIKE_ADDRESS = /\S+@\S+\.\S+/
+
+/**
+ * What to say after a half-typed name lands in a recipient box.
+ *
+ * Reported, with a screenshot of Gmail offering two Stanley Lees - one at
+ * schools.example.edu.au and one at gmail.com: "next time, it should ask me
+ * which email that is showing to send it to, as both are called stanley".
+ *
+ * There is nothing wrong with typing "stanley" into the To box; that is what
+ * a person does. What must not happen next is a guess, and a guess here is
+ * one keystroke - Enter takes whichever suggestion the page has highlighted,
+ * and nothing afterwards says which address it picked. The recipient is the
+ * one field in a message where being wrong cannot be taken back: the mail
+ * goes to a real person who is not the one who was meant.
+ *
+ * So the step that puts a partial name there says so in its own result,
+ * which is where every other correction in this file lives. Nothing is
+ * blocked - the model can still read the list and press the right one - it
+ * is told that picking needs certainty and that asking is available.
+ *
+ * Empty when the text is already an address: "stanley@example.com" in a To
+ * box is not ambiguous, and a warning on every correct recipient is a
+ * warning nobody reads.
+ */
+export function pickingRecipient(name: string, text: string): string {
+  if (!ADDRESS_FIELD.test(name ?? '')) return ''
+  if (LOOKS_LIKE_ADDRESS.test(text ?? '')) return ''
+  return (
+    'This is a partial name in a recipient box, so the page is now offering matches for ' +
+    'it. Do NOT press Enter or pick one on the assumption there is only one: look at the ' +
+    'suggestions on screen, and if more than one person matches - the same name at two ' +
+    'different addresses is the normal case - ask the user which address, with their ' +
+    'addresses quoted, and wait. Pressing one of these decides who gets the message.'
+  )
+}
+
 export function describe(step: Step): string {
   switch (step.kind) {
     case 'click':
@@ -437,12 +503,29 @@ export function describe(step: Step): string {
       }`
     }
     case 'fill': {
+      /*
+       * And whether anything is about to be DELETED, in the sentence the
+       * card shows.
+       *
+       * The card is the whole of the review on accept-all - it is read
+       * after the fact, if at all - so the one word that distinguishes
+       * "put this in the empty box" from "delete what is in the box and
+       * put this there instead" has to be in it. "Put "HI" in "Message
+       * Body" and check it" is what scrolled past while a signature was
+       * being deleted.
+       */
+      const verb = step.force ? 'Replace everything in' : 'Put'
+      const tail = step.force ? 'with' : 'in'
       /* The value goes to the field; it does not go to the log. */
       if (isSecretField(step.name)) {
-        return `Put ${HIDDEN} in ${JSON.stringify(step.name)} and check it`
+        return step.force
+          ? `Replace everything in ${JSON.stringify(step.name)} with ${HIDDEN} and check it`
+          : `Put ${HIDDEN} in ${JSON.stringify(step.name)} and check it`
       }
       const short = step.text.length > 60 ? `${step.text.slice(0, 60)}…` : step.text
-      return `Put ${JSON.stringify(short)} in ${JSON.stringify(step.name)} and check it`
+      return step.force
+        ? `${verb} ${JSON.stringify(step.name)} ${tail} ${JSON.stringify(short)} and check it`
+        : `${verb} ${JSON.stringify(short)} ${tail} ${JSON.stringify(step.name)} and check it`
     }
     case 'read':
       return `Read ${JSON.stringify(step.name)} back`

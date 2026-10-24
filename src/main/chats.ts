@@ -258,6 +258,25 @@ export class ChatStore {
     })
   }
 
+  /**
+   * This chat's picture files that the chat itself no longer names.
+   *
+   * Only this chat's - `imagesOf` is a prefix match - so nothing here can
+   * reach a file belonging to a conversation that is mid-save. A file it
+   * cannot remove is left for the launch-time sweep, which is where every
+   * other unreachable byte is caught.
+   */
+  private dropStale(id: string, keep: ReadonlySet<string>): void {
+    for (const file of this.imagesOf(id)) {
+      if (keep.has(file)) continue
+      try {
+        unlinkSync(join(this.imageDir, file))
+      } catch {
+        /* Locked, or already gone. Not worth failing a save over. */
+      }
+    }
+  }
+
   /** Every image file belonging to one chat, for when it is deleted. */
   private imagesOf(id: string): string[] {
     try {
@@ -341,6 +360,30 @@ export class ChatStore {
     /* After the write, not before: the cap is about old conversations, and
        dropping one must never be the reason this one was not saved. */
     this.prune()
+    /*
+     * And the pictures this chat has stopped naming.
+     *
+     * Asked for as "after i delete the chat, delete the images too", which
+     * `delete` has always done - this is the half it does not reach. A chat
+     * is saved again on every turn, and auto-compaction replaces older
+     * messages with a summary: their screenshots are then written by nobody
+     * and named by nobody, and until now they waited for a launch that found
+     * the folder over 64 MB. On the afternoon this was reported that was
+     * nineteen screenshots, about three megabytes, with nothing left in the
+     * app that could show them.
+     *
+     * Scoped to this chat's own files, so it is a readdir and a prefix
+     * filter rather than parsing every conversation - cheap enough to run
+     * on a save that happens every turn. See sweep() for the launch-time
+     * pass that still catches the cases this cannot: a chat whose JSON will
+     * not parse, and a crash between the two writes.
+     */
+    this.dropStale(
+      chat.id,
+      new Set(
+        record.messages.flatMap((m) => (m.images ?? []).map((img) => img.file ?? '')).filter(Boolean)
+      )
+    )
 
     const { messages: _messages, ...summary } = record
     return summary

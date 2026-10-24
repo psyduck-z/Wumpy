@@ -6,6 +6,7 @@ import {
   HIDDEN,
   isSecretField,
   onShot,
+  pickingRecipient,
   toScreen,
   type Plan,
   type Step
@@ -625,6 +626,40 @@ async function oneStep(
        */
       const before = await readValue(step.name, send)
       const held = before.text ?? ''
+      /*
+       * AND WHAT IS ALREADY IN THERE IS SOMEBODY'S, UNLESS THEY SAID SO.
+       *
+       * Reported: "it erased my entire signature (built different) and
+       * replaced it with the content, but my signature is supposed to stay
+       * there". One step did that - `fill "Message Body" HI` - and it did
+       * exactly what fill is documented to do: find the box, empty it, put
+       * the text in. The destruction was the default.
+       *
+       * It is the default no longer. `fill` into an empty box is the common
+       * case and is untouched; `fill` into a box with writing in it stops
+       * and says what is in there, and `replace` is the word that means
+       * delete it. The model is told both in the same breath, so the cost
+       * of the stricter default is one turn in the rare case and a
+       * signature in the case that was reported.
+       *
+       * The preview matters as much as the refusal: "Built Different" in
+       * the failure line is how the model works out that what it is about
+       * to delete is a signature and not a stale value.
+       */
+      if (held.trim().length > 0 && !step.force) {
+        const preview = secret
+          ? HIDDEN
+          : JSON.stringify(held.length > 80 ? `${held.slice(0, 80)}…` : held)
+        return (
+          `FILL REFUSED ${JSON.stringify(step.name)} is not empty - it holds ${held.length} ` +
+          `character${held.length === 1 ? '' : 's'}: ${preview}. Nothing was typed and nothing ` +
+          'was deleted. If that text should stay - a signature, a draft, a quoted reply - ' +
+          `put the cursor in the box with \`focus ${JSON.stringify(step.name)}\` and \`type\` ` +
+          'what you are adding, which inserts at the caret. If it really should all go, say ' +
+          `\`replace ${JSON.stringify(step.name)} <text>\`, which is this step with the ` +
+          'deleting asked for.'
+        )
+      }
       if (held.trim().length > 0) {
         /*
          * And when there IS something, delete it the way a person does.
@@ -722,7 +757,13 @@ async function oneStep(
          * anyone needs to know about a field called Password.
          */
         const shown = secret ? HIDDEN : JSON.stringify(back.text)
-        return `FILL ok ${JSON.stringify(step.name)} now says ${shown} (via ${back.via})${weak} ${put.note}`
+        /* And, in a recipient box, that choosing between the matches it has
+           just raised is not something to guess at. See pickingRecipient. */
+        const picking = pickingRecipient(step.name, step.text)
+        return (
+          `FILL ok ${JSON.stringify(step.name)} now says ${shown} (via ${back.via})${weak} ` +
+          `${put.note}${picking ? ` ${picking}` : ''}`
+        )
       }
       if (secret) {
         return (

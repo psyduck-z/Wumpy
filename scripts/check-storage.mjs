@@ -178,6 +178,52 @@ const reopened = chats.load('keeper')
 check('the chat still reads back', reopened?.messages?.[0]?.images?.length, 1)
 check('with its bytes inlined', reopened.messages[0].images[0].dataUrl.startsWith('data:'), true)
 
+/**
+ * WHEN THE CHAT STOPS NAMING A PICTURE, THE PICTURE GOES THEN.
+ *
+ * Asked for as "after i delete the chat, delete the images too". Deleting
+ * has always taken them - the assertion below pins that - and the half it
+ * never reached is this one: a chat is saved again on every turn, and
+ * auto-compaction replaces older messages with a summary, so their
+ * screenshots are left named by nobody. Those used to wait for a launch
+ * that found the folder over 64 MB, which on an afternoon of a desktop
+ * sequence is nineteen screenshots and about three megabytes sitting in
+ * the user data directory with nothing in the app that could show them.
+ */
+{
+  chats.save({
+    id: 'shrinks',
+    messages: [
+      { role: 'user', content: 'first', images: [shot('one.jpg')] },
+      { role: 'user', content: 'second', images: [shot('two.jpg')] }
+    ]
+  })
+  const both = readdirSync(imageDir).filter((f) => f.startsWith('shrinks-'))
+  check('two messages, two pictures on disk', both.length, 2)
+
+  /* The same conversation, compacted: the first exchange is now a summary
+     and the picture that was in it is named by nothing. */
+  chats.save({
+    id: 'shrinks',
+    messages: [
+      { role: 'system', content: 'Earlier turns, summarised.', summary: true },
+      { role: 'user', content: 'second', images: [shot('two.jpg')] }
+    ]
+  })
+  const left = readdirSync(imageDir).filter((f) => f.startsWith('shrinks-'))
+  check('the one nothing names any more is gone', left.length, 1)
+  /* And the one still in the conversation is NOT, which is the failure
+     that would make this worse than the leak it fixes. */
+  const still = chats.load('shrinks')
+  check('the picture still in the chat survives', still?.messages?.[1]?.images?.length, 1)
+  check('and its bytes are still readable', still.messages[1].images[0].dataUrl.startsWith('data:'), true)
+
+  /* Deleting takes the rest, which is the part that already worked. */
+  chats.delete('shrinks')
+  check('deleting the chat takes its pictures', readdirSync(imageDir).filter((f) => f.startsWith('shrinks-')).length, 0)
+  check('and leaves every other chat alone', readdirSync(imageDir).includes(mine[0]), true)
+}
+
 /*
  * And the cap. Written straight to disk rather than through 205 saves,
  * because save() calls prune() and prune() lists the folder - the point
