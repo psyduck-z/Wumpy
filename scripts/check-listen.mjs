@@ -70,6 +70,53 @@ const app = read('src/renderer/src/App.tsx')
 
 check('main answers the request with loopback audio', /audio: 'loopback'/.test(panel), true)
 check('and only for our own page', /!request\.frame\.url\.startsWith\('file:'\)/.test(panel), true)
+
+/* --------------------------------------- the gate in front of that handler */
+
+/**
+ * THE PERMISSION RULE, WHICH REFUSED THE WHOLE FEATURE.
+ *
+ * Reported as a panel saying "Could not start listening." and nothing else.
+ * The handler above was never reached: Chromium asks the embedder first, and
+ * the rule there was written when the microphone was all there was.
+ *
+ * The three shapes, measured on Electron 44 rather than assumed - a probe
+ * that logged the request and refused it, so nothing was captured to find
+ * them out:
+ *
+ *   getUserMedia({ audio })   mediaTypes ['audio']   allowed
+ *   getUserMedia({ video })   mediaTypes ['video']   refused, and should be
+ *   getDisplayMedia(...)      mediaTypes []          REFUSED, and should not
+ *
+ * `length === 1` excluded the empty list, and the empty list is the only
+ * shape getDisplayMedia arrives in. So this is pinned from both sides: the
+ * empty one goes through, the camera does not.
+ */
+{
+  /* From the call, not from the comment above it - the doc block names
+     setDisplayMediaRequestHandler, so an indexOf from the top of the file
+     found the mention and sliced backwards into nothing. */
+  const from = panel.indexOf('session.setPermissionRequestHandler')
+  const rule = panel.slice(from, panel.indexOf('session.setDisplayMediaRequestHandler', from))
+  check('the rule was found at all', rule.length > 100, true)
+  check('an empty mediaTypes is granted', /types\.length === 0\) return done\(true\)/.test(rule), true)
+  check('and absent still is', /types === undefined \|\|/.test(rule), true)
+  check('audio alone is granted', /types\.length === 1 && types\[0\] === 'audio'/.test(rule), true)
+  /* Which leaves ['video'] - the camera - as the one shape this gate can
+     see and refuses. It is not allowed to become "anything our page asks". */
+  check('nothing grants a bare video request', /types\[0\] === 'video'/.test(rule), false)
+  check('and a page that is not ours gets nothing', /if \(!own\) return done\(false\)/.test(rule), true)
+}
+
+/*
+ * And refusing the display request is a thing that THROWS, so it may only
+ * happen once. `callback({})` raises "Video was requested, but no video
+ * stream was provided"; inline in the `.then` that threw into the `.catch`,
+ * which refused again - "One-time callback was called more than once", an
+ * unhandled rejection, with the renderer still waiting.
+ */
+check('a refusal is answered once', /const refuse = \(why: string\)/.test(panel), true)
+check('and says why into the log', /console\.warn\(`\[listen\] \$\{why\}`\)/.test(panel), true)
 check('the renderer stops the video track', /track\.stop\(\)/.test(loopback), true)
 check('and removes it from the stream', /stream\.removeTrack\(track\)/.test(loopback), true)
 /* Before anything can decode a frame: the stop must come before the function
@@ -105,6 +152,35 @@ for (const forbidden of ['saveAs', 'writeFile', 'createObjectURL', 'download']) 
  * you stop talking; doing that to a meeting would end the session every time
  * somebody thought about an answer.
  */
+/* ------------------------------------------- and a failure says which one */
+
+/**
+ * THE REASON IS RETURNED, NOT READ BACK OFF A RENDER.
+ *
+ * `start` used to answer true or false, and the caller read
+ * `listening.error` on the next line. That is React state, and the
+ * `listening` object the caller holds is the one from the render still on
+ * screen - so it held what was there BEFORE the call: null. Every failure,
+ * whatever it was, printed the fallback "Could not start listening." and
+ * threw the real reason away one line after working it out.
+ *
+ * Which is how a permission rule refusing the loopback request went
+ * unexplained for as long as it did. A reason that is returned cannot be
+ * stale, and the log gets a copy either way.
+ */
+check('start hands back the reason', /start\(source: AudioSource\): Promise<string \| null>/.test(hook), true)
+check('and the panel prints what it was handed', /const why = await listening\.start\(want\)/.test(app), true)
+check('not what the last render happened to hold', /listening\.error \?\?/.test(app), false)
+/* Including the silent one: already listening used to return false with no
+   reason set at all, which is the only way the fallback was ever honest. */
+check('every refusal has words on it', /return failed\('Already listening\.'\)/.test(hook), true)
+check('and every one of them reaches the log', /console\.warn\(`\[listen\] \$\{why\}`\)/.test(hook), true)
+/* A NotAllowedError here is not Windows saying no - there is no per-app
+   permission for loopback and no privacy toggle for it. Sending the reader
+   to the Windows settings was sending them away from the bug. */
+check('a refusal does not blame Windows', /Windows did not allow/.test(hook), false)
+check('it names what threw', /The capture was refused \(\$\{name/.test(hook), true)
+
 check('listening never ends by itself', /silenceMs: null/.test(hook), true)
 check('and has a ceiling so a forgotten session cannot run for ever', /maxMs: MAX_MS/.test(hook), true)
 check('four hours of it', /4 \* 60 \* 60 \* 1000/.test(hook), true)

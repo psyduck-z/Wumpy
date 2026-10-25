@@ -130,23 +130,41 @@ export class Panel {
     })
 
     /**
-     * The microphone, and nothing else.
+     * The microphone and the loopback tap, and nothing else.
      *
      * Chromium asks the embedder for every permission a page requests, and
      * Electron's default is to refuse - so without this, dictation fails with a
      * NotAllowedError that looks exactly like the user saying no. Granting it
      * wholesale would hand the panel the camera, the clipboard, notifications and
-     * the screen as well, so each request is answered on its own: audio capture
-     * for our own page, nothing for anything else.
+     * the screen as well, so each request is answered on its own.
+     *
+     * THE SHAPES, MEASURED RATHER THAN ASSUMED. Electron 44, this machine:
+     *
+     *   getUserMedia({ audio })  mediaTypes ['audio']   the microphone
+     *   getUserMedia({ video })  mediaTypes ['video']   the camera
+     *   getDisplayMedia(...)     mediaTypes []          the display request
+     *
+     * An EMPTY list was being refused, and an empty list is the only shape
+     * getDisplayMedia ever arrives in - so listening to the speakers failed
+     * at this line, before the handler below could answer it, and the panel
+     * said "Could not start listening." with nothing else to go on. The rule
+     * had been written for the microphone, when the microphone was all there
+     * was, and `length === 1` quietly excluded the feature added later.
+     *
+     * The empty one is granted because this gate cannot see what is being
+     * asked for and the next one can: setDisplayMediaRequestHandler below
+     * decides what is actually shared, and it shares loopback audio. The
+     * camera is still refused here, which is the shape this gate CAN see.
      */
     this.window.webContents.session.setPermissionRequestHandler(
       (contents, permission, done, details) => {
         const own = contents === this.window?.webContents
         if (!own) return done(false)
         if (permission !== 'media') return done(false)
-        // mediaTypes is absent on some requests; audio-only is the only shape we want.
         const types = (details as { mediaTypes?: string[] }).mediaTypes
-        done(types === undefined ? true : types.length === 1 && types[0] === 'audio')
+        // Absent on some requests, empty on the display one: both go through.
+        if (types === undefined || types.length === 0) return done(true)
+        done(types.length === 1 && types[0] === 'audio')
       }
     )
 
@@ -171,22 +189,38 @@ export class Panel {
      */
     this.window.webContents.session.setDisplayMediaRequestHandler(
       (request, callback) => {
+        /*
+         * Refusing is a thing that THROWS, which is why this is a function.
+         *
+         * `callback({})` is how the handler says no, and Electron throws out
+         * of it - "Video was requested, but no video stream was provided".
+         * Written inline inside the `.then`, that throw chained into the
+         * `.catch`, which refused a second time: "One-time callback was
+         * called more than once", an unhandled rejection, and the renderer
+         * still waiting on a promise nobody answered. Found while probing
+         * this handler rather than in the app, because every path that
+         * reaches it is a path where there was nothing to share anyway.
+         */
+        const refuse = (why: string): void => {
+          console.warn(`[listen] ${why}`)
+          try {
+            callback({})
+          } catch {
+            /* The refusal landed; the throw is how it is delivered. */
+          }
+        }
+        /* Only our own page. A remote frame asking to record the machine is
+           not a request this app has any reason to grant. */
         if (request.frame?.url && !request.frame.url.startsWith('file:')) {
-          /* Only our own page. A remote frame asking to record the machine
-             is not a request this app has any reason to grant. */
-          callback({})
-          return
+          return refuse(`refused a request from ${request.frame.url}`)
         }
         desktopCapturer
           .getSources({ types: ['screen'] })
           .then((sources) => {
-            if (!sources.length) {
-              callback({})
-              return
-            }
+            if (!sources.length) return refuse('no screen source, so no loopback tap')
             callback({ video: sources[0], audio: 'loopback' })
           })
-          .catch(() => callback({}))
+          .catch((err: unknown) => refuse(`could not list screens: ${String(err)}`))
       },
       /*
        * No picker. Windows' own share dialog would ask which window to

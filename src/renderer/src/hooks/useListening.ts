@@ -25,7 +25,23 @@ export interface ListeningSession {
   /** Transcribed but not yet counted - the piece currently in Whisper. */
   pending: number
   error: string | null
-  start(source: AudioSource): Promise<boolean>
+  /**
+   * Starts, and RETURNS why not.
+   *
+   * Not a boolean, and that is the whole of a bug worth remembering. The
+   * caller used to read `listening.error` straight after awaiting this -
+   * but `error` is React state, and the `listening` it was reading came
+   * from the render that is still on screen, so it held whatever was there
+   * BEFORE this ran: null. Every failure, whatever it was, printed the
+   * fallback sentence "Could not start listening." and the real reason was
+   * discarded one line after being worked out.
+   *
+   * Which is how a `mediaTypes` rule in main refusing the loopback request
+   * went unexplained: the renderer knew, said so into a state nobody could
+   * read yet, and the panel showed six words. A reason that is returned
+   * cannot be stale.
+   */
+  start(source: AudioSource): Promise<string | null>
   stop(): Promise<Listening | null>
   /** The transcript as it stands, without stopping. */
   peek(): Listening | null
@@ -71,9 +87,18 @@ export function useListening(commands: () => string[]): ListeningSession {
     []
   )
 
+  /** Remembered and handed back, so the caller never reads a stale render. */
+  const failed = useCallback((why: string): string => {
+    console.warn(`[listen] ${why}`)
+    setError(why)
+    return why
+  }, [])
+
   const start = useCallback(
-    async (want: AudioSource): Promise<boolean> => {
-      if (live.current) return false
+    async (want: AudioSource): Promise<string | null> => {
+      /* Said out loud rather than returned bare: a silent false here was one
+         of the three ways this could fail with nothing to show for it. */
+      if (live.current) return failed('Already listening.')
       setError(null)
       piecesRef.current = []
       startedAt.current = Date.now()
@@ -83,14 +108,22 @@ export function useListening(commands: () => string[]): ListeningSession {
       try {
         audio = await listenTo(want)
       } catch (err) {
-        setError(
-          err instanceof Error && /denied|not allowed|NotAllowed/i.test(err.message)
-            ? 'Windows did not allow the capture. Nothing was recorded.'
-            : err instanceof Error
-              ? err.message
-              : 'Could not start listening.'
+        /*
+         * A NotAllowedError is not Windows saying no.
+         *
+         * There is no per-app permission for loopback and no privacy toggle
+         * for it, so this is almost always Wumpy's own permission handler in
+         * main/panel.ts refusing the request - which is exactly what it was
+         * doing, and this sentence sent the reader to the Windows settings
+         * instead. It names both now, in the order worth checking.
+         */
+        const name = err instanceof Error ? err.name : ''
+        const message = err instanceof Error ? err.message : String(err)
+        return failed(
+          /denied|not allowed|NotAllowed/i.test(`${name} ${message}`)
+            ? `The capture was refused (${name || 'NotAllowedError'}). Nothing was recorded.`
+            : message || 'Could not start listening.'
         )
-        return false
       }
       closeAudio.current = audio.stop
 
@@ -145,16 +178,15 @@ export function useListening(commands: () => string[]): ListeningSession {
       } catch (err) {
         audio.stop()
         closeAudio.current = null
-        setError(err instanceof Error ? err.message : 'Could not start recording.')
-        return false
+        return failed(err instanceof Error ? err.message : 'Could not start recording.')
       }
 
       setSource(want)
       setOn(true)
       setSession({ startedAt: startedAt.current, pieces: [] })
-      return true
+      return null
     },
-    [commands, snapshot]
+    [commands, failed, snapshot]
   )
 
   const stop = useCallback(async (): Promise<Listening | null> => {

@@ -1421,9 +1421,12 @@ function namedControls(shot: Attachment): string[] {
    */
   const startListening = useCallback(
     async (want: AudioSource): Promise<void> => {
-      const ok = await listening.start(want)
-      if (!ok) {
-        chat.note(listening.error ?? 'Could not start listening.', true)
+      /* The reason comes back from the call. Reading `listening.error` here
+         read the render that is still on screen, so it was always null and
+         every failure printed the same six words. See start(). */
+      const why = await listening.start(want)
+      if (why) {
+        chat.note(why, true)
         return
       }
       const what =
