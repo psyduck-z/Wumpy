@@ -115,8 +115,19 @@ const tokensFor = (list) => A.preambleTokens({ ...FULL, needs: list })
    turn where somebody contradicts the app looks like any other turn. The
    engine itself is named in OPEN_PROMPT, which a plain turn does not
    send. */
-check('everything, as it was', A.preambleTokens(FULL), 14767)
-check('a turn about nothing in particular', tokensFor([]), 8211)
+
+/* 8,211 -> 8,286 so it stops denying that it can hear. "listen and
+   summarise content in this meeting" was answered with "I can't listen to
+   audio directly", about a feature that was in the status bar at the time:
+   nothing in the preamble had ever mentioned listening, so the model
+   reasoned from what a chat model normally cannot do. 75 tokens, and it
+   goes in APP_PROMPT because it is ungateable in the worst way - the turn
+   where it matters is a sentence about a meeting, which needs no screen, no
+   shell and no search, so every gated section is already out. It earns its
+   place twice over now that `/listen` is gone and asking is the only way
+   in: see intents.ts. */
+check('everything, as it was', A.preambleTokens(FULL), 14842)
+check('a turn about nothing in particular', tokensFor([]), 8286)
 check('which is a third of it gone', A.preambleTokens(FULL) - tokensFor([]) > 4500, true)
 check('a turn about the screen', tokensFor(['desktop']) < A.preambleTokens(FULL), true)
 check('a turn about a website', tokensFor(['open']) < A.preambleTokens(FULL), true)
@@ -340,10 +351,10 @@ check('nor one about opening a site', needs(said('I opened vocabulary.com for yo
 
 /* ------------------------------------------------------- the shape contract */
 
-check('no list at all means everything', A.preambleTokens({ ...FULL }), 14767)
-check('an empty list is a real answer, not everything', tokensFor([]) < 14767, true)
+check('no list at all means everything', A.preambleTokens({ ...FULL }), 14842)
+check('an empty list is a real answer, not everything', tokensFor([]) < 14842, true)
 check('one capability is not the other', tokensFor(['open']) !== tokensFor(['desktop']), true)
-check('every topic together is everything', tokensFor(ALL), 14767)
+check('every topic together is everything', tokensFor(ALL), 14842)
 
 /* --------------------------------------------------------------- the wiring */
 

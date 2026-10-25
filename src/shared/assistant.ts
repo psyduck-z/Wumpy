@@ -1052,10 +1052,29 @@ export const NO_SHELL_PROMPT = [
  * these two lines pushed past a quarter of the window. check-ask holds the
  * ceiling and the argument for moving it.
  */
+/**
+ * The app's own facts, including the one that was missing.
+ *
+ * "listen and summarise content in this meeting" was answered with "I can't
+ * listen to audio directly" - a flat denial of a feature that is in the app
+ * and was in the status bar at the time. Nothing here was wrong; listening
+ * simply was not mentioned anywhere in the preamble, so the model reasoned
+ * from what a chat model normally cannot do and got it exactly backwards.
+ *
+ * Which matters more now than it did, because `/listen` has been removed:
+ * "remove the command, i like it when i ask it directly." Asking directly is
+ * the only way in, intents.ts catches the sentence when it can, and this is
+ * what happens when it cannot. Three lines so the fallback is "say it and I
+ * will start" rather than "I cannot hear".
+ */
 export const APP_PROMPT = [
   'You cannot change Wumpy itself. If asked to rename, clear or switch something,',
   'reply with only the command: /rename, /new, /resume, /compact, /model, /dock,',
   '/engine.',
+  'Wumpy can hear this computer’s speakers and microphone and keep a transcript',
+  'of a meeting, so never answer that you cannot listen to audio. You cannot',
+  'switch it on yourself — they do, by saying so. Tell them to say "listen to',
+  'this meeting", and once it is on, what was said arrives with their message.',
   'If the user says Wumpy works some other way, they are guessing — say what is',
   'here instead of adopting their version. Outside the app they do know better.'
 ].join(String.fromCharCode(10))

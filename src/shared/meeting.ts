@@ -184,6 +184,11 @@ export const NOTES_PROMPT = [
  * Wumpy is listening, every message carries the transcript, so asking about
  * the meeting is just asking. `ask` empty means they wanted the notes.
  *
+ * The command is gone altogether now - "remove the command, i like it when i
+ * ask it directly" - so a session starts from a sentence as well, through
+ * intents.ts. Nothing in here changes: this was always the half that had no
+ * syntax in it.
+ *
  * The last paragraph is what makes that safe. A transcript on every turn
  * means it is also attached to "what is the weather" - so the model is told
  * in as many words that a message which is not about the meeting is an

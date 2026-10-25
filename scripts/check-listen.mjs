@@ -1,8 +1,14 @@
 /**
- * `/listen`: hearing the machine, and the three promises that go with it.
+ * Hearing the machine, and the three promises that go with it.
  *
  * Asked for as meeting notes - "allow the AI to listen to computer audio...
  * during meetings, it's able to get the summary, notes, specific details".
+ *
+ * There is no `/listen` any more: "remove the command, i like it when i ask
+ * it directly". So the way in is a sentence, and the sentence is checked by
+ * running the matcher rather than reading its regex - a pattern that
+ * compiles and matches nothing would pass a source assertion and fail a
+ * user, which is exactly how this was reported.
  *
  * The feature itself cannot be checked without a meeting, but the three
  * things it promises can, and each of them is a promise that would be
@@ -206,18 +212,25 @@ check('a question about notes is a question', M.wantsNotes('what notes did they 
 /* --------------------------------------------- nothing to remember */
 
 /**
- * The complaint, in the user's words: "/listen what did they say about the
- * deadline... that's too long. How am I supposed to remember this?"
+ * NOTHING TO REMEMBER, and by now that is literal.
  *
- * Three ways in now, and none of them is a syntax. The command takes no
- * argument, so the palette runs it on one Enter; plain English reaches it
- * through the intents table; and while it is listening there is nothing to
- * type at all, because every message already carries the transcript.
+ * The complaint, in the user's words: "/listen what did they say about the
+ * deadline... that's too long. How am I supposed to remember this?" The
+ * argument went first, then the word: "remove the command, i like it when i
+ * ask it directly."
+ *
+ * So there is no command, and nothing may quietly put one back - a slash
+ * command that exists is a slash command the help, the palette and the
+ * clickable chips all start teaching again.
  */
 const commands = read('src/renderer/src/commands.ts')
-const listen = commands.slice(commands.indexOf("name: 'listen'"), commands.indexOf("name: 'approve'"))
-check('/listen asks for no argument', listen.includes('arg:'), false)
-check('and its hint does not teach one', /stop\|notes\|question/.test(commands), false)
+check('there is no listen command', /name: 'listen'/.test(commands), false)
+check('nor one hiding under another name', /aliases: \[[^\]]*'(?:meeting|call)'/.test(commands), false)
+check('and nothing offers it as a button', /^\s*'listen',$/m.test(commands), false)
+/* The ACTION stays: the status bar's one button and the intents below both
+   build it, and App.tsx still has the whole of the session in it. */
+check('but the action it built is still there', /kind: 'listen'; what:/.test(commands), true)
+check('and the panel still runs one', /kind: 'listen', what: listening\.on/.test(app), true)
 
 /* Run the matcher rather than reading its regex: a pattern that compiles
    and matches nothing would pass a source assertion and fail a user. */
@@ -233,16 +246,49 @@ await build({
 const { matchIntent } = await import(pathToFileURL(join(process.cwd(), '.listen-intents.mjs')).href)
 rmSync('.listen-intents.mjs', { force: true })
 
+/*
+ * THE SENTENCE THAT WAS REPORTED, first.
+ *
+ * "listen and summarise content in this meeting" reached the model, which
+ * said "I can't listen to audio directly" - a flat denial of a feature that
+ * was running in the same window. The old pattern wanted the object to come
+ * straight after the verb, so four words in the middle of it were enough to
+ * miss. Words between the two are now anything at all; the object is still
+ * required.
+ */
 for (const said of [
+  'listen and summarise content in this meeting',
   'listen to the meeting',
   'start listening to this call',
-  'listen to my speakers',
   'take notes of this meeting',
-  'please start listening to the call'
+  'please start listening to the call',
+  'listen to this call and take notes',
+  'can you listen to this meeting'
 ]) {
   const got = matchIntent(said)
   check(`"${said}" starts it`, got && got.kind === 'listen' && got.what === 'toggle', true)
 }
+/*
+ * And it starts what was actually named.
+ *
+ * "listen to my speakers" used to build the same toggle as everything else,
+ * which opens the microphone too - in a call, every other person in the
+ * room, from a sentence that asked for one side of it. Naming a source was
+ * the one argument `/listen` had that was worth keeping, so it is kept, in
+ * words.
+ */
+for (const [said, want] of [
+  ['listen to my speakers', 'system'],
+  ['listen to the system audio', 'system'],
+  ['listen to my microphone', 'mic'],
+  ['take notes from my mic', 'mic']
+]) {
+  const got = matchIntent(said)
+  check(`"${said}" opens that one`, got && got.what === 'source' && got.ask === want, true)
+}
+/* A meeting is both halves of a meeting, and so is naming neither. */
+check('a meeting is both', matchIntent('listen to the meeting')?.what, 'toggle')
+
 for (const said of ['stop listening', 'stop taking notes', 'end the meeting']) {
   const got = matchIntent(said)
   check(`"${said}" ends it`, got && got.kind === 'listen' && got.what === 'stop', true)
@@ -253,6 +299,21 @@ for (const said of ['stop listening', 'stop taking notes', 'end the meeting']) {
    cannot mean anything else. */
 for (const said of ['listen', 'listen to what I am telling you', 'can you listen to this file']) {
   check(`"${said}" is not a command`, matchIntent(said)?.kind ?? null, null)
+}
+/*
+ * And the thing to listen to can be a THING, which is not this feature.
+ *
+ * Each of these reaches an object word and none of them means open a live
+ * tap on the speakers. They go to the model, which handles a file well: it
+ * can be pointed at one.
+ */
+for (const said of [
+  'can you listen to this audio file',
+  'listen to the recording of the meeting',
+  'take notes from this call recording',
+  'listen to this mp3'
+]) {
+  check(`"${said}" is for the model`, matchIntent(said)?.kind ?? null, null)
 }
 
 check('an ordinary message carries the transcript', /chat\.send\(meetingTurn\(heard, text\), text, images\)/.test(app), true)

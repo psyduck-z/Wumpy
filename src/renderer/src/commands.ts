@@ -655,50 +655,27 @@ export const COMMANDS: CommandSpec[] = [
     arg: 'on|off',
     run: (arg) => ({ kind: 'voice', setting: 'autostop', on: bool(arg) })
   },
-  {
-    /*
-     * Listening to the machine, for meetings.
-     *
-     * ONE WORD, and that is the whole design now. It took an argument for
-     * a day - `/listen notes`, `/listen stop`, and worst of all `/listen
-     * what did they say about the deadline`, which was reported exactly
-     * as it deserved: "that's too long. How am I supposed to remember
-     * this?"
-     *
-     * Nobody should have to. `/listen` starts it and `/listen` stops it,
-     * and while it is listening every ordinary message already carries
-     * the transcript - so asking about the meeting is asking, and the
-     * notes are "notes". See @shared/meeting.meetingTurn and the intents
-     * table, which catches "stop listening" said in English too.
-     *
-     * The old words still work, because somebody may have learned them
-     * in the day they existed, but nothing teaches them any more: `arg`
-     * is gone, so the palette no longer waits for one and Enter runs it.
-     *
-     * NOT aliased to `record`, which is what it is not: nothing is kept
-     * but text, and a name that promises a recording would be a promise
-     * this does not make.
-     */
-    name: 'listen',
-    /* NOT `notes`, which `/remember` has owned since before this existed -
-       and which would be the wrong half anyway: the notes are what comes
-       out, the listening is the thing being switched on. */
-    aliases: ['meeting', 'call'],
-    hint: 'Hear your speakers and take notes — say it again to stop',
-    run: (arg) => {
-      const word = arg.trim().toLowerCase()
-      if (!word) return { kind: 'listen', what: 'toggle', ask: '' }
-      if (['stop', 'off', 'end', 'done'].includes(word)) return { kind: 'listen', what: 'stop', ask: '' }
-      if (['notes', 'summary', 'summarise', 'summarize'].includes(word))
-        return { kind: 'listen', what: 'notes', ask: '' }
-      if (['mic', 'me', 'both', 'system', 'them', 'speakers'].includes(word))
-        return { kind: 'listen', what: 'source', ask: word }
-      /* Anything else said after the word is an ordinary message that
-         happens to begin with it, and ordinary messages already carry the
-         transcript. Nothing to parse. */
-      return { kind: 'listen', what: 'toggle', ask: '' }
-    }
-  },
+  /*
+   * THERE IS NO `/listen`, AND THAT IS THE POINT.
+   *
+   * Asked for in these words, with a screenshot of the thing working as it
+   * should: "remove the command, i like it when i ask it directly."
+   *
+   * It had already been cut down twice. It took an argument for a day -
+   * `/listen notes`, `/listen stop`, and worst of all `/listen what did they
+   * say about the deadline`, which was reported exactly as it deserved:
+   * "that's too long. How am I supposed to remember this?" The argument went,
+   * and then the word itself, because a word somebody has to have met before
+   * is still a thing to remember.
+   *
+   * The action it built has not gone anywhere - see CommandAction's 'listen'.
+   * What builds it now is intents.ts, from the sentence a person would say
+   * without being taught: "listen to this meeting", "listen and summarise
+   * content in this meeting", "stop listening". While a session is running
+   * every ordinary message already carries the transcript, so asking about
+   * the meeting is just asking, and the status bar has the one button there
+   * is. Nothing here needs a name any more.
+   */
   {
     name: 'approve',
     aliases: ['auto', 'permissions'],
@@ -977,7 +954,6 @@ export const CLICKABLE: readonly string[] = [
   'log',
   'pin',
   'reasoning',
-  'listen',
   'voice',
   'polish',
   'autostop',

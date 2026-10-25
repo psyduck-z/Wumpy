@@ -108,20 +108,57 @@ const INTENTS: Intent[] = [
   },
   {
     /*
-     * "listen to the meeting" / "start listening" / "take notes of this call"
+     * "listen to the meeting" / "listen and summarise content in this
+     * meeting" / "take notes of this call"
      *
-     * Because `/listen` is a word somebody has to have met before, and the
-     * complaint behind this whole change was about having to remember any
-     * of it. Saying what you want is the version nobody has to learn.
+     * THIS IS THE ONLY WAY IN NOW. There is no `/listen` - see commands.ts,
+     * where it was removed in these words: "remove the command, i like it
+     * when i ask it directly." So this pattern is not a convenience over a
+     * command any more, and a sentence it fails to recognise is not a user
+     * falling back on typing a slash. It is the model being asked to listen,
+     * having no way to, and saying so - which is how this was reported:
+     * "listen and summarise content in this meeting" answered with "I can't
+     * listen to audio directly."
      *
-     * The object is required for the same reason the rename intent needs
-     * the word "chat": a bare "listen" is a thing people say to each other
-     * in the middle of a sentence, and short-circuiting the model is only
-     * free when the phrasing cannot mean anything else.
+     * So the words between the verb and the object are allowed to be
+     * anything. What is NOT relaxed is the object itself, for the same
+     * reason the rename intent needs the word "chat": a bare "listen" is a
+     * thing people say to each other mid-sentence, and short-circuiting the
+     * model is only free when the phrasing cannot mean anything else.
      */
     pattern:
-      /^(?:please\s+)?(?:start\s+)?(?:listen(?:ing)?|take\s+notes?)\s+(?:to|of|on|in)?\s*(?:this\s+|the\s+|my\s+|a\s+)?(?:meeting|call|conversation|audio|sound|speakers?)\.?$/i,
-    build: () => ({ kind: 'listen', what: 'toggle', ask: '' })
+      /^(?:please\s+)?(?:can\s+you\s+)?(?:start\s+)?(?:listen(?:ing)?|take\s+notes?)\b.*?\b(?:meeting|call|conversation|audio|sound|speakers?|microphone|mic)\b.*$/i,
+    build: (m) => {
+      const said = m.input ?? ''
+      /*
+       * Except when the thing to listen to is a THING.
+       *
+       * "listen to this recording", "can you listen to this audio file" -
+       * both reach the object word and neither means open a live tap on the
+       * speakers. The model handles those, and handles them well: a file is
+       * something it can be pointed at.
+       */
+      if (/\b(?:file|files|recording|recordings|mp3|m4a|wav|clip|video|voicemail|attachment)\b/i.test(said)) {
+        return null
+      }
+      /*
+       * And it listens to what was actually named.
+       *
+       * "listen to my speakers" used to start BOTH taps, microphone
+       * included, because every phrasing built the same toggle. In a call
+       * that is every other person in the room, opened by a sentence that
+       * asked for one side of it. Naming a source is the one argument the
+       * command had that was worth keeping, so it is kept - said in words
+       * rather than as `/listen mic`.
+       */
+      const mic = /\b(?:microphone|mic)\b/i.test(said)
+      const speakers = /\b(?:speakers?|system)\b/i.test(said)
+      if (mic && !speakers) return { kind: 'listen', what: 'source', ask: 'mic' }
+      if (speakers && !mic) return { kind: 'listen', what: 'source', ask: 'system' }
+      /* A meeting is both halves of a meeting, which is also what somebody
+         who named neither is asking for. */
+      return { kind: 'listen', what: 'toggle', ask: '' }
+    }
   },
   {
     /* And the other end of it, where a bare "stop listening" IS unambiguous:

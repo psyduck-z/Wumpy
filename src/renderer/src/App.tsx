@@ -1433,20 +1433,21 @@ function namedControls(shot: Attachment): string[] {
             ? 'your speakers only — not your microphone'
             : 'your microphone only'
       /*
-       * ONE THING TO REMEMBER, and it is not a command.
+       * NOTHING TO REMEMBER, and that is now literally true.
        *
        * This used to end by teaching three forms, one of them `/listen
-       * what did they say about the deadline`. Every message carries the
-       * transcript now, so the only thing worth saying is: talk to it.
-       * `/listen` again stops it, which is the word they just typed.
+       * what did they say about the deadline`. Then it taught one, which
+       * was `/listen` again. There is no such command any more - "remove
+       * the command, i like it when i ask it directly" - so what it says
+       * is the sentence that stops it, which is also just a sentence.
        */
       chat.note(
         [
           `**Listening** to ${what}. Just talk to me — say **notes** for a write-up, ` +
             'or ask anything about what was said.',
           '',
-          `\`/listen\` again stops it. Only the text is kept, no audio, ` +
-            'and the channels are mixed so it cannot say who spoke.',
+          'Say **stop listening** when you are done. Only the text is kept, ' +
+            'no audio, and the channels are mixed so it cannot say who spoke.',
           '',
           '_Recording others may need their consent where you are._'
         ].join(NEWLINE)
@@ -2141,7 +2142,10 @@ function namedControls(shot: Attachment): string[] {
                   ? 'both'
                   : 'system'
             if (listening.on) {
-              chat.note('Already listening. `/listen` to stop, then pick a source.')
+              /* Naming a source only means anything at the start, because
+                 the tap is already open. Not treated as "stop", which is a
+                 thing somebody says on purpose and in words. */
+              chat.note('Already listening. Say **stop listening** first, then ask for the one you want.')
               return
             }
             await startListening(want)
@@ -2297,8 +2301,8 @@ function namedControls(shot: Attachment): string[] {
        * Nobody should have to. A transcript Wumpy is actively building is
        * context for the conversation, the way the screen or an attachment
        * is - not a thing you address with a command. So every message
-       * carries it, including `notes`, and the only word left to remember
-       * is the one that started it.
+       * carries it, including `notes`, and there is no word left to
+       * remember at all: the thing that started it was a sentence.
        *
        * It costs tokens, which is why it is bounded rather than clever:
        * only while a session exists in this chat, said out loud when it
@@ -3340,7 +3344,11 @@ function namedControls(shot: Attachment): string[] {
         onListening={() =>
           void runCommand(
             { kind: 'listen', what: listening.on ? 'stop' : 'notes', ask: '' },
-            '/listen'
+            /* Not `/listen`: there is no such command. Nothing reads this
+               for a 'listen' action anyway - it is the text a command
+               echoes - but a string that looks like one is a thing somebody
+               will copy out of the source and type. */
+            'listen'
           )
         }
         onCycleApproval={() => void runCommand({ kind: 'approve', mode: 'cycle' }, '/approve')}
