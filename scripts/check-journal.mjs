@@ -28,8 +28,9 @@
  * Run with: npm run check:journal
  */
 import { build } from 'esbuild'
-import { readFileSync, rmSync } from 'node:fs'
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
+import { tmpdir } from 'node:os'
 import { pathToFileURL } from 'node:url'
 
 const out = join(process.cwd(), '.journal-check.mjs')
@@ -741,11 +742,102 @@ check('nor the window furniture', changed({ compactWidth: 462, smoothText: true 
   check('the file is written atomically', /writeAtomic\(/.test(store), true)
   check('and read back through the same pruning', /prune\(/.test(store), true)
 
+  /**
+   * AND A `/log` ON SCREEN KEEPS UP WITH IT.
+   *
+   * Asked for: "when my logs is displayed, also make it auto update...
+   * when it rechecks the models, also automatically add that in,
+   * especially while I'm still looking at the logs". The report was a
+   * snapshot of a file that changes, and the change worth watching - a
+   * sweep finishing - happens with nobody typing.
+   */
+  check('every change is announced from one place', /this\.write\(\)\s*\n\s*this\.changed\?\.\(\)/.test(store), true)
+  check('and the panel is what it tells', /journal = new JournalStore\(\(\) => panel\?\.send\(IPC\.journalChanged/.test(main), true)
+  /* No payload: the page fetches only if it has something on screen to
+     bring up to date, so an unwatched machine copies nothing across. */
+  check('with nothing in the message', /IPC\.journalChanged, null\)/.test(main), true)
+
+  const app = readFileSync('src/renderer/src/App.tsx', 'utf8')
+  check('the page listens', /window\.wumpy\.journal\.onChange\(/.test(app), true)
+  /* The newest one only, and only while it is the last thing said: a block
+     that has scrolled above an answer is part of what was said at the time,
+     and rewriting it would be editing the conversation behind the reader. */
+  check(
+    'and only rewrites it while it is the last message',
+    /shown\[shown\.length - 1\]\?\.id !== live\.id\) \{\s*\n\s*liveLog\.current = null/.test(app),
+    true
+  )
+  check('the block is written as one that can be', /chat\.liveNote\(journalLines/.test(app), true)
+
+  const bridge = readFileSync('src/preload/index.ts', 'utf8')
+  check('the bridge carries the news one way', /onChange: \(cb: \(\) => void\) => on\(IPC\.journalChanged/.test(bridge), true)
+
   /* One way: the panel may read it and clear it, and there is no handler for
      writing a line from the renderer at all. */
   const preload = readFileSync('src/preload/index.ts', 'utf8')
   check('the bridge reads and clears, and nothing else', /journal: \{\s*get:[\s\S]*?clear:[\s\S]*?\}/.test(preload), true)
   check('nothing in the bridge can add a line', /journalAdd|journal\.add/.test(preload), false)
+}
+
+/* ------------------------------------------- the store, told to a listener */
+
+/**
+ * The real JournalStore, in a temporary directory, saying what it did.
+ *
+ * Source assertions above prove the wiring is written; this proves it
+ * fires - on a line added, on a sweep's line being finished, and on the
+ * whole thing being forgotten. A `/log` that keeps up is exactly as good as
+ * this callback.
+ */
+{
+  const dir = mkdtempSync(join(tmpdir(), 'wumpy-journal-'))
+  const shim = join(dir, 'electron.mjs')
+  writeFileSync(shim, `export const app = { getPath: () => ${JSON.stringify(dir)} }${NL}`)
+  const built = join(process.cwd(), '.journal-store.mjs')
+  await build({
+    entryPoints: ['src/main/journal.ts'],
+    bundle: true,
+    platform: 'node',
+    format: 'esm',
+    outfile: built,
+    logLevel: 'error',
+    alias: { electron: shim, '@shared': 'src/shared' }
+  })
+  const { JournalStore } = await import(pathToFileURL(built).href)
+  rmSync(built, { force: true })
+
+  let told = 0
+  const store = new JournalStore(() => (told += 1))
+  check('nothing happens, nothing is said', told, 0)
+
+  store.add('rank', J.sweepOpen(9))
+  check('a line is announced', told, 1)
+  check('and it is on the disk', JSON.parse(readFileSync(join(dir, 'journal.json'), 'utf8')).entries.length, 1)
+
+  /* The sweep finishing rewrites its own line, which is a change somebody
+     watching should see: `measuring 9 models…` becoming `9 models in 8
+     min` is the moment the hourly ranking reports in. */
+  check('finishing the sweep line is a change', store.amend('rank', J.sweepOpen(9), '9 models in 8 min'), true)
+  check('and it is announced too', told, 2)
+  check('with nothing added', store.all().length, 1)
+  check('and the line now reads as finished', store.all()[0].what, '9 models in 8 min')
+
+  /* An amend that matches nothing changed nothing, so it says nothing. */
+  check('a miss changes nothing', store.amend('rank', 'not in here', 'x'), false)
+  check('and announces nothing', told, 2)
+
+  /* A refusal folded into the one before it is not a change either. See
+     QUIET_REPEATS: one turn against twenty keys is a dozen of the same
+     fact, and a dozen redraws of the panel for it would be worse. */
+  store.add('limit', 'NVIDIA: rate limited')
+  store.add('limit', 'NVIDIA: rate limited')
+  check('a folded repeat is not a second change', told, 3)
+
+  store.clear()
+  check('forgetting it is a change as well', told, 4)
+  check('and there is nothing left', store.all().length, 0)
+
+  rmSync(dir, { recursive: true, force: true })
 }
 
 console.log(

@@ -800,6 +800,14 @@ export const IPC = {
    */
   journalClear: 'journal:clear',
   /**
+   * A line was added, finished or cleared.
+   *
+   * One way, main to page, and with no payload: the panel fetches the list
+   * again only if it has a `/log` on screen to keep up to date, so a
+   * machine nobody is watching sends a few bytes an hour and nothing else.
+   */
+  journalChanged: 'journal:changed',
+  /**
    * Ask every model in the catalogue whether it answers.
    *
    * Costs one real request per model, so there is deliberately no caller but

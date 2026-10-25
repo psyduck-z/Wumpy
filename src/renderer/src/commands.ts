@@ -417,7 +417,12 @@ export const COMMANDS: CommandSpec[] = [
     /* Not `history`: that is already an alias of `/chats`, and the saved
        conversations are a different thing from what the app has been doing. */
     aliases: ['logs', 'activity', 'timeline'],
-    hint: 'What Wumpy has done, and when',
+    /* "and keeps up" is the thing worth knowing that the output does not
+       say: the block fills in by itself while it is the last message, so
+       an hourly sweep arrives while you are looking at it. Said here
+       rather than in a footer line, which would cost a line of panel on
+       every single `/log`. */
+    hint: 'What Wumpy has done, and when — keeps up as it happens',
     arg: 'all | clear | model | ran',
     /* Offered as a button, but never with its argument: see clickBareOnly. */
     clickBareOnly: true,

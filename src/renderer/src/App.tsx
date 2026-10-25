@@ -89,7 +89,7 @@ import { poolLines } from './quota'
 import { footprintLines } from '@shared/footprint'
 import { settingsLines } from './settingsreport'
 import { rankLines, rankSummary } from '@shared/ranking'
-import { journalLines } from '@shared/journal'
+import { journalLines, type JournalView } from '@shared/journal'
 import { DEFAULT_RUNS, freshLatencies, probeLines } from '@shared/probe'
 import { copyText } from './copy'
 import { Toast } from './components/Toast'
@@ -528,6 +528,46 @@ export default function App(): React.JSX.Element {
    */
   const chatRef = useRef(chat)
   chatRef.current = chat
+
+  /**
+   * The `/log` on screen that is keeping up, if there is one.
+   *
+   * Asked for: "when my logs is displayed, also make it auto update... when
+   * it rechecks the models, also automatically add that in, especially
+   * while I'm still looking at the logs". The report was a snapshot, and
+   * what it reports on happens with nobody typing - a sweep finishing is
+   * the one line somebody sitting looking at the panel would most like to
+   * watch arrive.
+   *
+   * The newest one only, and only while it is the last thing in the chat.
+   * A block that has scrolled above an answer is part of what was said at
+   * the time, and rewriting it would be editing the conversation behind the
+   * reader; once something else is said, it stands as it was.
+   */
+  const liveLog = useRef<{ id: string; view: JournalView } | null>(null)
+
+  useEffect(
+    () =>
+      window.wumpy.journal.onChange(() => {
+        const live = liveLog.current
+        if (!live) return
+        const shown = chatRef.current.messages
+        /* No longer the last thing said, or gone with the chat it was in:
+           it stops keeping up rather than being rewritten where it sits. */
+        if (shown[shown.length - 1]?.id !== live.id) {
+          liveLog.current = null
+          return
+        }
+        /* Fetched only now, which is why the message from main carries no
+           payload: a machine nobody is watching sends a few bytes an hour
+           and copies nothing across the bridge. */
+        void window.wumpy.journal.get().then((entries) => {
+          if (liveLog.current?.id !== live.id) return
+          chatRef.current.update(live.id, journalLines(entries, live.view).join(NEWLINE))
+        })
+      }),
+    []
+  )
   const retitleRef = useRef(retitle)
   retitleRef.current = retitle
 
@@ -1883,14 +1923,18 @@ function namedControls(shot: Attachment): string[] {
             return
           }
           const entries = await window.wumpy.journal.get()
-          chat.note(
-            journalLines(entries, {
-              /* `/log` shows the recent ones; `/log all` and any filtered
-                 view show everything kept. */
-              limit: action.all ? null : undefined,
-              only: action.only
-            }).join(NEWLINE)
-          )
+          const view: JournalView = {
+            /* `/log` shows the recent ones; `/log all` and any filtered
+               view show everything kept. */
+            limit: action.all ? null : undefined,
+            only: action.only
+          }
+          /* Written as a note that can be rewritten, and remembered as the
+             one that keeps up. See the subscription below. */
+          liveLog.current = {
+            id: chat.liveNote(journalLines(entries, view).join(NEWLINE)),
+            view
+          }
           return
         }
         case 'remember': {

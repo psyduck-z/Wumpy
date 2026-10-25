@@ -57,6 +57,16 @@ export interface ChatState {
   history(): Array<{ role: string; content: string }>
   /** Adds a local-only note (command output, errors) without calling the model. */
   note(content: string, error?: boolean): void
+  /**
+   * A note meant to be rewritten later, returning the id to rewrite it by.
+   *
+   * For a report that goes out of date while it is on screen - `/log` and
+   * the hourly ranking. Always appends, unlike `note`, so the id that comes
+   * back is the id of the message it just made.
+   */
+  liveNote(content: string): string
+  /** Rewrites one local note in place. Ignores a message that has gone. */
+  update(id: string, content: string): void
   /** Adds a line the model will see as context, shown as a chip. */
   notice(content: string): void
   /**
@@ -366,6 +376,48 @@ export function useChat(): ChatState {
     })
   }, [])
 
+  /**
+   * A note that is going to be rewritten, and the id to rewrite it by.
+   *
+   * `/log` asked for this: "when my logs is displayed, also make it auto
+   * update... when it rechecks the models, also automatically add that in,
+   * especially while I'm still looking at the logs". A report that is a
+   * snapshot of a file that changes is out of date the moment anything
+   * happens, and the thing it reports on - the hourly ranking - happens
+   * while nobody is typing.
+   *
+   * Deliberately NOT `note`, which folds an identical note into the one
+   * before it and moves it to the end. That is right for "now answering
+   * with X" and wrong here twice over: the id would be the older message's,
+   * and the decision is made inside the state updater where the caller
+   * cannot see it. This one always appends, so the id it returns is the id
+   * of the thing it just made.
+   */
+  const liveNote = useCallback((content: string): string => {
+    const id = nextId()
+    setMessages((prev) => [
+      ...prev,
+      { id, role: 'assistant', content, createdAt: Date.now(), local: true }
+    ])
+    return id
+  }, [])
+
+  /**
+   * Rewrites one message that is already on screen.
+   *
+   * Only ever used on a local note the app itself wrote - nothing the user
+   * said or the model answered is rewritten, which is the rule the whole
+   * transcript rests on. A message that has gone (a new chat, a reopened
+   * one) is left alone rather than resurrected.
+   */
+  const update = useCallback((id: string, content: string) => {
+    setMessages((prev) =>
+      prev.some((m) => m.id === id && m.local)
+        ? prev.map((m) => (m.id === id ? { ...m, content } : m))
+        : prev
+    )
+  }, [])
+
   const setContext = useCallback((ctx: { chatTitle: string | null }) => {
     context.current = ctx
   }, [])
@@ -547,6 +599,8 @@ export function useChat(): ChatState {
     setContext,
     history,
     note,
+    liveNote,
+    update,
     notice,
     notify,
     aside,

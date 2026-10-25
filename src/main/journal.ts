@@ -24,7 +24,14 @@ export class JournalStore {
   private readonly file = join(app.getPath('userData'), 'journal.json')
   private entries: Entry[]
 
-  constructor() {
+  /**
+   * @param changed Told after every line, so a `/log` already on screen can
+   *   keep up with one. Asked for: "when my logs is displayed, also make it
+   *   auto update... especially while I'm still looking at the logs" - and
+   *   the thing most worth seeing arrive is the one that happens while
+   *   nobody is typing, which is the hourly ranking.
+   */
+  constructor(private readonly changed?: () => void) {
     this.entries = this.read()
   }
 
@@ -97,7 +104,19 @@ export class JournalStore {
     this.flush()
   }
 
+  /**
+   * Written, and then said out loud.
+   *
+   * Announced from the one place every change goes through, rather than
+   * from the three that call it: a line that reached the disk and not the
+   * panel is the bug this arrangement cannot have.
+   */
   private flush(): void {
+    this.write()
+    this.changed?.()
+  }
+
+  private write(): void {
     try {
       /* Not indented, unlike the other stores. Those are small and worth
          reading by hand; this one is a thousand lines of three fields, and

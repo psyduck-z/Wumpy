@@ -1888,7 +1888,12 @@ void app.whenReady().then(async () => {
      answer: are these keys on one account or several. See keyAccounts. */
   cloud = new CloudClient(keys, pools, (p) => settings.get('keyAccounts')[p])
   usage = new UsageStore()
-  journal = new JournalStore()
+  /* The panel is told about every line, so a `/log` on screen keeps up
+     with the hourly ranking rather than being a snapshot of the moment it
+     was asked for. `panel` is built on the next line and nothing can add a
+     line before then, but the guard costs nothing and the order of this
+     block is not something to depend on. */
+  journal = new JournalStore(() => panel?.send(IPC.journalChanged, null))
   /* First line of every session. The gaps between these are what explain
      gaps in the timeline: Wumpy was not running. */
   journal.add('start', `version ${app.getVersion()}`)

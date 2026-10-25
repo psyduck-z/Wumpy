@@ -188,7 +188,9 @@ const api = {
   journal: {
     get: (): Promise<Entry[]> => ipcRenderer.invoke(IPC.journalGet),
     /** Resolves to how many lines there were to forget. */
-    clear: (): Promise<number> => ipcRenderer.invoke(IPC.journalClear)
+    clear: (): Promise<number> => ipcRenderer.invoke(IPC.journalClear),
+    /** Something happened. The page decides whether it cares. */
+    onChange: (cb: () => void) => on(IPC.journalChanged, cb)
   },
   /**
    * The background re-ranking: one key measuring the models while the
