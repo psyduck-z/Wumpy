@@ -1925,7 +1925,7 @@ function namedControls(shot: Attachment): string[] {
           const entries = await window.wumpy.journal.get()
           const view: JournalView = {
             /* `/log` shows the recent ones; `/log all` and any filtered
-               view show everything kept. */
+               view show the whole day, which is everything kept. */
             limit: action.all ? null : undefined,
             only: action.only
           }

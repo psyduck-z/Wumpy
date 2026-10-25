@@ -89,28 +89,46 @@ export const MAX_DETAIL = 120
 /**
  * How many lines are kept at all.
  *
- * Enough for a busy week and small enough that the file stays tens of
- * kilobytes - see disk.ts for why that matters: Wumpy's own records were
- * 236 KB of a 38 MB user data directory and the goal is to keep them that
- * way. A thousand lines written without indentation is about 55 KB.
+ * A ceiling and not the usual limit - see startOfDay, which is what actually
+ * decides what is in here. A day that reached a thousand lines would be a day
+ * of nothing but Wumpy, and the cap exists for the case the day rule cannot
+ * cover: something recording in a loop, which would otherwise grow the file
+ * until midnight.
  *
- * The number has to be a week's worth of a BUSY day rather than an average
- * one, because the ranking alone can be two dozen: a sweep an hour for as
- * long as the machine is on. That is also why a sweep is one line and not
- * two - see amended.
+ * Still a thousand rather than lower, because the cheap failure is a file of
+ * 55 KB (a thousand lines, written without indentation) and the expensive one
+ * is a busy morning losing its start. See disk.ts for why the size is worth a
+ * thought at all: Wumpy's own records were 236 KB of a 38 MB user data
+ * directory and the goal is to keep them that way.
  */
 export const MAX_ENTRIES = 1000
 
 /**
- * And how long.
+ * And how long: today, and no longer.
  *
- * Seven days, because this is a record of what somebody did on their own
- * machine and it has no business outliving the question it answers. The same
- * reasoning as usage.ts keeping only today, one step less strict: "when did
- * the model change?" is reasonably asked about last Tuesday, and "what did I
- * run in March" is not a question this exists for.
+ * Asked for in those words - "only keep logs from today". It was seven days,
+ * and the shorter rule is the better one for what this actually answers.
+ * Every question a timeline gets asked here is about the session somebody is
+ * in: why is it on that model, when did the ranking last run, did that
+ * command go twice. "What did I run on Tuesday" is not a question anyone has
+ * asked it, and a week of answers to it is a week of a person's activity
+ * sitting on the disk for no reason - see the file's own note on what is
+ * deliberately not recorded. Keeping less is the same decision as not
+ * writing the key.
+ *
+ * It also makes the report simpler than any wording could: one day, one
+ * section, and `/log all` is a day rather than a week.
+ *
+ * MIDNIGHT, local, and calculated rather than subtracted. `now - 24h` is not
+ * "since midnight" at any hour but midnight, and on the two days a year the
+ * clocks move it is not a day either - the day is 23 hours or 25. setHours
+ * on a local date is the one of these that is right on all three counts.
  */
-export const MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000
+export function startOfDay(now = Date.now()): number {
+  const d = new Date(now)
+  d.setHours(0, 0, 0, 0)
+  return d.getTime()
+}
 
 /**
  * How many the bare command shows. The rest are a word away with `/log all`.
@@ -136,10 +154,19 @@ export function entry(kind: EventKind, what: string, at = Date.now()): Entry {
   return { kind, what: detailOf(what), at }
 }
 
-/** Drops what is older than MAX_AGE_MS. Oldest first, as stored. */
+/**
+ * Drops everything from before today. Oldest first, as stored.
+ *
+ * `>=` and not `>`: a line stamped exactly at midnight belongs to the day
+ * that is starting, and that is the one second where the two readings differ.
+ *
+ * Nothing is dropped from the other end. A timestamp in the future is a
+ * clock that was put back after the line was written, and the event still
+ * happened - dayHeading will date it honestly rather than call it today.
+ */
 export function prune(entries: readonly Entry[], now = Date.now()): Entry[] {
-  const cutoff = now - MAX_AGE_MS
-  return entries.filter((e) => Number.isFinite(e?.at) && e.at > cutoff)
+  const cutoff = startOfDay(now)
+  return entries.filter((e) => Number.isFinite(e?.at) && e.at >= cutoff)
 }
 
 /**
@@ -296,7 +323,13 @@ const MONTHS = [
  *
  * Spelled out rather than taken from Intl: a report that reads differently
  * depending on the machine's locale is a report whose wording cannot be
- * checked, and only a week of days ever appears here.
+ * checked, and barely any day but today ever appears here.
+ *
+ * Barely, rather than never, which is why this still has all three cases in
+ * it. The list only holds today - see startOfDay - but it is read at the
+ * moment a line was added, and a line written at 23:59:59 can be printed at
+ * 00:00:01. The heading then says the day it happened rather than claiming it
+ * was today, and the stale line is gone by the next read.
  */
 export function dayHeading(at: number, now = Date.now()): string {
   if (dayOf(at) === dayOf(now)) return 'Today'
@@ -422,8 +455,12 @@ export interface JournalView {
  * The whole report, as `/log` prints it.
  *
  * Newest first, grouped by day, because "when" is the question and a
- * timeline that starts a week ago is one somebody has to scroll to reach the
- * thing they just did.
+ * timeline that starts at breakfast is one somebody has to scroll to reach
+ * the thing they just did.
+ *
+ * Grouped by day although only today is kept, which costs one line and a
+ * loop: the rule names the day, and the one case where the grouping does
+ * real work is the line that crossed midnight - see dayHeading.
  */
 export function journalLines(entries: readonly Entry[], view: JournalView = {}): string[] {
   const now = view.now ?? Date.now()
@@ -436,11 +473,11 @@ export function journalLines(entries: readonly Entry[], view: JournalView = {}):
     return [
       head,
       '',
-      'Nothing yet. This fills in as things happen — the model changing, a ' +
-        'command running, the hourly re-ranking finishing a sweep.',
+      'Nothing yet today. This fills in as things happen — the model ' +
+        'changing, a command running, the hourly re-ranking finishing a sweep.',
       '',
-      '_Nothing is sent anywhere: it is a list on this machine, kept for ' +
-        'seven days._'
+      '_Nothing is sent anywhere: it is a list on this machine, and it ' +
+        'starts again at midnight._'
     ]
   }
 
@@ -449,7 +486,7 @@ export function journalLines(entries: readonly Entry[], view: JournalView = {}):
     return [
       head,
       '',
-      `Nothing of that sort in the last seven days, out of ${kept.length} ` +
+      `Nothing of that sort today, out of ${kept.length} ` +
         'things that did happen.',
       '',
       '`/log` shows everything.'
@@ -514,8 +551,8 @@ export function journalLines(entries: readonly Entry[], view: JournalView = {}):
      says the same two things in a third of the words: where it lives, and
      that it holds what was DONE and not what was said. */
   lines.push(
-    '_Seven days on this machine, never sent to a model: what was done, ' +
-      'never what was said. `/log clear` forgets it._'
+    '_Today only, on this machine, never sent to a model: what was done, ' +
+      'never what was said. `/log clear` forgets it now._'
   )
   return lines
 }
@@ -604,7 +641,7 @@ export function rankNote(why: 'off' | 'onekey' | null, model: string): string {
  * replace is text this module wrote itself - an open sweep's own line,
  * becoming the same sweep's finished line. A sweep is one event and it has
  * one time, the time it started; recording it twice would be two lines
- * saying one thing, and at a sweep an hour that is most of a week's
+ * saying one thing, and at a sweep an hour that is most of a day's
  * history.
  *
  * Nothing a person or a model did is ever amended. A command that ran is

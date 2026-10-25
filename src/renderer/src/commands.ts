@@ -443,7 +443,7 @@ export const COMMANDS: CommandSpec[] = [
       return {
         kind: 'error',
         message:
-          'Usage: `/log` for the recent ones, `/log all` for everything kept, ' +
+          'Usage: `/log` for the recent ones, `/log all` for the whole day, ' +
           '`/log model` or `/log ran` for one sort, `/log clear` to forget it.'
       }
     }

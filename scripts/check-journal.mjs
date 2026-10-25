@@ -16,9 +16,11 @@
  * damage.
  *
  * A RECORD THAT GROWS IS A LEAK. It is written on every command, every search,
- * every setting; both the count cap and the seven-day cap are checked with
- * real entries, because disk.ts exists because of 38 MB of user data that
- * nobody chose.
+ * every setting; both the count cap and the day rule are checked with real
+ * entries, because disk.ts exists because of 38 MB of user data that nobody
+ * chose. The day rule is the one the user asked for in those words - "only
+ * keep logs from today" - and the three wrong ways to write it are all still
+ * writable, so all three are checked: see startOfDay.
  *
  * AND IT MUST NOT HOLD WHAT IT PROMISES NOT TO. The report says, every time,
  * that there are no keys and no messages in here. That promise is only as good
@@ -152,14 +154,65 @@ check('only one kind folds at all', J.QUIET_REPEATS, ['limit'])
   check('the list stops growing', list.length, J.MAX_ENTRIES)
   check('and it is the OLD end that goes', list[0].what, 'run 50')
 }
+/**
+ * TODAY, AND NOTHING BEFORE IT.
+ *
+ * Asked for in those words: "only keep logs from today". It was seven days,
+ * and the three ways of writing this rule wrongly are all still writable, so
+ * all three are checked:
+ *
+ *   now - 24h          keeps last night. The entry below at yesterday 23:00
+ *                      is three and a half hours old and must still go.
+ *   now - now % DAY    is midnight in UTC, which is lunchtime or teatime
+ *                      somewhere - and the clock the log prints is the one
+ *                      on the taskbar.
+ *   a fixed 24h step   is wrong on the two days a year the clocks move, when
+ *                      the day is 23 hours or 25. See the year below.
+ */
 {
-  const old = J.entry('command', 'eight days ago', NOW - 8 * DAY)
-  const recent = J.entry('command', 'this morning', NOW - 8 * HOUR)
-  check('seven days is the limit', J.prune([old, recent], NOW).length, 1)
-  check('and the one kept is the recent one', J.prune([old, recent], NOW)[0].what, 'this morning')
-  check('adding one also prunes', J.keep([old], recent, 500, NOW).length, 1)
+  const lastNight = J.entry('command', 'late last night', at(1, 23, 0))
+  const thisMorning = J.entry('command', 'this morning', at(0, 8, 12))
+  check('yesterday is not kept', J.prune([lastNight, thisMorning], NOW).length, 1)
+  check('and the one kept is today', J.prune([lastNight, thisMorning], NOW)[0].what, 'this morning')
+  check('adding one also prunes', J.keep([lastNight], thisMorning, 500, NOW).length, 1)
+  /* Not a rolling day: that line is barely three hours old. */
+  check('and it goes even three hours later', NOW - lastNight.at < DAY, true)
+
+  /* Midnight itself belongs to the day that is starting, which is the one
+     second where the two readings of the rule differ. */
+  check('midnight is today', J.prune([J.entry('start', 'on the dot', at(0, 0, 0))], NOW).length, 1)
+  check(
+    'and the instant before it is not',
+    J.prune([{ kind: 'start', what: 'just before', at: at(0, 0, 0) - 1 }], NOW).length,
+    0
+  )
+  check('the cutoff is local midnight', J.startOfDay(NOW), new Date(2026, 9, 23).getTime())
+
+  /**
+   * Every day of a year, including whichever two this machine moves its
+   * clocks on.
+   *
+   * The timezone is whatever the machine has - the point is that the answer
+   * is the local date's own midnight on all 365 of them, which a subtraction
+   * cannot be.
+   */
+  let wrong = 0
+  for (let d = 0; d < 365; d++) {
+    const noon = new Date(2026, 0, 1 + d, 12, 0, 0).getTime()
+    const midnight = new Date(new Date(noon).getFullYear(), new Date(noon).getMonth(), new Date(noon).getDate()).getTime()
+    if (J.startOfDay(noon) !== midnight) wrong++
+  }
+  check('and it is midnight on every day of the year', wrong, 0)
 }
 check('a nonsense timestamp is not kept', J.prune([{ kind: 'start', what: 'x' }], NOW).length, 0)
+/* Nothing is dropped from the other end. A timestamp in the future is a
+   clock that was put back after the line was written, and the event still
+   happened - see dayHeading, which dates it honestly instead. */
+check(
+  'a line from a clock that was put back is kept',
+  J.prune([J.entry('start', 'from the future', NOW + 3 * HOUR)], NOW).length,
+  1
+)
 
 /* ---------------------------------------------------------------- the words */
 
@@ -241,15 +294,17 @@ check('and coming back is a line too', J.rankNote(null, 'anything'), 'ready agai
 
 /* --------------------------------------------------------------- the report */
 
-const DAYS = [
+/* A day's worth, all of it today - which since "only keep logs from today"
+   is every list the report will ever be handed. */
+const TODAY = [
   J.entry('model', 'GLM 5.3 Flash → DeepSeek V4.1 Flash', at(0, 20, 14)),
   J.entry('rank', '9 models in 8 min', at(0, 19, 58)),
   J.entry('command', 'npm run build', at(0, 19, 31)),
-  J.entry('setting', 'panel → bottom-right', at(1, 9, 5)),
-  J.entry('start', 'version 0.1.0', at(3, 8, 2))
+  J.entry('setting', 'panel → bottom-right', at(0, 9, 5)),
+  J.entry('start', 'version 0.1.0', at(0, 8, 2))
 ]
 /* Oldest first, as the store keeps them. */
-const STORED = [...DAYS].reverse()
+const STORED = [...TODAY].reverse()
 
 {
   const lines = J.journalLines(STORED, { now: NOW })
@@ -263,14 +318,10 @@ const STORED = [...DAYS].reverse()
    */
   check('nothing in it is a table', text.includes('| --- |'), false)
   check('today is a rule across the block', text.includes('─── Today ────'), true)
-  check('so is yesterday', text.includes('─── Yesterday ────'), true)
-  /* Spelled out rather than taken from Intl, so the wording can be checked
-     at all. 20 Oct 2026 was a Tuesday. */
-  check('and an older day is dated', text.includes('─── Tue 20 Oct ────'), true)
-  /* Every rule the same width, or they do not read as one set of sections. */
+  /* One day kept is one section: the rule names the day and there is never
+     a second one to scroll past. */
   const rules = lines.filter((l) => l.startsWith('───'))
-  check('three days, three rules', rules.length, 3)
-  check('all the same width', new Set(rules.map((r) => [...r].length)).size, 1)
+  check('one day, one rule', rules.length, 1)
   check('newest first', text.indexOf('20:14') < text.indexOf('19:58'), true)
   check(
     'the time, the sort of thing, and the thing',
@@ -316,7 +367,45 @@ const STORED = [...DAYS].reverse()
      before it is asked. */
   check('it says what is not in it', text.includes('what was done, never what was said'), true)
   check('and that it never leaves', text.includes('never sent to a model'), true)
+  check('and how long it is kept', text.includes('Today only'), true)
   check('and how to be rid of it', text.includes('`/log clear`'), true)
+  /* Nothing in the report still promises a week of it. */
+  check('nothing claims seven days', /seven days|last week/i.test(text), false)
+}
+
+/**
+ * THE DAY HEADING, which now has one case it uses and two it keeps.
+ *
+ * Only today is kept - see startOfDay - so 'Today' is what the rule says.
+ * The other two are not dead code: the list is read at the moment a line is
+ * added, and a line written at 23:59:59 can be printed at 00:00:01. The
+ * heading then dates it instead of calling it today, and it is gone by the
+ * next read.
+ */
+{
+  check('today is today', J.dayHeading(at(0, 9, 0), NOW), 'Today')
+  check('yesterday has its own word', J.dayHeading(at(1, 9, 0), NOW), 'Yesterday')
+  /* Spelled out rather than taken from Intl, so the wording can be checked
+     at all. 20 Oct 2026 was a Tuesday. */
+  check('and anything else is dated', J.dayHeading(at(3, 8, 2), NOW), 'Tue 20 Oct')
+
+  /**
+   * And the one list that really does print two sections: a clock put back.
+   *
+   * The entry is stamped after midnight and the clock now says five to, so
+   * prune keeps it (it is not from before today) and the heading dates it
+   * rather than lying about it. This is also where the rules being the same
+   * width is worth checking, which a single-section report cannot show.
+   */
+  const lateEvening = new Date(2026, 9, 22, 23, 55, 0).getTime()
+  const twoDays = J.journalLines(
+    [J.entry('command', 'before the clock moved', lateEvening - 10 * MINUTE), J.entry('start', 'after it', lateEvening + 10 * MINUTE)],
+    { now: lateEvening }
+  )
+  const rules = twoDays.filter((l) => l.startsWith('───'))
+  check('two days, two rules', rules.length, 2)
+  check('all the same width', new Set(rules.map((r) => [...r].length)).size, 1)
+  check('and the odd one is dated, not called today', rules.some((r) => r.includes('Fri 23 Oct')), true)
 }
 
 /**
@@ -432,13 +521,18 @@ const STORED = [...DAYS].reverse()
   check('with what will fill it', empty.includes('re-ranking'), true)
   check('a table of nothing is not printed', empty.includes('| --- |'), false)
 }
-/* Everything is older than the limit: the same thing as empty, not a table of
-   headings with no rows under them. */
-check(
-  'a list that has all aged out reads as empty',
-  J.journalLines([J.entry('command', 'old', NOW - 9 * DAY)], { now: NOW }).join(NL).includes('Nothing yet'),
-  true
-)
+/* Everything in it is from yesterday: the same thing as empty, not a day rule
+   with no rows under it. This is what the first `/log` of the morning reads
+   like on a machine that was busy all night. */
+{
+  const stale = J.journalLines(
+    [J.entry('command', 'last thing last night', at(1, 23, 50))],
+    { now: NOW }
+  ).join(NL)
+  check('a list that is all from yesterday reads as empty', stale.includes('Nothing yet'), true)
+  check('and says when it starts again', stale.includes('starts again at midnight'), true)
+  check('with no day rule over nothing', stale.includes('───'), false)
+}
 
 /* ------------------------------------------------------- what changed, and what did not */
 
@@ -836,6 +930,37 @@ check('nor the window furniture', changed({ compactWidth: 462, smoothText: true 
   store.clear()
   check('forgetting it is a change as well', told, 4)
   check('and there is nothing left', store.all().length, 0)
+
+  /**
+   * AND THE SWEEP THAT CROSSED MIDNIGHT.
+   *
+   * A sweep waits for quiet moments, so there can be an hour between its
+   * first measurement and its last - which means on any night the machine is
+   * on, one of them opens before midnight and finishes after it. Amending
+   * yesterday's line in place would have put the finished sweep into a list
+   * that is about to drop it, and `/log` would show a sweep that never ended.
+   * So the store prunes before it looks, finds nothing, and sends the ranker
+   * down its other path, which stamps the line today.
+   */
+  const yesterday = Date.now() - 24 * HOUR
+  const before = told
+  store.add('rank', J.sweepOpen(9), yesterday)
+  check('a line stamped yesterday goes as soon as the list is read', store.all().length, 0)
+  /* And the file stops holding it there and then, rather than waiting for
+     the first thing that happens today. */
+  check('the file does not hold it either', JSON.parse(readFileSync(join(dir, 'journal.json'), 'utf8')).entries.length, 0)
+  /* Written back, but not announced: whoever is reading is about to be
+     handed the pruned list anyway. */
+  check('and reading it is not announced', told, before + 1)
+  check(
+    'a sweep from yesterday is not finished in place',
+    store.amend('rank', J.sweepOpen(9), '9 models in 8 min'),
+    false
+  )
+  /* Which is the line the app writes when that comes back false. */
+  store.add('rank', '9 models in 8 min')
+  check('so the finished sweep is written fresh, today', store.all().length, 1)
+  check('with the time it was written', J.dayHeading(store.all()[0].at), 'Today')
 
   rmSync(dir, { recursive: true, force: true })
 }

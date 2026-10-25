@@ -15,7 +15,7 @@ import { amended, entry, isRepeat, keep, prune, type Entry, type EventKind } fro
  * list would have been empty for exactly those, and emptied again by every
  * reload.
  *
- * Small on purpose - see MAX_ENTRIES and MAX_AGE_MS, both in @shared/journal
+ * Small on purpose - see startOfDay and MAX_ENTRIES, both in @shared/journal
  * with the reasoning. Written atomically because this app is stopped with
  * `Stop-Process -Force` several times an hour and a torn JSON file reads back
  * as no history at all.
@@ -39,9 +39,10 @@ export class JournalStore {
     try {
       const raw = JSON.parse(readFileSync(this.file, 'utf8')) as { entries?: Entry[] }
       if (!Array.isArray(raw?.entries)) return []
-      /* Pruned on the way in as well as on the way out, so a machine that
-         was off for a fortnight does not keep a fortnight-old list alive by
-         never adding to it. */
+      /* Pruned on the way in as well as on the way out, so a launch the
+         morning after keeps nothing: yesterday's lines are dropped here,
+         before anything can read them, rather than waiting for the first
+         thing that happens to today's list. */
       return prune(
         raw.entries.filter(
           (e) => e && typeof e.kind === 'string' && typeof e.what === 'string'
@@ -80,23 +81,46 @@ export class JournalStore {
    * first measurement and becomes `9 models in 8 min` at its last. The time
    * stays the time it started, which is the time somebody is looking for.
    *
-   * False when there was no such line - cleared, or aged out of a sweep
-   * that ran across midnight - so the caller can write the finished line
-   * fresh rather than drop the event. See @shared/journal amended for why
-   * this is the only rewriting anything here does.
+   * False when there was no such line - cleared, or belonging to yesterday -
+   * so the caller can write the finished line fresh rather than drop the
+   * event. See @shared/journal amended for why this is the only rewriting
+   * anything here does.
+   *
+   * Pruned BEFORE looking, which is the whole reason that second case is
+   * real. A sweep can be an hour between its first measurement and its last,
+   * so on any night the machine is on there is a sweep that opened at 23:50
+   * and finished after midnight. Amending the old line in place would have
+   * put the finished sweep in a list that is about to drop it, and `/log`
+   * would show a sweep that never ended. Finding nothing instead sends the
+   * caller down its other path, which stamps the line today.
    */
   amend(kind: EventKind, from: string, to: string): boolean {
+    const dropped = this.pruneNow()
     const next = amended(this.entries, kind, from, to)
-    if (!next) return false
-    this.entries = next
-    this.flush()
-    return true
+    if (next) this.entries = next
+    /* Announced on a miss as well, when the miss was yesterday going: the
+       list a `/log` is showing changed, whether or not the sweep's line was
+       in it. */
+    if (next || dropped) this.flush()
+    return next !== null
   }
 
   /** Oldest first, as stored. The report does its own ordering. */
   all(): readonly Entry[] {
-    this.entries = prune(this.entries)
+    /* Written back, but not announced. Somebody is asking for the list right
+       now, so the day turning over is a reason for the file to stop holding
+       yesterday and no reason to tell the panel to ask again - it is about
+       to be handed the pruned answer. */
+    if (this.pruneNow()) this.write()
     return this.entries
+  }
+
+  /** Drops what is not from today, and says whether anything went. */
+  private pruneNow(): boolean {
+    const kept = prune(this.entries)
+    const dropped = kept.length !== this.entries.length
+    this.entries = kept
+    return dropped
   }
 
   clear(): void {
