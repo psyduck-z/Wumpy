@@ -883,6 +883,32 @@ export class CloudClient {
           }, opts.maxTurnMs)
         : null
 
+    /**
+     * What the model actually sent, so a capped turn can say which silence
+     * it was.
+     *
+     * A question asked while Wumpy was listening sat for the full three
+     * minutes and ended in "That turn was taking too long, so Wumpy stopped
+     * it" - which reads as an answer that ran on, and the saved chat says
+     * otherwise: no content, no scratchpad, not one token in 180 seconds.
+     * The two cases need different words because they need different
+     * actions, and "too long" sent the reader to the wrong one.
+     *
+     * The log was no help either: `drain` writes a line per turn and a
+     * capped turn never reaches it, so three dead minutes left nothing
+     * behind at all. Both are the same two booleans.
+     */
+    const seen = { text: false, thinking: false }
+    const watched: StreamHandlers = {
+      onDelta: (delta) => {
+        if (delta.content) seen.text = true
+        if (delta.thinking) seen.thinking = true
+        handlers.onDelta(delta)
+      },
+      onDone: (stats) => handlers.onDone(stats),
+      onError: (message, failure) => handlers.onError(message, failure)
+    }
+
     try {
       const wire: WireMessage[] = wireMessagesFor(provider, [
         ...(opts.systemPrompt ? [{ role: 'system' as const, content: opts.systemPrompt }] : []),
@@ -911,13 +937,31 @@ export class CloudClient {
       // headers are back: measuring from there reported a 9ms turn at 1500
       // tok/s, which is the stream being read, not the model answering.
       const startedAt = Date.now()
-      const res = await this.send(provider, model, body, controller.signal, handlers)
+      const res = await this.send(provider, model, body, controller.signal, watched)
       if (!res) return
 
-      await this.drain(res, handlers, startedAt, provider)
+      await this.drain(res, watched, startedAt, provider)
     } catch (err) {
       if (hitCap) {
-        handlers.onError('That turn was taking too long, so Wumpy stopped it.')
+        const waited = friendlyWait(opts.maxTurnMs)
+        /* In the log as well, because this used to leave nothing in it. */
+        console.warn(
+          `[wumpy] turn capped on ${model} after ${opts.maxTurnMs}ms: ` +
+            (seen.text
+              ? 'an answer was still arriving'
+              : seen.thinking
+                ? 'reasoning only, no answer had started'
+                : 'nothing arrived at all - not one token')
+        )
+        handlers.onError(
+          seen.text
+            ? `Stopped after ${waited}: ${model} was still writing. What arrived is above.`
+            : seen.thinking
+              ? `${model} reasoned for ${waited} and never started answering, so Wumpy ` +
+                'stopped it. `/nothink` for a straight answer, or `/model` for another one.'
+              : `Nothing came back from ${model} in ${waited} — not one token, so this is ` +
+                'the provider rather than the question. Ask again, or `/model` for another one.'
+        )
       } else if ((err as Error)?.name === 'AbortError') {
         handlers.onDone({})
       } else {

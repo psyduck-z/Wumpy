@@ -1102,8 +1102,46 @@ check(
   true
 )
 
-console.log(failures ? `\n${failures} cloud checks FAILED` : '\nall cloud checks')
-process.exitCode = failures ? 1 : 0
+/* ------------------------------------------- a turn that never said anything */
+
+/**
+ * WHICH SILENCE IT WAS, because the two need opposite things done about them.
+ *
+ * "allow it to answer while its listening" started here rather than at the
+ * microphone. A question asked eleven seconds into a session sat for the
+ * full three minutes and came back as "That turn was taking too long, so
+ * Wumpy stopped it" - which describes an answer that ran on, and the saved
+ * chat says the opposite happened: no content, no scratchpad, not one token
+ * from the provider in 180 seconds. One sentence covered a model halfway
+ * through a long answer, a model reasoning in circles and a provider that
+ * never spoke, and sent the reader looking in the wrong place for all three.
+ *
+ * And nothing reached the log at all: the per-turn line is written at the
+ * end of drain(), which a capped turn never gets to, so three dead minutes
+ * left no trace to read afterwards.
+ */
+{
+  const main = read('src/main/cloud.ts')
+  check(
+    'the cap counts what arrived',
+    /const seen = \{ text: false, thinking: false \}/.test(main),
+    true
+  )
+  /* Counted where the stream is actually read, or it counts nothing. */
+  check('the stream reports through it', /this\.drain\(res, watched, startedAt, provider\)/.test(main), true)
+  check('and so does the sender', /this\.send\(provider, model, body, controller\.signal, watched\)/.test(main), true)
+  check('silence names the provider, not the question', /not one token, so this is /.test(main), true)
+  check('reasoning with no answer offers a way out', /reasoned for \$\{waited\} and never started answering/.test(main), true)
+  check('a cut-off answer says what arrived is kept', /What arrived is above/.test(main), true)
+  check('and all three are in the log', /turn capped on \$\{model\}/.test(main), true)
+  /* The sentence that fitted all three and said nothing. Quoted in the
+     comment above the fix, which is why this looks for the call. */
+  check(
+    'nothing still sends "taking too long"',
+    /onError\('That turn was taking too long/.test(main),
+    false
+  )
+}
 
 /* ------------------------------------------------- the rank beside the name */
 
@@ -1336,3 +1374,15 @@ check('and the badge knows which order it is a place in', /ordering\?: Ordering/
     '29s when last checked'
   )
 }
+
+/*
+ * COUNTED LAST, because it used to be counted in the middle.
+ *
+ * This summary and the exit code sat two hundred lines above the end of the
+ * file, so every check written after it could fail in green: `failures` went
+ * up, nothing read it again, and `process.exitCode` had already been set to
+ * zero. A test that cannot fail the suite is worse than no test, because it
+ * is counted among the ones that can.
+ */
+console.log(failures ? `\n${failures} cloud checks FAILED` : '\nall cloud checks')
+process.exitCode = failures ? 1 : 0

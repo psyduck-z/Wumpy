@@ -230,9 +230,21 @@ check('words are counted', M.countWords('the deadline moved'), 3)
  * Below the threshold there is nothing to summarise, and saying so beats a
  * paragraph of invention: a model given ten seconds of speech and asked for
  * "the key decisions" will produce key decisions.
+ *
+ * THE WRITE-UP IS ALL IT GATES. It used to gate everything, and that is the
+ * bug behind "allow it to answer while its listening": eleven seconds into a
+ * session, "what are we doing" - the question this whole feature is for -
+ * was sent with no transcript attached, because eight words was under
+ * thirty. A question cannot invent a summary; it can only be answered badly
+ * without the thing it is about.
  */
-check('ten seconds of speech is not a meeting', M.wordCount({ startedAt: 0, pieces: [{ at: 0, text: 'hello is this thing on' }] }) < M.ENOUGH_WORDS, true)
-check('and the panel checks before asking', /wordCount\(heard\) < ENOUGH_WORDS/.test(app), true)
+const thin = { startedAt: 0, pieces: [{ at: 0, text: 'hello is this thing on' }] }
+check('ten seconds of speech is not a meeting', M.wordCount(thin) < M.ENOUGH_WORDS, true)
+check('the write-up still waits for enough', /wantsNotes\(text\) && wordCount\(heard\) < ENOUGH_WORDS/.test(app), true)
+check('and so does the chip that asks for it', /!heard \|\| wordCount\(heard\) < ENOUGH_WORDS/.test(app), true)
+/* But a question gets what there is, however little that is. */
+check('a question on a thin transcript still carries it', M.meetingTurn(thin, 'what are we doing').includes('is this thing on'), true)
+check('and says how little there is', M.meetingTurn(thin, 'what are we doing').includes('5 words'), true)
 
 /* ------------------------------------------- what the model is told not to do */
 
@@ -393,8 +405,22 @@ for (const said of [
 }
 
 check('an ordinary message carries the transcript', /chat\.send\(meetingTurn\(heard, text\), text, images\)/.test(app), true)
-/* Only when there is enough of one to be worth the tokens. */
-check('but only once there is enough of it', /heard && wordCount\(heard\) >= ENOUGH_WORDS/.test(app), true)
+/*
+ * FROM THE FIRST WORD, and while it is live even from none.
+ *
+ * The thirty-word gate used to stand here too, so the first half-minute of
+ * every session answered questions about the meeting without the meeting -
+ * which is what "allow it to answer while its listening" was reporting. An
+ * empty transcript is still worth sending while the tap is open: it is the
+ * honest answer to "what are we doing" in the first few seconds, and
+ * `meetingTurn` says so in words rather than sending an empty heading.
+ */
+check('while it is listening, every message carries it', /heard && \(listening\.on \|\| wordCount\(heard\) > 0\)/.test(app), true)
+check('an empty transcript says it is empty', M.meetingTurn({ startedAt: 0, pieces: [] }, 'what are we doing').includes('Nothing has been transcribed yet'), true)
+/* And claims no duration it cannot measure: `elapsed` is where the last
+   piece sat, and with no pieces there is no "about 1 minute" to invent. */
+check('and claims no length', /minute/.test(M.meetingTurn({ startedAt: 0, pieces: [] }, 'what are we doing')), false)
+check('a transcript is timed by its audio', M.meetingTurn(session, 'what moved?').includes('1:35 in, '), true)
 /* And it belongs to this conversation: left behind, an hour of somebody's
    standup would ride along on an unrelated chat with no sign of it. */
 check('a new chat forgets it', /listening\.forget\(\)/.test(app), true)

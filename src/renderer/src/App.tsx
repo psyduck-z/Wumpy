@@ -71,6 +71,7 @@ import {
   elapsed,
   meetingTurn,
   stamp,
+  wantsNotes,
   wordCount,
   type Listening
 } from '@shared/meeting'
@@ -2313,9 +2314,26 @@ function namedControls(shot: Attachment): string[] {
        * many words to ignore the transcript when the message is not about
        * the meeting, because "what is the weather" will arrive with an
        * hour of somebody's standup attached to it.
+       *
+       * FROM THE FIRST WORD, not from the thirtieth. "allow it to answer
+       * while its listening" - and it would not: eleven seconds into a
+       * session, "what are we doing" fell straight past this branch for
+       * having eight words of transcript, and went to the model as a bare
+       * three-word question with no meeting attached to it. ENOUGH_WORDS
+       * exists to stop a summary being invented from ten seconds of speech,
+       * which is a write-up problem; it was never a reason to answer a
+       * question about the meeting without the meeting. So the gate stays
+       * on `notes` below and nowhere else, and while a session is live even
+       * an empty transcript goes - `meetingTurn` says it is empty, which is
+       * itself the answer to "what are we doing" in the first few seconds.
        */
       const heard = listening.peek()
-      if (heard && wordCount(heard) >= ENOUGH_WORDS) {
+      if (heard && (listening.on || wordCount(heard) > 0)) {
+        /* The write-up is the one thing that needs enough to write from. */
+        if (wantsNotes(text) && wordCount(heard) < ENOUGH_WORDS) {
+          chat.note(tooLittle(heard))
+          return
+        }
         /* Sent wrapped, shown as typed: the transcript is thousands of
            words and belongs in the request, not on the screen. */
         chat.send(meetingTurn(heard, text), text, images)

@@ -65,11 +65,20 @@ export function countWords(text: string): number {
 }
 
 /**
- * Below this there is not enough to summarise, and saying so is better than
+ * Below this there is not enough to SUMMARISE, and saying so is better than
  * a paragraph of invention.
  *
  * Thirty words is about ten seconds of speech. A model handed less than that
  * and asked for "the key decisions" will produce key decisions.
+ *
+ * IT GATES THE WRITE-UP AND NOTHING ELSE, which it used to. Eleven seconds
+ * into a session somebody asked "what are we doing" - the one question this
+ * feature exists for - and the transcript was withheld for being eight words
+ * long, so the question went to the model with no meeting attached to it and
+ * whatever came back was about nothing. A thin transcript cannot produce an
+ * invented summary when the message is a question about it: the worst it can
+ * do is make the model say there is not much there yet, which is true and is
+ * the answer. See `meetingTurn`, which says so itself when there is nothing.
  */
 export const ENOUGH_WORDS = 30
 
@@ -193,9 +202,15 @@ export const NOTES_PROMPT = [
  * means it is also attached to "what is the weather" - so the model is told
  * in as many words that a message which is not about the meeting is an
  * ordinary message, and the transcript is there to be ignored.
+ *
+ * AND IT GOES OUT HOWEVER SHORT IT IS, including empty. The write-up still
+ * waits for ENOUGH_WORDS, because that one invents; a question does not, and
+ * withholding the first ten words made "what are we doing" - asked eleven
+ * seconds in - a question about nothing at all. Length is stated rather than
+ * hidden, so a model with four words to go on says it has four words.
  */
 export function meetingTurn(session: Listening, ask = ''): string {
-  const minutes = Math.max(1, Math.round(elapsed(session) / 60_000))
+  const words = wordCount(session)
   const question = wantsNotes(ask) ? '' : ask.trim()
   return [
     question
@@ -204,10 +219,20 @@ export function meetingTurn(session: Listening, ask = ''): string {
     '',
     RULES,
     '',
-    `Transcript so far — about ${minutes} minute${minutes === 1 ? '' : 's'}, ` +
-      `${wordCount(session)} words:`,
-    '',
-    transcriptText(session),
+    /*
+     * Measured by the audio, not by the clock.
+     *
+     * `elapsed` is where the last piece sat in the recording, which stays
+     * true after the session stops; wall-clock time from `startedAt` would
+     * keep growing and have the model announce three hours of a meeting
+     * that ended at twenty minutes.
+     */
+    words
+      ? `Transcript so far — ${stamp(elapsed(session))} in, ${words} words:`
+      : 'Nothing has been transcribed yet: it has only just started ' +
+        'listening, or has heard nothing but silence. If my message is about ' +
+        'the meeting, say that plainly - do not guess at what was said.',
+    ...(words ? ['', transcriptText(session)] : []),
     '',
     question
       ? [
