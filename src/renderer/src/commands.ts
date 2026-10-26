@@ -780,7 +780,20 @@ export const KEYS: readonly {
   { keys: '↑ / ↓', what: 'Recall what you typed before, in an empty box' },
   { keys: 'Ctrl+M', what: 'Start or stop dictation' },
   { keys: 'Ctrl+K', what: 'Every command, searchable' },
-  { keys: 'F1', what: 'The commands, the keys and what the card shapes mean', runs: ['help'] },
+  /*
+   * Ctrl+/ rather than F1.
+   *
+   * "don't use my f1 or f2 those are essential" - they belong to something
+   * else on this machine, and a panel that floats over whatever you were
+   * working in has no business taking a key you need there. Ctrl+/ is what
+   * most apps use for "show me the shortcuts" anyway, and / is already the
+   * key that starts a command here.
+   *
+   * Ctrl+Shift+/ - which is Ctrl+? - does the same, both because that is the
+   * other way people type it and because / is a shifted key on some
+   * layouts.
+   */
+  { keys: 'Ctrl+/', what: 'Every keyboard shortcut', runs: ['shortcuts'] },
 
   /*
    * Ctrl+Tab rather than F6, which is what this was.

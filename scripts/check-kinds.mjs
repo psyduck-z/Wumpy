@@ -242,13 +242,6 @@ check('four rows and no more', help.split('\n').filter((l) => /^\| [■▲●◆
 // Red is the exception to the whole scheme, so the one place it is explained
 // has to say so.
 check('and that red overrides it', /Red overrides the colour/.test(help), true)
-// The key people press when they do not know what to press. It printed
-// nothing at all before: /help was reachable by typing it or by finding it
-// in the palette, which is the wrong way round.
-check('F1 prints it', /e\.key === 'F1'/.test(read('src/renderer/src/App.tsx')), true)
-const f1 = cmds.KEYS.find((k) => k.keys === 'F1')
-check('and the key table says so', Boolean(f1 && help.includes(`| F1 | ${f1.what} |`)), true)
-check('and that it is /help it runs', f1?.runs, ['help'])
 // The marks are explained in /shortcuts too, which is the command somebody
 // reaches for when they cannot remember a symbol either.
 check('the sheet explains them as well', cmds.shortcutsText().includes('| ■ |'), true)

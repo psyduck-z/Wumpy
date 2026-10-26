@@ -2803,15 +2803,20 @@ function namedControls(shot: Attachment): string[] {
       }
 
       /*
-       * F1 prints the commands and the keys.
+       * Ctrl+/ prints the shortcuts.
        *
-       * /help existed and was reachable by typing it or by finding it in the
-       * palette, which is the wrong way round: the key people press when
-       * they do not know what to press is this one, and it did nothing.
+       * This was F1, which is not ours to take: "don't use my f1 or f2 those
+       * are essential". The panel floats over whatever the user was working
+       * in, so a key that matters there matters while this is open too.
+       *
+       * Ctrl+/ is what most applications use for exactly this, and / is
+       * already the key that starts a command here. Ctrl+? is accepted with
+       * it - the same chord with Shift held, which is how people type a
+       * question mark and how some layouts reach the slash at all.
        */
-      if (e.key === 'F1' && !e.ctrlKey && !e.altKey && !e.shiftKey) {
+      if (e.ctrlKey && !e.altKey && (e.key === '/' || e.key === '?')) {
         e.preventDefault()
-        void runCommand({ kind: 'help' }, '/help')
+        void runCommand({ kind: 'shortcuts' }, '/shortcuts')
         return
       }
 

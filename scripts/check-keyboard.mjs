@@ -916,6 +916,45 @@ check(
 // command must not be a place where Ctrl+Tab stops working.
 check('the completion lets Ctrl+Tab past', /'Tab' && !e\.shiftKey && !e\.ctrlKey/.test(composer), true)
 
+/* ------------------------------------------------- keys that are not ours */
+
+/**
+ * F1 and F2 belong to the user: "don't use my f1 or f2 those are essential".
+ *
+ * Wumpy floats over whatever they were working in and opens on a keystroke,
+ * so a key that matters in the thing underneath matters while this is open
+ * too. F1 was bound to /help here for about an hour - a reasonable
+ * convention, and not reasonable on this machine.
+ *
+ * Asserted by name rather than remembered, because the next obvious place to
+ * put a help key is exactly there.
+ */
+for (const key of ['F1', 'F2']) {
+  for (const [name, src] of [
+    ['the panel', app],
+    ['the composer', composer],
+    ['the picker', read('src/renderer/src/components/Picker.tsx')]
+  ]) {
+    check(`${key} is left alone by ${name}`, src.includes(`'${key}'`), false)
+  }
+  check(`and ${key} is not in the key table`, cmds.KEYS.some((k) => k.keys.includes(key)), false)
+}
+
+// What took its place. Ctrl+/ is what most applications use for this, and /
+// already starts a command here. Ctrl+? is the same chord with Shift, which
+// is how people type a question mark and how some layouts reach / at all.
+check(
+  'Ctrl+/ prints the shortcuts',
+  /e\.ctrlKey && !e\.altKey && \(e\.key === '\/' \|\| e\.key === '\?'\)/.test(app),
+  true
+)
+check('and it runs /shortcuts', /kind: 'shortcuts' \}, '\/shortcuts'/.test(app), true)
+check(
+  'and the table says so',
+  cmds.KEYS.some((k) => k.keys === 'Ctrl+/' && (k.runs ?? []).includes('shortcuts')),
+  true
+)
+
 /* --------------------------------------------- Space presses what has focus */
 
 /**
