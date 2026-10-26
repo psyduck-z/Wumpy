@@ -474,13 +474,10 @@ check('NVIDIA is marked as reasoning regardless', C.PROVIDERS.nvidia.alwaysReaso
 for (const p of ['google', 'groq', 'mistral']) {
   check(`${p} can be told to stop`, C.PROVIDERS[p].alwaysReasons, false)
 }
-check(
-  'so the flash cap gets room anyway',
-  C.maxTokensFor(384, false, 'nvidia'),
-  384 + C.THINKING_ALLOWANCE
-)
-check('while Google keeps the tier’s own', C.maxTokensFor(384, false, 'google'), 384)
-check('and no provider at all is unchanged', C.maxTokensFor(384, false), 384)
+/* Which used to buy it 1,024 tokens of headroom on top of a hand-picked
+   cap. There is no cap to add headroom to now: reasoning and the answer
+   come out of the window, which is what they were always doing. */
+check('and nothing is added to a cap any more', 'THINKING_ALLOWANCE' in C, false)
 
 check('its models route there', C.providerFor('z-ai/glm-5.3'), 'nvidia')
 /*
@@ -702,19 +699,75 @@ check(
 check('thinking-on omits the field on Google', C.reasoningEffortFor('google', true), null)
 check('and on Groq', C.reasoningEffortFor('groq', true), null)
 
-check('with reasoning off the cap is the tier’s own', C.maxTokensFor(384, false), 384)
+/* --------------------------------------------- how long an answer may be */
+
+/**
+ * AS LONG AS THERE IS ROOM FOR, and no longer anybody's number.
+ *
+ * Reported under a screenshot of an answer that stopped mid-sentence:
+ * "don't add a response limit - it can take as much time as it wants unless
+ * an issue is detected." The limit was 4,000 tokens plus 1,024 when
+ * reasoning was on, both picked by hand years of models ago, and the only
+ * thing they could do by the time they were reached was cut an answer in
+ * half.
+ *
+ * What goes out now is the window less what the request takes, so the only
+ * thing that can truncate an answer is running out of context - a real
+ * condition, with a real fix, that the panel already names.
+ */
+const WINDOW = 32_768
+check('the answer gets what the request did not', C.maxTokensFor(14_842, WINDOW), WINDOW - 14_842)
+check('a short question gets nearly all of it', C.maxTokensFor(200, WINDOW), WINDOW - 200)
+/* Four times the old ceiling in the ordinary case, which is the whole point:
+   nothing anyone types runs into this. */
+check('and that is far past the old 5,024', C.maxTokensFor(14_842, WINDOW) > 5024 * 3, true)
+/* It can never ask for more than the window, which is what kept the old cap
+   safe on an endpoint that rejects prompt + max_tokens over the limit. */
+check('it never asks beyond the window', C.maxTokensFor(14_842, WINDOW) + 14_842 <= WINDOW, true)
+/*
+ * A prompt that has eaten the window is a compaction that did not happen,
+ * not a reason to ask for zero tokens: half an answer beats none, and the
+ * floor is what makes sure there is one.
+ */
+check('a full window still leaves a floor', C.maxTokensFor(WINDOW, WINDOW), C.LEAST_ROOM)
+check('and so does an impossible one', C.maxTokensFor(99_999, WINDOW), C.LEAST_ROOM)
+check('the floor is a real answer, not a gesture', C.LEAST_ROOM >= 1000, true)
+check('nonsense in is still a request that works', C.maxTokensFor(Number.NaN, WINDOW), WINDOW)
+check('and a nonsense window does not ask for nothing', C.maxTokensFor(100, 0), C.LEAST_ROOM)
+
+/* Measured the same way the meter measures, over the messages as they go. */
 check(
-  'with it on there is room to think first',
-  C.maxTokensFor(384, true),
-  384 + C.THINKING_ALLOWANCE
+  'the request is counted as it will be sent',
+  C.requestTokens([{ role: 'user', content: 'a'.repeat(400) }]),
+  100
 )
-check('the allowance clears the measured 487', C.THINKING_ALLOWANCE > 487, true)
-check('a zero cap does not become zero tokens', C.maxTokensFor(0, false) > 0, true)
 check(
-  'every tier’s num_predict survives reasoning being on',
-  [384, 800, 1024, 1500].every((n) => C.maxTokensFor(n, true) - C.THINKING_ALLOWANCE === n),
+  'a picture is counted as a picture',
+  C.requestTokens([
+    { role: 'user', content: [{ type: 'text', text: 'a'.repeat(400) }, { type: 'image_url', image_url: { url: 'data:image/png;base64,AAA' } }] }
+  ]) > 1000,
   true
 )
+/* And the sender uses both, or the body still carries a number. */
+{
+  const main = read('src/main/cloud.ts')
+  check(
+    'the body asks for the room that is left',
+    /max_tokens: maxTokensFor\(requestTokens\(wire\), CONTEXT_TOKENS\)/.test(main),
+    true
+  )
+  /*
+   * THE OTHER HALF OF THE SAME SENTENCE: "it can take as much time as it
+   * wants". The turn cap was a stopwatch started with the request, so an
+   * answer still being written at three minutes was aborted for being long.
+   * Restarted on every delta it measures silence instead, which is the
+   * thing the number was set for: "a hosted model that has not started in
+   * three minutes is not going to".
+   */
+  check('the clock is on the silence', /\/\* Still talking, so the silence timer starts over\. \*\//.test(main), true)
+  check('and every delta restarts it', /waitAgain\(\)\n\s+handlers\.onDelta\(delta\)/.test(main), true)
+  check('a quiet provider is still caught', /hitCap = true/.test(main), true)
+}
 
 /* ------------------------------------------- when there is nothing local */
 
@@ -1079,9 +1132,11 @@ check('a local model has no sibling', C.siblingModel('phi4-mini:3.8b', new Set()
   )
   const chat = read('src/renderer/src/hooks/useChat.ts')
   check('the message is marked before the turn clears', /if \(d\.cutOff\)/.test(chat), true)
+  /* And it says the true thing: with no output cap, the only way to finish
+     on 'length' is to fill the window, which /compact is the answer to. */
   check(
     'and the transcript says so',
-    /hit the length limit/.test(read('src/renderer/src/components/Message.tsx')),
+    /ran out of room in the context/.test(read('src/renderer/src/components/Message.tsx')),
     true
   )
 }
@@ -1131,9 +1186,9 @@ check(
   check('the stream reports through it', /this\.drain\(res, watched, startedAt, provider\)/.test(main), true)
   check('and so does the sender', /this\.send\(provider, model, body, controller\.signal, watched\)/.test(main), true)
   check('silence names the provider, not the question', /not one token, so this is /.test(main), true)
-  check('reasoning with no answer offers a way out', /reasoned for \$\{waited\} and never started answering/.test(main), true)
+  check('reasoning with no answer offers a way out', /reasoned, then went quiet for \$\{waited\}/.test(main), true)
   check('a cut-off answer says what arrived is kept', /What arrived is above/.test(main), true)
-  check('and all three are in the log', /turn capped on \$\{model\}/.test(main), true)
+  check('and all three are in the log', /went quiet for \$\{opts\.maxTurnMs\}ms/.test(main), true)
   /* The sentence that fitted all three and said nothing. Quoted in the
      comment above the fix, which is why this looks for the call. */
   check(

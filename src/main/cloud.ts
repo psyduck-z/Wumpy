@@ -13,6 +13,7 @@ import {
   countTokens,
   keysAreSeparate,
   maxTokensFor,
+  requestTokens,
   provedBlind,
   rememberBlind,
   providerFor,
@@ -32,6 +33,7 @@ import {
   verdictFor
 } from '@shared/probe'
 import type { ProbeResult } from '@shared/probe'
+import { CONTEXT_TOKENS } from '@shared/assistant'
 import { dataUrl, visionTask } from '@shared/vision'
 import type { ChatOptions, StreamFailure, StreamHandlers, StreamStats } from './stream'
 import type { KeyStore } from './keys'
@@ -874,14 +876,32 @@ export class CloudClient {
     const controller = new AbortController()
     this.inflight.set(requestId, controller)
 
+    /**
+     * A CLOCK ON THE SILENCE, NOT ON THE ANSWER.
+     *
+     * "it can take as much time as it wants unless an issue is detected."
+     * This was a stopwatch started with the request: three minutes later the
+     * turn was aborted whether it was writing steadily or had never said a
+     * word, so a long answer was cut off for being long - the same hand-
+     * picked ceiling as the output cap, in seconds instead of tokens.
+     *
+     * Restarted by every delta, it measures the only thing that is actually
+     * a problem: nothing arriving. A model writing for ten minutes is left
+     * alone; a provider that has gone quiet for three is still caught, which
+     * is the failure this number was set for in the first place - "a hosted
+     * model that has not started in three minutes is not going to".
+     */
     let hitCap = false
-    const cap =
-      opts.maxTurnMs > 0
-        ? setTimeout(() => {
-            hitCap = true
-            controller.abort()
-          }, opts.maxTurnMs)
-        : null
+    let cap: ReturnType<typeof setTimeout> | null = null
+    const waitAgain = (): void => {
+      if (opts.maxTurnMs <= 0) return
+      if (cap) clearTimeout(cap)
+      cap = setTimeout(() => {
+        hitCap = true
+        controller.abort()
+      }, opts.maxTurnMs)
+    }
+    waitAgain()
 
     /**
      * What the model actually sent, so a capped turn can say which silence
@@ -903,6 +923,8 @@ export class CloudClient {
       onDelta: (delta) => {
         if (delta.content) seen.text = true
         if (delta.thinking) seen.thinking = true
+        /* Still talking, so the silence timer starts over. */
+        waitAgain()
         handlers.onDelta(delta)
       },
       onDone: (stats) => handlers.onDone(stats),
@@ -926,9 +948,10 @@ export class CloudClient {
         stream_options: { include_usage: true },
         temperature: opts.options.temperature,
         top_p: opts.options.top_p,
-        // Reasoning is spent out of this before any visible word, so a cap
-        // sized for the answer alone truncates the answer to nothing.
-        max_tokens: maxTokensFor(opts.options.num_predict, opts.thinking, provider),
+        /* Everything the window has left, rather than a length somebody
+           chose. The only thing that can cut an answer short now is the
+           context running out, which the panel says plainly. */
+        max_tokens: maxTokensFor(requestTokens(wire), CONTEXT_TOKENS),
         ...(effort ? { reasoning_effort: effort } : {}),
         ...(kwargs ? { chat_template_kwargs: kwargs } : {})
       }
@@ -985,19 +1008,20 @@ export class CloudClient {
         const waited = friendlyWait(opts.maxTurnMs)
         /* In the log as well, because this used to leave nothing in it. */
         console.warn(
-          `[wumpy] turn capped on ${model} after ${opts.maxTurnMs}ms: ` +
+          `[wumpy] ${model} went quiet for ${opts.maxTurnMs}ms: ` +
             (seen.text
-              ? 'an answer was still arriving'
+              ? 'an answer had started and stopped'
               : seen.thinking
                 ? 'reasoning only, no answer had started'
-                : 'nothing arrived at all - not one token')
+                : 'nothing had arrived at all - not one token')
         )
         handlers.onError(
           seen.text
-            ? `Stopped after ${waited}: ${model} was still writing. What arrived is above.`
+            ? `${model} stopped writing part-way and sent nothing more for ${waited}. ` +
+              'What arrived is above — say "carry on" for the rest.'
             : seen.thinking
-              ? `${model} reasoned for ${waited} and never started answering, so Wumpy ` +
-                'stopped it. `/nothink` for a straight answer, or `/model` for another one.'
+              ? `${model} reasoned, then went quiet for ${waited} without starting an ` +
+                'answer. `/nothink` for a straight answer, or `/model` for another one.'
               : `Nothing came back from ${model} in ${waited} — not one token, so this is ` +
                 'the provider rather than the question. Ask again, or `/model` for another one.'
         )

@@ -1485,10 +1485,11 @@ export const DEFAULT_MODEL = 'deepseek-ai/deepseek-v4.1-flash'
  * mode, and a write is still checked against the home folder before it
  * happens. What is gone is the gate that said *this tier* may not ask.
  *
- * num_predict 4000 because a hosted model at 121 tok/s spends it in half a
- * minute, and the old 384-token Flash cap existed to stop a 13 tok/s model
- * talking for four minutes. Measured, Codestral's longest answer on the
- * benchmark was 346 tokens, so this is headroom rather than a target.
+ * There is no output cap here any more. It was num_predict 4000 - headroom
+ * rather than a target, sized against a benchmark whose longest answer was
+ * 346 tokens - and headroom is still a ceiling when something finally
+ * reaches it: "don't add a response limit". What goes out now is the room
+ * the window has left. See `maxTokensFor`.
  */
 /**
  * Which sections the preamble is made of, for one configuration.
@@ -1741,7 +1742,7 @@ export function assistantFor(model: string, canShell: boolean, thinking = false)
     model,
     thinking,
     tools: canShell ? 'full' : 'none',
-    options: { num_predict: 4000, temperature: 0.4, top_p: 0.9 },
+    options: { temperature: 0.4, top_p: 0.9 },
     systemPrompt: VOICE_PROMPT
   }
 }

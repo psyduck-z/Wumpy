@@ -321,7 +321,12 @@ export const Message = memo(function Message({
         <div className="msg-cutoff">
           {message.cutOff === 'content_filter'
             ? 'The provider stopped this answer part-way.'
-            : 'This hit the length limit and stopped part-way. Say “carry on” for the rest.'}
+            : /* No output cap any more - the request asks for whatever the
+                 window has left - so reaching the end of one means the
+                 context is full, which is a different thing to say and a
+                 different thing to do about it. */
+              'This ran out of room in the context and stopped part-way. ' +
+              '`/compact` to make room, then say “carry on”.'}
         </div>
       )}
 

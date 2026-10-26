@@ -116,7 +116,15 @@ export interface ChatMessage {
  * local backend and the model warm-up are gone with it.
  */
 export interface GenerationOptions {
-  num_predict: number
+  /**
+   * No num_predict, and nothing in its place.
+   *
+   * It was the output cap - 4,000 tokens, chosen by hand - and the answer in
+   * the panel stopped mid-sentence when a model wanted more than that.
+   * "don't add a response limit": the request now asks for whatever the
+   * window has left, which is a fact about the context rather than a
+   * preference about length. See `maxTokensFor`.
+   */
   temperature: number
   top_p?: number
 }

@@ -26,6 +26,9 @@ export type ProviderId = 'google' | 'groq' | 'mistral' | 'nvidia' | 'ollama'
  * drop it on the next read as an unrecognised provider name.
  */
 import { MEDIA_NOT_SENT, foldAttachments, type Attached } from './attach'
+/* The meter's own estimate, so the room left for an answer is measured the
+   same way as the room it is being taken out of. */
+import { estimateTokens } from './pressure'
 /* Type only, and it has to stay that way: @shared/order imports this file
    for the catalogue and the usable-speed floor, so a value imported back
    from it would be a cycle. The one thing needed here is the NAME of an
@@ -1802,19 +1805,19 @@ export const FALLBACK_CLOUD_MODEL: Record<string, string> = {
 /* ------------------------------------------------------------- the thinking */
 
 /**
- * Headroom added to the output cap when reasoning is left on.
+ * THERE IS NO THINKING ALLOWANCE ANY MORE, and nothing to add it to.
  *
- * Reasoning is spent out of max_tokens before a single visible word is
- * produced, so a cap sized for the answer truncates the answer to nothing.
- * Measured on gemini-3.5-flash: asking for one sentence with max_tokens 200
- * spent 188 on thinking, emitted 8 tokens of prose and stopped with
- * finish_reason "length" - "A tray application is a computer program that".
+ * It was 1,024 tokens of headroom on top of a hand-picked output cap,
+ * because reasoning is spent out of max_tokens before a single visible word
+ * is produced - measured on gemini-3.5-flash, where asking for one sentence
+ * with max_tokens 200 spent 188 on thinking and emitted eight words:
+ * "A tray application is a computer program that".
  *
- * Wumpy's own tiers ask for 384 to 1500, and the four real write-a-file tasks
- * averaged 487 thinking tokens. So the allowance is sized above that, and a
- * tier's num_predict keeps meaning what it says: room for the answer.
+ * That was the right fix for a cap of 384. With the cap gone - see
+ * `maxTokensFor`, which now sends the room that is left rather than a number
+ * - reasoning and the answer come out of the same window, which is what they
+ * were always doing, and there is nothing to make an allowance against.
  */
-export const THINKING_ALLOWANCE = 1024
 
 /**
  * How a tier's thinking flag reaches the provider.
@@ -1919,18 +1922,61 @@ export function thinkingKwargsFor(
 }
 
 /**
- * The output cap to send, given the tier's and whether reasoning is on.
+ * THE ANSWER GETS THE ROOM THAT IS LEFT. It is not given a budget.
  *
- * The provider is optional and defaults to leaving the old behaviour alone,
- * because one of them reasons whether or not it was asked to. On that one the
- * allowance is unconditional: a 384-token cap on a model that spends its first
- * 200 tokens thinking returns a sentence cut off mid-word, which is the exact
- * failure measured on Google before reasoning_effort was found.
+ * Asked for in one line, under a screenshot of an answer that stopped
+ * mid-sentence: "don't add a response limit - it can take as much time as it
+ * wants unless an issue is detected."
+ *
+ * It had one, and the number was picked by hand: 4,000 tokens, plus 1,024 of
+ * headroom when reasoning was on, from a note reasoning about a 13 tok/s
+ * local model talking for four minutes. Both of those facts are three
+ * generations of model old, and the cap had stopped meaning "this is enough
+ * for an answer" and started meaning "this is where your answer gets cut".
+ *
+ * So nothing here chooses a length. What is sent is the window, less what
+ * the request itself takes - the only ceiling that is a fact rather than a
+ * preference, and the one the provider would impose anyway. An answer can
+ * now only be cut off by running out of context, which is a real condition
+ * with a real fix (`/compact`, or a new chat), and which the panel already
+ * says plainly when it happens.
+ *
+ * Sent rather than omitted, because omitting it is not "no limit": these
+ * endpoints are OpenAI-shaped, and an absent max_tokens means the server's
+ * own default, which on some of them is 1,024 and would make answers
+ * shorter. The floor is for the case where the prompt has eaten the window:
+ * compaction should have run long before, and half an answer still beats
+ * asking for zero tokens.
  */
-export function maxTokensFor(numPredict: number, thinking: boolean, provider?: ProviderId): number {
-  const asked = numPredict > 0 ? numPredict : 1024
-  const reasons = thinking || (provider ? PROVIDERS[provider].alwaysReasons : false)
-  return reasons ? asked + THINKING_ALLOWANCE : asked
+export const LEAST_ROOM = 1024
+
+export function maxTokensFor(prompt: number, limit: number): number {
+  if (!Number.isFinite(limit) || limit <= 0) return LEAST_ROOM
+  const taken = Number.isFinite(prompt) ? Math.max(0, prompt) : 0
+  return Math.max(LEAST_ROOM, Math.floor(limit - taken))
+}
+
+/**
+ * What the request is about to cost, near enough to size the answer by.
+ *
+ * The same four-characters-to-a-token estimate as the meter, over the
+ * messages as they will actually go out - which is the only count available
+ * before the provider replies with its own.
+ */
+export function requestTokens(messages: readonly WireMessage[]): number {
+  let chars = 0
+  let images = 0
+  for (const m of messages) {
+    if (typeof m.content === 'string') {
+      chars += m.content.length
+      continue
+    }
+    for (const part of m.content) {
+      if (part.type === 'text') chars += part.text?.length ?? 0
+      else images++
+    }
+  }
+  return estimateTokens(chars, images)
 }
 
 /* --------------------------------------------------------------- the key itself */

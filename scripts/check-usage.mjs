@@ -282,9 +282,16 @@ check(
   T.assistantFor(T.DEFAULT_MODEL, false).tools,
   'none'
 )
-// 384 was a patience budget at 13 tok/s. At 121 it is a truncation, and this
-// is the only tier there is.
-check('the output cap is sized for a hosted model', a.options.num_predict >= 2000, true)
+/*
+ * AND THERE IS NO OUTPUT CAP HERE AT ALL.
+ *
+ * 384 was a patience budget at 13 tok/s; 4,000 was headroom at 121. Both
+ * were lengths somebody chose, and the second one was eventually reached by
+ * a model with more to say - "don't add a response limit". What the request
+ * asks for now is the room the window has left, worked out at send time, so
+ * nothing in the tier carries a number.
+ */
+check('the tier names no answer length', 'num_predict' in a.options, false)
 check('reasoning is off by default', a.thinking, false)
 
 // The prompt that survived is the one written for a capable model. The local
