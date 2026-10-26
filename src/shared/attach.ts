@@ -423,6 +423,23 @@ export function opaqueLine(file: Attached): string {
   )
 }
 
+/**
+ * What stands in for a picture that this model cannot be sent.
+ *
+ * The bytes were always dropped for a model with no eyes - the alternative
+ * is a 400 that costs the whole turn - but they were dropped SILENTLY, and
+ * a silently dropped picture is the one failure mode this file exists to
+ * prevent everywhere else. The model is handed "what is this" with nothing
+ * attached and describes something plausible.
+ *
+ * It matters more now than it did: a model that refuses a picture mid-answer
+ * is recorded as unable to read them, so every later turn in that chat takes
+ * this path rather than the one that argues with the endpoint.
+ */
+export const MEDIA_NOT_SENT =
+  '[An image or media file was attached to this message. It was NOT sent: this model ' +
+  'cannot read them. Say so rather than describing what it might show.]'
+
 /** What one attachment is going to cost, near enough to warn with. */
 export function attachmentTokens(file: Attached): number {
   switch (file.kind) {

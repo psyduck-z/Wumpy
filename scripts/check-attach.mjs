@@ -212,7 +212,10 @@ check('a fence survives a file that contains fences', A.textBlock({ kind: 'text'
   const picture = { kind: 'image', dataUrl: 'data:image/png;base64,AAA', bytes: 10, name: 'a.png' }
   const m = { role: 'user', content: 'what is this', images: [picture] }
   check('a picture still goes as a part', Array.isArray(wireMessage(m, true).content), true)
-  check('and is dropped without vision', wireMessage(m, false).content, 'what is this')
+  /* Dropped without vision, and SAID to be dropped: a question with the
+     picture quietly removed gets a plausible description of nothing. */
+  check('and is dropped without vision', String(wireMessage(m, false).content).startsWith('what is this'), true)
+  check('with the drop stated', String(wireMessage(m, false).content).includes('NOT sent'), true)
 }
 {
   const m = {

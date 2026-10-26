@@ -233,11 +233,32 @@ check('and that is four of the six', C.CLOUD_MODELS.filter((m) => m.sees).length
   check('the model is written down as blind', /rememberBlind\(model\)/.test(main), true)
   /* Stripped from the body, not merely retried: without this the second
      attempt carries the same picture. */
-  check('and the picture comes out of the body', /m\.content = text\.length === 1/.test(main), true)
+  check('and the picture comes out of the body', /export function stripPictures/.test(main), true)
   check('leaving the question behind', /part\?\.type === 'text'/.test(main), true)
   /* provedBlind doubles as the loop guard, or a 400 for any other reason
      would retry for ever once the model is marked. */
   check('and it cannot loop', /!provedBlind\(model\)/.test(main), true)
+  /* Having nothing to strip is the other guard: an ordinary 400 must not
+     retry itself unchanged and fail the same way twice. */
+  check('a 400 with no picture in it is not retried', /!provedBlind\(model\) && stripPictures\(body\)/.test(main), true)
+
+  /*
+   * AND THE SAME FAILURE ARRIVING INSIDE A 200.
+   *
+   * NVIDIA answers a picture its model cannot read with headers, a 200 and
+   * then `data: {"error":{"message":"Internal server error"}}`. There is no
+   * status to classify and no body to match, so everything above misses it
+   * - and the picture stays in the conversation, rides along on the newest
+   * two turns, and kills every message after it. Three bare red banners on
+   * a one-word question is what that looked like.
+   */
+  check('an error inside the stream is handed back', /if \(chunk\.error\?\.message\) return stripKey/.test(main), true)
+  check('and retried without the picture', /nothingArrived && !provedBlind\(model\) && stripPictures\(body\)/.test(main), true)
+  /* Only when nothing had arrived: a stream that dies halfway through an
+     answer is a dropped connection, and the picture was already accepted. */
+  check('but not when the answer had started', /const nothingArrived = !seen\.text && !seen\.thinking/.test(main), true)
+  check('it says who stopped, not just what', /stopped mid-answer/.test(main), true)
+  check('and it reaches the log', /stopped mid-stream/.test(main), true)
 }
 
 check(
@@ -364,7 +385,31 @@ check('as the image alone', alone.content[0].type, 'image_url')
  */
 check(
   'images are dropped for a model that cannot see',
-  C.wireMessage({ role: 'user', content: 'look', images: [PIC] }, false),
+  Array.isArray(C.wireMessage({ role: 'user', content: 'look', images: [PIC] }, false).content),
+  false
+)
+/*
+ * AND IT SAYS SO, which it did not. The bytes were dropped in silence, so
+ * the model was handed "look" with nothing attached and described something
+ * plausible - the exact failure every other attachment path in this app
+ * writes a line to prevent. It matters more now that a model which refuses
+ * a picture mid-stream is recorded as text-only: every later turn in that
+ * chat comes through here.
+ */
+check(
+  'and says the picture was not sent',
+  C.wireMessage({ role: 'user', content: 'look', images: [PIC] }, false).content.includes('NOT sent'),
+  true
+)
+check(
+  'the question itself survives',
+  C.wireMessage({ role: 'user', content: 'look', images: [PIC] }, false).content.startsWith('look'),
+  true
+)
+/* Nothing added when there was nothing to drop. */
+check(
+  'a message with no picture is untouched',
+  C.wireMessage({ role: 'user', content: 'look' }, false),
   { role: 'user', content: 'look' }
 )
 /* Only a user turn carries them — an assistant does not send pictures. */

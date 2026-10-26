@@ -91,7 +91,15 @@ check('a negative count is not negative room', P.fullness(-100, LIMIT), 0)
 check(
   'what the user is told names the reason',
   P.roomNote(LIMIT * 0.93, LIMIT),
-  'The conversation was 93% of the way full, so earlier turns were summarised before carrying on.'
+  'The conversation had used 93% of the room it has, so earlier turns were summarised before carrying on.'
+)
+/* And it is the room, not the window: the same tokens with the preamble
+   named are a smaller share of a smaller space, and the sentence has to
+   agree with the bar the user was just looking at. */
+check(
+  'and it quotes the same scale as the meter',
+  P.roomNote(26_000, LIMIT, 14_842),
+  'The conversation had used 62% of the room it has, so earlier turns were summarised before carrying on.'
 )
 
 /* --------------------------------------------------- counting the pictures */
@@ -159,7 +167,7 @@ for (const where of [
 
 check('the room is made through a ref, not a forward reference', /makeRoomRef = useRef/.test(app), true)
 check('and the ref is filled in after the compaction exists', app.indexOf('makeRoomRef.current = makeRoomNow') > app.indexOf('const compactHistory'), true)
-check('the user is told it happened', /roomNote\(used, limit\)/.test(app), true)
+check('the user is told it happened', /roomNote\(used, limit, instructions\)/.test(app), true)
 check('a request that was too big is retried once', /tooBig\(m\.error\)/.test(app), true)
 check('and only once, by id', /retried\.current\.has\(failed\.id\)/.test(app), true)
 check('the meter uses the same thresholds it acts on', /MIDTASK_AT \* 100/.test(bar), true)
@@ -379,11 +387,37 @@ check(
   P.needsRoom('send', 22_000, LIMIT2, 21_000),
   false
 )
+/*
+ * AND THE LINE IS DRAWN ROUND WHAT A SUMMARY CAN REACH.
+ *
+ * "why is the minimum compact thing 40%?" - because both the meter and this
+ * decision measured `used / limit`, and with 13,300 tokens of instructions
+ * in a 32,768 budget, 65% of the window was a conversation of 8,000 tokens.
+ * The preamble was most of the reading and all of the floor.
+ *
+ * So the fixed cost comes off both ends. 22,000 used is 8,700 of
+ * conversation in 19,468 of room - under half, and not yet worth a request.
+ */
+check(
+  'the preamble is no longer most of the reading',
+  P.needsRoom('send', 22_000, LIMIT2, 13_300),
+  false
+)
 check(
   'but a real conversation over the line is',
-  P.needsRoom('send', 22_000, LIMIT2, 13_300),
+  P.needsRoom('send', 27_000, LIMIT2, 13_300),
   true
 )
+/* A new chat reads zero, however big the preamble is. That is the whole
+   complaint: it used to read 41% with nothing in it. */
+check('a new chat is empty, not 41% full', P.fullness(13_300, LIMIT2, 13_300), 0)
+check('and the old reading is what it was', Math.round(P.fullness(13_300, LIMIT2) * 100), 41)
+/* Half the room is half the bar. */
+check('half the room reads as half', P.fullness(13_300 + 9_734, LIMIT2, 13_300), 0.5)
+/* Instructions that do not fit are not a conversation problem, and the
+   floor below is what stops that reading becoming a compaction loop. */
+check('a preamble past the window reads full', P.fullness(40_000, LIMIT2, 40_000), 1)
+check('but nothing to summarise means nothing to do', P.needsRoom('send', 40_000, LIMIT2, 40_000), false)
 check('the floor is a handful of exchanges', P.MIN_COMPACTABLE >= 1000 && P.MIN_COMPACTABLE <= 4000, true)
 check('and without a figure for them, it behaves as before', P.needsRoom('send', 22_000, LIMIT2), true)
 check('under the threshold is still under it', P.needsRoom('send', 1000, LIMIT2, 0), false)

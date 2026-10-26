@@ -1,5 +1,5 @@
 import type { ApprovalMode, ContextUsage } from '@shared/types'
-import { MIDTASK_AT, SEND_AT } from '@shared/pressure'
+import { MIDTASK_AT, SEND_AT, fullness } from '@shared/pressure'
 import type { PoolView } from '@shared/pool'
 import { keyCommandFor } from '../quota'
 import type { ChatStats } from '../hooks/useChat'
@@ -46,7 +46,17 @@ function ContextMeter({
   // The tooltip said "counted by Ollama" until Ollama was removed from the
   // app entirely, naming a backend that is no longer there. Whichever
   // provider is configured reports these counts now.
-  const pct = Math.min(100, (usage.used / usage.limit) * 100)
+  /**
+   * The conversation, against the room the conversation has.
+   *
+   * "why is the minimum compact thing 40%?" - because this was used over
+   * limit, and roughly half of `used` is the instructions, which are re-sent
+   * every turn and which this button cannot shrink by a single token. A
+   * meter that reads 45% on a chat holding the word "hi", and that compacts
+   * when you click it, is answering a different question from the one it is
+   * asking you to act on. It starts at zero now. See `fullness`.
+   */
+  const pct = Math.min(100, fullness(usage.used, usage.limit, usage.instructions) * 100)
   /* The same two numbers the compaction uses, imported rather than typed
      again: a meter that turns amber at a different percentage from the one
      that acts is a meter that lies about what is about to happen. */
@@ -58,18 +68,18 @@ function ContextMeter({
       className={`ctx ${level}`}
       onClick={onCompact}
       title={[
-        `Context: ${usage.used.toLocaleString()} of ${usage.limit.toLocaleString()} tokens ` +
+        `This conversation: ~${Math.max(0, usage.used - (usage.instructions ?? 0)).toLocaleString()} ` +
+          `of the ${Math.max(0, usage.limit - (usage.instructions ?? 0)).toLocaleString()} tokens it has room for ` +
           `(${pct.toFixed(0)}%)${usage.estimated ? ', estimated' : ', counted by the provider'}`,
         /*
-         * The split, because the number is mostly not the conversation.
-         *
-         * The instructions are re-sent in full on every turn and compaction
-         * cannot shrink them, so "40% full with two messages in the chat" is
-         * the truth and used to look like a bug.
+         * The whole window underneath, because the percentage is no longer
+         * of it. The instructions are re-sent in full on every turn and this
+         * button cannot shrink them by one token - which is why they are the
+         * room that was taken out of the number rather than part of it.
          */
         usage.instructions
-          ? `Instructions, re-sent every turn: ~${usage.instructions.toLocaleString()}` +
-            `${LINE}This conversation: ~${Math.max(0, usage.used - usage.instructions).toLocaleString()}`
+          ? `Instructions, re-sent every turn and not compactable: ~${usage.instructions.toLocaleString()}` +
+            `${LINE}Whole window: ${usage.used.toLocaleString()} of ${usage.limit.toLocaleString()}`
           : '',
         'Click to compact older turns (the instructions stay).'
       ]

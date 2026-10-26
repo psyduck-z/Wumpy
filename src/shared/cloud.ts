@@ -25,7 +25,7 @@ export type ProviderId = 'google' | 'groq' | 'mistral' | 'nvidia' | 'ollama'
  * would not fail to compile: it would accept the key, encrypt it, and then
  * drop it on the next read as an unrecognised provider name.
  */
-import { foldAttachments, type Attached } from './attach'
+import { MEDIA_NOT_SENT, foldAttachments, type Attached } from './attach'
 /* Type only, and it has to stay that way: @shared/order imports this file
    for the catalogue and the usable-speed floor, so a value imported back
    from it would be a cycle. The one thing needed here is the NAME of an
@@ -1484,9 +1484,17 @@ export function wireMessage(
   )
 
   /* Attachments whose BYTES go up are still dropped on a model that cannot
-     read them, because the alternative is a 400 that costs the whole turn. */
+     read them, because the alternative is a 400 that costs the whole turn.
+     Said out loud rather than done quietly: a model handed "what is this"
+     with the picture removed and no mention of it describes something
+     plausible, which is worse than the refusal this avoided. */
   const sendable = vision ? folded.bytes : []
-  if (!sendable.length) return { role, content: folded.text }
+  if (!sendable.length) {
+    const dropped = folded.bytes.length
+      ? [folded.text, MEDIA_NOT_SENT].filter(Boolean).join(String.fromCharCode(10))
+      : folded.text
+    return { role, content: dropped }
+  }
 
   const parts: WirePart[] = []
   if (folded.text) parts.push({ type: 'text', text: folded.text })

@@ -32,6 +32,7 @@ import {
   verdictFor
 } from '@shared/probe'
 import type { ProbeResult } from '@shared/probe'
+import { MEDIA_NOT_SENT } from '@shared/attach'
 import { dataUrl, visionTask } from '@shared/vision'
 import type { ChatOptions, StreamFailure, StreamHandlers, StreamStats } from './stream'
 import type { KeyStore } from './keys'
@@ -937,10 +938,54 @@ export class CloudClient {
       // headers are back: measuring from there reported a 9ms turn at 1500
       // tok/s, which is the stream being read, not the model answering.
       const startedAt = Date.now()
-      const res = await this.send(provider, model, body, controller.signal, watched)
+      let res = await this.send(provider, model, body, controller.signal, watched)
       if (!res) return
 
-      await this.drain(res, watched, startedAt, provider)
+      let said = await this.drain(res, watched, startedAt, provider)
+
+      /**
+       * A 200 THAT FAILS INSIDE THE STREAM, which the retries above cannot
+       * see at all.
+       *
+       * NVIDIA answers a picture its model cannot read with headers, a 200,
+       * and then `data: {"error":{"message":"Internal server error"}}` - no
+       * status to classify, no body to match, nothing for the 400 path above
+       * to catch. Three of those in a row is what this looked like from the
+       * panel: a red "Internal server error" with no model, no provider and
+       * no suggestion, on a question that was one word long.
+       *
+       * The second and third are the part that matters. The picture stays in
+       * the conversation and the newest two go up on every later turn, so
+       * one unreadable image killed every message after it until the chat
+       * was abandoned. Dropping it costs one extra request, once, and the
+       * model is written down as text-only exactly as a 400 would have
+       * written it down.
+       *
+       * Only when nothing arrived: a stream that failed halfway through an
+       * answer is a gateway dropping a connection, and the picture had
+       * already been accepted.
+       */
+      const nothingArrived = !seen.text && !seen.thinking
+      if (said && nothingArrived && !provedBlind(model) && stripPictures(body)) {
+        rememberBlind(model)
+        console.warn(
+          `[wumpy] ${model} failed mid-stream carrying a picture ("${said}"). ` +
+            'Asking again without it, and never attaching one again.'
+        )
+        res = await this.send(provider, model, body, controller.signal, watched)
+        if (!res) return
+        said = await this.drain(res, watched, Date.now(), provider)
+      }
+
+      if (said) {
+        console.warn(`[wumpy] ${model} stopped mid-stream: ${said}`)
+        handlers.onError(
+          `${PROVIDERS[provider].label} stopped mid-answer: ${said}. That is their ` +
+            'gateway rather than your key or your question — ask again, or `/model` ' +
+            'for another one.',
+          { kind: 'other', elsewhere: true }
+        )
+      }
     } catch (err) {
       if (hitCap) {
         const waited = friendlyWait(opts.maxTurnMs)
@@ -1212,30 +1257,13 @@ export class CloudClient {
       const refusedPicture =
         res.status === 400 &&
         /multimodal|image|vision|not support|invalid request/i.test(detail ?? '')
-      const carryingPicture = (
-        (body as { messages?: Array<{ content?: unknown }> }).messages ?? []
-      ).some((m) => Array.isArray(m.content))
-      if (refusedPicture && carryingPicture && !provedBlind(model)) {
+      if (refusedPicture && !provedBlind(model) && stripPictures(body)) {
         /* `provedBlind` is both the record and the loop guard: once it is
            true the next 400 falls through to the ordinary handling
-           instead of retrying for ever. */
+           instead of retrying for ever. And `stripPictures` is the guard
+           on there being one to drop: without it an ordinary 400 would
+           post the identical request and fail identically. */
         rememberBlind(model)
-        /*
-         * Stripped from the body in place, because this loop is inside
-         * `send` and the body was built by the caller: a bare `continue`
-         * would post the identical request and be refused identically.
-         * The text parts stay - the question survives, only the picture
-         * goes - and a message left with one text part collapses back to
-         * a plain string, which is the shape every provider prefers.
-         */
-        const dropped = body as { messages?: Array<{ content?: unknown }> }
-        for (const m of dropped.messages ?? []) {
-          if (!Array.isArray(m.content)) continue
-          const text = (m.content as Array<{ type?: string; text?: string }>).filter(
-            (part) => part?.type === 'text'
-          )
-          m.content = text.length === 1 ? (text[0].text ?? '') : text
-        }
         console.log(
           `[wumpy] ${model} refused the picture; it is text-only. ` +
             'Asking again without it, and never attaching one again.'
@@ -1284,13 +1312,20 @@ export class CloudClient {
     return null
   }
 
-  /** Reads the SSE body, forwarding deltas and totalling what it cost. */
+  /**
+   * Reads the SSE body, forwarding deltas and totalling what it cost.
+   *
+   * Returns the provider's own words when the stream carried an error
+   * instead of an answer, and null when the turn finished. RETURNED rather
+   * than reported, because a 200 that fails inside the stream can still be a
+   * refused picture, and the retry for that lives where the body is.
+   */
   private async drain(
     res: Response,
     handlers: StreamHandlers,
     startedAt: number,
     provider: ProviderId
-  ): Promise<void> {
+  ): Promise<string | null> {
     const reader = res.body!.getReader()
     const decoder = new TextDecoder()
     let buffer = ''
@@ -1320,10 +1355,7 @@ export class CloudClient {
         } catch {
           continue
         }
-        if (chunk.error?.message) {
-          handlers.onError(stripKey(chunk.error.message))
-          return
-        }
+        if (chunk.error?.message) return stripKey(chunk.error.message)
 
         if (chunk.usage) {
           const counted = countTokens(chunk.usage)
@@ -1389,6 +1421,7 @@ export class CloudClient {
         `, finish=${finish || 'none'}`
     )
     handlers.onDone(stats)
+    return null
   }
 
   /**
@@ -1486,6 +1519,39 @@ export class CloudClient {
  * "The soonest frees up in 28800s" was the old line, which is eight hours
  * written in a unit nobody converts in their head.
  */
+/**
+ * Takes the pictures out of a request body, in place, and says they are gone.
+ *
+ * In place because the body belongs to the caller and the retry is a
+ * `continue` inside `send`: a bare retry would post the identical request and
+ * be refused identically. The question survives - only the bytes go - and
+ * what is left collapses to a plain string, which is the shape every provider
+ * prefers.
+ *
+ * Returns whether there was anything to take, which is also the guard: an
+ * ordinary 400 with no picture in it must not retry itself unchanged.
+ *
+ * The line left behind is the part that was missing. A model handed "what is
+ * this" with the picture quietly removed describes something plausible, and
+ * nobody ever finds out it was looking at nothing.
+ */
+export function stripPictures(body: unknown): boolean {
+  const messages = (body as { messages?: Array<{ content?: unknown }> }).messages ?? []
+  let dropped = false
+  for (const m of messages) {
+    if (!Array.isArray(m.content)) continue
+    const parts = m.content as Array<{ type?: string; text?: string }>
+    if (!parts.some((part) => part?.type !== 'text')) continue
+    dropped = true
+    const said = parts
+      .filter((part) => part?.type === 'text')
+      .map((part) => part.text ?? '')
+      .filter(Boolean)
+    m.content = [...said, MEDIA_NOT_SENT].join(String.fromCharCode(10))
+  }
+  return dropped
+}
+
 export function friendlyWait(ms: number): string {
   const seconds = Math.ceil(Math.max(0, ms) / 1000)
   if (seconds < 90) return `${seconds}s`

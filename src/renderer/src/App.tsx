@@ -1340,7 +1340,9 @@ function namedControls(shot: Attachment): string[] {
      */
     if (Date.now() - lastCompact.current < COMPACT_COOLDOWN_MS) return false
     const done = await compactHistory({ silent: true })
-    if (done) chatRef.current.note(roomNote(used, limit))
+    /* The same three numbers the decision was made on, so the sentence and
+       the meter quote the same percentage. */
+    if (done) chatRef.current.note(roomNote(used, limit, instructions))
     return done
   }, [compactHistory, settings])
   makeRoomRef.current = makeRoomNow

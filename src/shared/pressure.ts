@@ -26,6 +26,15 @@
  * then continue" half - a compaction that drops the result it was making room
  * for has lost the thing it was protecting.
  *
+ * ALL THREE ARE FRACTIONS OF WHAT A SUMMARY CAN REACH, which is the window
+ * minus the instructions - see `fullness`. They were fractions of the whole
+ * window until the meter was asked why it bottomed out at 40%: against a
+ * 32,768 budget with 14,842 tokens of preamble, "65% full" meant a
+ * conversation of 6,457 tokens, about fifteen exchanges, and the other 65%
+ * was a constant. The percentages are unchanged and now mean the thing they
+ * are named after; the practical effect is that a conversation gets the room
+ * that is actually free before it is summarised.
+ *
  * Pure, so the thresholds can be argued with and checked without a window.
  */
 
@@ -55,10 +64,38 @@ export function thresholdFor(turn: Turn): number {
   return turn === 'idle' ? IDLE_AT : turn === 'send' ? SEND_AT : MIDTASK_AT
 }
 
-/** How full the window is, as a fraction. Zero when the limit is nonsense. */
-export function fullness(used: number, limit: number): number {
+/**
+ * How full the part that can be summarised is, as a fraction.
+ *
+ * NOT how full the window is, and that is the fix rather than a nicety.
+ * Asked as "why is the minimum compact thing 40%?" - because the meter is a
+ * button that compacts, and it read 45% on a chat holding the word "hi".
+ *
+ * The instructions are 14,842 tokens of a 32,768 budget (8,286 when the turn
+ * needs none of the optional sections), they are re-sent in full on every
+ * turn, and a summary cannot touch one of them. Measured against the whole
+ * window they are a floor nobody can get under: the number never started at
+ * zero, never reached zero again, and 45% of it described something the
+ * button it sits in cannot change. Several comments in this app already
+ * admitted that it "used to look like a bug". It looked like one because the
+ * number was answering a different question from the one the button asks.
+ *
+ * So both ends move: the fixed cost comes off `used` and off `limit`, and
+ * what is left is the conversation against the room the conversation has. A
+ * new chat is 0%. 100% is no room left for history. The thresholds below are
+ * fractions of the same thing, so the bar and the compaction cannot disagree.
+ *
+ * Instructions bigger than the window is not a conversation problem and
+ * cannot be summarised away, so it reads as full and MIN_COMPACTABLE is what
+ * stops that turning into a compaction loop.
+ */
+export function fullness(used: number, limit: number, instructions = 0): number {
   if (!Number.isFinite(used) || !Number.isFinite(limit) || limit <= 0) return 0
-  return Math.max(0, used) / limit
+  const fixed = Math.min(Math.max(0, Number.isFinite(instructions) ? instructions : 0), limit)
+  const conversation = Math.max(0, used - fixed)
+  const room = limit - fixed
+  if (room <= 0) return conversation > 0 ? 1 : 0
+  return conversation / room
 }
 
 /**
@@ -97,7 +134,7 @@ export const COMPACT_COOLDOWN_MS = 60_000
  * possibly help.
  */
 export function needsRoom(turn: Turn, used: number, limit: number, instructions = 0): boolean {
-  if (fullness(used, limit) <= thresholdFor(turn)) return false
+  if (fullness(used, limit, instructions) <= thresholdFor(turn)) return false
   return used - Math.max(0, instructions) >= MIN_COMPACTABLE
 }
 
@@ -108,8 +145,8 @@ export function needsRoom(turn: Turn, used: number, limit: number, instructions 
  * middle of a sequence they are watching, with the panel showing nothing
  * about why. The percentage is in it because it is the reason.
  */
-export function roomNote(used: number, limit: number): string {
-  return `The conversation was ${Math.round(fullness(used, limit) * 100)}% of the way full, so earlier turns were summarised before carrying on.`
+export function roomNote(used: number, limit: number, instructions = 0): string {
+  return `The conversation had used ${Math.round(fullness(used, limit, instructions) * 100)}% of the room it has, so earlier turns were summarised before carrying on.`
 }
 
 /**
