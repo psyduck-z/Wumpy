@@ -211,6 +211,45 @@ for (let i = 0; i < names.length; i++) {
   }
 }
 
+/* ------------------------------- the stylesheet still says what it reads as */
+
+/**
+ * A comment does not end a selector.
+ *
+ * Found by accident next to the picker: a block comment had been pasted
+ * between `.picker-row.is-removing` and its `{`, which reads as
+ * `.picker-row.is-removing .picker-badge` - one selector, two rules quietly
+ * gone. The ✕ stopped appearing on every row in remove mode, and the
+ * capability badge was styled only inside a row being removed, which is to
+ * say never.
+ *
+ * Nothing complains about this. CSS has no syntax error to raise here: both
+ * halves are valid, the file parses, and the only symptom is a rule that
+ * does nothing. So it is checked.
+ */
+{
+  let inside = 0
+  for (let at = styles.indexOf('/*'); at !== -1; at = styles.indexOf('/*', at + 2)) {
+    const end = styles.indexOf('*/', at + 2)
+    if (end === -1) break
+    const before = styles.slice(0, at).trimEnd()
+    const after = styles.slice(end + 2)
+    const stop = after.search(/[{};]/)
+    /* The comment is followed by a selector (the next punctuation is its
+       opening brace) but is NOT preceded by the end of something - so it is
+       sitting in the middle of a selector. */
+    /* `*／` counts as the end of something too: two comments in a row above
+       one rule is the house style, not a broken selector. */
+    if (stop >= 0 && after[stop] === '{' && before && !/([};{,]|\*\/)$/.test(before)) {
+      inside++
+      console.log(`     after: ${before.slice(-60)}`)
+    }
+  }
+  check('no comment sits inside a selector', inside, 0)
+}
+check('the ✕ shows on every row in remove mode', /\.picker-row\.is-removing \.picker-del \{/.test(styles), true)
+check('and the badge is styled outside one', /\n\.picker-badge \{/.test(styles), true)
+
 /* ------------------------------------------------- and they can be looked up */
 
 /**

@@ -102,12 +102,43 @@ export function Picker({
       )
     : items
 
+  /**
+   * Whether the highlight should drag the list to it.
+   *
+   * It must when a key moved it - that is the whole point of arrowing
+   * through a list taller than the panel - and it must NOT when the mouse
+   * did, which is the bug: "when I scroll down, my cursor goes back up, but
+   * then everything shifts... and my cursor goes back to the start".
+   *
+   * The loop was: the wheel scrolls, a row slides under the stationary
+   * pointer, mouseenter moves the highlight to it, and the effect below
+   * scrolls that row into view. A row at the top edge is half cut off while
+   * the wheel is moving, so "into view" means scrolling back up by the part
+   * that was cut - undoing the scroll, over and over, and cancelling the
+   * wheel's own animation each time it did.
+   *
+   * A mouse-moved highlight never needs scrolling to anyway: the row is
+   * under the pointer, which is as visible as a thing gets.
+   */
+  const follow = useRef(false)
+
+  /** Where the pointer was, to tell a real move from a row sliding under it. */
+  const pointer = useRef<{ x: number; y: number } | null>(null)
+
   useEffect(() => inputRef.current?.focus(), [])
-  useEffect(() => setCursor(0), [filter])
+  /* Back to the top, and scrolled there: the rows under the cursor are not
+     the rows that were there a keystroke ago. */
+  useEffect(() => {
+    follow.current = true
+    setCursor(0)
+  }, [filter])
   /* Switching tabs re-sorts the rows under the cursor, so the highlight
      would stay on row four and mean something else. Back to the top, which
      is where the answer to "which is best on this one" now is. */
-  useEffect(() => setCursor(0), [tabs?.active])
+  useEffect(() => {
+    follow.current = true
+    setCursor(0)
+  }, [tabs?.active])
 
   useEffect(() => {
     if (!armed) return
@@ -117,9 +148,27 @@ export function Picker({
 
   // Keep the highlighted row in view while arrowing through a long list.
   useEffect(() => {
+    if (!follow.current) return
+    follow.current = false
     const el = rowsRef.current?.children[cursor] as HTMLElement | undefined
     el?.scrollIntoView({ block: 'nearest' })
   }, [cursor])
+
+  /**
+   * The highlight following the pointer, when the pointer is what moved.
+   *
+   * mousemove rather than mouseenter, because Chromium sends a mousemove at
+   * the same coordinates after content scrolls under a still pointer - and
+   * an enter event cannot be told apart from a real one at all. Same
+   * coordinates as last time means the mouse did not move, whatever else
+   * did.
+   */
+  const pointAt = (i: number, x: number, y: number): void => {
+    if (pointer.current?.x === x && pointer.current?.y === y) return
+    pointer.current = { x, y }
+    follow.current = false
+    setCursor(i)
+  }
 
   /** Skips disabled rows so the cursor never rests on something unusable. */
   const move = (delta: number): void => {
@@ -129,6 +178,7 @@ export function Picker({
       next = (next + delta + visible.length) % visible.length
       if (!visible[next].disabled) break
     }
+    follow.current = true
     setCursor(next)
   }
 
@@ -158,7 +208,9 @@ export function Picker({
     if (visible.length === 0) return
     const order = visible.map((_, i) => (to === 'first' ? i : visible.length - 1 - i))
     const hit = order.find((i) => !visible[i].disabled)
-    if (hit !== undefined) setCursor(hit)
+    if (hit === undefined) return
+    follow.current = true
+    setCursor(hit)
   }
 
   /**
@@ -301,7 +353,7 @@ export function Picker({
                 type="button"
                 className="picker-main"
                 disabled={item.disabled}
-                onMouseEnter={() => !item.disabled && setCursor(i)}
+                onMouseMove={(e) => !item.disabled && pointAt(i, e.clientX, e.clientY)}
                 onClick={() => commit(item)}
               >
                 <span className="picker-title">
