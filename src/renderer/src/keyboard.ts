@@ -89,6 +89,36 @@ export function isTypingTarget(target: EventTarget | null): boolean {
 }
 
 /**
+ * Whether a keystroke landed on something a key can operate.
+ *
+ * Space presses a focused button. It does in every application on this
+ * machine, it is half of what the Tab key is for, and this app was taking
+ * it: the adopter below sees every keystroke in the capture phase, decided
+ * that a button is not a text box, and moved the caret to the composer
+ * instead of pressing the thing that had focus. So every button in the panel
+ * could be reached and then only activated with Enter - including the ones
+ * reached by the arrow keys and F6, which exist to make the buttons
+ * reachable in the first place.
+ *
+ * Duck-typed for the same two reasons as isTypingTarget: it keeps this file
+ * checkable without a DOM, and an element from another realm is a perfectly
+ * good HTMLElement that fails instanceof.
+ */
+export function isActivatable(target: EventTarget | null): boolean {
+  const el = target as {
+    tagName?: unknown
+    getAttribute?: (name: string) => string | null
+  } | null
+  if (!el || typeof el.tagName !== 'string') return false
+  const tag = el.tagName.toLowerCase()
+  if (tag === 'button' || tag === 'a' || tag === 'select' || tag === 'summary') return true
+  /* A div wearing a role is still a control to the user and to a screen
+     reader, and the picker's rows are exactly that. */
+  const role = typeof el.getAttribute === 'function' ? (el.getAttribute('role') ?? '') : ''
+  return ['button', 'tab', 'option', 'checkbox', 'radio', 'menuitem'].includes(role)
+}
+
+/**
  * Handles an arrow press inside a group of controls.
  *
  * Returns true when it moved focus, so the caller can preventDefault only in
@@ -158,6 +188,16 @@ export function adoptsKeystroke(k: {
   // Escape, Tab, the arrows and the function keys all mean something else,
   // and every one of them has a name longer than one character.
   if (k.key.length !== 1) return 'ignore'
+  /**
+   * Space belongs to whatever has focus, when that is something a key can
+   * press.
+   *
+   * Otherwise the two features argue: the arrows and F6 exist to put focus
+   * on a button, and this would take the keystroke that presses it. See
+   * isActivatable - every button in the panel could be reached and then
+   * operated only with Enter.
+   */
+  if (k.key === ' ' && isActivatable(k.target)) return 'ignore'
   /**
    * Space moves the caret and types nothing.
    *

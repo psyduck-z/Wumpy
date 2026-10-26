@@ -897,6 +897,75 @@ check(
   true
 )
 
+/* --------------------------------------------- Space presses what has focus */
+
+/**
+ * The two features were arguing, and the newer one was winning.
+ *
+ * The adopter sees every keystroke in the capture phase so that a character
+ * typed at a window whose caret is elsewhere still lands in the box. It
+ * decided that a button is not a text box and took Space - which is the key
+ * that presses a button, in every application on this machine. So the
+ * arrows, Ctrl+Down and now F6 could all put focus on a button that then
+ * answered to Enter and nothing else.
+ */
+check('a button takes Space', K.isActivatable({ tagName: 'BUTTON' }), true)
+check('so does a link', K.isActivatable({ tagName: 'A' }), true)
+check('and a select', K.isActivatable({ tagName: 'SELECT' }), true)
+// The picker's rows are divs wearing a role, which is a control to the user
+// and to a screen reader either way.
+check(
+  'a div with a role counts',
+  K.isActivatable({ tagName: 'DIV', getAttribute: () => 'button' }),
+  true
+)
+check('a plain div does not', K.isActivatable({ tagName: 'DIV', getAttribute: () => null }), false)
+check('nor a textarea', K.isActivatable({ tagName: 'TEXTAREA' }), false)
+check('nor nothing at all', K.isActivatable(null), false)
+check(
+  'Space on a button is left alone',
+  K.adoptsKeystroke({
+    key: ' ',
+    ctrlKey: false,
+    altKey: false,
+    metaKey: false,
+    target: { tagName: 'BUTTON' },
+    composerHasFocus: false,
+    pickerOpen: false
+  }),
+  'ignore'
+)
+// And still caught everywhere else, because holding it is how dictation
+// starts and that machine lives on the textarea's own handler.
+check(
+  'Space with focus nowhere still reaches the box',
+  K.adoptsKeystroke({
+    key: ' ',
+    ctrlKey: false,
+    altKey: false,
+    metaKey: false,
+    target: { tagName: 'BODY' },
+    composerHasFocus: false,
+    pickerOpen: false
+  }),
+  'focus'
+)
+// A letter typed at a focused button is still a message being written: the
+// whole point of the adopter is that a character never disappears.
+check(
+  'but a letter still goes to the box',
+  K.adoptsKeystroke({
+    key: 'a',
+    ctrlKey: false,
+    altKey: false,
+    metaKey: false,
+    target: { tagName: 'BUTTON' },
+    composerHasFocus: false,
+    pickerOpen: false
+  }),
+  'insert'
+)
+
 /* ------------------------------------------------- getting down a long list */
 
 /**

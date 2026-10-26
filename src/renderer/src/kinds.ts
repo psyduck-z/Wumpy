@@ -28,6 +28,14 @@ export type CardKind = 'run' | 'write' | 'desktop' | 'screen' | 'look' | 'search
 export type Family = 'runs' | 'changes' | 'sees' | 'out'
 
 /**
+ * In order, least to most of a reach outwards: code here, a change here,
+ * something of yours going out, the web. Used by /help, so the list anyone
+ * reads is in a deliberate order rather than whatever order an object
+ * happened to be written in.
+ */
+export const FAMILIES: readonly Family[] = ['runs', 'changes', 'sees', 'out']
+
+/**
  * Which family each card belongs to.
  *
  * `run` is its own family rather than part of `changes` because executing
@@ -74,7 +82,30 @@ export const FAMILY_SHAPE: Record<Family, 'square' | 'triangle' | 'circle' | 'di
   out: 'diamond'
 }
 
+/**
+ * The same four shapes as characters, for /help.
+ *
+ * A shape nobody can look up is a shape that has to be guessed at, and the
+ * place this app explains itself is a markdown table - which can hold a
+ * square but not a stylesheet. These are the geometric-shapes block, which
+ * every Windows font has had for twenty years.
+ */
+export const SHAPE_GLYPH: Record<(typeof FAMILY_SHAPE)[Family], string> = {
+  square: '■',
+  triangle: '▲',
+  circle: '●',
+  diamond: '◆'
+}
+
 /** The hover text for a card's mark. */
 export function markTitle(kind: CardKind): string {
   return FAMILY_WORD[KIND_FAMILY[kind]]
+}
+
+/** One row per family, for the table in /help. */
+export function markLines(): Array<{ glyph: string; what: string }> {
+  return FAMILIES.map((family) => ({
+    glyph: SHAPE_GLYPH[FAMILY_SHAPE[family]],
+    what: FAMILY_WORD[family]
+  }))
 }

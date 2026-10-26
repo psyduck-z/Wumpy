@@ -2789,6 +2789,19 @@ function namedControls(shot: Attachment): string[] {
         return
       }
 
+      /*
+       * F1 prints the commands and the keys.
+       *
+       * /help existed and was reachable by typing it or by finding it in the
+       * palette, which is the wrong way round: the key people press when
+       * they do not know what to press is this one, and it did nothing.
+       */
+      if (e.key === 'F1' && !e.ctrlKey && !e.altKey && !e.shiftKey) {
+        e.preventDefault()
+        void runCommand({ kind: 'help' }, '/help')
+        return
+      }
+
       if (e.ctrlKey && !e.altKey && !e.shiftKey) {
         // Ctrl+Shift+M, not Ctrl+M: dictation had Ctrl+M first, and the
         // composer listens in the capture phase, so the binding I added here

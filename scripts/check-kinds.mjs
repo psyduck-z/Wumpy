@@ -211,5 +211,41 @@ for (let i = 0; i < names.length; i++) {
   }
 }
 
+/* ------------------------------------------------- and they can be looked up */
+
+/**
+ * A shape nobody can look up is a shape to be guessed at.
+ *
+ * /help is the only place the system is explained, and the rows are built
+ * from kinds.ts rather than typed into the table - an explanation that can
+ * drift from what is drawn on screen is worse than no explanation.
+ */
+const cmdOut = join(process.cwd(), '.kinds-cmds.mjs')
+await build({
+  entryPoints: ['src/renderer/src/commands.ts'],
+  bundle: true,
+  platform: 'node',
+  format: 'esm',
+  outfile: cmdOut,
+  logLevel: 'error'
+})
+const help = (await import(pathToFileURL(cmdOut).href)).helpText()
+rmSync(cmdOut, { force: true })
+
+check('the marks are explained somewhere', help.includes('What a card would touch'), true)
+for (const family of K.FAMILIES) {
+  const glyph = K.SHAPE_GLYPH[K.FAMILY_SHAPE[family]]
+  check(`${family} is in the table`, help.includes(`| ${glyph} | ${K.FAMILY_WORD[family]} |`), true)
+}
+check('four rows and no more', help.split('\n').filter((l) => /^\| [■▲●◆] \|/.test(l)).length, 4)
+// Red is the exception to the whole scheme, so the one place it is explained
+// has to say so.
+check('and that red overrides it', /Red overrides the colour/.test(help), true)
+// The key people press when they do not know what to press. It printed
+// nothing at all before: /help was reachable by typing it or by finding it
+// in the palette, which is the wrong way round.
+check('F1 prints it', /e\.key === 'F1'/.test(read('src/renderer/src/App.tsx')), true)
+check('and says so in the table', /\| F1 \| This list \|/.test(help), true)
+
 console.log(failures ? `\n${failures} kind checks FAILED` : '\nall kind checks')
 process.exitCode = failures ? 1 : 0

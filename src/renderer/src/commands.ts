@@ -4,6 +4,7 @@ import { MAX_RUNS } from '@shared/probe'
 import { readOrdering, type Ordering } from '@shared/order'
 import { readKind, type EventKind } from '@shared/journal'
 import { nearest } from '@shared/nearest'
+import { markLines } from './kinds'
 
 /**
  * What a command asks the app to do. Commands are parsed in the renderer and
@@ -742,7 +743,9 @@ export const SHORTCUT_FOR: Record<string, string | undefined> = {
   approve: 'Shift+Tab',
   stop: 'Esc',
   quit: 'Esc',
-  help: 'Ctrl+K'
+  // F1 rather than Ctrl+K, which opens the searchable list of everything and
+  // is its own row below. This one prints the tables.
+  help: 'F1'
 }
 
 /**
@@ -907,7 +910,26 @@ export function helpText(): string {
     '| PageUp / PageDown | Move through the transcript, or a list, a page at a time |',
     '| Ctrl+Home / Ctrl+End | Jump to the ends of the transcript, or of a list |',
     '| Tab | Switch tabs in a list |',
+    '| F1 | This list |',
     '| Esc | Stop, go back, or hide |',
+    '',
+    /*
+     * The four marks, because a shape nobody can look up is a shape to be
+     * guessed at.
+     *
+     * Built from kinds.ts rather than typed out here: the table is the only
+     * place the system is explained, and an explanation that can drift from
+     * what is drawn on screen is worse than none.
+     */
+    '**What a card would touch**',
+    '',
+    'The shape at the top-left of a card says what it would do, in its own',
+    'colour. Red overrides the colour and keeps the shape: that one is',
+    'destructive.',
+    '',
+    '| Mark | Meaning |',
+    '| --- | --- |',
+    ...markLines().map((m) => `| ${m.glyph} | ${m.what} |`),
     '',
     'Typing while an answer is running queues the message until it finishes.',
     'Start it with `/also` instead and it is added as a note straight away,',
