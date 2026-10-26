@@ -1,4 +1,11 @@
-import type { ChatMessage, DesktopResult, LinkResult, ShellResult, WriteResult } from './types'
+import type {
+  ChatMessage,
+  DesktopResult,
+  LinkResult,
+  NoteTopic,
+  ShellResult,
+  WriteResult
+} from './types'
 import { shorten } from './activity'
 import { needsElevation, neverRan, notOnPath } from './parsefail'
 
@@ -110,6 +117,63 @@ export function repeatOfNote(messages: readonly ChatMessage[], content: string):
   if (last.aside || chipKind(last)) return null
   if (last.role !== 'assistant' || last.content !== content) return null
   return { id: last.id, repeat: (last.repeat ?? 1) + 1 }
+}
+
+/**
+ * The note a new statement REPLACES, rather than is said under.
+ *
+ * repeatOfNote above is about the same words twice. This is about the same
+ * subject twice in different words, which is the shape the user hit: three
+ * presses of Shift+Tab put "Manual", "Auto" and "Accept all" in the
+ * transcript, all three describing the one setting and two of them wrong by
+ * the time they were read. "since they fall under the same command or
+ * effect, just replace, not add".
+ *
+ * Three rules, and the awkward one is the first:
+ *
+ * Anything in between is skipped, not stopped at. A statement of state is
+ * about NOW, so a stale one must not survive just because Wumpy said
+ * something else after it. That is also why the replacement moves to the end
+ * rather than being rewritten where it stands - at the bottom it is read as
+ * the current state, halfway up it is read as history.
+ *
+ * A different topic does not block either, for the same reason: "pinned" and
+ * "accept all" are two facts and both are current.
+ *
+ * The person speaking ends it. Once they have typed, what was true before is
+ * part of the conversation they are reading back, and the next statement is
+ * a new thing they asked for - the same line repeatOf draws for chips.
+ */
+export function restatementOf(
+  messages: readonly ChatMessage[],
+  topic: NoteTopic
+): string | null {
+  for (let i = messages.length - 1; i >= 0; i--) {
+    const m = messages[i]
+    if (m.role === 'user' && !m.automatic) return null
+    if (m.aside) return null
+    if (m.topic === topic && m.local && !m.error) return m.id
+  }
+  return null
+}
+
+/**
+ * Applies a restatement: the note says the new thing, in the old one's place
+ * at the end of the transcript.
+ *
+ * The id is kept, so it is the same note having changed its mind rather than
+ * a new one - which is what stops the list jumping about as React re-keys
+ * it, and what makes "replace" true rather than "remove and add".
+ */
+export function restated(
+  messages: readonly ChatMessage[],
+  id: string,
+  content: string,
+  now: number
+): ChatMessage[] {
+  const found = messages.find((m) => m.id === id)
+  if (!found) return [...messages]
+  return [...messages.filter((m) => m.id !== id), { ...found, content, createdAt: now }]
 }
 
 /**

@@ -1,8 +1,15 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { actionFacts } from '../ledger'
-import type { Attachment, ChatMessage } from '@shared/types'
+import type { Attachment, ChatMessage, NoteTopic } from '@shared/types'
 import { BAIL_WINDOW_MS, hasBlock, returnsThePrompt } from '../abort'
-import { collapsed, repeatOf, repeatOfNote, type ChipKind } from '@shared/notify'
+import {
+  collapsed,
+  repeatOf,
+  repeatOfNote,
+  restated,
+  restatementOf,
+  type ChipKind
+} from '@shared/notify'
 
 let counter = 0
 export const nextId = (): string => `m${Date.now().toString(36)}${(counter++).toString(36)}`
@@ -55,8 +62,15 @@ export interface ChatState {
   setContext(ctx: { chatTitle: string | null }): void
   /** Messages as the model would see them, for size estimates and compaction. */
   history(): Array<{ role: string; content: string }>
-  /** Adds a local-only note (command output, errors) without calling the model. */
-  note(content: string, error?: boolean): void
+  /**
+   * Adds a local-only note (command output, errors) without calling the model.
+   *
+   * `topic` is for the notes that state what is true NOW - the mode, the
+   * model, whether the panel is pinned. Two notes on one topic are one
+   * statement changing its mind, so the second replaces the first rather
+   * than being added under it. See restatementOf in shared/notify.ts.
+   */
+  note(content: string, error?: boolean, topic?: NoteTopic): void
   /**
    * A note meant to be rewritten later, returning the id to rewrite it by.
    *
@@ -343,8 +357,21 @@ export function useChat(): ChatState {
     []
   )
 
-  const note = useCallback((content: string, error = false) => {
+  const note = useCallback((content: string, error = false, topic?: NoteTopic) => {
     setMessages((prev) => {
+      /*
+       * A statement about something already stated replaces it.
+       *
+       * Not the same thing as the repeat below, which is the same words
+       * twice. This is the same SUBJECT twice in different words - three
+       * presses of Shift+Tab saying "Manual", then "Auto", then "Accept
+       * all", all about one setting and the first two wrong by the time
+       * they are read. See restatementOf for which earlier note counts.
+       */
+      if (topic && !error) {
+        const earlier = restatementOf(prev, topic)
+        if (earlier) return restated(prev, earlier, content, Date.now())
+      }
       /*
        * The same note twice running is said once.
        *
@@ -370,7 +397,8 @@ export function useChat(): ChatState {
           content: error ? '' : content,
           error: error ? content : undefined,
           createdAt: Date.now(),
-          local: true
+          local: true,
+          topic
         }
       ]
     })

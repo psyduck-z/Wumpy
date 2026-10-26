@@ -420,7 +420,94 @@ check(
   check('and it is the same one, moved to the end', after[0].id, before[0].id)
 }
 
+/* ------------------------------------------- one statement, said once */
+
+/**
+ * The same subject twice, in different words.
+ *
+ * Reported with a screenshot of nine paragraphs: three presses of Shift+Tab
+ * had put "Manual", then "Auto", then "Accept all" in the transcript, three
+ * times over, all of them about the one setting and two in three wrong by
+ * the time they were read. "since they fall under the same command or
+ * effect, just replace, not add".
+ *
+ * The repeat rule above could not help - it is the same WORDS twice, and
+ * these are three different sentences about one fact.
+ */
+const MANUAL = '**Manual** — every command waits for you.'
+const ALL = '**Accept all** — commands run without asking.'
+const states = (content, topic, over = {}) => aNote(content, { topic, ...over })
+
+check(
+  'a second statement replaces the first',
+  N.restatementOf([states(MANUAL, 'approve')], 'approve') !== null,
+  true
+)
+check('a different subject does not', N.restatementOf([states(MANUAL, 'approve')], 'pin'), null)
+check('nor does an untagged note', N.restatementOf([aNote(MANUAL)], 'approve'), null)
+check('nor an empty transcript', N.restatementOf([], 'approve'), null)
+/*
+ * Anything in between is skipped rather than stopped at, which is the
+ * difference between this and the chip rule. A statement of state is about
+ * NOW, so a stale one must not survive because Wumpy said something else
+ * after it - and a note about something else is a second current fact, not a
+ * wall.
+ */
+check(
+  'Wumpy talking in between does not save the stale one',
+  N.restatementOf([states(MANUAL, 'approve'), aNote('Ran something.')], 'approve') !== null,
+  true
+)
+check(
+  'and neither does a statement about something else',
+  N.restatementOf([states(MANUAL, 'approve'), states('Pinned.', 'pin')], 'approve') !== null,
+  true
+)
+/* The person speaking ends it: what was true before is part of the
+   conversation they are reading back. The same line repeatOf draws. */
+check(
+  'but the person speaking does',
+  N.restatementOf(
+    [states(MANUAL, 'approve'), { id: 'u', role: 'user', content: 'hi', createdAt: 2 }],
+    'approve'
+  ),
+  null
+)
+/* An automatic turn is the app handing something to the model, not the
+   person saying anything. */
+check(
+  'a hand-back is not the person speaking',
+  N.restatementOf(
+    [
+      states(MANUAL, 'approve'),
+      { id: 'a', role: 'user', content: 'here is the screenshot', createdAt: 2, automatic: true }
+    ],
+    'approve'
+  ) !== null,
+  true
+)
+{
+  const before = [states(MANUAL, 'approve'), aNote('Ran something.')]
+  const after = N.restated(before, N.restatementOf(before, 'approve'), ALL, 9)
+  check('nothing is added', after.length, before.length)
+  check('it says the new thing', after[after.length - 1].content, ALL)
+  check('it is still the same note', after[after.length - 1].id, before[0].id)
+  /* Moved to the end, because at the bottom it reads as the current state
+     and halfway up it reads as history. */
+  check('and it is the last thing said', after[after.length - 1].topic, 'approve')
+  check('the other line is untouched', after[0].content, 'Ran something.')
+}
+
 ok('note() asks before appending', /repeatOfNote\(prev, content\)/.test(chat))
+ok('and asks about the subject first', /restatementOf\(prev, topic\)/.test(chat))
+ok('a new note carries its subject', /local: true,\n\s*topic\n/.test(chat))
+/* The reported one. A mode that cycles three ways from one key is the note
+   most likely to be said several times in a row. */
+ok('the approval mode is one of them', /APPROVAL_NOTE\[next\], false, 'approve'/.test(app))
+/* Two routes to the same fact - the command and the header button - so they
+   have to agree about what it is a statement about, or Ctrl+P and /pin
+   stack up against each other. */
+ok('both ways of pinning are the same subject', (app.match(/'pin'\n/g) ?? []).length >= 2)
 /* The cause, not just the safety net: picking the model already in use is a
    confirmation, and announcing a change that did not happen is the spam. */
 ok('picking the current model says nothing', /if \(name === current\) \{/.test(app))

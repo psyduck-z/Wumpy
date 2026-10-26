@@ -94,7 +94,45 @@ export interface ChatMessage {
    * to say.
    */
   cutOff?: string
+  /**
+   * What this note is a statement about, when it is one.
+   *
+   * Set on the notes that say what is true NOW rather than what just
+   * happened - which mode commands run in, which model answers, whether the
+   * panel is pinned. A second statement about the same thing replaces the
+   * first instead of being added under it: cycling the approval mode three
+   * times used to leave nine paragraphs in the transcript, six of them
+   * describing modes that were no longer on. Reported with a screenshot of
+   * exactly that: "since they fall under the same command or effect, just
+   * replace, not add".
+   *
+   * See restatementOf in shared/notify.ts for when a statement is a
+   * restatement and when it is a new thing worth saying.
+   */
+  topic?: NoteTopic
 }
+
+/**
+ * The things a note can be a statement about.
+ *
+ * A closed list rather than a free string, because the whole value of the
+ * field is that two notes agree they are about the same thing - and a typo
+ * in a topic is a note that silently stops replacing the one before it.
+ *
+ * Finer than the command that produced it: `/think` and `/lean` are both the
+ * 'setting' action and they are two different facts about the world.
+ */
+export type NoteTopic =
+  | 'approve'
+  | 'pin'
+  | 'model'
+  | 'engine'
+  | 'reasoning'
+  | 'thinking'
+  | 'lean'
+  | 'voice'
+  | 'voice-polish'
+  | 'voice-autostop'
 
 /* -------------------------------------------------------- the one assistant */
 

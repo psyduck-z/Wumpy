@@ -1775,7 +1775,7 @@ function namedControls(shot: Attachment): string[] {
         case 'reasoning': {
           const show = action.show === 'toggle' ? !(settings?.showReasoning ?? false) : action.show
           await patch({ showReasoning: show })
-          chat.note(`Reasoning ${show ? 'shown' : 'hidden'}.`)
+          chat.note(`Reasoning ${show ? 'shown' : 'hidden'}.`, false, 'reasoning')
           return
         }
         /**
@@ -2103,7 +2103,9 @@ function namedControls(shot: Attachment): string[] {
             chat.note(
               on
                 ? 'Thinking on — it reasons first, so the first word takes longer.'
-                : 'Thinking off — straight to the answer.'
+                : 'Thinking off — straight to the answer.',
+              false,
+              'thinking'
             )
             return
           }
@@ -2112,7 +2114,9 @@ function namedControls(shot: Attachment): string[] {
           chat.note(
             next
               ? 'Short instructions on — about 2,500 fewer tokens a turn.'
-              : 'Full instructions on — about 2,500 more a turn.'
+              : 'Full instructions on — about 2,500 more a turn.',
+            false,
+            'lean'
           )
           return
         }
@@ -2123,7 +2127,9 @@ function namedControls(shot: Attachment): string[] {
             chat.note(
               next
                 ? 'Voice on — **hold the spacebar** and talk, or Ctrl+M for a long one.'
-                : 'Voice off.'
+                : 'Voice off.',
+              false,
+              'voice'
             )
             return
           }
@@ -2135,7 +2141,9 @@ function namedControls(shot: Attachment): string[] {
                 ? /* Where it goes is the whole decision, and this said
                      "the local model" long after there was one. */
                   `Polish on — dictation goes to **${model}** before it reaches the box.`
-                : 'Polish off — dictation goes in as heard.'
+                : 'Polish off — dictation goes in as heard.',
+              false,
+              'voice-polish'
             )
             return
           }
@@ -2144,7 +2152,9 @@ function namedControls(shot: Attachment): string[] {
           chat.note(
             next
               ? 'Dictation stops when you stop talking.'
-              : 'Dictation runs until you press Ctrl+M again.'
+              : 'Dictation runs until you press Ctrl+M again.',
+            false,
+            'voice-autostop'
           )
           return
         }
@@ -2202,7 +2212,11 @@ function namedControls(shot: Attachment): string[] {
         case 'pin': {
           const next = action.pinned === 'toggle' ? !pinned : action.pinned
           await patch({ hideOnBlur: !next })
-          chat.note(next ? 'Staying on top until dismissed.' : 'Will hide when it loses focus.')
+          chat.note(
+            next ? 'Staying on top until dismissed.' : 'Will hide when it loses focus.',
+            false,
+            'pin'
+          )
           return
         }
         case 'compact': {
@@ -2220,7 +2234,7 @@ function namedControls(shot: Attachment): string[] {
           setAutoRuns(0)
           autoRunsRef.current = 0
           ranCommandsRef.current = []
-          chat.note(APPROVAL_NOTE[next])
+          chat.note(APPROVAL_NOTE[next], false, 'approve')
           return
         }
         case 'stop':
@@ -3244,7 +3258,9 @@ function namedControls(shot: Attachment): string[] {
           chat.note(
             hosted
               ? `Now answering with **${hosted.label}**. ${hosted.blurb}`
-              : `Now answering with \`${name}\`.`
+              : `Now answering with \`${name}\`.`,
+            false,
+            'model'
           )
           close()
         },
@@ -3262,7 +3278,9 @@ function namedControls(shot: Attachment): string[] {
           chat.note(
             `Searches will open in **${
               SEARCH_ENGINES[isSearchEngine(id) ? id : DEFAULT_ENGINE].label
-            }**.`
+            }**.`,
+            false,
+            'engine'
           )
           close()
         },
@@ -3330,7 +3348,11 @@ function namedControls(shot: Attachment): string[] {
     chat.note(
       next
         ? 'Pinned — staying on top until you dismiss it.'
-        : 'Unpinned — will hide when it loses focus.'
+        : 'Unpinned — will hide when it loses focus.',
+      false,
+      /* The same fact as the /pin command's note, so the two replace each
+         other: pressing Ctrl+P four times is one statement, not four. */
+      'pin'
     )
   }
 
