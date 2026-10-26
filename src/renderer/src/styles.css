@@ -2863,7 +2863,7 @@ body {
 }
 
 /* ---- which part of the panel you are in ----
-   F6 steps between the header, the transcript, the status bar and the box.
+   Ctrl+Tab steps between the header, the transcript, the status bar and the box.
    The ring above says which control; these say which part - and they are
    only on the two strips, because the box has a caret and a focused card
    already lights its own border.
@@ -2881,7 +2881,7 @@ body {
  * The transcript itself taking focus.
  *
  * There is not always a button in it - a conversation of plain answers has
- * none at all - and F6 landing nowhere reads as the key being broken. So the
+ * none at all - and the key landing nowhere reads as it being broken. So the
  * scroller is focusable (tabindex -1) and becomes the place you land, which
  * has the side benefit that the arrow keys and PgUp then scroll it natively
  * rather than through a handler.

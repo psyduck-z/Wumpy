@@ -29,6 +29,8 @@ const {
   parseCommand,
   completions,
   helpText,
+  shortcutsText,
+  KEYS,
   SHORTCUT_FOR,
   CLICKABLE,
   readCommandChip
@@ -131,6 +133,71 @@ console.log('ok   /help lists every command and every key')
      reader, it is just no longer a column. */
   if (!help.includes('on\\|off')) fail('/help no longer shows the on|off arguments')
   console.log(`ok   ${rows.length} /help rows are two cells, arguments and all`)
+}
+
+/* -------------------------------------------------------------- /shortcuts */
+
+/**
+ * The shortcuts on their own, asked for by name: "add a new command to see
+ * all of the shortcuts".
+ *
+ * They were a table at the bottom of /help, under sixty rows of commands,
+ * which is a long scroll to the one table nobody memorises - in the one
+ * place you go when you cannot remember something.
+ *
+ * What is checked is that there is only ONE list behind both. There used to
+ * be three - the table inside /help, KEY_ONLY for the Ctrl+K palette, and
+ * SHORTCUT_FOR for the hint beside a command - so the same chord was written
+ * out two or three times in different words, and they had already drifted.
+ */
+{
+  const sheet = shortcutsText()
+  if (!findCommand('shortcuts')) fail('/shortcuts does not exist')
+  if (findCommand('hotkeys')?.name !== 'shortcuts') fail('/hotkeys does not reach /shortcuts')
+  for (const row of KEYS) {
+    if (!sheet.includes(`| ${row.keys} | ${row.what} |`)) {
+      fail(`/shortcuts is missing ${row.keys}`)
+    }
+    if (!help.includes(`| ${row.keys} | ${row.what} |`)) fail(`/help is missing ${row.keys}`)
+  }
+  console.log(`ok   ${KEYS.length} keys, listed the same way by /shortcuts and /help`)
+
+  // One chord, one row. Two rows for one motion is how a key table becomes
+  // unreadable, and it is also how the old three lists disagreed.
+  const chords = KEYS.map((k) => k.keys.replace(/\s/g, '').toLowerCase())
+  const twice = [...new Set(chords.filter((c, i) => chords.indexOf(c) !== i))]
+  if (twice.length) fail(`a chord is listed twice: ${twice.join(', ')}`)
+
+  // The hint beside a command in the palette comes from this same list.
+  for (const row of KEYS) {
+    for (const name of row.runs ?? []) {
+      if (!findCommand(name)) fail(`${row.keys} says it runs /${name}, which does not exist`)
+      if (SHORTCUT_FOR[name] !== row.keys) fail(`/${name}'s hint is not ${row.keys}`)
+    }
+  }
+  console.log(`ok   ${chords.length} chords, each listed once, each pointing somewhere real`)
+
+  // And it is not simply /help again: the commands are the other half.
+  if (sheet.includes('**Commands**')) fail('/shortcuts prints the command table too')
+  if (sheet.length >= help.length) fail('/shortcuts is not shorter than /help')
+  // The card marks come along, because they are the other symbols on screen
+  // and this is now where a symbol is explained.
+  if (!sheet.includes('What a card would touch')) {
+    fail('/shortcuts does not explain the card marks')
+  }
+  console.log('ok   /shortcuts is the keys, the marks, and a pointer at the rest')
+
+  /**
+   * And it is NOT called /keys, not even as an alias.
+   *
+   * `/key` takes a secret, and the guard keeping those out of input history
+   * matches the first word - so `/keys nvidia <secret>`, one letter wrong,
+   * would have printed a help table and written the key to a plain file that
+   * comes back on one press of Up. Two commands a character apart, one of
+   * them handling secrets, is not a namespace worth having.
+   */
+  if (findCommand('keys')) fail('/keys exists, one letter from the command that takes a secret')
+  if (findCommand('key')?.name !== 'key') fail('/key no longer reaches the key manager')
 }
 
 /* -------------------------------------------------------------- the parser */

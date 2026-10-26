@@ -97,7 +97,7 @@ export function isTypingTarget(target: EventTarget | null): boolean {
  * that a button is not a text box, and moved the caret to the composer
  * instead of pressing the thing that had focus. So every button in the panel
  * could be reached and then only activated with Enter - including the ones
- * reached by the arrow keys and F6, which exist to make the buttons
+ * reached by the arrow keys and Ctrl+Tab, which exist to make the buttons
  * reachable in the first place.
  *
  * Duck-typed for the same two reasons as isTypingTarget: it keeps this file
@@ -192,7 +192,7 @@ export function adoptsKeystroke(k: {
    * Space belongs to whatever has focus, when that is something a key can
    * press.
    *
-   * Otherwise the two features argue: the arrows and F6 exist to put focus
+   * Otherwise the two features argue: the arrows and Ctrl+Tab exist to put focus
    * on a button, and this would take the keystroke that presses it. See
    * isActivatable - every button in the panel could be reached and then
    * operated only with Enter.
@@ -213,7 +213,7 @@ export function adoptsKeystroke(k: {
 /* ------------------------------------------------------------- the regions */
 
 /**
- * The four parts of the panel, in the order F6 walks them.
+ * The four parts of the panel, in the order Ctrl+Tab walks them.
  *
  * Everything above was about moving INSIDE something - a row of buttons, a
  * list, the box. Getting BETWEEN them was the hole: the composer holds the
@@ -223,9 +223,15 @@ export function adoptsKeystroke(k: {
  * every message on screen and wrapping round. Pinning the panel, moving it,
  * changing the model or reading the quota were mouse-only in practice.
  *
- * F6 is what Windows uses for this, which means it is already in the user's
- * hands rather than something to be taught. Screen order, top to bottom, so
- * the ring matches what is in front of you; Shift+F6 goes the other way.
+ * Ctrl+Tab, because Tab already means "the next thing" and this app already
+ * uses Ctrl for the bigger version of a key's meaning, so there is nothing
+ * to memorise. It was F6 alone - the Windows convention, and a key nobody
+ * remembers: "don't make it too hard to remember - like function 16, like
+ * what the hell, function 6, like what the hell". F6 still works, since it
+ * is what a Windows user may try and it costs one line.
+ *
+ * Screen order, top to bottom, so the ring matches what is in front of you;
+ * Shift goes the other way.
  */
 export const REGIONS = ['header', 'transcript', 'status', 'composer'] as const
 
@@ -236,7 +242,7 @@ export type Region = (typeof REGIONS)[number]
  *
  * The transcript is two things that never coexist: the scroller, and a picker
  * that replaces it while one is open. One selector for both, so a picker is
- * still a place F6 can land rather than a hole in the ring.
+ * still a place Ctrl+Tab can land rather than a hole in the ring.
  */
 export const REGION_SELECTOR: Record<Region, string> = {
   header: '.header',
@@ -248,7 +254,7 @@ export const REGION_SELECTOR: Record<Region, string> = {
 /**
  * Which region an element sits in, or null when it is in none of them.
  *
- * Used to decide where F6 is stepping FROM, which is read off where the
+ * Used to decide where Ctrl+Tab is stepping FROM, which is read off where the
  * caret actually is rather than remembered in state: focus moves for plenty
  * of reasons that have nothing to do with this key, and a remembered
  * position would be wrong the moment one of them happened.
@@ -271,7 +277,7 @@ export function regionOf(el: Element | null | undefined): Region | null {
  *
  * From nowhere in particular - focus on the body, which happens after a
  * card's button disappears from under it - the walk starts at the composer,
- * so the first F6 moves off the box rather than onto it.
+ * so the first press moves off the box rather than onto it.
  *
  * Returns null when there is nowhere else to go, so the caller can leave the
  * keystroke alone instead of preventing a default it did nothing about.
@@ -291,7 +297,7 @@ export function regionAfter(
 }
 
 /**
- * Which control F6 should land on, stepping into a region.
+ * Which control Ctrl+Tab should land on, stepping into a region.
  *
  * The first one, except in the transcript, which is read bottom-up: the
  * newest message is at the end and the newest proposal is the one the keys

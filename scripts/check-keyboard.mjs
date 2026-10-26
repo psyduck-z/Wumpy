@@ -891,11 +891,30 @@ check(
   /regionOf\(e\.target as Element \| null\)/.test(app),
   true
 )
+/**
+ * And it is Ctrl+Tab, not F6.
+ *
+ * F6 is the Windows convention for this and nobody remembers it: "don't make
+ * it too hard to remember - like function 16, like what the hell, function
+ * 6, like what the hell". Tab already means the next thing, so Ctrl+Tab is
+ * the same idea with nothing to memorise. F6 still works, and is named in
+ * the row rather than given one of its own - two rows for one motion is the
+ * sort of thing that makes a key table unreadable.
+ */
+check('Ctrl+Tab moves between the parts', /e\.key === 'Tab' && e\.ctrlKey/.test(app), true)
 check(
-  'F6 is listed where the other keys are',
-  cmds.KEY_ONLY.some((k) => k.keys.includes('F6')),
+  'and it is listed where the other keys are',
+  cmds.KEY_ONLY.some((k) => k.keys.includes('Ctrl+Tab')),
   true
 )
+check(
+  'with F6 named beside it',
+  cmds.KEYS.some((k) => k.keys.includes('Ctrl+Tab') && k.what.includes('F6')),
+  true
+)
+// The slash-command completion in the box takes plain Tab. A half-typed
+// command must not be a place where Ctrl+Tab stops working.
+check('the completion lets Ctrl+Tab past', /'Tab' && !e\.shiftKey && !e\.ctrlKey/.test(composer), true)
 
 /* --------------------------------------------- Space presses what has focus */
 

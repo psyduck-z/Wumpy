@@ -79,6 +79,7 @@ import {
   allCommands,
   parseCommand,
   helpText,
+  shortcutsText,
   KEY_ONLY,
   SHORTCUT_FOR,
   type CommandAction
@@ -2228,6 +2229,9 @@ function namedControls(shot: Attachment): string[] {
         case 'help':
           chat.note(helpText())
           return
+        case 'shortcuts':
+          chat.note(shortcutsText())
+          return
         case 'quit':
           window.wumpy.panel.hide()
           return
@@ -2777,14 +2781,23 @@ function namedControls(shot: Attachment): string[] {
       }
 
       /**
-       * F6 walks the panel's parts; Shift+F6 walks them backwards.
+       * Ctrl+Tab walks the panel's parts; Ctrl+Shift+Tab walks them back.
        *
-       * Windows' own key for this, so it is already in the user's hands
-       * rather than something this app has to teach. Unmodified apart from
-       * Shift: Ctrl+F6 and Alt+F6 mean other things in other apps and
-       * nothing here, so they are left alone.
+       * This was F6 alone, which is the Windows convention and which nobody
+       * remembers: "don't make it too hard to remember - like function 16,
+       * like what the hell, function 6, like what the hell". Fair. Tab
+       * already means "the next thing" and this app already uses Ctrl for
+       * the bigger version of a key's meaning, so Ctrl+Tab is the same idea
+       * with nothing to memorise.
+       *
+       * F6 stays as well. It costs one line, it is what a Windows user may
+       * try first, and if Chromium ever swallows Ctrl+Tab the way a browser
+       * with tabs would, the panel is still navigable.
+       *
+       * Unmodified apart from Shift in the F6 case: Ctrl+F6 and Alt+F6 mean
+       * other things in other apps and nothing here, so they are left alone.
        */
-      if (e.key === 'F6' && !e.ctrlKey && !e.altKey) {
+      if ((e.key === 'Tab' && e.ctrlKey && !e.altKey) || (e.key === 'F6' && !e.ctrlKey && !e.altKey)) {
         if (stepRegion(e.shiftKey)) e.preventDefault()
         return
       }
@@ -2948,7 +2961,7 @@ function namedControls(shot: Attachment): string[] {
        * It used to take the chord everywhere, and Shift+Tab is the only way
        * back through a row of controls: anywhere but the composer, this made
        * the keyboard one-directional. You could step into the header with
-       * F6 and then only ever go forward, and the fourth press changed what
+       * Ctrl+Tab and then only ever go forward, and the fourth press changed what
        * runs without asking instead of moving focus - which is not a key you
        * want to press by accident while looking for the pin.
        *
@@ -3350,7 +3363,7 @@ function namedControls(shot: Attachment): string[] {
       ) : (
         <div className="scroll" ref={scroller} onScroll={onScroll} tabIndex={-1}>
           {/*
-            tabIndex -1 above: somewhere for F6 to land when there is no
+            tabIndex -1 above: somewhere for Ctrl+Tab to land when there is no
             button in the transcript at all, which is most conversations.
             Negative because it is a place you are PUT rather than a stop on
             the Tab route - and once there, the arrow keys scroll it with no
@@ -3536,7 +3549,7 @@ function Empty({
       ) : (
         <p>
           <code>{model}</code>. Press <kbd>{hotkeyLabel}</kbd> anywhere to summon this,{' '}
-          <kbd>Ctrl+K</kbd> for everything it can do.
+          <kbd>Ctrl+K</kbd> for everything it can do, <code>/shortcuts</code> for them.
         </p>
       )}
     </div>

@@ -85,6 +85,21 @@ export type CommandAction =
   | { kind: 'compact' }
   | { kind: 'stop' }
   | { kind: 'help' }
+  /**
+   * `/shortcuts` — the keys, on their own.
+   *
+   * They were inside /help, under sixty rows of commands, which is a long
+   * way to scroll for the one table nobody can memorise. Asked for by name:
+   * "add a new command to see all of the shortcuts".
+   *
+   * NOT called 'keys', here or out there, and that is not fussiness. `/key`
+   * takes a secret, and the guard that keeps those out of input history
+   * matches on the first word - so `/keys nvidia <secret>`, one letter
+   * wrong, would have printed this table and written the key to a plain file
+   * that comes back on one press of Up. Two commands a character apart, one
+   * of them handling secrets, is not a namespace worth having.
+   */
+  | { kind: 'shortcuts' }
   | { kind: 'quit' }
   /** Send to the model, but wrapped in a prompt that shapes the answer. */
   | { kind: 'prompt'; text: string; label: string }
@@ -710,6 +725,15 @@ export const COMMANDS: CommandSpec[] = [
   },
   { name: 'stop', hint: 'Stop generating', run: () => ({ kind: 'stop' }) },
   { name: 'help', aliases: ['?'], hint: 'List every command', run: () => ({ kind: 'help' }) },
+  /* Named for the word the request used - "see all of the shortcuts" - with
+     /hotkeys too, since that is what this app calls the key that summons the
+     panel. Not /keys, and not even as an alias: see the action above. */
+  {
+    name: 'shortcuts',
+    aliases: ['hotkeys'],
+    hint: 'Every keyboard shortcut',
+    run: () => ({ kind: 'shortcuts' })
+  },
   { name: 'quit', aliases: ['exit'], hint: 'Quit Wumpy', run: () => ({ kind: 'quit' }) },
 
   ...PROMPT_COMMANDS.map((p): CommandSpec => ({
@@ -728,24 +752,96 @@ export const COMMANDS: CommandSpec[] = [
 ]
 
 /**
+ * Every key, in one place.
+ *
+ * There were three lists: a hand-written markdown table inside /help, a
+ * KEY_ONLY array for the Ctrl+K palette, and a SHORTCUT_FOR map putting the
+ * key beside its command. The same chord was therefore written out two or
+ * three times, in different words and different arrow glyphs - "Alt+Up /
+ * Alt+Down | Step through the conversation a message at a time" in one and
+ * "Alt+↑ / Alt+↓ | Step through messages" in the other - and nothing made
+ * them agree. /shortcuts exists to answer "what are the shortcuts", and it can
+ * only answer it honestly if there is one list to read.
+ *
+ * `runs` names the command the key is a shortcut for, where there is one.
+ * That is what puts the chord beside it in the palette, and what keeps the
+ * key from being listed twice there - once on its command's row and once on
+ * its own.
+ *
+ * Grouped the way they are used rather than alphabetically: typing, then the
+ * panel, then proposals, then reading back, then the way out.
+ */
+export const KEYS: readonly {
+  readonly keys: string
+  readonly what: string
+  readonly runs?: readonly string[]
+}[] = [
+  { keys: 'Enter / Shift+Enter', what: 'Send, or start a new line' },
+  { keys: '↑ / ↓', what: 'Recall what you typed before, in an empty box' },
+  { keys: 'Ctrl+M', what: 'Start or stop dictation' },
+  { keys: 'Ctrl+K', what: 'Every command, searchable' },
+  { keys: 'F1', what: 'The commands, the keys and what the card shapes mean', runs: ['help'] },
+
+  /*
+   * Ctrl+Tab rather than F6, which is what this was.
+   *
+   * F6 is the Windows convention and nobody remembers it: "don't make it too
+   * hard to remember - like function 16, like what the hell, function 6,
+   * like what the hell". Ctrl+Tab is the same idea with nothing to memorise,
+   * because Tab already means "the next thing" and Ctrl is already how this
+   * app says "the bigger version of that". F6 still works and is listed
+   * beside it, since it costs nothing and is what a Windows user may try.
+   */
+  {
+    keys: 'Ctrl+Tab / Ctrl+Shift+Tab',
+    what: 'Move between the header, transcript, status bar and box (also F6)'
+  },
+  { keys: 'Ctrl+N', what: 'New chat', runs: ['new'] },
+  { keys: 'Ctrl+R', what: 'Reopen a saved chat', runs: ['resume'] },
+  { keys: 'Ctrl+Shift+M', what: 'Change the model', runs: ['model'] },
+  { keys: 'Ctrl+D', what: 'Move the panel to the next corner', runs: ['dock'] },
+  { keys: 'Ctrl+P', what: 'Pin or unpin', runs: ['pin'] },
+  {
+    keys: 'Shift+Tab',
+    what: 'Cycle approval mode (from the box; elsewhere it steps back)',
+    runs: ['approve']
+  },
+
+  { keys: 'Ctrl+Enter', what: 'Run the newest proposal' },
+  { keys: 'Ctrl+Shift+Enter', what: 'Skip the newest proposal' },
+  { keys: 'Ctrl+↓ / Ctrl+↑', what: 'Step into the newest / first proposal' },
+  { keys: '← / →', what: 'Move between a proposal’s buttons' },
+  { keys: 'Space', what: 'Press the button that has focus' },
+
+  { keys: 'Alt+↑ / Alt+↓', what: 'Step through the conversation a message at a time' },
+  { keys: 'PageUp / PageDown', what: 'Move through the transcript, or a list, a page at a time' },
+  { keys: 'Ctrl+Home / Ctrl+End', what: 'Jump to the ends of the transcript, or of a list' },
+  { keys: 'Tab', what: 'Switch tabs in a list' },
+  { keys: 'Ctrl+Shift+C', what: 'Copy the last answer' },
+
+  { keys: 'Ctrl+C', what: 'Stop the answer (copies instead if text is selected)' },
+  { keys: 'Esc', what: 'Back to the box, then close the panel' }
+]
+
+/**
  * Keys that reach a command directly, shown beside it in the menu.
  *
  * The menu is for finding things. Showing the key is what stops it being
- * needed a second time.
+ * needed a second time. Derived from KEYS, so a chord cannot be advertised
+ * on a command's row in one wording and in the key table in another.
  */
 export const SHORTCUT_FOR: Record<string, string | undefined> = {
+  /* Not a key at all: the thing worth knowing about /also is WHEN it is for,
+     and the palette's hint column is where there is room to say it. */
   also: 'while busy',
-  new: 'Ctrl+N',
-  resume: 'Ctrl+R',
-  model: 'Ctrl+Shift+M',
-  dock: 'Ctrl+D',
-  pin: 'Ctrl+P',
-  approve: 'Shift+Tab',
+  /* Esc is layered - it stops an answer, else steps out of a card, else
+     hides the panel - so the table lists it once, with no command, and both
+     commands it stands in for are named here. */
   stop: 'Esc',
   quit: 'Esc',
-  // F1 rather than Ctrl+K, which opens the searchable list of everything and
-  // is its own row below. This one prints the tables.
-  help: 'F1'
+  ...Object.fromEntries(
+    KEYS.flatMap((k) => (k.runs ?? []).map((command) => [command, k.keys] as const))
+  )
 }
 
 /**
@@ -756,23 +852,9 @@ export const SHORTCUT_FOR: Record<string, string | undefined> = {
  * copying the last answer — was undiscoverable unless you already knew it.
  * That is most of the navigation.
  */
-export const KEY_ONLY: Array<{ keys: string; what: string }> = [
-  // First, because it is the one that gets you to the others: everything in
-  // the header and the status bar was mouse-only before it existed.
-  { keys: 'F6 / Shift+F6', what: 'Move between the header, transcript, status bar and box' },
-  { keys: 'Ctrl+Enter', what: 'Run the newest proposal' },
-  { keys: 'Ctrl+Shift+Enter', what: 'Skip the newest proposal' },
-  { keys: 'Ctrl+↓ / Ctrl+↑', what: 'Step into the newest / first proposal' },
-  { keys: '← →', what: 'Move between a proposal’s buttons' },
-  { keys: 'Alt+↑ / Alt+↓', what: 'Step through messages' },
-  { keys: 'PgUp / PgDn', what: 'Scroll the transcript, or page through a list' },
-  { keys: 'Ctrl+Home / Ctrl+End', what: 'Jump to the ends of the transcript, or of a list' },
-  { keys: 'Tab', what: 'Switch tabs in a list' },
-  { keys: 'Ctrl+Shift+C', what: 'Copy the last answer' },
-  { keys: 'Ctrl+C', what: 'Stop generating (with nothing selected)' },
-  { keys: 'Esc', what: 'Back to the box, then close the panel' },
-  { keys: '↑ ↓', what: 'Recall what you typed before, in an empty box' }
-]
+export const KEY_ONLY: Array<{ keys: string; what: string }> = KEYS.filter((k) => !k.runs).map(
+  (k) => ({ keys: k.keys, what: k.what })
+)
 
 /** Every command, for the menu. */
 export function allCommands(): CommandSpec[] {
@@ -885,42 +967,39 @@ export function helpText(): string {
     '| --- | --- |',
     ...rows,
     '',
+    /* The same rows /shortcuts prints, from the same list. They were typed out
+       again here, in different words, and drifted. */
+    ...keyRows(),
+    '',
+    ...markRows(),
+    '',
+    'Typing while an answer is running queues the message until it finishes.',
+    'Start it with `/also` instead and it is added as a note straight away,',
+    'without interrupting: the answer carries on and the model sees it next turn.'
+  ].join('\n')
+}
+
+/** The keys as a markdown table, for /shortcuts and for the end of /help. */
+function keyRows(): string[] {
+  return [
     '**Keys**',
     '',
     '| Key | What it does |',
     '| --- | --- |',
-    '| Ctrl+K | Every command, searchable |',
-    '| ↑ / ↓ | Step back through what you have typed before |',
-    '| Enter / Shift+Enter | Send / start a new line |',
-    '| Ctrl+M | Start or stop dictation |',
-    '| Ctrl+Shift+M | Change the model |',
-    '| Ctrl+N | New chat |',
-    '| Ctrl+R | Reopen a saved chat |',
-    '| Ctrl+D | Move the panel to the next corner |',
-    '| Ctrl+P | Pin or unpin |',
-    '| Ctrl+Shift+C | Copy the last answer |',
-    '| Ctrl+Enter | Run the command being asked about |',
-    '| Ctrl+Shift+Enter | Skip it |',
-    '| Ctrl+Down / Ctrl+Up | Step into the newest / first proposal |',
-    '| ← / → | Move between a proposal’s buttons |',
-    '| Ctrl+C | Stop the answer (copies instead if text is selected) |',
-    '| Alt+Up / Alt+Down | Step through the conversation a message at a time |',
-    '| Shift+Tab | Cycle approval mode (from the box; elsewhere it steps back) |',
-    '| F6 / Shift+F6 | Move between the header, transcript, status bar and box |',
-    '| PageUp / PageDown | Move through the transcript, or a list, a page at a time |',
-    '| Ctrl+Home / Ctrl+End | Jump to the ends of the transcript, or of a list |',
-    '| Tab | Switch tabs in a list |',
-    '| F1 | This list |',
-    '| Esc | Stop, go back, or hide |',
-    '',
-    /*
-     * The four marks, because a shape nobody can look up is a shape to be
-     * guessed at.
-     *
-     * Built from kinds.ts rather than typed out here: the table is the only
-     * place the system is explained, and an explanation that can drift from
-     * what is drawn on screen is worse than none.
-     */
+    ...KEYS.map((k) => `| ${k.keys} | ${k.what} |`)
+  ]
+}
+
+/*
+ * The four marks, because a shape nobody can look up is a shape to be
+ * guessed at.
+ *
+ * Built from kinds.ts rather than typed out here: the table is the only
+ * place the system is explained, and an explanation that can drift from
+ * what is drawn on screen is worse than none.
+ */
+function markRows(): string[] {
+  return [
     '**What a card would touch**',
     '',
     'The shape at the top-left of a card says what it would do, in its own',
@@ -929,11 +1008,28 @@ export function helpText(): string {
     '',
     '| Mark | Meaning |',
     '| --- | --- |',
-    ...markLines().map((m) => `| ${m.glyph} | ${m.what} |`),
+    ...markLines().map((m) => `| ${m.glyph} | ${m.what} |`)
+  ]
+}
+
+/**
+ * Every shortcut, and nothing else: `/shortcuts`.
+ *
+ * They were a table inside /help, below sixty rows of commands - a long
+ * scroll to reach the one table nobody memorises, in the one place you go
+ * when you cannot remember something. Asked for by name.
+ *
+ * The card marks come too. They are not keys, but they are the other thing
+ * on screen that is a symbol rather than a word, and this is now the place
+ * you come to have a symbol explained.
+ */
+export function shortcutsText(): string {
+  return [
+    ...keyRows(),
     '',
-    'Typing while an answer is running queues the message until it finishes.',
-    'Start it with `/also` instead and it is added as a note straight away,',
-    'without interrupting: the answer carries on and the model sees it next turn.'
+    ...markRows(),
+    '',
+    'Every command is in `/help`, or press Ctrl+K to search them.'
   ].join('\n')
 }
 
@@ -988,7 +1084,8 @@ export const CLICKABLE: readonly string[] = [
   'think',
   'nothink',
   'lean',
-  'help'
+  'help',
+  'shortcuts'
 ]
 
 /**

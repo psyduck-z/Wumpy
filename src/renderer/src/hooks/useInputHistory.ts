@@ -60,7 +60,13 @@ export function useInputHistory(): InputHistory {
      * is harmless and still worth not recording, so the whole command is
      * excluded rather than only the lines with a secret in them.
      */
-    if (/^\/(key|apikey)\b/i.test(entry)) {
+    /* No \b after the word: anything beginning `/key` is treated as possibly
+       carrying one. A near-miss is the dangerous case - `/keys nvidia
+       <secret>` is one letter from the real command, and if some later
+       command happened to answer to that spelling the line would be stored
+       in plain text. Nothing whose name starts with "key" is worth
+       remembering anyway. */
+    if (/^\/(key|apikey)/i.test(entry)) {
       setBrowsing(false)
       return
     }

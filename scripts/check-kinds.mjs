@@ -229,7 +229,8 @@ await build({
   outfile: cmdOut,
   logLevel: 'error'
 })
-const help = (await import(pathToFileURL(cmdOut).href)).helpText()
+const cmds = await import(pathToFileURL(cmdOut).href)
+const help = cmds.helpText()
 rmSync(cmdOut, { force: true })
 
 check('the marks are explained somewhere', help.includes('What a card would touch'), true)
@@ -245,7 +246,12 @@ check('and that red overrides it', /Red overrides the colour/.test(help), true)
 // nothing at all before: /help was reachable by typing it or by finding it
 // in the palette, which is the wrong way round.
 check('F1 prints it', /e\.key === 'F1'/.test(read('src/renderer/src/App.tsx')), true)
-check('and says so in the table', /\| F1 \| This list \|/.test(help), true)
+const f1 = cmds.KEYS.find((k) => k.keys === 'F1')
+check('and the key table says so', Boolean(f1 && help.includes(`| F1 | ${f1.what} |`)), true)
+check('and that it is /help it runs', f1?.runs, ['help'])
+// The marks are explained in /shortcuts too, which is the command somebody
+// reaches for when they cannot remember a symbol either.
+check('the sheet explains them as well', cmds.shortcutsText().includes('| ■ |'), true)
 
 console.log(failures ? `\n${failures} kind checks FAILED` : '\nall kind checks')
 process.exitCode = failures ? 1 : 0

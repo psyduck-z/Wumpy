@@ -478,8 +478,10 @@ export function Composer({
         return
       }
       // Shift+Tab is left alone: it cycles approval mode, and `e.key` is 'Tab'
-      // for both, so without this the palette swallowed it.
-      if ((e.key === 'Tab' && !e.shiftKey) || (e.key === 'Enter' && !e.shiftKey)) {
+      // for both, so without this the palette swallowed it. Ctrl+Tab the
+      // same - it moves between the parts of the panel, and a half-typed
+      // command in the box must not be a place that key stops working.
+      if ((e.key === 'Tab' && !e.shiftKey && !e.ctrlKey) || (e.key === 'Enter' && !e.shiftKey)) {
         const spec = palette[selected]
         if (spec) {
           e.preventDefault()
