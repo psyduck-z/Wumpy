@@ -4,6 +4,8 @@ import type { WriteResult, WriteTarget } from '@shared/types'
 import { arrowNavigate } from '../keyboard'
 import { registerPending } from '../pending'
 import { claimOnce } from '../once'
+import { KIND_FAMILY } from '../kinds'
+import { KindMark } from './KindMark'
 
 /**
  * A file the model wants to create, and the button that allows it.
@@ -110,9 +112,11 @@ export function WriteCard({
       onKeyDown={(e) => {
         if (arrowNavigate(e, cardRef.current)) e.preventDefault()
       }}
+      data-family={KIND_FAMILY.write}
       className={`cmd write ${state === 'failed' || target?.ok === false ? 'is-failed' : ''}`}
     >
       <div className="cmd-head">
+        <KindMark kind="write" />
         <span className="cmd-shell">{target?.exists ? 'Replace file' : 'New file'}</span>
         <span className="spacer" />
         {state === 'idle' && !complete && <span className="cmd-status">still writing…</span>}

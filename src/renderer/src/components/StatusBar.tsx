@@ -271,6 +271,15 @@ export function StatusBar({
         onClick={onCycleApproval}
         title={APPROVAL[approvalMode].title}
       >
+        {/*
+          How much of the dot is filled in is how much runs without you:
+          empty, half, solid. The three modes already differed by a word and
+          a colour, and the word is 9.5px in the corner of the screen - this
+          is the same fact in a shape, which is the part you can see without
+          reading. Not the only signal, which is the point: Shift+Tab is easy
+          to hit by accident, and what it changes should be noticeable.
+        */}
+        <span className="approval-dot" aria-hidden="true" />
         {APPROVAL[approvalMode].label}
       </button>
 

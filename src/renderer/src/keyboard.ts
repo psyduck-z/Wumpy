@@ -169,3 +169,96 @@ export function adoptsKeystroke(k: {
   if (k.key === ' ') return 'focus'
   return 'insert'
 }
+
+/* ------------------------------------------------------------- the regions */
+
+/**
+ * The four parts of the panel, in the order F6 walks them.
+ *
+ * Everything above was about moving INSIDE something - a row of buttons, a
+ * list, the box. Getting BETWEEN them was the hole: the composer holds the
+ * caret almost all the time, Tab from there walks forward into the
+ * transcript, and Shift+Tab was spent on the approval mode - so the header's
+ * buttons and the status bar's were reachable only by tabbing forward through
+ * every message on screen and wrapping round. Pinning the panel, moving it,
+ * changing the model or reading the quota were mouse-only in practice.
+ *
+ * F6 is what Windows uses for this, which means it is already in the user's
+ * hands rather than something to be taught. Screen order, top to bottom, so
+ * the ring matches what is in front of you; Shift+F6 goes the other way.
+ */
+export const REGIONS = ['header', 'transcript', 'status', 'composer'] as const
+
+export type Region = (typeof REGIONS)[number]
+
+/**
+ * How to find each region in the page.
+ *
+ * The transcript is two things that never coexist: the scroller, and a picker
+ * that replaces it while one is open. One selector for both, so a picker is
+ * still a place F6 can land rather than a hole in the ring.
+ */
+export const REGION_SELECTOR: Record<Region, string> = {
+  header: '.header',
+  transcript: '.scroll, .picker',
+  status: '.status',
+  composer: '.composer'
+}
+
+/**
+ * Which region an element sits in, or null when it is in none of them.
+ *
+ * Used to decide where F6 is stepping FROM, which is read off where the
+ * caret actually is rather than remembered in state: focus moves for plenty
+ * of reasons that have nothing to do with this key, and a remembered
+ * position would be wrong the moment one of them happened.
+ */
+export function regionOf(el: Element | null | undefined): Region | null {
+  for (const region of REGIONS) {
+    if (el?.closest?.(REGION_SELECTOR[region])) return region
+  }
+  return null
+}
+
+/**
+ * One step around the ring, skipping anything not on screen.
+ *
+ * `present` is asked rather than assumed because two of the four come and go:
+ * the status bar drops parts of itself when the panel is in a corner, and a
+ * region with nothing focusable in it would otherwise swallow the keystroke
+ * and leave focus where it was - which reads exactly like the key not
+ * working.
+ *
+ * From nowhere in particular - focus on the body, which happens after a
+ * card's button disappears from under it - the walk starts at the composer,
+ * so the first F6 moves off the box rather than onto it.
+ *
+ * Returns null when there is nowhere else to go, so the caller can leave the
+ * keystroke alone instead of preventing a default it did nothing about.
+ */
+export function regionAfter(
+  from: Region | null,
+  back: boolean,
+  present: (region: Region) => boolean
+): Region | null {
+  const n = REGIONS.length
+  const start = REGIONS.indexOf(from ?? 'composer')
+  for (let i = 1; i <= n; i++) {
+    const region = REGIONS[(((start + (back ? -i : i)) % n) + n) % n]
+    if (region !== from && present(region)) return region
+  }
+  return null
+}
+
+/**
+ * Which control F6 should land on, stepping into a region.
+ *
+ * The first one, except in the transcript, which is read bottom-up: the
+ * newest message is at the end and the newest proposal is the one the keys
+ * are almost always meant for. That is the same end Ctrl+Down picks, so the
+ * two ways in agree.
+ */
+export function entryIndex(region: Region, count: number): number {
+  if (count <= 0) return -1
+  return region === 'transcript' ? count - 1 : 0
+}

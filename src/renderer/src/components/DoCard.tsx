@@ -5,6 +5,8 @@ import { registerPending } from '../pending'
 import { claimOnce } from '../once'
 import { describe, readPlan } from '@shared/steps'
 import type { LinkApproval } from '@shared/links'
+import { KIND_FAMILY } from '../kinds'
+import { KindMark } from './KindMark'
 
 /**
  * The model asking to click and type on the real desktop.
@@ -93,9 +95,11 @@ export function DoCard({
       onKeyDown={(e) => {
         if (arrowNavigate(e, cardRef.current)) e.preventDefault()
       }}
+      data-family={KIND_FAMILY.desktop}
       className={`cmd desktop ${failed ? 'is-failed' : ''}`}
     >
       <div className="cmd-head">
+        <KindMark kind="desktop" />
         <span className="cmd-shell">Your screen</span>
         <span className="cmd-risk" title="This moves the pointer and presses keys on your desktop.">
           clicks and types

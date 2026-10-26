@@ -12,6 +12,8 @@ import type { LinkResult } from '@shared/types'
 import { arrowNavigate } from '../keyboard'
 import { registerPending } from '../pending'
 import { claimOnce } from '../once'
+import { KIND_FAMILY } from '../kinds'
+import { KindMark } from './KindMark'
 
 /**
  * A page the model wants to open, and the button that allows it.
@@ -110,9 +112,11 @@ export function LinkCard({
       onKeyDown={(e) => {
         if (arrowNavigate(e, cardRef.current)) e.preventDefault()
       }}
+      data-family={KIND_FAMILY.link}
       className={`cmd link ${state === 'failed' || !check.ok ? 'is-failed' : ''}`}
     >
       <div className="cmd-head">
+        <KindMark kind="link" />
         <span className="cmd-shell">{query ? 'Web search' : 'Open page'}</span>
         {check.ok && <span className="cmd-status link-host">{check.host}</span>}
         {check.local && <span className="cmd-status link-local">on this machine</span>}

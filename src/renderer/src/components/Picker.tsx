@@ -146,6 +146,30 @@ export function Picker({
     }
   }
 
+  /**
+   * Straight to one end of the list, past anything unpickable.
+   *
+   * The command list is sixty rows now that the keys are in it, and the only
+   * way down was to hold an arrow key or to know what to type. The ends are
+   * where the two obvious things are: the first match, and whatever was
+   * added last.
+   */
+  const jump = (to: 'first' | 'last'): void => {
+    if (visible.length === 0) return
+    const order = visible.map((_, i) => (to === 'first' ? i : visible.length - 1 - i))
+    const hit = order.find((i) => !visible[i].disabled)
+    if (hit !== undefined) setCursor(hit)
+  }
+
+  /**
+   * How far a page moves.
+   *
+   * Eight rows rather than the height of the list measured in pixels: the
+   * rows are a fixed size, the list shows about ten of them, and a number
+   * that depends on nothing cannot be wrong after a resize.
+   */
+  const PAGE = 8
+
   /** The next tab round, or the previous one. */
   const stepTab = (delta: 1 | -1): void => {
     if (!tabs || tabs.items.length < 2) return
@@ -176,6 +200,28 @@ export function Picker({
     } else if (e.key === 'ArrowUp') {
       e.preventDefault()
       move(-1)
+    } else if (e.key === 'PageDown' || e.key === 'PageUp') {
+      /*
+       * A page at a time through a long list.
+       *
+       * Taken from the window handler, which would otherwise try to scroll a
+       * transcript that is not on screen while a picker is open. Neither key
+       * does anything useful in a one-line filter box, so nothing is being
+       * stolen from the typing.
+       */
+      e.preventDefault()
+      e.stopPropagation()
+      move(e.key === 'PageUp' ? -PAGE : PAGE)
+    } else if (e.ctrlKey && (e.key === 'Home' || e.key === 'End')) {
+      /*
+       * Ctrl, because plain Home and End belong to the filter box - they are
+       * how you get to the front of what you typed. Ctrl+Home and Ctrl+End
+       * already mean "the ends of the thing you are looking at" everywhere
+       * else in the panel, and here the thing you are looking at is a list.
+       */
+      e.preventDefault()
+      e.stopPropagation()
+      jump(e.key === 'Home' ? 'first' : 'last')
     } else if (e.key === 'Enter') {
       e.preventDefault()
       const hit = visible[cursor]

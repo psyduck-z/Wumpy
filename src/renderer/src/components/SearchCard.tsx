@@ -4,6 +4,8 @@ import type { LinkApproval } from '@shared/links'
 import { arrowNavigate } from '../keyboard'
 import { registerPending } from '../pending'
 import { claimOnce } from '../once'
+import { KIND_FAMILY } from '../kinds'
+import { KindMark } from './KindMark'
 
 const PROVIDER_LABEL: Record<string, string> = {
   brave: 'Brave Search',
@@ -114,9 +116,11 @@ export function SearchCard({
       onKeyDown={(e) => {
         if (arrowNavigate(e, cardRef.current)) e.preventDefault()
       }}
+      data-family={KIND_FAMILY.search}
       className={`cmd search ${error ? 'is-failed' : ''}`}
     >
       <div className="cmd-head">
+        <KindMark kind="search" />
         <span className="cmd-shell">Web search</span>
         {state === 'done' && provider && (
           <span className="cmd-status">{PROVIDER_LABEL[provider] ?? provider}</span>

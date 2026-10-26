@@ -5,6 +5,8 @@ import { liveOutput, onLive, forgetLive } from '../live'
 import { runningPhase, tailLines } from '@shared/running'
 import type { ShellKind, ShellResult } from '@shared/types'
 import { arrowNavigate } from '../keyboard'
+import { KIND_FAMILY } from '../kinds'
+import { KindMark } from './KindMark'
 
 const SHELL_LABEL: Record<ShellKind, string> = {
   powershell: 'PowerShell',
@@ -279,9 +281,11 @@ export function CommandCard({
       onKeyDown={(e) => {
         if (arrowNavigate(e, cardRef.current)) e.preventDefault()
       }}
+      data-family={KIND_FAMILY.run}
       className={`cmd ${risk ? 'is-risky' : ''} ${failed ? 'is-failed' : ''}`}
     >
       <div className="cmd-head">
+        <KindMark kind="run" />
         <span className="cmd-shell">{SHELL_LABEL[shell]}</span>
         {risk && (
           <span className="cmd-risk" title={`This command ${risk}.`}>

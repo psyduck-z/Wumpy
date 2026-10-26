@@ -6,6 +6,8 @@ import { claimOnce } from '../once'
 import { readLookRequest } from '@shared/look'
 import { sizeLabel } from '@shared/attach'
 import type { LinkApproval } from '@shared/links'
+import { KIND_FAMILY } from '../kinds'
+import { KindMark } from './KindMark'
 
 /**
  * The model asking to open a picture that is already on the disk.
@@ -104,9 +106,11 @@ export function LookCard({
       onKeyDown={(e) => {
         if (arrowNavigate(e, cardRef.current)) e.preventDefault()
       }}
+      data-family={KIND_FAMILY.look}
       className={`cmd look ${error ? 'is-failed' : ''}`}
     >
       <div className="cmd-head">
+        <KindMark kind="look" />
         <span className="cmd-shell">Open a picture</span>
         <span className="spacer" />
         {state === 'idle' && !complete && <span className="cmd-status">still writing…</span>}

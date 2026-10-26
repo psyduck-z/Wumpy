@@ -4,6 +4,8 @@ import { arrowNavigate } from '../keyboard'
 import { registerPending } from '../pending'
 import { claimOnce } from '../once'
 import type { LinkApproval } from '@shared/links'
+import { KIND_FAMILY } from '../kinds'
+import { KindMark } from './KindMark'
 
 /**
  * The model asking to look at the screen, and the button that lets it.
@@ -111,9 +113,11 @@ export function ScreenCard({
       onKeyDown={(e) => {
         if (arrowNavigate(e, cardRef.current)) e.preventDefault()
       }}
+      data-family={KIND_FAMILY.screen}
       className={`cmd screen ${error ? 'is-failed' : ''}`}
     >
       <div className="cmd-head">
+        <KindMark kind="screen" />
         <span className="cmd-shell">Your screen</span>
         <span className="spacer" />
         {state === 'idle' && !complete && <span className="cmd-status">still writing…</span>}

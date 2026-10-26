@@ -754,13 +754,17 @@ export const SHORTCUT_FOR: Record<string, string | undefined> = {
  * That is most of the navigation.
  */
 export const KEY_ONLY: Array<{ keys: string; what: string }> = [
+  // First, because it is the one that gets you to the others: everything in
+  // the header and the status bar was mouse-only before it existed.
+  { keys: 'F6 / Shift+F6', what: 'Move between the header, transcript, status bar and box' },
   { keys: 'Ctrl+Enter', what: 'Run the newest proposal' },
   { keys: 'Ctrl+Shift+Enter', what: 'Skip the newest proposal' },
   { keys: 'Ctrl+↓ / Ctrl+↑', what: 'Step into the newest / first proposal' },
   { keys: '← →', what: 'Move between a proposal’s buttons' },
   { keys: 'Alt+↑ / Alt+↓', what: 'Step through messages' },
-  { keys: 'PgUp / PgDn', what: 'Scroll the transcript' },
-  { keys: 'Ctrl+Home / Ctrl+End', what: 'Jump to the top / bottom' },
+  { keys: 'PgUp / PgDn', what: 'Scroll the transcript, or page through a list' },
+  { keys: 'Ctrl+Home / Ctrl+End', what: 'Jump to the ends of the transcript, or of a list' },
+  { keys: 'Tab', what: 'Switch tabs in a list' },
   { keys: 'Ctrl+Shift+C', what: 'Copy the last answer' },
   { keys: 'Ctrl+C', what: 'Stop generating (with nothing selected)' },
   { keys: 'Esc', what: 'Back to the box, then close the panel' },
@@ -898,9 +902,11 @@ export function helpText(): string {
     '| ← / → | Move between a proposal’s buttons |',
     '| Ctrl+C | Stop the answer (copies instead if text is selected) |',
     '| Alt+Up / Alt+Down | Step through the conversation a message at a time |',
-    '| Shift+Tab | Cycle approval mode |',
-    '| PageUp / PageDown | Move through the transcript |',
-    '| Ctrl+Home / Ctrl+End | Jump to the start, or to the latest |',
+    '| Shift+Tab | Cycle approval mode (from the box; elsewhere it steps back) |',
+    '| F6 / Shift+F6 | Move between the header, transcript, status bar and box |',
+    '| PageUp / PageDown | Move through the transcript, or a list, a page at a time |',
+    '| Ctrl+Home / Ctrl+End | Jump to the ends of the transcript, or of a list |',
+    '| Tab | Switch tabs in a list |',
     '| Esc | Stop, go back, or hide |',
     '',
     'Typing while an answer is running queues the message until it finishes.',

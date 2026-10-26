@@ -83,6 +83,14 @@ import {
   SHORTCUT_FOR,
   type CommandAction
 } from './commands'
+import {
+  entryIndex,
+  focusablesIn,
+  regionAfter,
+  regionOf,
+  REGION_SELECTOR,
+  type Region
+} from './keyboard'
 import { newestPending } from './pending'
 import { forgetClaims } from './once'
 import { forgetAllLive } from './live'
@@ -2691,6 +2699,57 @@ function namedControls(shot: Attachment): string[] {
     setAtBottom(near)
   }, [])
 
+  /**
+   * Steps between the panel's four parts.
+   *
+   * The pieces inside each part were already navigable - arrows between a
+   * card's buttons, arrows in a picker, history in the box - and getting
+   * from one part to another was the hole. The composer holds the caret
+   * almost always, Tab from there walks forward into the transcript, and
+   * Shift+Tab was spent on the approval mode, so the header's buttons and
+   * the status bar's could be reached only by tabbing forward through every
+   * message on screen until it wrapped round. Pinning, moving the panel,
+   * changing the model and reading the quota were mouse-only in practice.
+   *
+   * Where it lands is the part worth being careful about. The newest
+   * proposal, if there is one, because that is what the keys are nearly
+   * always for and it is the same end Ctrl+Down picks. Otherwise the first
+   * control in the strip. Otherwise the transcript itself, which is
+   * focusable for exactly this reason: landing nowhere is indistinguishable
+   * from the key not working.
+   *
+   * Returns whether it moved, so the keystroke is only swallowed when
+   * something happened. See keyboard.ts for the ring itself.
+   */
+  const stepRegion = useCallback((back: boolean): boolean => {
+    const landing = (region: Region): HTMLElement | null => {
+      const container = document.querySelector<HTMLElement>(REGION_SELECTOR[region])
+      if (!container) return null
+      if (region === 'composer') return container.querySelector<HTMLTextAreaElement>('textarea')
+      if (region === 'transcript') {
+        const cards = container.querySelectorAll<HTMLElement>('.cmd, .ask')
+        const newest = cards[cards.length - 1]?.querySelector<HTMLElement>(
+          'button:not([disabled])'
+        )
+        if (newest) return newest
+      }
+      const items = focusablesIn(container)
+      const at = entryIndex(region, items.length)
+      if (at >= 0) return items[at] ?? null
+      /* Nothing to land on. The transcript still takes the keystroke - the
+         scroller itself is the landing spot, and the arrow keys scroll it
+         from there. A strip with no controls is genuinely nowhere to go. */
+      return region === 'transcript' ? container : null
+    }
+
+    const target = regionAfter(regionOf(document.activeElement), back, (r) => landing(r) !== null)
+    const el = target ? landing(target) : null
+    if (!el) return false
+    el.focus()
+    el.scrollIntoView({ block: 'nearest' })
+    return true
+  }, [])
+
   /* ------------------------------------------------------------- shortcuts */
 
   useEffect(() => {
@@ -2714,6 +2773,19 @@ function namedControls(shot: Attachment): string[] {
         if (streaming) stopAndMaybeEdit()
         else if (picker) setPicker(null)
         else close()
+        return
+      }
+
+      /**
+       * F6 walks the panel's parts; Shift+F6 walks them backwards.
+       *
+       * Windows' own key for this, so it is already in the user's hands
+       * rather than something this app has to teach. Unmodified apart from
+       * Shift: Ctrl+F6 and Alt+F6 mean other things in other apps and
+       * nothing here, so they are left alone.
+       */
+      if (e.key === 'F6' && !e.ctrlKey && !e.altKey) {
+        if (stepRegion(e.shiftKey)) e.preventDefault()
         return
       }
 
@@ -2856,8 +2928,25 @@ function namedControls(shot: Attachment): string[] {
         return
       }
 
-      // Shift+Tab cycles approval mode, as it does in Claude Code.
+      /**
+       * Shift+Tab cycles approval mode, as it does in Claude Code - but only
+       * from the box.
+       *
+       * It used to take the chord everywhere, and Shift+Tab is the only way
+       * back through a row of controls: anywhere but the composer, this made
+       * the keyboard one-directional. You could step into the header with
+       * F6 and then only ever go forward, and the fourth press changed what
+       * runs without asking instead of moving focus - which is not a key you
+       * want to press by accident while looking for the pin.
+       *
+       * The composer is where it is for, and where it is safe: Tab out of
+       * the box still works, and nothing in the box is a control to walk
+       * back to. Focus on nothing counts as the box, because that is where
+       * it is about to be put.
+       */
       if (e.key === 'Tab' && e.shiftKey && !e.ctrlKey && !e.altKey) {
+        const from = regionOf(e.target as Element | null)
+        if (from !== null && from !== 'composer') return
         e.preventDefault()
         void runCommand({ kind: 'approve', mode: 'cycle' }, '/approve')
         return
@@ -2873,7 +2962,7 @@ function namedControls(shot: Attachment): string[] {
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [chat, close, newChat, retitle, runCommand, scrollBy, stepMessage, picker, streaming, stopAndMaybeEdit])
+  }, [chat, close, newChat, retitle, runCommand, scrollBy, stepMessage, stepRegion, picker, streaming, stopAndMaybeEdit])
 
   const warnedRef = useRef(false)
   useEffect(() => {
@@ -3246,7 +3335,14 @@ function namedControls(shot: Attachment): string[] {
       {picker ? (
         <Picker {...pickerProps(picker)} />
       ) : (
-        <div className="scroll" ref={scroller} onScroll={onScroll}>
+        <div className="scroll" ref={scroller} onScroll={onScroll} tabIndex={-1}>
+          {/*
+            tabIndex -1 above: somewhere for F6 to land when there is no
+            button in the transcript at all, which is most conversations.
+            Negative because it is a place you are PUT rather than a stop on
+            the Tab route - and once there, the arrow keys scroll it with no
+            handler of ours involved.
+          */}
           {/*
             A long session is slow because every message is a live subtree,
             not because of anything the model is doing. Only the end of it is

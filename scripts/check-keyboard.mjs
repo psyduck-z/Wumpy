@@ -777,8 +777,6 @@ check(
   true
 )
 
-console.log(failures ? `\n${failures} keyboard checks FAILED` : '\nall keyboard checks')
-process.exitCode = failures ? 1 : 0
 /*
  * A start in the tray must not report a focus failure.
  *
@@ -807,3 +805,129 @@ check(
 check('the tray state is passed in', /isTucked: \(\) => boolean/.test(focusSrc), true)
 check('and the composer passes it', /\(\) => tucked$/m.test(composer), true)
 
+
+/* ---------------------------------------- moving between the panel's parts */
+
+/**
+ * The parts were navigable; getting between them was not.
+ *
+ * The composer holds the caret almost always, Tab from there walks forward
+ * into the transcript, and Shift+Tab was spent on the approval mode - so the
+ * header's buttons and the status bar's could only be reached by tabbing
+ * forward through every message on screen until it wrapped. Pinning, moving
+ * the panel, changing the model and reading the quota were mouse-only in
+ * practice, in a window whose whole point is that it opens on a keystroke.
+ */
+check('the ring is screen order', [...K.REGIONS], ['header', 'transcript', 'status', 'composer'])
+check('F6 from the box wraps to the header', K.regionAfter('composer', false, () => true), 'header')
+check('Shift+F6 goes to the strip above it', K.regionAfter('composer', true, () => true), 'status')
+check('and onwards', K.regionAfter('header', false, () => true), 'transcript')
+check('and backwards', K.regionAfter('transcript', true, () => true), 'header')
+// Focus lands on the body whenever a button disappears from under it - a card
+// that finished, a picker that closed. The first F6 after that should move
+// off the box, not onto it.
+check('from nowhere it steps off the box', K.regionAfter(null, false, () => true), 'header')
+
+// A region with nothing to land on would swallow the keystroke and leave
+// focus where it was, which is indistinguishable from a broken key. So the
+// walk asks, rather than assuming all four are there: the status bar drops
+// parts of itself in a corner dock, and a transcript of plain answers has no
+// controls in it at all.
+check(
+  'an empty region is skipped',
+  K.regionAfter('composer', false, (r) => r !== 'header'),
+  'transcript'
+)
+check(
+  'and so are two in a row',
+  K.regionAfter('composer', false, (r) => r === 'status'),
+  'status'
+)
+check('nowhere to go answers null', K.regionAfter('composer', false, () => false), null)
+check(
+  'and it never lands back where it started',
+  K.regionAfter('composer', false, (r) => r === 'composer'),
+  null
+)
+check('the walk cannot run off the end', K.regionAfter('header', true, () => true), 'composer')
+
+// Where in a region focus lands. The transcript reads bottom-up: the newest
+// proposal is the one the keys are nearly always for, and it is the same end
+// Ctrl+Down picks, so the two ways in agree.
+check('the transcript is entered at its end', K.entryIndex('transcript', 4), 3)
+check('a strip at its start', K.entryIndex('status', 4), 0)
+check('the header too', K.entryIndex('header', 2), 0)
+check('nothing focusable answers -1', K.entryIndex('status', 0), -1)
+
+check("F6 is bound to the panel's regions", /e\.key === 'F6'/.test(app), true)
+check('Shift+F6 is the same key backwards', /stepRegion\(e\.shiftKey\)/.test(app), true)
+check(
+  'and it only swallows the key when it moved',
+  /if \(stepRegion\(e\.shiftKey\)\) e\.preventDefault\(\)/.test(app),
+  true
+)
+check('the newest proposal is the landing spot', /\.cmd, \.ask[\s\S]{0,200}newest/.test(app), true)
+check('the transcript itself can be landed on', /tabIndex=\{-1\}/.test(app), true)
+check('and says so when it is', /\.scroll:focus-visible/.test(styles), true)
+check('a strip you have stepped into is marked', /\.status:focus-within/.test(styles), true)
+
+/**
+ * Shift+Tab is the only way back through a row of controls, and the approval
+ * cycle had taken it everywhere.
+ *
+ * So the keyboard was one-directional outside the box: you could step into
+ * the header and then only ever go forward, and the attempt to go back
+ * changed what runs without asking. It belongs to the composer, which is
+ * what it was added for and the one place where there is nothing behind you
+ * to walk back to.
+ */
+check(
+  'Shift+Tab cycles approval only from the box',
+  /from !== null && from !== 'composer'\) return/.test(app),
+  true
+)
+check(
+  'and it is the region that decides',
+  /regionOf\(e\.target as Element \| null\)/.test(app),
+  true
+)
+check(
+  'F6 is listed where the other keys are',
+  cmds.KEY_ONLY.some((k) => k.keys.includes('F6')),
+  true
+)
+
+/* ------------------------------------------------- getting down a long list */
+
+/**
+ * The command list is sixty rows now that the keys are listed in it.
+ *
+ * Arrows and a filter were the whole of it, so reaching the bottom meant
+ * holding a key down or already knowing what to type - and the keys that
+ * exist for this were doing nothing: PageDown went to the window handler,
+ * which tried to scroll a transcript that is not even mounted while a picker
+ * is open.
+ */
+const pickerSrc = read('src/renderer/src/components/Picker.tsx')
+check('a list pages', /e\.key === 'PageDown' \|\| e\.key === 'PageUp'/.test(pickerSrc), true)
+check('by a fixed number of rows', /const PAGE = 8/.test(pickerSrc), true)
+check('and jumps to its ends', /e\.ctrlKey && \(e\.key === 'Home' \|\| e\.key === 'End'\)/.test(pickerSrc), true)
+// Plain Home and End are how you get to the front of what you typed in the
+// filter box. Ctrl+Home and Ctrl+End already mean "the ends of the thing you
+// are looking at" everywhere else in the panel.
+check(
+  'plain Home stays with the filter box',
+  /else if \(e\.key === '(Home|End)'/.test(pickerSrc),
+  false
+)
+check(
+  'the ends skip anything unpickable',
+  /order\.find\(\(i\) => !visible\[i\]\.disabled\)/.test(pickerSrc),
+  true
+)
+// Or the window handler acts on them as well, and a picker is meant to own
+// the keyboard while it is open.
+check('and the keys stop at the picker', /stopPropagation\(\)\n\s*move\(/.test(pickerSrc), true)
+
+console.log(failures ? `\n${failures} keyboard checks FAILED` : '\nall keyboard checks')
+process.exitCode = failures ? 1 : 0

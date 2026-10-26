@@ -56,6 +56,32 @@
   --accent-text: 173 165 255;
   --danger: 248 113 113;
   --danger-soft: 248 113 113 / 0.12;
+  /*
+   * Four colours for the four kinds of permission a card can ask for.
+   *
+   * The note above says the only colour on screen should be colour that
+   * means something. These do: they say what is at stake before the label is
+   * read - code running here, a file or a click changing something, a
+   * picture of your screen leaving for the model, the web being reached. One
+   * hue each, with a lighter pair for the small uppercase label, which at
+   * 10.5px needs more lift off the surface than the fill colour gives it.
+   *
+   * The shape beside the label carries the same fact (see kinds.ts), so
+   * nothing here rests on telling one hue from another.
+   *
+   * Which is just as well, because the first set could not be told apart:
+   * `sees` was written as a blue (96 165 250) that sits 57 points from the
+   * violet accent in RGB, and at 8px on a near-black panel those are the
+   * same colour. check-kinds.mjs measures every pair against every other
+   * and against the danger red - five things that mean something, no two of
+   * them closer than 93 - which is how that was found rather than shipped.
+   */
+  --kind-change: 232 170 40;
+  --kind-change-text: 247 204 100;
+  --kind-sees: 56 189 248;
+  --kind-sees-text: 125 211 252;
+  --kind-out: 52 204 134;
+  --kind-out-text: 110 231 170;
   --shadow: 0 20px 56px rgb(0 0 0 / 0.82), 0 2px 10px rgb(0 0 0 / 0.6);
   --code-bg: 9 9 10;
 }
@@ -785,15 +811,45 @@ body {
 
 /* --------------------------------------------------------- command cards */
 
+/*
+ * One box, four families.
+ *
+ * Everything coloured on a card reads --kind, and --kind is set in exactly
+ * one place: the data-family attribute the card puts on itself from
+ * KIND_FAMILY. So the border, the head, the label and the shape cannot come
+ * to disagree about what kind of thing is being proposed, and a new card
+ * type is a line in kinds.ts rather than four rules in here.
+ */
 .cmd {
+  --kind: var(--accent);
+  --kind-text: var(--accent-text);
   margin: 0 0 9px;
-  border: 1px solid rgb(var(--accent) / 0.35);
+  border: 1px solid rgb(var(--kind) / 0.35);
   border-radius: 10px;
   overflow: hidden;
   background: rgb(var(--surface));
 }
 
+.cmd[data-family="changes"] {
+  --kind: var(--kind-change);
+  --kind-text: var(--kind-change-text);
+}
+.cmd[data-family="sees"] {
+  --kind: var(--kind-sees);
+  --kind-text: var(--kind-sees-text);
+}
+.cmd[data-family="out"] {
+  --kind: var(--kind-out);
+  --kind-text: var(--kind-out-text);
+}
+
+/* Danger outranks the family: what a destructive command touches matters
+   less than the fact that it is destructive, and red is already what that
+   means everywhere else in the app. The shape stays, so the card still says
+   which kind of thing went red. */
 .cmd.is-risky {
+  --kind: var(--danger);
+  --kind-text: var(--danger);
   border-color: rgb(var(--danger) / 0.55);
 }
 .cmd.is-failed {
@@ -805,23 +861,43 @@ body {
   align-items: center;
   gap: 7px;
   padding: 6px 7px 6px 10px;
-  background: rgb(var(--accent-soft));
+  background: rgb(var(--kind) / 0.16);
   font-size: 10.5px;
-}
-
-.cmd.is-risky .cmd-head {
-  background: rgb(var(--danger-soft));
 }
 
 .cmd-shell {
   font-weight: 600;
   letter-spacing: 0.3px;
   text-transform: uppercase;
-  color: rgb(var(--accent-text));
+  color: rgb(var(--kind-text));
 }
 
-.cmd.is-risky .cmd-shell {
-  color: rgb(var(--danger));
+/* ---- the family mark ----
+   Four primitives, drawn rather than drawn in: a square is the element, a
+   circle is a radius, a triangle is a clip and a diamond is the square
+   turned. No SVG, because at 8px an outline of a monitor or a globe is a
+   smudge and these four are not.
+
+   8px and square-ish on purpose: the shape has to survive being this small,
+   which is the whole argument for using basic ones. */
+.cmd-mark {
+  flex: none;
+  width: 8px;
+  height: 8px;
+  background: rgb(var(--kind));
+}
+.cmd[data-family="sees"] .cmd-mark {
+  border-radius: 50%;
+}
+.cmd[data-family="changes"] .cmd-mark {
+  clip-path: polygon(50% 0, 100% 100%, 0 100%);
+}
+.cmd[data-family="out"] .cmd-mark {
+  /* Slightly smaller: a square turned 45 degrees reads bigger than the
+     square it came from, because what you see is its diagonal. */
+  width: 7px;
+  height: 7px;
+  transform: rotate(45deg);
 }
 
 .cmd-risk {
@@ -850,6 +926,14 @@ body {
   cursor: pointer;
 }
 
+/*
+ * The one thing on a card that does NOT take the family colour.
+ *
+ * It is the button you press, and that should look the same on every card:
+ * the family says what is at stake, not which control is the primary one.
+ * Four differently-coloured Run buttons would also mean four contrast
+ * problems - white on amber is the worst of them - solved four ways.
+ */
 .cmd-run {
   background: rgb(var(--accent));
   color: #fff;
@@ -1802,6 +1886,9 @@ body {
 /* ---- approval mode ---- */
 
 .approval {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
   padding: 1px 7px;
   margin-right: 2px;
   background: none;
@@ -1817,6 +1904,26 @@ body {
 
 .approval:hover {
   color: rgb(var(--text));
+}
+
+/* ---- how much runs without you, as a shape ----
+   Empty, half, solid. In currentColor, so it comes along with the amber and
+   the red below rather than needing a colour of its own - and so the two
+   signals can never disagree about which mode is on. */
+.approval-dot {
+  flex: none;
+  width: 7px;
+  height: 7px;
+  border: 1px solid currentColor;
+  border-radius: 50%;
+}
+/* Half a disc, cut down the middle: read-only commands run themselves and
+   anything that changes something still asks. */
+.approval.is-auto .approval-dot {
+  background: linear-gradient(to right, currentColor 50%, rgb(0 0 0 / 0) 50%);
+}
+.approval.is-all .approval-dot {
+  background: currentColor;
 }
 
 /* Automatic modes are stated louder, because they act without being asked. */
@@ -2755,9 +2862,48 @@ body {
   outline-color: rgb(var(--danger));
 }
 
+/* ---- which part of the panel you are in ----
+   F6 steps between the header, the transcript, the status bar and the box.
+   The ring above says which control; these say which part - and they are
+   only on the two strips, because the box has a caret and a focused card
+   already lights its own border.
+
+   The header's and the status bar's controls are 26px grey glyphs at the
+   very top and bottom of the panel, and a ring around one of those is easy
+   to miss on a dark window. A bar down the inside edge of the strip is not.
+   Inset, so nothing shifts when it appears. */
+.header:focus-within,
+.status:focus-within {
+  box-shadow: inset 2px 0 0 rgb(var(--accent) / 0.6);
+}
+
+/*
+ * The transcript itself taking focus.
+ *
+ * There is not always a button in it - a conversation of plain answers has
+ * none at all - and F6 landing nowhere reads as the key being broken. So the
+ * scroller is focusable (tabindex -1) and becomes the place you land, which
+ * has the side benefit that the arrow keys and PgUp then scroll it natively
+ * rather than through a handler.
+ *
+ * Drawn inside: the global rule puts a 2px outline 2px OUTSIDE the element,
+ * and this one runs the full height of a panel that clips its overflow, so
+ * two of its four sides would be cut off square.
+ */
+.scroll:focus-visible {
+  outline: none;
+  box-shadow: inset 0 0 0 1px rgb(var(--accent) / 0.45);
+}
+
 /* A card holding focus is lifted slightly out of the transcript, so it is
-   obvious which proposal the keys apply to when several are on screen. */
-.cmd:focus-within,
+   obvious which proposal the keys apply to when several are on screen.
+
+   In its own family's colour, which is also why it is brighter than the 0.45
+   this used to be: a violet edge at 0.45 was a visible change on a violet
+   card and nearly none on a teal one. */
+.cmd:focus-within {
+  border-color: rgb(var(--kind) / 0.7);
+}
 .ask:focus-within {
   border-color: rgb(var(--accent) / 0.45);
 }
