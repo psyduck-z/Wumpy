@@ -145,6 +145,69 @@ for (const [kind, word] of Object.entries(J.WORD)) {
 }
 check('only one kind folds at all', J.QUIET_REPEATS, ['limit'])
 
+/* ------------------------------------- a setting being fiddled with */
+
+/**
+ * One key, held: Shift+Tab cycles the approval mode three ways.
+ *
+ * A few seconds of that wrote "commands → run everything", "commands →
+ * read-only runs itself", "commands → ask every time", over and over, and
+ * /log became a wall of a setting changing its mind. Reported with a
+ * screenshot of exactly that: "make this stricter - no repeating annoying
+ * logs or notifications."
+ *
+ * isRepeat could not help - these are three different lines, and only the
+ * last of them is true.
+ */
+{
+  const at = (s) => NOW + s * 1000
+  let list = []
+  for (const [i, value] of ['run everything', 'read-only runs itself', 'ask every time'].entries()) {
+    list = J.keep(list, J.entry('setting', `commands → ${value}`, at(i * 3)))
+  }
+  check('a setting cycled three ways is one line', list.length, 1)
+  check('and it is where it landed', list[0].what, 'commands → ask every time')
+  check('with the time it landed there', list[0].at, at(6))
+
+  /* A minute is the line between fiddling and deciding. Changing something
+     at 21:20 and changing it back at 21:34 is the thing somebody comes to a
+     timeline to find out. */
+  const later = J.keep(list, J.entry('setting', 'commands → run everything', at(90)))
+  check('a minute later it is a second decision', later.length, 2)
+
+  /* A different setting in between is a different fact, and both are real
+     history - so this only ever drops the line immediately before. */
+  const other = J.keep(list, J.entry('setting', 'thinking → on', at(9)))
+  const back = J.keep(other, J.entry('setting', 'commands → run everything', at(12)))
+  check('another setting in between is kept', back.length, 3)
+}
+/*
+ * Only settings. A model line carries the value it changed FROM, so the text
+ * before the arrow is not the subject - and an act is never folded into
+ * another act, which is the whole of QUIET_REPEATS above.
+ */
+check(
+  'a model change is not a restatement',
+  J.restates(
+    [J.entry('model', 'a → b', NOW)],
+    J.entry('model', 'b → c', NOW + 1000)
+  ),
+  false
+)
+check(
+  'nor is a command',
+  J.restates(
+    [J.entry('command', 'npm run build', NOW)],
+    J.entry('command', 'npm run build', NOW + 1000)
+  ),
+  false
+)
+check(
+  'a setting with no subject to compare is left alone',
+  J.restates([J.entry('setting', 'something happened', NOW)], J.entry('setting', 'and again', NOW + 1)),
+  false
+)
+
 /* The caps, both of them, with real entries. */
 {
   let list = []

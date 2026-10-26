@@ -200,6 +200,44 @@ export function isRepeat(
 }
 
 /**
+ * Where a line about the same setting REPLACES the one before it.
+ *
+ * isRepeat above is the same line twice. This is the same SETTING twice with
+ * different values, which is what one key held down produces: Shift+Tab
+ * cycles the approval mode three ways, so a few seconds of it wrote
+ * "commands → run everything", "commands → read-only runs itself",
+ * "commands → ask every time", over and over, and /log was a wall of a
+ * setting being fiddled with. "no repeating annoying logs or
+ * notifications."
+ *
+ * Only the line immediately before, and only within the minute. Beyond that
+ * they are two decisions and the timeline should say so - changing a setting
+ * at 21:20 and changing it back at 21:34 is exactly the thing somebody comes
+ * here to find out. Inside a minute it is one person making up their mind,
+ * and the honest record of that is where they landed.
+ *
+ * 'setting' only. A model line carries the value it changed FROM, so the
+ * text before the arrow is not the subject and this rule would read it
+ * wrongly; and a command, a write or a search are acts rather than states -
+ * see QUIET_REPEATS for why running the same thing twice must always be two
+ * lines.
+ */
+export function restates(
+  entries: readonly Entry[],
+  next: Entry,
+  within = SAME_AGAIN_MS
+): boolean {
+  if (next.kind !== 'setting') return false
+  const last = entries[entries.length - 1]
+  if (!last || last.kind !== 'setting') return false
+  if (next.at - last.at >= within) return false
+  const subject = (e: Entry): string => e.what.split(' → ')[0]
+  /* A line with no arrow in it has no subject to compare, and two of those
+     are two different things that happened. */
+  return subject(last) !== last.what ? subject(last) === subject(next) : false
+}
+
+/**
  * Adds one and keeps the file within both limits.
  *
  * Returns the whole list rather than mutating, so the store has one place
@@ -212,7 +250,11 @@ export function keep(
   now = next.at
 ): Entry[] {
   if (isRepeat(entries, next)) return entries.slice()
-  const kept = prune([...entries, next], now)
+  /* The line it supersedes goes, rather than the new one being dropped:
+     suppressing it would leave the log claiming a setting is what it was
+     two changes ago. See restates. */
+  const base = restates(entries, next) ? entries.slice(0, -1) : entries
+  const kept = prune([...base, next], now)
   return kept.length > max ? kept.slice(kept.length - max) : kept
 }
 

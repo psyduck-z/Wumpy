@@ -123,6 +123,27 @@ export interface ChatMessage {
  * 'setting' action and they are two different facts about the world.
  */
 export type NoteTopic =
+  /**
+   * The `/log` report, which is a statement of state like any other - it
+   * says what has happened AS OF NOW. Typing it twice put two copies of a
+   * twenty-line block in the transcript, the first of them already out of
+   * date: "make this stricter - no repeating annoying logs or
+   * notifications. here, I typed /log twice".
+   */
+  | 'journal'
+  /**
+   * The other reports, for the same reason. Every one of them is a snapshot
+   * of how things are right now - what is set, what has been spent, which
+   * models are quickest, which keys answer - so a second copy under the
+   * first is a page of transcript saying what the page above it said, with
+   * the older one now wrong in whatever changed.
+   */
+  | 'settings'
+  | 'usage'
+  | 'rank'
+  | 'probe'
+  | 'help'
+  | 'shortcuts'
   | 'approve'
   | 'pin'
   | 'model'

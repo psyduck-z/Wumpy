@@ -1687,7 +1687,9 @@ function namedControls(shot: Attachment): string[] {
               /* The order the report talks about has to be the order the
                  user will see when they open the list. */
               isOrdering(settings?.modelOrder) ? settings.modelOrder : DEFAULT_ORDERING
-            ).join(NEWLINE)
+            ).join(NEWLINE),
+            false,
+            'probe'
           )
           return
         }
@@ -1816,7 +1818,9 @@ function namedControls(shot: Attachment): string[] {
               model,
               pool,
               rankSummary(rank, rank.traffic, rank.lastSweepMs)
-            ).join(NEWLINE)
+            ).join(NEWLINE),
+            false,
+            'settings'
           )
           return
         }
@@ -1833,7 +1837,9 @@ function namedControls(shot: Attachment): string[] {
               ...rankLines(view, view.traffic, view.lastSweepMs, measured)
             ]
               .filter(Boolean)
-              .join(NEWLINE)
+              .join(NEWLINE),
+            false,
+            'rank'
           )
           return
         }
@@ -1870,7 +1876,9 @@ function namedControls(shot: Attachment): string[] {
                   : `Nothing used yet today. Answering with \`${report.model}\`.`,
                 ...(poolReport.length ? ['', ...poolReport] : []),
                 ...(footprint.length ? ['', ...footprint] : [])
-              ].join(NEWLINE)
+              ].join(NEWLINE),
+              false,
+              'usage'
             )
             return
           }
@@ -1915,7 +1923,9 @@ function namedControls(shot: Attachment): string[] {
               ...report.lines.filter((l) => l.note).map((l) => `_${l.model}: ${l.note}_`),
               ...(poolReport.length ? ['', ...poolReport] : []),
               ...(footprint.length ? ['', ...footprint] : [])
-            ].join(String.fromCharCode(10))
+            ].join(String.fromCharCode(10)),
+            false,
+            'usage'
           )
           return
         }
@@ -1946,9 +1956,14 @@ function namedControls(shot: Attachment): string[] {
             only: action.only
           }
           /* Written as a note that can be rewritten, and remembered as the
-             one that keeps up. See the subscription below. */
+             one that keeps up. See the subscription below.
+
+             Tagged, so asking twice rewrites the report rather than printing
+             a second copy of it under the first - which is twenty lines of
+             transcript saying what the twenty lines above it already said,
+             one of them already out of date. */
           liveLog.current = {
-            id: chat.liveNote(journalLines(entries, view).join(NEWLINE)),
+            id: chat.liveNote(journalLines(entries, view).join(NEWLINE), 'journal'),
             view
           }
           return
@@ -2241,10 +2256,10 @@ function namedControls(shot: Attachment): string[] {
           chat.stop()
           return
         case 'help':
-          chat.note(helpText())
+          chat.note(helpText(), false, 'help')
           return
         case 'shortcuts':
-          chat.note(shortcutsText())
+          chat.note(shortcutsText(), false, 'shortcuts')
           return
         case 'quit':
           window.wumpy.panel.hide()

@@ -75,10 +75,11 @@ export interface ChatState {
    * A note meant to be rewritten later, returning the id to rewrite it by.
    *
    * For a report that goes out of date while it is on screen - `/log` and
-   * the hourly ranking. Always appends, unlike `note`, so the id that comes
-   * back is the id of the message it just made.
+   * the hourly ranking. Given a topic it replaces the last report on that
+   * subject rather than adding a second copy of it, and hands back that
+   * one's id so the subscription carries on rewriting the right message.
    */
-  liveNote(content: string): string
+  liveNote(content: string, topic?: NoteTopic): string
   /** Rewrites one local note in place. Ignores a message that has gone. */
   update(id: string, content: string): void
   /** Adds a line the model will see as context, shown as a chip. */
@@ -421,12 +422,23 @@ export function useChat(): ChatState {
    * cannot see it. This one always appends, so the id it returns is the id
    * of the thing it just made.
    */
-  const liveNote = useCallback((content: string): string => {
-    const id = nextId()
-    setMessages((prev) => [
-      ...prev,
-      { id, role: 'assistant', content, createdAt: Date.now(), local: true }
-    ])
+  const liveNote = useCallback((content: string, topic?: NoteTopic): string => {
+    /**
+     * Decided out here rather than inside the updater, unlike `note`.
+     *
+     * The caller needs the id NOW - it is what the subscription rewrites the
+     * report by - and a functional update does not run until React gets
+     * round to rendering, so nothing it decides can be returned from this
+     * call. messagesRef is the same list the updater will see, one render
+     * behind at worst, and the fallback below covers that worst.
+     */
+    const earlier = topic ? restatementOf(messagesRef.current, topic) : null
+    const id = earlier ?? nextId()
+    setMessages((prev) =>
+      earlier && prev.some((m) => m.id === earlier)
+        ? restated(prev, earlier, content, Date.now())
+        : [...prev, { id, role: 'assistant', content, createdAt: Date.now(), local: true, topic }]
+    )
     return id
   }, [])
 

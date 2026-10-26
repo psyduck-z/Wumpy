@@ -498,6 +498,40 @@ check(
   check('the other line is untouched', after[0].content, 'Ran something.')
 }
 
+/**
+ * And a report is a statement too.
+ *
+ * `/log` typed twice put two copies of a twenty-line block in the
+ * transcript, the first of them already out of date by the second - the
+ * entries it was printed from had changed in between. "here, I typed /log
+ * twice".
+ *
+ * liveNote is the awkward one: it hands an id back to the caller, which is
+ * what the subscription rewrites the report by, so the decision cannot be
+ * made inside the updater the way `note` makes it.
+ */
+ok('a live report can have a subject', /liveNote = useCallback\(\s*\(content: string, topic\?/.test(chat))
+ok('and reuses the one it replaces', /const id = earlier \?\? nextId\(\)/.test(chat))
+/* If the note it meant to replace has gone - a new chat, a reopened one -
+   it appends instead, rather than returning an id that is not on screen. */
+ok('with a fallback when it has gone', /prev\.some\(\(m\) => m\.id === earlier\)/.test(chat))
+ok('/log is one of them', /journalLines\(entries, view\)\.join\(NEWLINE\), 'journal'/.test(app))
+
+/* And so is every other report, because every one of them is a snapshot of
+   how things are right now. A second copy under the first is a page of
+   transcript saying what the page above it said, with the older one wrong in
+   whatever has changed since. */
+{
+  /* Whitespace removed: the argument is on its own line in some of these
+     and inline in others, depending on how long the report's expression is,
+     and the check is about which calls carry a subject rather than how
+     Prettier broke the line. */
+  const flat = app.replace(/\s+/g, '')
+  for (const topic of ['settings', 'usage', 'rank', 'probe', 'help', 'shortcuts']) {
+    ok(`the ${topic} report replaces itself`, flat.includes(`false,'${topic}'`))
+  }
+}
+
 ok('note() asks before appending', /repeatOfNote\(prev, content\)/.test(chat))
 ok('and asks about the subject first', /restatementOf\(prev, topic\)/.test(chat))
 ok('a new note carries its subject', /local: true,\n\s*topic\n/.test(chat))
