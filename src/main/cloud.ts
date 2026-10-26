@@ -32,7 +32,6 @@ import {
   verdictFor
 } from '@shared/probe'
 import type { ProbeResult } from '@shared/probe'
-import { MEDIA_NOT_SENT } from '@shared/attach'
 import { dataUrl, visionTask } from '@shared/vision'
 import type { ChatOptions, StreamFailure, StreamHandlers, StreamStats } from './stream'
 import type { KeyStore } from './keys'
@@ -944,12 +943,11 @@ export class CloudClient {
       let said = await this.drain(res, watched, startedAt, provider)
 
       /**
-       * A 200 THAT FAILS INSIDE THE STREAM, which the retries above cannot
-       * see at all.
+       * A 200 THAT FAILS INSIDE THE STREAM, which the 400 path cannot see.
        *
        * NVIDIA answers a picture its model cannot read with headers, a 200,
        * and then `data: {"error":{"message":"Internal server error"}}` - no
-       * status to classify, no body to match, nothing for the 400 path above
+       * status to classify, no body to match, nothing for the refusal above
        * to catch. Three of those in a row is what this looked like from the
        * panel: a red "Internal server error" with no model, no provider and
        * no suggestion, on a question that was one word long.
@@ -957,24 +955,20 @@ export class CloudClient {
        * The second and third are the part that matters. The picture stays in
        * the conversation and the newest two go up on every later turn, so
        * one unreadable image killed every message after it until the chat
-       * was abandoned. Dropping it costs one extra request, once, and the
-       * model is written down as text-only exactly as a 400 would have
-       * written it down.
+       * was abandoned.
        *
        * Only when nothing arrived: a stream that failed halfway through an
        * answer is a gateway dropping a connection, and the picture had
        * already been accepted.
        */
       const nothingArrived = !seen.text && !seen.thinking
-      if (said && nothingArrived && !provedBlind(model) && stripPictures(body)) {
+      if (said && nothingArrived && !provedBlind(model) && carryingPicture(body)) {
         rememberBlind(model)
         console.warn(
-          `[wumpy] ${model} failed mid-stream carrying a picture ("${said}"). ` +
-            'Asking again without it, and never attaching one again.'
+          `[wumpy] ${model} failed mid-stream carrying a picture ("${said}"); it is text-only.`
         )
-        res = await this.send(provider, model, body, controller.signal, watched)
-        if (!res) return
-        said = await this.drain(res, watched, Date.now(), provider)
+        handlers.onError(`${model} cannot read pictures.`, { kind: 'blind', elsewhere: false })
+        return
       }
 
       if (said) {
@@ -1257,18 +1251,15 @@ export class CloudClient {
       const refusedPicture =
         res.status === 400 &&
         /multimodal|image|vision|not support|invalid request/i.test(detail ?? '')
-      if (refusedPicture && !provedBlind(model) && stripPictures(body)) {
+      if (refusedPicture && !provedBlind(model) && carryingPicture(body)) {
         /* `provedBlind` is both the record and the loop guard: once it is
-           true the next 400 falls through to the ordinary handling
-           instead of retrying for ever. And `stripPictures` is the guard
-           on there being one to drop: without it an ordinary 400 would
-           post the identical request and fail identically. */
+           true the next 400 falls through to the ordinary handling. And
+           `carryingPicture` is the guard on there being one at all, or an
+           ordinary 400 would be reported as a model that cannot see. */
         rememberBlind(model)
-        console.log(
-          `[wumpy] ${model} refused the picture; it is text-only. ` +
-            'Asking again without it, and never attaching one again.'
-        )
-        continue
+        console.log(`[wumpy] ${model} refused the picture; it is text-only.`)
+        handlers.onError(`${model} cannot read pictures.`, { kind: 'blind', elsewhere: false })
+        return null
       }
 
       const unusableModel = res.status === 404 || res.status === 400
@@ -1520,36 +1511,26 @@ export class CloudClient {
  * written in a unit nobody converts in their head.
  */
 /**
- * Takes the pictures out of a request body, in place, and says they are gone.
+ * Is there a picture in this request at all?
  *
- * In place because the body belongs to the caller and the retry is a
- * `continue` inside `send`: a bare retry would post the identical request and
- * be refused identically. The question survives - only the bytes go - and
- * what is left collapses to a plain string, which is the shape every provider
- * prefers.
+ * The guard on both refusal paths, and it has to be asked of the BODY rather
+ * than of the conversation: a message only becomes a list of parts when
+ * something is attached to it. Without it, an ordinary 400 on a plain
+ * question would be read as proof that the model cannot see, and the model
+ * would be denied pictures for the rest of the session over a typo in a
+ * request.
  *
- * Returns whether there was anything to take, which is also the guard: an
- * ordinary 400 with no picture in it must not retry itself unchanged.
- *
- * The line left behind is the part that was missing. A model handed "what is
- * this" with the picture quietly removed describes something plausible, and
- * nobody ever finds out it was looking at nothing.
+ * Nothing is stripped here any more. The turn is handed back to the caller
+ * instead, which has something better than a request with the picture
+ * missing: a model that can see, to look at it and say what is there.
  */
-export function stripPictures(body: unknown): boolean {
+export function carryingPicture(body: unknown): boolean {
   const messages = (body as { messages?: Array<{ content?: unknown }> }).messages ?? []
-  let dropped = false
-  for (const m of messages) {
-    if (!Array.isArray(m.content)) continue
-    const parts = m.content as Array<{ type?: string; text?: string }>
-    if (!parts.some((part) => part?.type !== 'text')) continue
-    dropped = true
-    const said = parts
-      .filter((part) => part?.type === 'text')
-      .map((part) => part.text ?? '')
-      .filter(Boolean)
-    m.content = [...said, MEDIA_NOT_SENT].join(String.fromCharCode(10))
-  }
-  return dropped
+  return messages.some(
+    (m) =>
+      Array.isArray(m.content) &&
+      (m.content as Array<{ type?: string }>).some((part) => part?.type !== 'text')
+  )
 }
 
 export function friendlyWait(ms: number): string {

@@ -594,6 +594,20 @@ function registerIpc(): void {
      */
     /** Why the first attempt gave up, so the announcement can say so truthfully. */
     let fallbackWhy = 'could not answer'
+    /**
+     * The model turned out not to read pictures, which is not a failed turn.
+     *
+     * Every model is born sighted here (see seesMedia), so the first picture
+     * sent to one that cannot read them is refused - as a 400, or, on NVIDIA,
+     * as "Internal server error" inside a 200. That used to be the end of it:
+     * the bytes were dropped and the model answered "I cannot see the image
+     * you attached", which is true, useless, and not what the app can do.
+     *
+     * It can borrow eyes. `lendEyes` has been here all along for models the
+     * catalogue already knew were blind; this is the turn that finds out, and
+     * it now gets the same treatment instead of being spent on an apology.
+     */
+    let blind = false
 
     async function attempt(on: string, announce: string | null): Promise<string | null> {
       let streamed = false
@@ -634,6 +648,15 @@ function registerIpc(): void {
             panel.send(IPC.chatDone, { requestId: req.requestId, ...stats })
           },
           onError: (message, failure) => {
+            /* Not an error the user has anything to do about: the picture
+               was refused, the model is now on record as text-only, and the
+               turn is about to be asked again with a description in place of
+               the bytes. Nothing has been streamed - the sender only reports
+               this before the first token. */
+            if (failure?.kind === 'blind') {
+              blind = true
+              return
+            }
             usage.add({
               model: on,
               via: providerFor(on) ?? 'unknown',
@@ -702,7 +725,32 @@ function registerIpc(): void {
       return fallbackTo
     }
 
-    const fallback = await attempt(model, null)
+    let fallback = await attempt(model, null)
+
+    /**
+     * The picture was refused, so it is looked at by something that can.
+     *
+     * One extra request per model per session, which is what the optimistic
+     * default costs and was always going to cost. `seesMedia` is false from
+     * here on, so this cannot repeat and the bytes do not go out again -
+     * `lendEyes` turns them into a description, and `wireMessage` says the
+     * picture was not sent if there was no eye to borrow.
+     *
+     * The same systemPrompt as the first attempt, deliberately: it was built
+     * once from these messages, the meter counted it, and a second preamble
+     * mid-turn is the thing the comment above it exists to prevent.
+     */
+    if (blind) {
+      blind = false
+      const eye = await lendEyes(sending)
+      fallback = await attempt(
+        model,
+        `_${model} cannot read pictures` +
+          (eye ? ` — ${eye.label} looked at it instead.` : ', and nothing here can.') +
+          `_${String.fromCharCode(10, 10)}`
+      )
+    }
+
     if (fallback) {
       /**
        * Said out loud, every time, before the second answer starts.
@@ -1283,23 +1331,23 @@ function registerIpc(): void {
    */
   async function lendEyes(
     messages: Array<Pick<ChatMessage, 'role' | 'content' | 'images'>>
-  ): Promise<void> {
-    if (seesMedia(activeModel())) return
+  ): Promise<CloudModel | null> {
+    if (seesMedia(activeModel())) return null
     const eye = readyEye()
-    if (!eye) return
+    if (!eye) return null
     const last = [...messages].reverse().find((m) => m.role === 'user' && m.images?.length)
-    if (!last) return
+    if (!last) return null
     const pictures = (last.images ?? [])
       .filter((a) => (a.kind ?? 'image') === 'image' && a.dataUrl)
       .slice(0, 2)
-    if (!pictures.length) return
+    if (!pictures.length) return null
 
     const seen: string[] = []
     for (const picture of pictures) {
       const text = await readPicture(eye, picture, 'file', last.content)
       if (text) seen.push(text)
     }
-    if (!seen.length) return
+    if (!seen.length) return null
     last.content = [
       last.content,
       '',
@@ -1309,6 +1357,9 @@ function registerIpc(): void {
       '[End of what it saw. That is second-hand - you did not see the picture.',
       'Answer from it, and say so if what was asked needs detail it does not cover.]'
     ].join(String.fromCharCode(10))
+    /* Which eye, so the turn that discovered the model is blind can say
+       whose description it is about to answer from. */
+    return eye
   }
 
   /** `asked` is the user pressing the card; `step` is the look after a plan. */

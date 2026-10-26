@@ -38,8 +38,16 @@ export interface StreamStats {
  * model on the same key could have answered.
  */
 export interface StreamFailure {
-  /** 'unusable' is a model this provider will not generate with at all. */
-  kind: 'limit' | 'auth' | 'network' | 'unusable' | 'other'
+  /**
+   * 'unusable' is a model this provider will not generate with at all.
+   *
+   * 'blind' is not a failure of the turn, it is a discovery about the model:
+   * it was sent a picture and refused it. The caller is expected to lend it
+   * the eyes of a model that can see and ask again, which is the whole point
+   * of the borrowed eye - so this one is never shown to the user as an
+   * error. Nothing had been streamed when it arrives.
+   */
+  kind: 'limit' | 'auth' | 'network' | 'unusable' | 'blind' | 'other'
   /** True when the same request somewhere else stands a chance. */
   elsewhere: boolean
   /**

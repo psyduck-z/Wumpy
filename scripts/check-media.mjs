@@ -233,32 +233,51 @@ check('and that is four of the six', C.CLOUD_MODELS.filter((m) => m.sees).length
   check('the model is written down as blind', /rememberBlind\(model\)/.test(main), true)
   /* Stripped from the body, not merely retried: without this the second
      attempt carries the same picture. */
-  check('and the picture comes out of the body', /export function stripPictures/.test(main), true)
-  check('leaving the question behind', /part\?\.type === 'text'/.test(main), true)
+  check('and the refusal is told to the caller', /kind: 'blind', elsewhere: false/.test(main), true)
   /* provedBlind doubles as the loop guard, or a 400 for any other reason
-     would retry for ever once the model is marked. */
+     would report it again every turn once the model is marked. */
   check('and it cannot loop', /!provedBlind\(model\)/.test(main), true)
-  /* Having nothing to strip is the other guard: an ordinary 400 must not
-     retry itself unchanged and fail the same way twice. */
-  check('a 400 with no picture in it is not retried', /!provedBlind\(model\) && stripPictures\(body\)/.test(main), true)
+  /* Carrying one is the other guard: an ordinary 400 on a plain question
+     must not be read as proof that the model has no eyes. */
+  check('a 400 with no picture in it is not a blind model', /!provedBlind\(model\) && carryingPicture\(body\)/.test(main), true)
 
   /*
    * AND THE SAME FAILURE ARRIVING INSIDE A 200.
    *
    * NVIDIA answers a picture its model cannot read with headers, a 200 and
    * then `data: {"error":{"message":"Internal server error"}}`. There is no
-   * status to classify and no body to match, so everything above misses it
-   * - and the picture stays in the conversation, rides along on the newest
-   * two turns, and kills every message after it. Three bare red banners on
-   * a one-word question is what that looked like.
+   * status to classify and no body to match, so the 400 path misses it - and
+   * the picture stays in the conversation, rides along on the newest two
+   * turns, and kills every message after it. Three bare red banners on a
+   * one-word question is what that looked like.
    */
   check('an error inside the stream is handed back', /if \(chunk\.error\?\.message\) return stripKey/.test(main), true)
-  check('and retried without the picture', /nothingArrived && !provedBlind\(model\) && stripPictures\(body\)/.test(main), true)
+  check('and reported as the same discovery', /nothingArrived && !provedBlind\(model\) && carryingPicture\(body\)/.test(main), true)
   /* Only when nothing had arrived: a stream that dies halfway through an
      answer is a dropped connection, and the picture was already accepted. */
   check('but not when the answer had started', /const nothingArrived = !seen\.text && !seen\.thinking/.test(main), true)
-  check('it says who stopped, not just what', /stopped mid-answer/.test(main), true)
+  check('any other mid-stream error says who stopped', /stopped mid-answer/.test(main), true)
   check('and it reaches the log', /stopped mid-stream/.test(main), true)
+
+  /*
+   * AND THE TURN IS ASKED AGAIN, WITH EYES.
+   *
+   * This is the whole point of the discovery and it was missing: the bytes
+   * were dropped and the model answered "I cannot see the image you
+   * attached - it wasn't sent to me". True, useless, and not what this app
+   * can do - `lendEyes` was already here for models the catalogue knew were
+   * blind, and the turn that FINDS OUT now gets the same thing.
+   */
+  const index = readFileSync('src/main/index.ts', 'utf8')
+  check('a blind refusal is not shown as an error', /if \(failure\?\.kind === 'blind'\)/.test(index), true)
+  check('the eye is borrowed before asking again', /const eye = await lendEyes\(sending\)/.test(index), true)
+  check('and the answer says whose eyes they were', /looked at it instead/.test(index), true)
+  /* No eye to borrow is a different sentence, not the same one with a hole
+     in it: the user is told the picture went nowhere. */
+  check('and says so when there is no eye at all', /and nothing here can/.test(index), true)
+  /* Cleared before the retry, so a second refusal cannot loop - though
+     provedBlind already makes a second one impossible. */
+  check('the retry cannot repeat', /blind = false/.test(index), true)
 }
 
 check(
