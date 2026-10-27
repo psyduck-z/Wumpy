@@ -198,6 +198,44 @@ check(
 // When to ask instead.
 check('two plausible readings means ask', /two readings are both plausible/.test(prompt), true)
 check('so does an unseen target', /something you have not seen on this machine/.test(prompt), true)
+
+/**
+ * AND THE RULE THAT WAS PULLING THE OTHER WAY.
+ *
+ * ASSUME THE SMALL STEP has said since early on that "open it" after
+ * talking about Spotify is Spotify - and ASK_PROMPT still ended with "Take
+ * wording literally and keep the user's capitalisation rather than
+ * reasoning about it", which is the opposite instruction in the strongest
+ * position a prompt has: the last line. It was written about the words you
+ * quote back INSIDE an ask - do not re-case a file name they typed - and
+ * generalised itself by sitting there.
+ *
+ * Told "so do it" two messages after proposing something, Wumpy asked
+ * "What do you want me to do?" with the Spotify rule in its context the
+ * whole time. So this is pinned from both ends: the narrow reading in, the
+ * general one out. A contradiction between two sections is worse than
+ * either rule being absent, because which one wins is a coin toss per turn.
+ */
+check('nothing tells it to read the message literally', /Take wording literally/.test(prompt), false)
+check(
+  'quoting their words back exactly is still the rule',
+  /words you REPEAT, never about what they meant/.test(prompt),
+  true
+)
+check('a short follow-up points backwards', /"IT" IS WHAT YOU JUST SAID/.test(prompt), true)
+check('named in the words people actually use', /"so do it", "do that", "yes", "go on", "that one"/.test(prompt), true)
+/* The exchange it came from, because the abstract version of this rule was
+   already there and was not enough. */
+check('with the exchange that paid for it', /it asked "What do you want me to do\?"/.test(prompt), true)
+/* And the half that is not about pronouns: a complaint is the request
+   arriving again, not a remark to agree with. Wumpy answered "easier to
+   remember tho" with "Right - fewer letters to keep in mind" and stopped,
+   which is a whole turn spent agreeing that the answer was wrong. */
+check('a complaint is answered, not agreed with', /A COMPLAINT IS A CORRECTION/.test(prompt), true)
+check('in the same reply', /Give the better answer in that same reply/.test(prompt), true)
+/* It must not become "never ask". The two cases that still earn a question
+   are named in the same breath as the ones that do not. */
+check('asking is still right for a fact only they have', /WHICH file, WHOSE account/.test(prompt), true)
 check('so does an untold preference', /a preference you were never told/.test(prompt), true)
 check(
   'and an inferred destructive target',
@@ -423,6 +461,33 @@ check('because guessed options are still guessing', /still guessing/.test(prompt
    * empty drafts, ONE COMPOSE WINDOW - which is useless to a turn about a
    * document and could be gated the way shellFor already gates the write and
    * install stretches inside SHELL_PROMPT.
+   *
+   * 26% -> 27% and 47% -> 48%, and the paragraph above is why this one has
+   * to be argued rather than waved through: it moves the ALWAYS-SENT bound,
+   * which the last two changes deliberately did not.
+   *
+   * What was added: 256 tokens in ASK_PROMPT, replacing "Take wording
+   * literally and keep the user's capitalisation rather than reasoning about
+   * it". That sentence was written in the first version of this prompt about
+   * the words you quote back inside an ask - do not re-case a file name -
+   * and has read ever since as a standing instruction to take the whole
+   * message literally. Two turns of evidence, one exchange: told "so do it"
+   * two messages after proposing the thing, Wumpy answered "What do you want
+   * me to do?"; told "easier to remember tho", it agreed with the criticism
+   * and left the answer exactly where it was. Both spend a turn asking the
+   * user to repeat something they already said, which on this hardware is
+   * the minute this whole file exists to protect.
+   *
+   * It cannot be gated. The turn where somebody says "so do it" needs no
+   * screen, no shell and no search - every gated section is already out, and
+   * the one word that would trigger a gate is the word that is missing.
+   *
+   * The promise above is NOT discharged, and is worth restating rather than
+   * quietly dropping: the compose gate would pay the second bound, because
+   * it is inside DESKTOP_PROMPT, and would do nothing at all for the first.
+   * The always-sent half has no gateable fat left in it that is honest to
+   * call fat - which is the real finding, and means the next addition here
+   * has to replace something rather than join it.
    */
   /*
    * quota: true although NVIDIA turns that section off (see promptShape:
@@ -437,12 +502,12 @@ check('because guessed options are still guessing', /still guessing/.test(prompt
   const everything = T.preambleTokens(FULL)
   check(
     `a plain turn pays ~${plain}, ${((plain / T.CONTEXT_TOKENS) * 100).toFixed(0)}% of the window`,
-    plain / T.CONTEXT_TOKENS <= 0.26,
+    plain / T.CONTEXT_TOKENS <= 0.27,
     true
   )
   check(
     `every capability on pays ~${everything}, ${((everything / T.CONTEXT_TOKENS) * 100).toFixed(0)}%`,
-    everything / T.CONTEXT_TOKENS <= 0.47,
+    everything / T.CONTEXT_TOKENS <= 0.48,
     true
   )
   /* And the gating has to be worth having, or the two numbers above are the

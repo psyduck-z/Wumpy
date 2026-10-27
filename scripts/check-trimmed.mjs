@@ -159,9 +159,17 @@ check('every combination is covered', COMBINATIONS.length, 64)
      and APP_PROMPT is not one of them, so it goes out whole either way.
      Which is the point of it being there - a sentence about a meeting is
      exactly the turn that sends nothing else. */
-  check('the full instructions, plain turn', plain(false), 8286)
+  /* 8,286 -> 8,542 and the saving 2,960 -> 3,216, both from the same 256
+     tokens: ASK_PROMPT learning that "so do it" points at what was just
+     said, and that a complaint is the request arriving again rather than a
+     remark to agree with. The short form did not move at all, because it
+     lifts named sections by heading and these two are not among them - so
+     the gap widened without the short form losing anything it had. Worth
+     stating rather than leaving as a number: the short form does NOT carry
+     this fix, and would keep the behaviour it was written for. */
+  check('the full instructions, plain turn', plain(false), 8542)
   check('the short ones', plain(true), 5326)
-  check('which is about 2,950 a turn', plain(false) - plain(true), 2960)
+  check('which is about 3,200 a turn', plain(false) - plain(true), 3216)
   /* It only replaces the three always-sent sections; the gated ones still
      come and go on the same rules. */
   const withScreen = (lean) => A.preambleTokens({ ...FULL, lean, needs: ['desktop'] })
@@ -212,10 +220,10 @@ check('every combination is covered', COMBINATIONS.length, 64)
 {
   const whole = A.assemblePrompt(FULL)
   check('with every topic it is the original', A.assemblePrompt({ ...FULL, needs: TOPICS }) === whole, true)
-  check('and with none it is the shortest', A.preambleTokens({ ...FULL, needs: [] }), 8286)
+  check('and with none it is the shortest', A.preambleTokens({ ...FULL, needs: [] }), 8542)
   const sizes = COMBINATIONS.map((c) => A.preambleTokens({ ...FULL, needs: c }))
   check('nothing is longer than everything', Math.max(...sizes), A.preambleTokens(FULL))
-  check('and nothing is shorter than nothing', Math.min(...sizes), 8286)
+  check('and nothing is shorter than nothing', Math.min(...sizes), 8542)
   /* Adding a topic may never shorten the prompt. */
   const notMonotonic = []
   for (const combination of COMBINATIONS) {
@@ -237,8 +245,8 @@ check('every combination is covered', COMBINATIONS.length, 64)
  */
 {
   const turn = (content, images) => A.preambleTokens({ ...FULL, needs: N.needsFor([{ role: 'user', content, images }]) })
-  check('a question about the app', turn('what is my key percentage'), 8286)
-  check('an explanation', turn('why does this throw a TypeError'), 8286)
+  check('a question about the app', turn('what is my key percentage'), 8542)
+  check('an explanation', turn('why does this throw a TypeError'), 8542)
   check('a screenshot', turn('what is this', [1]) > 9000, true)
   check('a desktop request', turn('click the compose button') > 9000, true)
   check('and the whole thing is never sent by accident', turn('hello') < 13341, true)
