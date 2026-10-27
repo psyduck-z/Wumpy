@@ -42,6 +42,34 @@ export type Step =
    */
   | { kind: 'press'; name: string; focusOnly: boolean }
   /*
+   * Putting the keyboard into PROSE, where there is no box to name.
+   *
+   * Asked for after a document went uncorrected: "I was writing a document
+   * and I asked it about some sort of grammatical error and I asked it to
+   * edit it directly by itself... it had a good idea. It knew what to do.
+   * But then it didn't seem to execute."
+   *
+   * It could not. A word in the middle of a paragraph is not a control: it
+   * has no name, so `press`, `focus` and `fill` have nothing to look up, and
+   * `fill` on the whole document would replace the document. The only thing
+   * left was a coordinate click - and typing after one of those is refused,
+   * for good reasons that have nothing to do with editing text (see
+   * typingIsAimed). So the one request had no legal step anywhere in the
+   * grammar, and a model with exactly the right idea had no way to say it.
+   *
+   * This is that step, and it earns the typing that follows by asking the
+   * question a bare click never answers: after the click, WHO HAS THE
+   * KEYBOARD? UI Automation knows - the focused element, its role, and what
+   * is selected in it - so the step either reports that the caret is in text
+   * and what the selection is, or fails and stops the plan before a single
+   * character goes anywhere.
+   *
+   * `select` is how a human fixes a typo: double-click the word, type the
+   * replacement over it. The selection comes back in the report, so the
+   * model can see it caught "thirty's" and not the word beside it.
+   */
+  | { kind: 'caret'; x: number; y: number; select: 'point' | 'word' | 'line' }
+  /*
    * Reading a control back, which is how a plan checks its own work.
    *
    * Looking used to mean a screenshot: about 1,100 tokens of a free tier
@@ -227,6 +255,46 @@ export function readPlan(raw: string): Plan {
           button: verb === 'rightclick' ? 'right' : 'left',
           times: verb === 'doubleclick' ? 2 : 1
         })
+      continue
+    }
+
+    if (verb === 'caret') {
+      /*
+       * "caret 640 520", or with `word` or `line` to select what is there.
+       *
+       * The modifier is a word rather than a click count because the count
+       * is an implementation detail of how Windows says "select the word" -
+       * and a model writing `caret 640 520 2` would be guessing at which
+       * number means what.
+       */
+      const bits = rest.split(/[\s,]+/).filter(Boolean)
+      const pair = /^(-?\d+)$/.test(bits[0] ?? '') && /^(-?\d+)$/.test(bits[1] ?? '')
+      if (!pair) {
+        problems.push(`caret needs two numbers: ${text}`)
+        continue
+      }
+      const x = Number(bits[0])
+      const y = Number(bits[1])
+      if (x < 0 || y < 0) {
+        problems.push(`caret has a negative coordinate: ${text}`)
+        continue
+      }
+      const how = (bits[2] ?? 'point').toLowerCase()
+      /* `paragraph` because that is what a triple-click actually takes in a
+         document, and a model that writes it means `line`. */
+      const select =
+        how === 'word'
+          ? 'word'
+          : how === 'line' || how === 'paragraph'
+            ? 'line'
+            : how === 'point' || bits.length < 3
+              ? 'point'
+              : null
+      if (select === null) {
+        problems.push(`caret takes nothing, \`word\` or \`line\` after the point: ${text}`)
+        continue
+      }
+      steps.push({ kind: 'caret', x, y, select })
       continue
     }
 
@@ -480,6 +548,85 @@ export function pickingRecipient(name: string, text: string): string {
   )
 }
 
+/** What the helper says about whatever holds the keyboard. */
+export interface Focused {
+  role: string
+  /** True when it is one of Wumpy's own windows. */
+  ours: boolean
+  /** 'yes', 'no', or 'readonly' - whether characters would go into it. */
+  takes: string
+  name: string
+  /** What is selected in it, empty when nothing is or it cannot be read. */
+  selected: string
+}
+
+/**
+ * A name on its way into a line that is read for the word "ok".
+ *
+ * Every reply on this protocol is judged by whether " ok" appears in it, and
+ * a caret failure has to quote the control that wrongly has the keyboard. A
+ * button called "Looks ok" would turn its own refusal into a success, and the
+ * next step would type into it - which is the single thing this step exists
+ * to prevent. One underscore, in a name being quoted back to a model, is the
+ * cheapest possible price for that not happening.
+ */
+function plainly(name: string): string {
+  return name.replace(/ ok\b/gi, '_ok')
+}
+
+/**
+ * Whether a caret landed somewhere it is safe to type, and what to say.
+ *
+ * This is the whole difference between `caret` and `click`. The click is the
+ * same synthesised button press either way; what follows it is a question to
+ * UI Automation about the focused element, and the answer to that question
+ * is what earns the typing. Three answers are failures, and each says what
+ * actually happened rather than that the step did not work:
+ *
+ *   - the keyboard is in Wumpy's own panel, so the click never reached their
+ *     window at all;
+ *   - the keyboard is in something that is not text, where single letters
+ *     are shortcuts - the three-empty-drafts failure, one step earlier;
+ *   - a word was asked for and nothing came back selected, which means the
+ *     next step would INSERT rather than replace. "thirty'sthirties" in the
+ *     middle of somebody's document is worse than a refusal.
+ *
+ * Pure, so the judgement can be checked without a desktop, a document and
+ * somebody to look at it. The protocol parsing lives in main, with the pipe.
+ */
+export function caretVerdict(got: Focused, select: 'point' | 'word' | 'line'): string {
+  const what = `${got.name ? JSON.stringify(plainly(got.name)) : 'something with no name'} (${got.role})`
+  if (got.ours) {
+    return (
+      `CARET FAILED the keyboard is in Wumpy's own panel - ${what} - and not in their ` +
+      'window, so the click did not land where you aimed it. Look again.'
+    )
+  }
+  if (got.takes === 'readonly') {
+    return `CARET FAILED the keyboard is in ${what}, which is text but cannot be edited. Nothing was typed.`
+  }
+  if (got.takes !== 'yes') {
+    return (
+      `CARET FAILED the keyboard is in ${what}, which is not text. Anything typed now ` +
+      'would be read as shortcuts, so nothing was. Aim at the writing itself, or press ' +
+      'the control by name.'
+    )
+  }
+  if (select !== 'point' && !got.selected) {
+    return (
+      `CARET FAILED the cursor is in ${what}, but nothing came back selected, so typing ` +
+      'would insert beside the word instead of replacing it. Either the point missed the ' +
+      'word, or this editor does not report its selection - if it is a document, use its ' +
+      'own find and replace instead: `key ctrl+h`, then fill the two boxes by name.'
+    )
+  }
+  if (!got.selected) return `CARET ok the cursor is in ${what}, with nothing selected.`
+  return (
+    `CARET ok the cursor is in ${what}, with ${JSON.stringify(got.selected)} selected - ` +
+    'typing now replaces exactly that and nothing else.'
+  )
+}
+
 export function describe(step: Step): string {
   switch (step.kind) {
     case 'click':
@@ -496,6 +643,12 @@ export function describe(step: Step): string {
       return `Wait ${step.ms}ms`
     case 'press':
       return `${step.focusOnly ? 'Put the cursor in' : 'Press'} ${JSON.stringify(step.name)}`
+    case 'caret':
+      /* The card says what is about to be SELECTED, because a selection is
+         what the next step types over. */
+      return step.select === 'point'
+        ? `Put the cursor in the text at ${step.x}, ${step.y}, and check it landed there`
+        : `Select the ${step.select === 'word' ? 'word' : 'line'} at ${step.x}, ${step.y}, and check what it caught`
     case 'paste': {
       const short = step.text.length > 60 ? `${step.text.slice(0, 60)}…` : step.text
       return `Paste ${JSON.stringify(short)}${

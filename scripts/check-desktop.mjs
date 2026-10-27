@@ -987,5 +987,195 @@ check(
   true
 )
 
+/* ------------------------------------------ the caret, for text with no box */
+
+/*
+ * CORRECTING A WORD IN SOMEBODY'S DOCUMENT, WHICH NOTHING HERE COULD DO.
+ *
+ * Reported: "I was writing a document and I asked it about some sort of
+ * grammatical error and I asked it to edit it directly by itself... I can
+ * tell it had a good idea. It knew what to do. But then it didn't seem to
+ * execute." It could not. Every verb above aims at a NAME, a word inside a
+ * paragraph has none, a `fill` of the document would replace the document,
+ * and typing after a bare coordinate click is refused - correctly, and for
+ * reasons that have nothing to do with editing prose. There was no legal
+ * step, so the best plan in the world would not have run.
+ *
+ * `caret` is the aim that was missing, and what makes it aim rather than a
+ * second kind of click is the question it asks afterwards: who has the
+ * keyboard, and what is selected in it.
+ */
+check('caret is a step', kinds(plan('caret 900 540')), ['caret'])
+check('it keeps the point', [plan('caret 900 540').steps[0].x, plan('caret 900 540').steps[0].y], [900, 540])
+check('a bare caret selects nothing', plan('caret 900 540').steps[0].select, 'point')
+check('word selects the word there', plan('caret 900 540 word').steps[0].select, 'word')
+check('line takes the whole line', plan('caret 900 540 line').steps[0].select, 'line')
+/* A triple-click takes a paragraph in a document and a line in a field, and
+   a model that writes either word means the same thing. */
+check('paragraph is the same as line', plan('caret 900 540 paragraph').steps[0].select, 'line')
+check('a comma works here too', plan('caret 900,540 word').steps[0].select, 'word')
+check('a caret with one number is dropped', plan('caret 900').steps, [])
+check('and says what it needed', plan('caret 900').problems[0].includes('needs two numbers'), true)
+check('a negative point is dropped', plan('caret -1 540').steps, [])
+/* An unknown modifier is a model guessing at the vocabulary; taking the
+   point and ignoring the word it did not understand would select something
+   nobody asked for. */
+check('an unknown modifier is dropped, not ignored', plan('caret 900 540 sentence').steps, [])
+check('and the choices are named', plan('caret 900 540 sentence').problems[0].includes('`word`'), true)
+
+/* The card has to say what is about to be selected: on accept-all the list
+   of steps is the whole of the review. */
+check('the card says it will select the word', S.describe(plan('caret 9 9 word').steps[0]).includes('Select the word at 9, 9'), true)
+check('and that it checks what it caught', S.describe(plan('caret 9 9 word').steps[0]).includes('check what it caught'), true)
+check('a bare caret says it puts the cursor there', S.describe(plan('caret 9 9').steps[0]).includes('Put the cursor in the text'), true)
+
+/* It is a coordinate, so it needs the picture and must be inside it - the
+   same two rules as a click, which it would be easy to add a third verb
+   without. */
+check('a caret needs a screenshot', /s\.kind === 'click' \|\| s\.kind === 'move' \|\| s\.kind === 'caret'/.test(inputSrc), true)
+check('and must land inside it', /step\.kind === 'move' \|\| step\.kind === 'caret'\)[\s\S]{0,60}!onShot/.test(inputSrc), true)
+check('a caret at the same wrong point four times is a loop too', /step\.kind === 'click' \|\| step\.kind === 'caret'\) && frame/.test(inputSrc), true)
+
+/* And it is aim, which is the point of all of it. */
+check('typing after a caret is allowed', /s\.kind === 'press' \|\| s\.kind === 'fill' \|\| s\.kind === 'caret'/.test(inputSrc), true)
+check('a caret then typing is a whole plan', plan('caret 900 540 word', 'type thirties').steps.length, 2)
+check('the refusal points at the caret for prose', /`caret X Y` instead of `click`/.test(inputSrc), true)
+
+/*
+ * The judgement, which is the half that makes it safe, and the only half
+ * that can be tested without a desktop, a document and somebody to look at
+ * it. Three failures, each saying what actually happened: "the step did not
+ * work" is not something a model can act on.
+ *
+ * Every verdict is also read for the word "ok" by the step runner, so each
+ * case is checked for the verdict AND for how it will be read.
+ */
+const focus = (over) => ({
+  role: 'Document',
+  ours: false,
+  takes: 'yes',
+  name: 'Document content',
+  selected: '',
+  ...over
+})
+const verdict = (over, select = 'point') => S.caretVerdict(focus(over), select)
+const reads = (text) => / ok\b/.test(text)
+
+check('the cursor in text is ok', reads(verdict({})), true)
+check('and says where it is', verdict({}).includes('"Document content" (Document)'), true)
+check('with a selection it says what it caught', verdict({ selected: "thirty's" }, 'word').includes('"thirty\'s" selected'), true)
+check('and that typing replaces exactly that', verdict({ selected: "thirty's" }, 'word').includes('replaces exactly that'), true)
+
+check('the keyboard in our own panel fails', reads(verdict({ ours: true })), false)
+check("and says it is Wumpy's own panel", verdict({ ours: true }).includes("Wumpy's own panel"), true)
+check('something that is not text fails', reads(verdict({ role: 'Button', name: 'Bold', takes: 'no' })), false)
+check('and says why, not just no', verdict({ takes: 'no' }).includes('would be read as shortcuts'), true)
+check('read-only text is its own answer', verdict({ takes: 'readonly' }).includes('cannot be edited'), true)
+check('and it fails too', reads(verdict({ takes: 'readonly' })), false)
+/* The one that protects the document: a word was asked for and nothing came
+   back selected, so the next step would INSERT beside it. */
+check('a word with nothing selected fails', reads(verdict({}, 'word')), false)
+check('and says what typing would have done', verdict({}, 'word').includes('insert beside the word'), true)
+check('and names find and replace instead', verdict({}, 'word').includes('key ctrl+h'), true)
+/* A bare caret is not asking for a selection, so it must not fail for the
+   lack of one - putting the cursor somewhere is the whole step. */
+check('but a bare caret wants no selection', reads(verdict({}, 'point')), true)
+check('a line with nothing selected fails like a word', reads(verdict({}, 'line')), false)
+/* A control called "Looks ok" must not turn its own refusal into a success:
+   the runner would read ok, and the next step would type into a button. */
+check(
+  'a name cannot smuggle an ok into a refusal',
+  reads(verdict({ name: 'Looks ok', role: 'Button', takes: 'no' })),
+  false
+)
+check('and the name is still recognisable', verdict({ name: 'Looks ok', takes: 'no' }).includes('Looks_ok'), true)
+/* A nameless control is the common case on a page and must still be named
+   as something, or the sentence reads as though nothing was found. */
+check('a nameless control is described anyway', verdict({ name: '', takes: 'no' }).includes('something with no name'), true)
+/* And the wire half: a reply that is not a FOCUSED ok line is its own
+   failure, not a verdict about an element nobody read. */
+check('a helper that could not answer is a failure', /nothing could say what has the keyboard/.test(inputSrc), true)
+check('the line is parsed where the pipe is', /function readFocused/.test(inputSrc), true)
+check('and the names are base64 like every other name', /Buffer\.from\(raw, 'base64'\)/.test(inputSrc), true)
+
+const focused = readFileSync('src/hook/Automation.cs', 'utf8')
+check('the helper can say who has the keyboard', /case "FOCUSED":/.test(readFileSync('src/hook/Program.cs', 'utf8')), true)
+check('it reads the focused element', /AutomationElement\.FocusedElement/.test(focused), true)
+check('it says whether that is one of ours', /ours=/.test(focused), true)
+check('it reads the selection, not the whole text', /GetSelection\(\)/.test(focused), true)
+/* Chromium gives its root Document a read-only ValuePattern holding the
+   URL, so asking about the value first calls every page on the web
+   uneditable. The text pattern decides, and read-only is only believed
+   without one. */
+check(
+  'the text pattern is asked before the value',
+  focused.indexOf('TryGetCurrentPattern(TextPattern.Pattern, out _)') < focused.indexOf('.Current.IsReadOnly'),
+  true
+)
+check('and nothing in it moves anything', /SetFocus|Invoke|SendInput/.test(focused.slice(focused.indexOf('public static void Focused'), focused.indexOf('/// The text inside a control'))), false)
+
+/* -------------------------------------- a plan that runs nothing says so */
+
+/*
+ * THE REFUSALS WERE INVISIBLE, which is why the document failure took a
+ * transcript to diagnose instead of a log line.
+ *
+ * Four early returns in runPlan refuse a plan before its first step, and
+ * none of them wrote anything down - so a turn where the model proposed
+ * something and the app said no looked exactly like a turn where it
+ * proposed nothing. The log for the three minutes in question held three
+ * screenshots, nine finished turns and not one word about a plan.
+ */
+check('a refused plan is written to the log', /\[do\] refused before anything ran/.test(inputSrc), true)
+check('and every refusal goes through it', (inputSrc.match(/return refuse\(/g) ?? []).length >= 4, true)
+check('the plan itself is logged before it runs', /\[do\] plan of \$\{plan\.steps\.length\}/.test(inputSrc), true)
+check(
+  'and that happens before the first refusal can return',
+  inputSrc.indexOf('[do] plan of') < inputSrc.indexOf('return refuse('),
+  true
+)
+
+/* ------------------------------------------- the prompt knows about both */
+
+check('the prompt offers caret as a step', /caret X Y \[word\|line\]/.test(desktop), true)
+check('it says a word in a paragraph is not a control', /is NOT a control/.test(desktop), true)
+check('it says what to do about a typo you can see', /a typo you can see/.test(desktop), true)
+check('and offers find and replace for the rest', /find and replace/.test(desktop), true)
+check('and forbids retyping a paragraph to fix a word', /NEVER retype a paragraph/.test(desktop), true)
+check('the click-is-not-aim rule names the exception', /which\s*',\s*'\s*is a click that asks afterwards|is a click that asks afterwards/.test(desktop), true)
+
+/*
+ * And the gate that decides whether any of the above is sent at all.
+ *
+ * "Correct it for me", "can you do that", "can you make the change": three
+ * requests to touch the screen, none of which held a word from the desktop
+ * table, so the 1,546 tokens of aiming rules were replaced by the stub that
+ * says "the rules for aiming arrive with the screenshot; never attempt a
+ * click without one" - and the model, reading that, asked to look again
+ * instead of acting. Twice.
+ */
+const N = await load('src/shared/needs.ts', 'needs')
+const asked = (text) => N.needsFor([{ role: 'user', content: text }])
+check('correcting something is desktop work', asked('correct it for me').includes('desktop'), true)
+check('so is making the change', asked('can you make the change').includes('desktop'), true)
+check('so is a grammatical question', asked('is this grammar right').includes('desktop'), true)
+check('and a typo', asked('fix the typo in the second paragraph').includes('desktop'), true)
+check('and an apostrophe', asked('should that apostrophe be there').includes('desktop'), true)
+/* The restraint: "fix" and "change" alone are two of the commonest words in
+   a conversation about code, and WRITE_WORDS already covers a file. */
+check('fixing a bug is not desktop work', asked('why does this keep failing').includes('desktop'), false)
+check('nor is a change of plan', asked('any change in the forecast').includes('desktop'), false)
+/* Looking is the first step of desktop work, so a turn that asked to look
+   keeps the rules for acting on what comes back - which the screenshot
+   itself only does while it is inside LOOKBACK. */
+check(
+  'asking to look keeps the aiming rules',
+  N.needsFor([
+    { role: 'assistant', content: '```wumpy-screen' + NL + '# see the document' + NL + '```' },
+    { role: 'user', content: 'now correct it' }
+  ]).includes('desktop'),
+  true
+)
+
 console.log(`${NL}${count - failed}/${count} desktop checks passed`)
 if (failed) process.exit(1)

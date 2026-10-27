@@ -2,12 +2,14 @@ import { clipboard, type BrowserWindow } from 'electron'
 import { log } from './log'
 import { lastShot } from './screen'
 import {
+  caretVerdict,
   describe,
   HIDDEN,
   isSecretField,
   onShot,
   pickingRecipient,
   toScreen,
+  type Focused,
   type Plan,
   type Step
 } from '@shared/steps'
@@ -38,6 +40,9 @@ import { aimNote, remember, repeats, type Aim } from '@shared/aim'
 
 /** Between steps, so a click has landed before the next one is sent. */
 const SETTLE_MS = 180
+
+/** Long enough for a click to have been handled and the focus to have moved. */
+const FOCUS_SETTLE_MS = 150
 
 /**
  * The helper's way of saying a command worked: the verb, then " ok".
@@ -89,10 +94,20 @@ function typingIsAimed(steps: readonly Step[]): string | null {
    * against the accessibility tree, they report which control they chose,
    * and `fill` reads the box back afterwards - so those are the ones allowed
    * to be followed by typing.
+   *
+   * AND `caret`, WHICH IS A CLICK THAT ASKS THE SAME QUESTION AFTERWARDS.
+   *
+   * The ban above is a ban on typing into the unknown, not a ban on clicking
+   * - and it had the side effect of making a document impossible to edit,
+   * because a word in a paragraph has no name to aim at. `caret` clicks and
+   * then reads the focused element back: if a text surface has the keyboard
+   * it says which one and what is selected in it, and if anything else does
+   * it FAILS, which stops the plan before the first character. That is the
+   * evidence a bare click never produced, so typing after it is allowed.
    */
   const aimed = steps
     .slice(0, firstType)
-    .some((s) => s.kind === 'press' || s.kind === 'fill')
+    .some((s) => s.kind === 'press' || s.kind === 'fill' || s.kind === 'caret')
   if (aimed) return null
   const clicked = steps.slice(0, firstType).some((s) => s.kind === 'click')
   return clicked
@@ -102,10 +117,15 @@ function typingIsAimed(steps: readonly Step[]): string | null {
         'to be - in a web app, where single letters are shortcuts, that is how three ' +
         'empty compose windows got opened and no recipient got typed. Name the box ' +
         'instead: `fill "To recipients" stanley@example.com` puts the text in and reads ' +
-        'it back to prove it, and `focus "<name>"` puts the cursor there.'
+        'it back to prove it, and `focus "<name>"` puts the cursor there. For text with ' +
+        'no box around it - a document, an editor, a paragraph you are correcting - use ' +
+        '`caret X Y` instead of `click`, or `caret X Y word` to select the word there: ' +
+        'it clicks, then says what has the keyboard and what is selected, and fails if ' +
+        'the answer is not text.'
     : 'This types without aiming at anything first, and typed characters go to ' +
         'whatever window currently holds the keyboard - which is probably not the ' +
-        'one you were looking at. Name the box with `fill` or `focus` first.'
+        'one you were looking at. Name the box with `fill` or `focus` first, or put the ' +
+        'cursor in prose with `caret X Y`.'
 }
 
 /**
@@ -248,38 +268,55 @@ export async function runPlan(
 ): Promise<PlanResult> {
   const frame = lastShot()
   /*
+   * EVERY WAY OUT OF HERE IS WRITTEN DOWN, INCLUDING THE ONES THAT RUN
+   * NOTHING.
+   *
+   * It did not used to be. A plan refused before its first step took one of
+   * four early returns, none of which logged anything, so a turn where the
+   * model proposed something and the app said no left wumpy.log looking
+   * exactly like a turn where the model proposed nothing at all. Asked why a
+   * document had not been corrected, the log for those three minutes held
+   * three screenshots, nine finished turns and not one line about a plan -
+   * and the refusals were the answer.
+   */
+  const refuse = (why: string): PlanResult => {
+    log(`[do] refused before anything ran: ${why}`)
+    return { ran: [], stopped: null, refused: why }
+  }
+  log(`[do] plan of ${plan.steps.length}: ${plan.steps.map(describe).join('; ')}`)
+  /*
    * A plan made entirely of names needs no picture: UI Automation finds the
    * control wherever it is. Only coordinates need a frame to be measured
    * against, so only they require one.
    */
-  const needsFrame = plan.steps.some((s) => s.kind === 'click' || s.kind === 'move')
+  const needsFrame = plan.steps.some(
+    (s) => s.kind === 'click' || s.kind === 'move' || s.kind === 'caret'
+  )
   if (!frame && needsFrame) {
-    return {
-      ran: [],
-      stopped: null,
-      refused:
-        'Nothing has been looked at yet. Take a screenshot first - the coordinates are ' +
+    return refuse(
+      'Nothing has been looked at yet. Take a screenshot first - the coordinates are ' +
         'pixels in that picture, so without one there is nothing to aim at.'
-    }
+    )
   }
   if (plan.steps.length === 0) {
-    return { ran: [], stopped: null, refused: 'No steps that could be understood.' }
+    return refuse('No steps that could be understood.')
   }
 
   const unaimed = typingIsAimed(plan.steps)
-  if (unaimed) return { ran: [], stopped: null, refused: unaimed }
+  if (unaimed) return refuse(unaimed)
 
   /* Checked before anything runs, so a plan that would wander off the screen
      half way through does not leave the first half done. */
   for (const step of plan.steps) {
-    if ((step.kind === 'click' || step.kind === 'move') && frame && !onShot(frame, step.x, step.y)) {
-      return {
-        ran: [],
-        stopped: null,
-        refused:
-          `${step.x}, ${step.y} is outside the screenshot ` +
+    if (
+      (step.kind === 'click' || step.kind === 'move' || step.kind === 'caret') &&
+      frame &&
+      !onShot(frame, step.x, step.y)
+    ) {
+      return refuse(
+        `${step.x}, ${step.y} is outside the screenshot ` +
           `(${frame.imageWidth} by ${frame.imageHeight}). Look again and use what you see.`
-      }
+      )
     }
   }
 
@@ -331,8 +368,10 @@ export async function runPlan(
       }
     }
 
-    /* A click at a point that has been clicked and clicked already. */
-    if (step.kind === 'click' && frame) {
+    /* A click at a point that has been clicked and clicked already. `caret`
+       is a click too, and a caret put in the same wrong place four times is
+       the same loop with a different verb. */
+    if ((step.kind === 'click' || step.kind === 'caret') && frame) {
       const at = toScreen(frame, step.x, step.y)
       const verdict = aimNote(repeats(aimHistory, at.x, at.y, Date.now()))
       if (verdict.refuse) {
@@ -475,10 +514,38 @@ async function focusNamed(
 
   const clicked = await throughThePanel(panel, () => send(`CLICK ${at[1]} ${at[2]}`))
   if (!OK.test(clicked)) return first
-  /* Long enough for the click to have been handled and focus to have moved. */
-  await wait(150)
+  await wait(FOCUS_SETTLE_MS)
   const again = await send(`FOCUS ${named(name)}`, 6000)
   return `${again} (after clicking it at ${at[1]},${at[2]})`
+}
+
+/**
+ * A FOCUSED line, read off the wire for the step that has to judge it.
+ *
+ * The protocol half only: which element, whether it is ours, whether it
+ * takes text, and the selection - with the two strings decoded, since they
+ * travel base64 like every other name on this pipe. What the answer MEANS is
+ * caretVerdict, which is pure and tested.
+ */
+function readFocused(reply: string): Focused | null {
+  if (!/^FOCUSED ok/.test(reply)) return null
+  const decode = (key: string): string => {
+    const raw = new RegExp(`${key}=(\\S*)`).exec(reply)?.[1] ?? ''
+    try {
+      return Buffer.from(raw, 'base64').toString('utf8')
+    } catch {
+      /* An undecodable name is not a reason to refuse an answer about the
+         keyboard; the verdict handles a nameless control already. */
+      return ''
+    }
+  }
+  return {
+    role: /role=(\S+)/.exec(reply)?.[1] ?? 'something',
+    ours: /ours=yes/.test(reply),
+    takes: /takes=(\S+)/.exec(reply)?.[1] ?? 'no',
+    name: decode('name'),
+    selected: decode('selected')
+  }
 }
 
 async function oneStep(
@@ -505,6 +572,32 @@ async function oneStep(
       return throughThePanel(panel, () =>
         send(`CLICK ${at.x} ${at.y} ${step.button} ${step.times}`)
       )
+    }
+    case 'caret': {
+      /*
+       * The same click, and then the question. Composed here rather than in
+       * the helper because the helper already has both halves - a click and
+       * a reader - and what makes this a different step is the judgement
+       * between them, which belongs on the side that can explain itself to
+       * a model.
+       *
+       * Two clicks take a word and three take a line, which is how Windows
+       * has always said it and what every editor already implements.
+       */
+      if (!frame) return 'CARET FAILED no-screenshot'
+      const at = toScreen(frame, step.x, step.y)
+      const times = step.select === 'line' ? 3 : step.select === 'word' ? 2 : 1
+      const clicked = await throughThePanel(panel, () =>
+        send(`CLICK ${at.x} ${at.y} left ${times}`)
+      )
+      if (!OK.test(clicked)) return clicked
+      await wait(FOCUS_SETTLE_MS)
+      const reply = await send('FOCUSED', 6000)
+      const got = readFocused(reply)
+      if (!got) {
+        return `CARET FAILED nothing could say what has the keyboard (${reply.split(' ').slice(0, 3).join(' ')}), so nothing was typed.`
+      }
+      return caretVerdict(got, step.select)
     }
     case 'type':
       /* Base64 over a line protocol: a newline in the text would otherwise

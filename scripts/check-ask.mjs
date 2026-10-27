@@ -404,6 +404,25 @@ check('because guessed options are still guessing', /still guessing/.test(prompt
    * The bounds are still bounds: a point of the window is 328 tokens, and
    * this spent 41 of them. The next thing added to the always-sent half
    * should buy its room by gating something, not by moving these again.
+   *
+   * 46% -> 47%, and the always-sent bound did not move at all, which is the
+   * distinction that made it allowable.
+   *
+   * What was added: 372 tokens for `caret`, in DESKTOP_PROMPT. Asked to
+   * correct a grammatical error in a document it could already see, Wumpy
+   * had no step that could do it - every verb aims at a control's NAME, a
+   * word inside a paragraph has none, and a `fill` of the document would
+   * replace the document - so the model proposed, the app refused, and three
+   * requests in a row produced nothing. That is a capability being described
+   * for the first time, not more advice about an existing one, and it is
+   * behind the gate that only opens on a turn about the screen: a plain turn
+   * pays none of it and sits where it always did.
+   *
+   * The NEXT thing added here should pay for itself structurally. The
+   * obvious room is DESKTOP_PROMPT's own compose stretch - recipients, three
+   * empty drafts, ONE COMPOSE WINDOW - which is useless to a turn about a
+   * document and could be gated the way shellFor already gates the write and
+   * install stretches inside SHELL_PROMPT.
    */
   /*
    * quota: true although NVIDIA turns that section off (see promptShape:
@@ -423,7 +442,7 @@ check('because guessed options are still guessing', /still guessing/.test(prompt
   )
   check(
     `every capability on pays ~${everything}, ${((everything / T.CONTEXT_TOKENS) * 100).toFixed(0)}%`,
-    everything / T.CONTEXT_TOKENS <= 0.46,
+    everything / T.CONTEXT_TOKENS <= 0.47,
     true
   )
   /* And the gating has to be worth having, or the two numbers above are the

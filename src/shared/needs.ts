@@ -81,9 +81,18 @@ const OPEN_WORDS =
  * through "menu"; and a named web application - gmail, docs, discord - is in
  * BOTH, because getting there and driving it are two different sets of rules
  * and anyone asking to compose an email needs each of them.
+ *
+ * AND THE WORDS FOR CHANGING SOMETHING THEY HAVE WRITTEN, which were the
+ * hole here. "Correct it for me", "can you make the change" and "is this
+ * apostrophe right" are a request to touch the screen, and not one of them
+ * held a word from this list: the aiming rules were stubbed on the three
+ * turns that most needed them. The editing verbs are narrowed to the ones
+ * with an object - `fix this`, `change it` - because "fix" and "change"
+ * alone are two of the commonest words in a conversation about code, and
+ * WRITE_WORDS already covers editing a file.
  */
 const DESKTOP_WORDS =
-  /\b(click|clicks|clicked|press|presses|pressed|type|types|typed|typing|fill|fills|filled|enter|select|selects|choose|tick|check ?box|drag|drop|scroll|hover|button|menu|dialog|field|text ?box|form|dropdown|drop-?down|toolbar|ribbon|window|windows|tab|tabs|screen|desktop|keyboard|mouse|cursor|caret|sign ?in|sign ?up|log ?in|login|compose|reply|forward|send (?:it|this|the|an? )?(?:email|message|mail)|inbox|gmail|outlook|account|password|username|submit|save as|copy|paste|cut|undo|redo|minimi[sz]e|maximi[sz]e|close (?:the|that|this)|switch to|alt ?tab|shortcut|hotkey|keystroke|automate|do it for me|for me on)\b/i
+  /\b(click|clicks|clicked|press|presses|pressed|type|types|typed|typing|fill|fills|filled|enter|select|selects|choose|tick|check ?box|drag|drop|scroll|hover|button|menu|dialog|field|text ?box|form|dropdown|drop-?down|toolbar|ribbon|window|windows|tab|tabs|screen|desktop|keyboard|mouse|cursor|caret|sign ?in|sign ?up|log ?in|login|compose|reply|forward|send (?:it|this|the|an? )?(?:email|message|mail)|inbox|gmail|outlook|account|password|username|submit|save as|copy|paste|cut|undo|redo|minimi[sz]e|maximi[sz]e|close (?:the|that|this)|switch to|alt ?tab|shortcut|hotkey|keystroke|automate|do it for me|for me on|typo|typos|grammar|grammatical|spelling|misspel\w*|punctuation|apostrophe|proofread|reword|rewrite|retype|sentence|paragraph|highlight|(?:correct|fix|change|edit|amend|replace) (?:it|this|that|these|those|the|my|his|her|their|our)|make (?:the|that|this) (?:change|correction|edit|fix))\b/i
 
 /**
  * Putting something on the machine, and knowing when it finished.
@@ -153,10 +162,23 @@ const WRITE_WORDS =
 const REMEMBER_WORDS =
   /\b(remember|remembers|remembered|remembering|forget|forgets|forgot|memorise|memorize|keep in mind|bear in mind|from now on|going forward|in future|in the future|next time|every time|permanently|persist|preference|preferences|my name is|call me|i prefer|i'd prefer|i always|i never|note that|make a note|keep a note|take note)\b/i
 
-/** The fences, so a sequence keeps its instructions while it is running. */
+/**
+ * The fences, so a sequence keeps its instructions while it is running.
+ *
+ * `wumpy-screen` counts as a desktop fence, which it did not at first, and
+ * the gap cost a real turn. Asked to correct a word in a document, the model
+ * looked at the screen, described what it found, was asked three times to
+ * make the change - and asked to look again instead, twice. By then the
+ * screenshot that had expanded the aiming rules was further back than
+ * LOOKBACK, nothing in "correct it for me" matched a keyword, and what the
+ * model was reading was the stub: "the rules for aiming arrive with the
+ * screenshot; never attempt a click without one". It was doing as it was
+ * told. Looking IS the first step of desktop work, so a turn that asked to
+ * look keeps the rules for acting on what comes back.
+ */
 const FENCES: Partial<Record<Capability, RegExp>> = {
   open: /```wumpy-open/,
-  desktop: /```wumpy-do/,
+  desktop: /```wumpy-do|```wumpy-screen/,
   write: /```wumpy-write/
 }
 

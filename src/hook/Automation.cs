@@ -663,6 +663,106 @@ internal static class UiTree
     }
 
     /// <summary>
+    /// Who has the keyboard right now, and what is selected in it.
+    ///
+    /// The one question a coordinate click cannot answer about itself, and
+    /// the reason typing after one was banned outright: SendInput posts to
+    /// whatever holds the focus at that instant, so a click that missed sends
+    /// an email address into a web page as a string of shortcuts.
+    ///
+    /// Nothing here moves, presses or changes anything. It is a read, taken
+    /// straight after a click, and it is what lets `caret` be trusted with
+    /// the typing that a bare `click` is not: the focused element names
+    /// itself, says whether it is text at all, and hands back its selection -
+    /// so "I double-clicked the word thirty's" stops being a hope and
+    /// becomes a string the model can check before it types over it.
+    /// </summary>
+    public static void Focused()
+    {
+        AutomationElement? el;
+        try
+        {
+            el = AutomationElement.FocusedElement;
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"FOCUSED FAILED {ex.GetType().Name}");
+            return;
+        }
+        if (el is null)
+        {
+            Console.WriteLine("FOCUSED FAILED nothing-has-the-keyboard");
+            return;
+        }
+
+        string name, role;
+        bool ours;
+        try
+        {
+            var c = el.Current;
+            name = c.Name ?? string.Empty;
+            role = c.ControlType.ProgrammaticName.Replace("ControlType.", string.Empty);
+            /* Wumpy's own panel is the normal foreground window while someone
+               is typing at it, so "the click did not reach their window" is
+               the likeliest single failure and worth naming as itself. */
+            ours = Owner != 0 && (uint)c.ProcessId == Owner;
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"FOCUSED FAILED {ex.GetType().Name}");
+            return;
+        }
+
+        /*
+         * Whether characters would go INTO it, which is three answers.
+         *
+         * The text pattern is asked first and a read-only value is only
+         * believed without one, because Chromium gives its root Document a
+         * ValuePattern holding the page's URL with IsReadOnly set - so a
+         * contenteditable asked the other way round reports itself as text
+         * that cannot be edited, and the step would refuse every document on
+         * the web.
+         */
+        var takes = "no";
+        try
+        {
+            if (el.TryGetCurrentPattern(TextPattern.Pattern, out _)) takes = "yes";
+            else if (el.TryGetCurrentPattern(ValuePattern.Pattern, out var value))
+                takes = ((ValuePattern)value).Current.IsReadOnly ? "readonly" : "yes";
+            else if (role is "Edit" or "Document") takes = "yes";
+        }
+        catch
+        {
+            /* An element that will not answer is not text as far as this is
+               concerned, which is the safe way for the answer to be wrong. */
+        }
+
+        var selected = string.Empty;
+        try
+        {
+            if (el.TryGetCurrentPattern(TextPattern.Pattern, out var pattern))
+            {
+                var ranges = ((TextPattern)pattern).GetSelection();
+                /* A caret with no selection is a degenerate range, which is
+                   an empty string - the same answer as no range at all, and
+                   the right one either way. */
+                if (ranges is not null && ranges.Length > 0)
+                    selected = ranges[0].GetText(200) ?? string.Empty;
+            }
+        }
+        catch
+        {
+            /* SupportedTextSelection.None throws rather than returning
+               nothing. The caller reads an empty selection as "cannot prove
+               it", which is exactly what this is. */
+        }
+
+        Console.WriteLine(
+            $"FOCUSED ok role={role} ours={(ours ? "yes" : "no")} takes={takes} " +
+            $"name={Encode(name)} len={selected.Length} selected={Encode(selected)}");
+    }
+
+    /// <summary>
     /// The text inside a control whose own value is empty.
     ///
     /// A web field is often a wrapper: the name and the role belong to the

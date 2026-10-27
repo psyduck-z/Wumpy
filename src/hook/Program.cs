@@ -973,6 +973,15 @@ internal static class Program
             case "GUARD":
                 Guard();
                 return;
+            case "FOCUSED":
+                /*
+                 * Who has the keyboard, for the step that clicks into prose.
+                 *
+                 * No argument: the answer is about the machine's own state
+                 * rather than about anything named. A read, like GUARD.
+                 */
+                UiTree.Focused();
+                return;
             case "ELEMENTS":
             {
                 /* "[limit] [filter words]" - the filter narrows a busy page. */
@@ -1286,7 +1295,8 @@ internal static class Program
         }
         why = "wumpy-has-the-keyboard - Wumpy's own panel is in front, so these characters would " +
               "be typed into it, not into the window you mean. Focus the box first (focus, or " +
-              "fill which does both), which brings that window forward.";
+              "fill which does both), which brings that window forward - or, for writing with " +
+              "no box around it, caret X Y, which clicks into the text and says what it reached.";
         return false;
     }
 

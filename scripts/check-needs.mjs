@@ -126,7 +126,15 @@ const tokensFor = (list) => A.preambleTokens({ ...FULL, needs: list })
    shell and no search, so every gated section is already out. It earns its
    place twice over now that `/listen` is gone and asking is the only way
    in: see intents.ts. */
-check('everything, as it was', A.preambleTokens(FULL), 14842)
+/* 14,842 -> 15,214 for the caret: the step that puts the keyboard in prose,
+   and the two ways to correct a word with it. Asked to fix a grammatical
+   error in a document, Wumpy had no legal step for it - every verb aimed at
+   a control's NAME and a word in a paragraph has none - so the 372 tokens
+   are a capability being described for the first time rather than more
+   advice about one. All of it is inside DESKTOP_PROMPT, so the always-sent
+   half below is unchanged: a turn about nothing in particular pays none of
+   it. */
+check('everything, as it was', A.preambleTokens(FULL), 15214)
 check('a turn about nothing in particular', tokensFor([]), 8286)
 check('which is a third of it gone', A.preambleTokens(FULL) - tokensFor([]) > 4500, true)
 check('a turn about the screen', tokensFor(['desktop']) < A.preambleTokens(FULL), true)
@@ -351,10 +359,10 @@ check('nor one about opening a site', needs(said('I opened vocabulary.com for yo
 
 /* ------------------------------------------------------- the shape contract */
 
-check('no list at all means everything', A.preambleTokens({ ...FULL }), 14842)
-check('an empty list is a real answer, not everything', tokensFor([]) < 14842, true)
+check('no list at all means everything', A.preambleTokens({ ...FULL }), 15214)
+check('an empty list is a real answer, not everything', tokensFor([]) < 15214, true)
 check('one capability is not the other', tokensFor(['open']) !== tokensFor(['desktop']), true)
-check('every topic together is everything', tokensFor(ALL), 14842)
+check('every topic together is everything', tokensFor(ALL), 15214)
 
 /* --------------------------------------------------------------- the wiring */
 
