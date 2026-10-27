@@ -3514,6 +3514,18 @@ function namedControls(shot: Attachment): string[] {
         </button>
       )}
 
+      {/*
+        The listening pill shows while it is ON, whatever it has heard -
+        which used to be the one case it was hidden for.
+
+        The gate was `words > 0`, so the pill appeared only once something
+        had been transcribed. That inverted the reason the pill exists: the
+        minutes when nothing is coming through are exactly the minutes worth
+        seeing, and a session that never heard anything had no pill at all
+        while quietly attaching an empty transcript to every turn. A
+        finished transcript still needs words to be worth a chip; a live
+        session does not.
+      */}
       <StatusBar
         model={model}
         ready={assistant?.ready ?? false}
@@ -3524,8 +3536,12 @@ function namedControls(shot: Attachment): string[] {
         compact={compact}
         approvalMode={settings?.approvalMode ?? 'manual'}
         listening={
-          listening.session && wordCount(listening.session) > 0
-            ? { words: wordCount(listening.session), live: listening.on }
+          listening.session && (listening.on || wordCount(listening.session) > 0)
+            ? {
+                words: wordCount(listening.session),
+                live: listening.on,
+                level: listening.level
+              }
             : null
         }
         onListening={() =>

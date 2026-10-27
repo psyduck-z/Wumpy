@@ -121,11 +121,19 @@ check('the renderer stops the video track', /track\.stop\(\)/.test(loopback), tr
 check('and removes it from the stream', /stream\.removeTrack\(track\)/.test(loopback), true)
 /* Before anything can decode a frame: the stop must come before the function
    hands the stream to anyone. */
-check(
-  'before the stream leaves the function',
-  loopback.indexOf('stream.removeTrack(track)') < loopback.indexOf('return stream'),
-  true
-)
+/* Sliced out first, rather than indexOf over the whole file: `return stream`
+   also begins `return stream.getAudioTracks()` in the labels helper, which
+   sits above this and made the comparison pass on the wrong line. */
+{
+  const from = loopback.indexOf('async function systemAudio')
+  const fn = loopback.slice(from, loopback.indexOf('\n}', from))
+  check('the function was found at all', fn.length > 100, true)
+  check(
+    'before the stream leaves the function',
+    fn.indexOf('stream.removeTrack(track)') < fn.indexOf('\n  return stream'),
+    true
+  )
+}
 /* Nothing reads pixels. A canvas, a video element or a frame grab appearing
    in this file would mean the command quietly grew a screenshot. */
 for (const forbidden of ['createElement', 'canvas', 'drawImage', 'getVideoTracks()[0].clone']) {
@@ -200,9 +208,102 @@ check('and the graph is closed by whoever built it', /void ctx\.close\(\)/.test(
  */
 check('stopping waits for the piece in flight', /await chain\.current/.test(hook), true)
 
-/* Two full-scale sources summed into one channel clip, and clipping is the
-   one distortion Whisper handles badly. */
-check('the two sources are halved before mixing', /gain\.gain\.value = 0\.5/.test(loopback), true)
+/* ------------------------------------- the mix, and the silence it caused */
+
+/**
+ * CLIPPING IS LIMITED, NOT PAID FOR IN ADVANCE.
+ *
+ * Two full-scale sources summed into one channel clip, and clipping is the
+ * one distortion Whisper handles badly. The first answer was a gain of 0.5
+ * on each, which is arithmetically sound and was the bug: the recorder's
+ * speech gate is an ABSOLUTE threshold calibrated on an un-halved
+ * microphone, so in `both` - the default - it effectively sat at 0.04,
+ * inside the band its own comment calls ordinary speech. Under it nothing
+ * is cut, nothing reaches Whisper, and a transcribed meeting reports that
+ * it heard nothing but silence.
+ *
+ * So the halving is pinned OUT as well as the limiter in. A future tidy-up
+ * that "simplifies" the limiter back to a pair of gains would restore a
+ * fault whose only symptom is an empty transcript.
+ */
+check('nothing scales a source down to pay for the sum', /gain\.value = 0\.5/.test(loopback), false)
+check('a limiter sits in front of the destination', /createDynamicsCompressor\(\)/.test(loopback), true)
+check('and the destination is behind it', /limiter\.connect\(mixed\)/.test(loopback), true)
+check('both sources go through it', /\.connect\(limiter\)/.test(loopback), true)
+/* Only the top of the range, and hard, or it is a compressor rather than a
+   limiter - and a compressor with a soft knee quietens ordinary speech
+   again, which is the whole fault this replaced. */
+check('it only acts near full scale', /threshold\.value = -3\b/.test(loopback), true)
+check('with no knee', /knee\.value = 0\b/.test(loopback), true)
+check('at a limiting ratio', /ratio\.value = 20\b/.test(loopback), true)
+/* DynamicsCompressorNode has no makeup gain of its own, so nothing quiet is
+   lifted either and the noise floor stays where the gate expects it. A gain
+   node reappearing in this file is how that would be undone - in either
+   direction, since the fault being pinned out was also a gain node. */
+check('and no gain node is left in the graph', /createGain\(\)/.test(loopback), false)
+
+/* -------------------------------------- and it says what it is hearing */
+
+/**
+ * A LONG LISTEN WROTE NOTHING ANYWHERE.
+ *
+ * Every `[listen]` line in the codebase was on a failure path, so a session
+ * that started cleanly and transcribed nothing left a log identical to one
+ * that was never started - and that was the whole of the evidence available
+ * when a meeting was reported as having been heard as silence. Three facts
+ * fix it, and each is pinned because each would be easy to drop in a tidy-up
+ * and impossible to miss the absence of until the next time.
+ */
+const types = read('src/shared/types.ts')
+const main = read('src/main/index.ts')
+const preload = read('src/preload/index.ts')
+check('there is a channel for it', /listenLog: 'listen:log'/.test(types), true)
+check('the renderer can send on it', /ipcRenderer\.send\(IPC\.listenLog/.test(preload), true)
+/* One way. A heartbeat that can wait on the main process is a heartbeat
+   that can stall the session it is reporting on. */
+check('and cannot wait on it', /invoke\(IPC\.listenLog/.test(preload), false)
+check('main writes it to the log file', /ipcMain\.on\(IPC\.listenLog/.test(main), true)
+/* Renderer text straight into a log file: a newline would forge a
+   timestamped line, and an unbounded string could put the meeting in it. */
+check('flattened before it is written', /replace\(\/\\s\+\/g, ' '\)/.test(main), true)
+check('and capped', /\.slice\(0, 300\)/.test(main), true)
+
+check('the session says what devices it opened', /started \(\$\{want\}\) on /.test(hook), true)
+check('and what it got, every so often', /const BEAT_MS = 30_000/.test(hook), true)
+check('on a timer that starts with the session', /setInterval\(beat, BEAT_MS\)/.test(hook), true)
+/* An hour-long interval outliving the panel is the one leak this hook can
+   have, so it is cleared from stop AND from an unmount. */
+check('and is cleared when it stops', /stopBeat\(\)/.test(hook), true)
+check('and on unmount', /useEffect\(\(\) => stopBeat/.test(hook), true)
+/* The line this was all for: a peak that never reaches the gate means
+   nothing was ever cut, which is indistinguishable from an empty room
+   everywhere else. */
+check(
+  'a session under the gate says so in those words',
+  /never once above the \$\{SPEECH_LEVEL\} speech gate/.test(hook),
+  true
+)
+check('against the same constant the gate uses', /export const SPEECH_LEVEL/.test(recorder), true)
+check('and the hook reads that one', /SPEECH_LEVEL/.test(hook), true)
+/* No audio is kept, and that goes for the log too: it carries levels,
+   counts and device names, never a transcript. */
+for (const forbidden of ['transcriptText', 'piece.text', 'part.text']) {
+  check(`the log never carries ${forbidden}`, new RegExp(`say\\([^)]*${forbidden}`).test(hook), false)
+}
+
+/* ------------------------------------------------- and it is on screen */
+
+/**
+ * A meter, because an open microphone showing nothing is a thing you have
+ * to take on faith for an hour. Dictation has had one from the beginning;
+ * this ran for hours with none, and `onLevel` was simply never passed.
+ */
+check('the recorder reports the raw level too', /onLevel\?\.\(Math\.min\(1, Math\.sqrt\(level \* 8\)\), level\)/.test(recorder), true)
+check('and the session asks for it', /onLevel: \(shown, raw\)/.test(hook), true)
+/* Quantised before it reaches state: the level arrives on every animation
+   frame, and a meeting is an hour of them. */
+check('quantised before it becomes state', /const BARS = 16/.test(hook), true)
+check('and only set when the step changes', /if \(step === stepRef\.current\) return/.test(hook), true)
 
 /* ------------------------------------------------------ the transcript */
 
@@ -434,6 +535,27 @@ const status = read('src/renderer/src/components/StatusBar.tsx')
 check('the panel shows that it is listening', /className=\{`listening/.test(status), true)
 check('with how much it has', /\$\{listening\.words\} words/.test(status), true)
 check('and says the transcript is being sent', /carries the transcript/.test(status), true)
+
+/**
+ * AND IT SHOWS WHILE IT IS ON, NOT ONLY ONCE IT HAS WORDS.
+ *
+ * The gate was `wordCount > 0`, which hid the pill for exactly the case the
+ * pill exists for: a live session that has heard nothing, attaching an empty
+ * transcript to every turn with nothing on screen to say so. A finished
+ * transcript still needs words to be worth a chip; a live one does not.
+ */
+check('a live session shows even at nothing', /listening\.on \|\| wordCount\(listening\.session\) > 0/.test(app), true)
+check('and the meter rides along with it', /level: listening\.level/.test(app), true)
+check('drawn only while live', /listening\.live && \(\s*<span className="listening-meter"/.test(status), true)
+/* Scaled rather than resized: composited, and it moves for as long as the
+   meeting does. */
+check('and scaled, not re-laid-out', /transform: `scaleX\(/.test(status), true)
+/* Never a bar of nothing: a meter pinned at zero reads as broken rather
+   than as quiet. */
+check('with a floor so it is visibly present', /Math\.max\(0\.02, listening\.level\)/.test(status), true)
+check('the title says so when there is nothing yet', /nothing transcribed yet/.test(status), true)
+const css = read('src/renderer/src/styles.css')
+check('the meter has a width to be seen in', /\.listening-meter \{[^}]*width: 20px/.test(css), true)
 
 /* ------------------------------------------------------- what is said out loud */
 

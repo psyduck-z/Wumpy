@@ -35,8 +35,16 @@ export interface Segment {
 
 /** What the caller needs to know while recording, for the meter and the label. */
 export interface RecorderEvents {
-  /** 0..1, roughly how loud it is right now. */
-  onLevel?(level: number): void
+  /**
+   * How loud it is right now, twice: once to draw and once to judge.
+   *
+   * `level` is curved for a meter and is the wrong number to reason with -
+   * `rms` is the raw figure SPEECH_LEVEL is compared against, so a caller
+   * that wants to say whether anything is being heard, or write it into the
+   * log, is reading the same quantity the gate reads rather than a
+   * sqrt-of-eight-times version of it.
+   */
+  onLevel?(level: number, rms: number): void
   onStop?(reason: 'silence' | 'asked' | 'limit'): void
   /**
    * A piece of speech has finished and can be transcribed now.
@@ -129,7 +137,7 @@ export interface Recording {
  * trailing silence, which the transcriber's own voice detection trims anyway;
  * erring high cuts people off mid-sentence.
  */
-const SPEECH_LEVEL = 0.02
+export const SPEECH_LEVEL = 0.02
 
 /** Formats the recorder can produce, best first. */
 const FORMATS = [
@@ -282,7 +290,7 @@ export async function record(opts: RecorderOptions = {}): Promise<Recording> {
      * and the difference between a mumble and a clear sentence is
      * visible rather than theoretical.
      */
-    opts.onLevel?.(Math.min(1, Math.sqrt(level * 8)))
+    opts.onLevel?.(Math.min(1, Math.sqrt(level * 8)), level)
 
     const now = performance.now()
     if (level > SPEECH_LEVEL) {

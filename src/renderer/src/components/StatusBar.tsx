@@ -218,7 +218,7 @@ export function StatusBar({
    * that nothing should have to be remembered; a thing you can see is the
    * other half of that.
    */
-  listening: { words: number; live: boolean } | null
+  listening: { words: number; live: boolean; level: number } | null
   onCycleApproval(): void
   onCompact(): void
   onQuota(): void
@@ -252,13 +252,31 @@ export function StatusBar({
           onClick={onListening}
           title={
             listening.live
-              ? `Listening — ${listening.words} words so far. Every message you send ` +
-                `carries the transcript. Click to stop.`
+              ? `Listening — ${
+                  listening.words
+                    ? `${listening.words} words so far`
+                    : 'nothing transcribed yet; the bar shows what it can hear'
+                }. Every message you send carries the transcript. Click to stop.`
               : `${listening.words} words of transcript, kept with this chat. ` +
                 `Every message you send carries it. Click to write it up.`
           }
         >
           {listening.live ? 'listening' : 'transcript'}
+          {/*
+            What it can hear, while it is listening.
+
+            An open microphone that shows nothing is a thing you have to take
+            on faith, and faith is what a session reported as "it heard
+            nothing but silence" cost an afternoon of. Dictation has had a
+            meter since the beginning; this ran for hours with none. Three
+            millimetres of bar answers the only question anyone has about a
+            listening session without opening the log.
+          */}
+          {listening.live && (
+            <span className="listening-meter" aria-hidden="true">
+              <span style={{ transform: `scaleX(${Math.max(0.02, listening.level)})` }} />
+            </span>
+          )}
         </button>
       )}
 

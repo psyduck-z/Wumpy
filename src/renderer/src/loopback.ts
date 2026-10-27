@@ -36,6 +36,23 @@ const MIC: MediaTrackConstraints = {
   autoGainControl: true
 }
 
+/** An open tap: the stream to record, what it is made of, and how to close it. */
+export interface Listening {
+  stream: MediaStream
+  /** What was actually opened, for the log. Device names, never audio. */
+  sources: string[]
+  stop(): void
+}
+
+/** Audio track names, which is as much as the browser will say about a device. */
+function labels(stream: MediaStream): string[] {
+  return stream.getAudioTracks().map((t) => t.label || t.kind)
+}
+
+function stopAll(stream: MediaStream): void {
+  stream.getTracks().forEach((t) => t.stop())
+}
+
 export function canHearSystem(): boolean {
   return Boolean(navigator.mediaDevices?.getDisplayMedia)
 }
@@ -82,17 +99,15 @@ async function systemAudio(): Promise<MediaStream> {
  * the honest trade and it is worth stating: these are notes of a conversation,
  * not minutes with attributions.
  */
-export async function listenTo(
-  source: AudioSource
-): Promise<{ stream: MediaStream; stop(): void }> {
+export async function listenTo(source: AudioSource): Promise<Listening> {
   if (source === 'mic') {
     const mic = await navigator.mediaDevices.getUserMedia({ audio: MIC })
-    return { stream: mic, stop: () => mic.getTracks().forEach((t) => t.stop()) }
+    return { stream: mic, sources: labels(mic), stop: () => stopAll(mic) }
   }
 
   if (source === 'system') {
     const sys = await systemAudio()
-    return { stream: sys, stop: () => sys.getTracks().forEach((t) => t.stop()) }
+    return { stream: sys, sources: labels(sys), stop: () => stopAll(sys) }
   }
 
   /*
@@ -111,26 +126,61 @@ export async function listenTo(
 
   const ctx = new AudioContext()
   const mixed = ctx.createMediaStreamDestination()
+
   /*
-   * Halved, both of them.
+   * Limited at the top, not halved throughout - and the difference was a
+   * whole meeting transcribed as silence.
    *
-   * Two full-scale sources summed into one channel clip at the top, and
-   * clipping is the one distortion Whisper handles badly - it is trained on
-   * ordinary recordings, and a square wave is not one. Half each means the
-   * sum cannot exceed full scale however loud both get at once. It costs
-   * 6dB, which the transcriber's own normalisation takes straight back.
+   * Two full-scale sources summed into one channel clip, and clipping is the
+   * one distortion Whisper handles badly: it is trained on ordinary
+   * recordings and a square wave is not one. The first answer to that was a
+   * gain of 0.5 on each, so the sum could not exceed full scale however loud
+   * both got at once. Arithmetically sound, and it taxed every quiet moment
+   * to pay for a loud one that mostly never comes - in a call the mic's echo
+   * canceller has already removed the far end from it, so the two sources
+   * are one voice each and rarely both at full scale.
+   *
+   * What it cost is downstream. The recorder's speech gate is an ABSOLUTE
+   * RMS threshold (SPEECH_LEVEL, 0.02) calibrated on an un-halved
+   * microphone, and nothing told it the signal had been turned down 6dB. So
+   * in `both` - the default - the gate effectively sat at 0.04 on the
+   * source, which is the middle of the 0.02-0.10 band its own comment calls
+   * ordinary speech. Below it nothing is ever cut, nothing reaches Whisper,
+   * and the transcript stays empty: a session that hears a conversation
+   * perfectly well and reports that it heard nothing but silence.
+   *
+   * A limiter puts the cost where the problem is. Normal speech passes at
+   * unity, so `both` now reaches the gate at the same level `mic` always
+   * did; only the top 3dB is touched, and only while both are loud at once.
+   * There is no makeup gain in this node, so nothing quiet is lifted either
+   * - the room stays as quiet as it was, which is what keeps the gate
+   * meaningful.
    */
+  const limiter = ctx.createDynamicsCompressor()
+  limiter.threshold.value = -3
+  limiter.knee.value = 0
+  limiter.ratio.value = 20
+  /* 3ms rather than 0: a true brick wall distorts low frequencies audibly,
+     and letting a rare 3ms transient through is cheaper than that. */
+  limiter.attack.value = 0.003
+  limiter.release.value = 0.25
+  limiter.connect(mixed)
+
   for (const stream of [sys, mic]) {
-    const gain = ctx.createGain()
-    gain.gain.value = 0.5
-    ctx.createMediaStreamSource(stream).connect(gain).connect(mixed)
+    ctx.createMediaStreamSource(stream).connect(limiter)
   }
 
   return {
     stream: mixed.stream,
+    /* The INPUTS, not the mixed output, whose track is called "MediaStream
+       Audio Destination Node" and says nothing. These name the real devices,
+       which is how a session listening to the wrong microphone - or to a
+       default output the meeting is not playing to - becomes a line in the
+       log rather than an hour of unexplained silence. */
+    sources: [...labels(sys), ...labels(mic)],
     stop: () => {
-      sys.getTracks().forEach((t) => t.stop())
-      mic.getTracks().forEach((t) => t.stop())
+      stopAll(sys)
+      stopAll(mic)
       /* The graph holds the audio device open until it is closed, which on
          Windows shows as a microphone-in-use indicator long after the
          recording ended. */

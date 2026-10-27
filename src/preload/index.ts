@@ -308,6 +308,14 @@ const api = {
      */
     tidy: (text: string, commands?: string[]): Promise<Dictation> =>
       ipcRenderer.invoke(IPC.voiceTidy, { text, commands }),
+    /**
+     * One line about a listening session, into wumpy.log.
+     *
+     * `send`, not `invoke`: a session writing its heartbeat must never be
+     * able to wait on the main process, and nothing here wants an answer.
+     * Main flattens and caps whatever arrives - see IPC.listenLog.
+     */
+    log: (line: string): void => ipcRenderer.send(IPC.listenLog, line),
     onStatus: (cb: (s: VoiceStatus) => void) => on<VoiceStatus>(IPC.voiceStatusChanged, cb)
   }
 }

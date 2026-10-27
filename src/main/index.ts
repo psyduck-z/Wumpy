@@ -72,7 +72,7 @@ import {
 import type { CloudModel, ProviderId } from '@shared/cloud'
 import { checkLink, DEFAULT_ENGINE, isSearchEngine } from '@shared/links'
 import { POLISH_PROMPT, polishAcceptable, tidyTranscript } from '@shared/dictation'
-import { captureConsole, logPath } from './log'
+import { captureConsole, log, logPath } from './log'
 import { captureScreen } from './screen'
 
 /**
@@ -1213,6 +1213,19 @@ function registerIpc(): void {
    */
   ipcMain.handle(IPC.voiceTidy, async (_e, req: { text: string; commands?: string[] }) =>
     finishTranscript((req.text ?? '').trim(), req.commands ?? [], 1, 0)
+  )
+
+  /**
+   * What a listening session is hearing, written down.
+   *
+   * Flattened and capped here rather than trusted. This is the one channel
+   * that puts renderer text straight into the log file, and a newline in it
+   * would forge a timestamped line; 300 characters is more than any line the
+   * session actually writes and far less than a transcript, so a mistake
+   * upstream cannot quietly turn the log into a copy of the meeting.
+   */
+  ipcMain.on(IPC.listenLog, (_e, line: unknown) =>
+    log(`[listen] ${String(line).replace(/\s+/g, ' ').slice(0, 300)}`)
   )
 
   /**

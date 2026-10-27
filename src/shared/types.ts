@@ -824,6 +824,23 @@ export const IPC = {
   voiceStart: 'voice:start',
   voiceTranscribe: 'voice:transcribe',
   voiceTidy: 'voice:tidy',
+  /**
+   * A line from a listening session, straight into wumpy.log.
+   *
+   * Because a long listen is the one thing in this app that runs for an hour
+   * with nobody watching, and until now it wrote NOTHING ANYWHERE. The only
+   * `[listen]` lines in the codebase were on failure paths, so a session
+   * that started cleanly and transcribed nothing left a log identical to a
+   * session that was never started - which is exactly the question that
+   * could not be answered when one was reported as having heard silence.
+   *
+   * Narrow on purpose, and one-way. The renderer's console only reaches the
+   * file through the dev-only console-message forwarder in panel.ts, at
+   * warning level or above, so the honest instrumentation of a working
+   * feature would have had to be logged as warnings and would vanish in a
+   * packaged build. This is a channel for facts.
+   */
+  listenLog: 'listen:log',
   linkOpen: 'link:open',
   linkCheck: 'link:check',
   linkSearch: 'link:search',

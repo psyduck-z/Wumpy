@@ -1,6 +1,6 @@
-import { useCallback, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { listenTo, type AudioSource } from '../loopback'
-import { record, type Recording } from '../recorder'
+import { record, SPEECH_LEVEL, type Recording } from '../recorder'
 import type { Heard, Listening } from '@shared/meeting'
 
 /**
@@ -24,6 +24,19 @@ export interface ListeningSession {
   session: Listening | null
   /** Transcribed but not yet counted - the piece currently in Whisper. */
   pending: number
+  /**
+   * How loud it is right now, 0..1, for a meter on the pill.
+   *
+   * Dictation has had one since the beginning and this had none, which is
+   * half of why a session that was hearing nothing looked exactly like a
+   * session that was hearing a meeting. An open microphone with no sign of
+   * what it can hear is a thing you have to take on faith for an hour.
+   *
+   * Coarse on purpose - see `BARS`. This is a bar in the corner, not an
+   * oscilloscope, and it must not cost a re-render per animation frame for
+   * the length of a meeting.
+   */
+  level: number
   error: string | null
   /**
    * Starts, and RETURNS why not.
@@ -65,11 +78,35 @@ export interface ListeningSession {
  */
 const MAX_MS = 4 * 60 * 60 * 1000
 
+/**
+ * How many steps the meter is quantised to before it reaches React.
+ *
+ * The level arrives on every animation frame. Putting that in state is 60
+ * re-renders a second of the whole status bar, for an hour, to move a bar a
+ * fraction of a pixel. Rounded to sixteenths, a quiet room sets state once
+ * and then stops, and talking moves it a handful of times a second - which
+ * is as much as a 24px bar can show anyway.
+ */
+const BARS = 16
+
+/**
+ * How often the session says what it is hearing, into wumpy.log.
+ *
+ * Thirty seconds, because the thing being diagnosed takes minutes to become
+ * suspicious and the line is one line. Short enough that a four-hour session
+ * is still under five hundred lines, and the log keeps its last 512KB.
+ */
+const BEAT_MS = 30_000
+
+/** Two significant figures is all an RMS reading is worth in a log line. */
+const rms = (n: number): string => n.toFixed(4)
+
 export function useListening(commands: () => string[]): ListeningSession {
   const [on, setOn] = useState(false)
   const [source, setSource] = useState<AudioSource>('both')
   const [session, setSession] = useState<Listening | null>(null)
   const [pending, setPending] = useState(0)
+  const [level, setLevel] = useState(0)
   const [error, setError] = useState<string | null>(null)
 
   const live = useRef<Recording | null>(null)
@@ -79,6 +116,36 @@ export function useListening(commands: () => string[]): ListeningSession {
   const startedAt = useRef(0)
   const chain = useRef<Promise<void>>(Promise.resolve())
 
+  /*
+   * What the heartbeat reports, all in refs: these are written from an
+   * animation frame and from a transcription callback, neither of which is
+   * a render, and none of them is on screen.
+   */
+  const stepRef = useRef(0)
+  /** Loudest raw RMS since the last beat - the number the gate compares. */
+  const peakRef = useRef(0)
+  const nowRef = useRef(0)
+  /** When the level last crossed SPEECH_LEVEL, or 0 for never. */
+  const spokeRef = useRef(0)
+  /** Pieces the recorder cut, pieces Whisper returned nothing for. */
+  const cutRef = useRef(0)
+  const emptyRef = useRef(0)
+  const beatRef = useRef<ReturnType<typeof setInterval> | null>(null)
+
+  const say = useCallback((line: string): void => {
+    window.wumpy.voice.log(line)
+  }, [])
+
+  const stopBeat = useCallback((): void => {
+    if (beatRef.current === null) return
+    clearInterval(beatRef.current)
+    beatRef.current = null
+  }, [])
+
+  /* An hour-long interval outliving the panel is the one leak this hook can
+     have; the session itself is torn down by `stop`. */
+  useEffect(() => stopBeat, [stopBeat])
+
   const snapshot = useCallback(
     (): Listening | null =>
       piecesRef.current.length || startedAt.current
@@ -87,12 +154,46 @@ export function useListening(commands: () => string[]): ListeningSession {
     []
   )
 
-  /** Remembered and handed back, so the caller never reads a stale render. */
-  const failed = useCallback((why: string): string => {
-    console.warn(`[listen] ${why}`)
-    setError(why)
-    return why
-  }, [])
+  /** Remembered, handed back, and written down, so no failure is only on screen. */
+  const failed = useCallback(
+    (why: string): string => {
+      console.warn(`[listen] ${why}`)
+      say(`could not start: ${why}`)
+      setError(why)
+      return why
+    },
+    [say]
+  )
+
+  /**
+   * One line of what it is hearing, every BEAT_MS.
+   *
+   * The first branch is the one this was written for. A peak that never
+   * reaches SPEECH_LEVEL means the recorder cut nothing, so Whisper saw
+   * nothing, so the transcript is empty - and the session looks from the
+   * outside exactly like a quiet room. Said in those words, with both
+   * numbers, it takes one glance at the log instead of an afternoon.
+   */
+  const beat = useCallback((): void => {
+    const seconds = Math.round((Date.now() - startedAt.current) / 1000)
+    const peak = peakRef.current
+    peakRef.current = 0
+    const words = piecesRef.current.reduce((n, p) => n + p.text.split(/\s+/).filter(Boolean).length, 0)
+    const heard = `${seconds}s in: peak ${rms(peak)}, now ${rms(nowRef.current)}`
+    if (!spokeRef.current) {
+      say(
+        `${heard} — never once above the ${SPEECH_LEVEL} speech gate, so nothing ` +
+          `has been cut and nothing has reached the transcriber. Check the ` +
+          `output device the meeting is playing to, and the volume.`
+      )
+      return
+    }
+    const ago = Math.round((performance.now() - spokeRef.current) / 1000)
+    say(
+      `${heard}, speech ${ago}s ago, ${cutRef.current} pieces cut, ` +
+        `${emptyRef.current} came back empty, ${words} words`
+    )
+  }, [say])
 
   const start = useCallback(
     async (want: AudioSource): Promise<string | null> => {
@@ -103,8 +204,15 @@ export function useListening(commands: () => string[]): ListeningSession {
       piecesRef.current = []
       startedAt.current = Date.now()
       chain.current = Promise.resolve()
+      peakRef.current = 0
+      nowRef.current = 0
+      spokeRef.current = 0
+      cutRef.current = 0
+      emptyRef.current = 0
+      stepRef.current = 0
+      setLevel(0)
 
-      let audio: { stream: MediaStream; stop(): void }
+      let audio: Awaited<ReturnType<typeof listenTo>>
       try {
         audio = await listenTo(want)
       } catch (err) {
@@ -126,6 +234,10 @@ export function useListening(commands: () => string[]): ListeningSession {
         )
       }
       closeAudio.current = audio.stop
+      /* Named devices, before anything can go wrong with them. A mic that is
+         not the one in the headset, or a loopback tap on an output the call
+         is not using, is invisible everywhere else. */
+      say(`started (${want}) on ${audio.sources.map((s) => `"${s}"`).join(' + ') || 'no named device'}`)
 
       const began = performance.now()
       try {
@@ -150,8 +262,24 @@ export function useListening(commands: () => string[]): ListeningSession {
           segmentPauseMs: 1_200,
           minSegmentMs: 4_000,
           maxSegmentMs: 30_000,
+          /*
+           * Both numbers: the curved one is drawn, the raw one is judged.
+           *
+           * Quantised before it touches state - see BARS - so a silent hour
+           * is one render, not two hundred thousand.
+           */
+          onLevel: (shown, raw) => {
+            nowRef.current = raw
+            if (raw > peakRef.current) peakRef.current = raw
+            if (raw > SPEECH_LEVEL) spokeRef.current = performance.now()
+            const step = Math.round(shown * BARS)
+            if (step === stepRef.current) return
+            stepRef.current = step
+            setLevel(step / BARS)
+          },
           onSegment: (seg) => {
             if (seg.silent || seg.blob.size === 0) return
+            cutRef.current += 1
             const at = seg.index === 0 ? 0 : performance.now() - began - seg.ms
             setPending((n) => n + 1)
             chain.current = chain.current.then(async () => {
@@ -165,10 +293,19 @@ export function useListening(commands: () => string[]): ListeningSession {
                 if (text) {
                   piecesRef.current.push({ at: Math.max(0, at), text })
                   setSession(snapshot())
+                } else {
+                  /* Audible enough to cut and nothing came back: the other
+                     shape of a silent transcript, and a different fault from
+                     never cutting at all. The heartbeat tells them apart. */
+                  emptyRef.current += 1
                 }
-              } catch {
+              } catch (err) {
                 /* One lost piece is a gap in the notes, not the end of the
-                   meeting. The next one is already being recorded. */
+                   meeting. The next one is already being recorded - but it is
+                   written down, because a transcriber failing on every piece
+                   looks from the outside like a room with nobody in it. */
+                emptyRef.current += 1
+                say(`a piece did not transcribe: ${err instanceof Error ? err.message : String(err)}`)
               } finally {
                 setPending((n) => Math.max(0, n - 1))
               }
@@ -184,14 +321,18 @@ export function useListening(commands: () => string[]): ListeningSession {
       setSource(want)
       setOn(true)
       setSession({ startedAt: startedAt.current, pieces: [] })
+      stopBeat()
+      beatRef.current = setInterval(beat, BEAT_MS)
       return null
     },
-    [commands, failed, snapshot]
+    [beat, commands, failed, say, snapshot, stopBeat]
   )
 
   const stop = useCallback(async (): Promise<Listening | null> => {
     const recording = live.current
     live.current = null
+    stopBeat()
+    setLevel(0)
     if (!recording) return snapshot()
     recording.stop()
     await recording.done
@@ -205,8 +346,15 @@ export function useListening(commands: () => string[]): ListeningSession {
     setPending(0)
     const final = snapshot()
     setSession(final)
+    /* The last word on the session, so a log read afterwards says what it
+       got rather than only what it was doing. */
+    say(
+      `stopped after ${Math.round((Date.now() - startedAt.current) / 1000)}s: ` +
+        `${cutRef.current} pieces cut, ${emptyRef.current} empty, ` +
+        `${final?.pieces.length ?? 0} kept`
+    )
     return final
-  }, [snapshot])
+  }, [say, snapshot, stopBeat])
 
   const forget = useCallback(async (): Promise<void> => {
     if (live.current) await stop()
@@ -216,5 +364,5 @@ export function useListening(commands: () => string[]): ListeningSession {
     setError(null)
   }, [stop])
 
-  return { on, source, session, pending, error, start, stop, peek: snapshot, forget }
+  return { on, source, session, pending, level, error, start, stop, peek: snapshot, forget }
 }
