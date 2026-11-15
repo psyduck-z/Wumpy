@@ -58,8 +58,13 @@ const sleep = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms
 /** How long nothing new must happen after an answer before it is read out. */
 export const QUIET_AFTER_MS = 600
 
-/** How long a microphone may take to deliver sound before it counts as dead. */
-export const LIVE_WAIT_MS = 6000
+/**
+ * How long a microphone may take to deliver sound before it counts as dead.
+ * Nine seconds, from six: on the MacBook the earbuds' switch to headset
+ * mode failed once and came back at 5.9s, twice in a row, and the next one
+ * came back just after 6s - a working mic thrown away by a hair.
+ */
+export const LIVE_WAIT_MS = 9000
 
 /**
  * How long a pause ends what you are saying. It was 1.3s, all of it spent
@@ -334,8 +339,15 @@ export function useVoiceTurn(deps: Deps): void {
 
       /* Listening counts from when the mic delivers sound, not from when it
          was asked for: the switch to headset mode is not the person's
-         silence. */
+         silence. And the bar says what the wait is - "it takes like 10
+         seconds to load the speech to text model" was this, read off a bar
+         that said "Getting the microphone ready…". Nothing loads. */
+      const slow = setTimeout(
+        () => showVoice({ detail: 'Waiting for the earbuds’ microphone - Bluetooth is slow to switch it on…' }),
+        1500
+      )
       const liveMs = await Promise.race([recording.live, sleep(LIVE_WAIT_MS).then(() => -1)])
+      clearTimeout(slow)
       if (cancelled) {
         recording.stop()
         await recording.done

@@ -189,9 +189,17 @@ async function pace(
   key: number,
   estimatedTokens = 0,
   /** Each key its own ceiling? Passed in: see CloudClient.separate. */
-  separate = false
+  separate = false,
+  /**
+   * Counted, but never held. Speech in a voice turn: a spoken answer
+   * waited 1,634ms for its key's turn (logged) before it was even asked
+   * for, with the person listening to silence. A voice turn is a handful
+   * of requests spread over two keys, well inside forty a minute each, and
+   * a 429 rests the key and moves on to the other anyway.
+   */
+  urgent = false
 ): Promise<void> {
-  const gap = PROVIDERS[provider].minGapMs
+  const gap = urgent ? 0 : PROVIDERS[provider].minGapMs
   /**
    * ONE QUEUE PER ALLOWANCE, WHICH IS NOT ALWAYS ONE QUEUE PER KEY.
    *
@@ -882,7 +890,7 @@ export class CloudClient {
     const index = rotation.next(Date.now(), model)
     if (index === null) return null
     this.remember(provider, rotation)
-    await pace(provider, index, 0, this.separate(provider))
+    await pace(provider, index, 0, this.separate(provider), true)
     const key = this.keys.secrets(provider)[index]
     if (!key) return null
     return {

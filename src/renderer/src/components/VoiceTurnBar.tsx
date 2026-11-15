@@ -22,7 +22,7 @@ export function VoiceTurnBar(): React.JSX.Element | null {
 
   const text =
     v.stage === 'starting'
-      ? 'Getting the microphone ready…'
+      ? v.detail || 'Opening the microphone…'
       : v.stage === 'listening'
         ? v.detail || 'Say something.'
         : v.stage === 'hearing'

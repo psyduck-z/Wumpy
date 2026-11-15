@@ -38,6 +38,9 @@ function receive(): void {
 /** Magpie's rate; each request's answer confirms it. */
 const RATE = 22050
 
+/** Sound held back before a stretch starts, to ride out a late piece. */
+export const CUSHION_S = 0.2
+
 export class Speaker {
   /** The turn's output (see earcons.ts), shared so it is already awake. */
   private context: AudioContext | null = null
@@ -52,6 +55,10 @@ export class Speaker {
   /** When the last scheduled sound ends, in page time - for idleFor(). */
   private endsAt = 0
   private requests = 0
+  /** Settles once every batch asked for so far has all its sound scheduled. */
+  private tail: Promise<void> = Promise.resolve()
+  /** Wakes the pump when new sentences arrive while it waits on the tail. */
+  private kick: () => void = () => {}
 
   constructor(private readonly hooks: SpeakerHooks) {
     receive()
@@ -61,6 +68,7 @@ export class Speaker {
   say(sentences: string[]): void {
     if (this.stopped || !sentences.length) return
     this.waiting.push(...sentences)
+    this.kick()
     if (!this.pump) this.pump = this.run().finally(() => (this.pump = null))
   }
 
@@ -104,47 +112,79 @@ export class Speaker {
     return Math.max(0, this.at - this.context.currentTime)
   }
 
+  /*
+   * Two batches in flight at once, played strictly in order.
+   *
+   * "Sometimes it jitters." One cause was here: the next batch was only
+   * asked for once the last piece of the current one had arrived, so after
+   * a short first sentence - "Five." is half a second of sound, made in
+   * about as long - there was nothing left to play while the next request
+   * went out and came back. Now the next batch is asked for straight away
+   * and its sound is held until everything before it is scheduled.
+   */
   private async run(): Promise<void> {
-    while (!this.stopped && this.waiting.length) {
-      /* One sentence when nothing is playing, so the first sound comes as
-         soon as it can; more while something is, since there is time. */
-      const batch = nextBatch(this.waiting, this.ahead() < 0.4)
-      this.waiting.splice(0, batch.length)
-      const text = batch.join(' ')
-      if (!(await this.magpie(text)) && !this.stopped) await this.systemVoice(text)
+    const running: Promise<void>[] = []
+    for (;;) {
+      while (!this.stopped && this.waiting.length) {
+        if (running.length >= 2) await running.shift()
+        if (this.stopped || !this.waiting.length) break
+        /* One sentence when nothing is playing or coming, so the first
+           sound comes as soon as it can; more when there is time. */
+        const batch = nextBatch(this.waiting, running.length === 0 && this.ahead() < 0.4)
+        this.waiting.splice(0, batch.length)
+        const job = this.job(batch.join(' '), this.tail)
+        this.tail = job
+        running.push(job)
+      }
+      if (this.stopped) return
+      const tail = this.tail
+      await Promise.race([tail, new Promise<void>((r) => (this.kick = r))])
+      this.kick = () => {}
+      if (this.stopped) return
+      if (!this.waiting.length && tail === this.tail) {
+        await tail
+        if (!this.waiting.length) return
+      }
     }
   }
 
-  private async magpie(text: string): Promise<boolean> {
+  /** Asks for one batch now; plays it once everything before it has been. */
+  private job(text: string, after: Promise<void>): Promise<void> {
     const id = `say-${++nextId}`
     const asked = Date.now()
+    const held: ArrayBuffer[] = []
+    let released = false
     let got = 0
     let first = -1
-    let all: () => void = () => {}
-    let wanted = Infinity
     receivers.set(id, (pcm) => {
       if (first < 0) first = Date.now() - asked
       got++
-      this.play(pcm)
-      if (got >= wanted) all()
+      if (released) this.play(pcm)
+      else held.push(pcm)
     })
-    try {
-      const result = await window.wumpy.voice.speakStream(id, text).catch(() => null)
-      if (!result || this.stopped) return got > 0
-      /* The pieces are sent before the answer, and arrive first; this only
-         covers a straggler. */
-      wanted = result.pieces
-      if (got < wanted) await Promise.race([new Promise<void>((r) => (all = r)), sleep(1500)])
-      this.requests++
-      if (this.requests <= 3)
-        this.hooks.note(
-          `said ${text.length} characters: first sound ${first}ms after asking` +
-            `${result.streamed ? `, ${result.pieces} pieces as it was made` : ', in one piece'}`
-        )
-      return got > 0
-    } finally {
-      receivers.delete(id)
-    }
+    const request = window.wumpy.voice.speakStream(id, text).catch(() => null)
+    return (async () => {
+      try {
+        await after
+        released = true
+        for (const pcm of held.splice(0)) this.play(pcm)
+        const result = await request
+        if (result && got < result.pieces) {
+          /* The pieces are sent before the answer and arrive first; this
+             only covers a straggler. */
+          const deadline = Date.now() + 1500
+          while (got < result.pieces && Date.now() < deadline && !this.stopped) await sleep(20)
+        }
+        if (result && ++this.requests <= 3)
+          this.hooks.note(
+            `said ${text.length} characters: first sound ${first}ms after asking` +
+              `${result.streamed ? `, ${result.pieces} pieces as it was made` : ', in one piece'}`
+          )
+        if (!got && !this.stopped) await this.systemVoice(text)
+      } finally {
+        receivers.delete(id)
+      }
+    })()
   }
 
   private play(pcm: ArrayBuffer): void {
@@ -167,8 +207,12 @@ export class Speaker {
     const source = context.createBufferSource()
     source.buffer = buffer
     source.connect(this.bus!)
+    /* A cushion before the first piece of a stretch, and again after a
+       piece came too late: pieces arrive over the network a fifth of a
+       second of sound at a time, and playing each the instant it lands
+       left a gap at every hiccup - the other half of "it jitters". */
     const quiet = this.ahead() <= 0.02
-    const start = Math.max(this.at, context.currentTime + 0.03)
+    const start = Math.max(this.at, context.currentTime + (quiet ? CUSHION_S : 0.03))
     source.start(start)
     this.at = start + buffer.duration
     this.endsAt = Date.now() + (this.at - context.currentTime) * 1000

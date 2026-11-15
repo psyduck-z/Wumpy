@@ -213,7 +213,16 @@ check('and the aborted try does not end the turn', /onDone: \(stats\) => \{[\s\S
 check('sentences are spoken while the answer is written', /while \(!cancelled && Date\.now\(\) < deadline\) \{\s+speakAhead\(since\)/.test(turn), true)
 check('and the rest once it is finished', /const spokeAnswer = speakAhead\(started\)/.test(turn), true)
 check('the mic waits until the voice has finished', /if \(cancelled\) return null\s+await speaker\?\.drain\(\)/.test(turn), true)
-check('pieces play back to back on one clock', /Math\.max\(this\.at, context\.currentTime \+ 0\.03\)/.test(speaker), true)
+check('pieces play back to back on one clock', /Math\.max\(this\.at, context\.currentTime \+ \(quiet \? CUSHION_S : 0\.03\)\)/.test(speaker), true)
+
+/* "Sometimes it jitters." */
+check('a cushion before each stretch rides out a late piece', /export const CUSHION_S = 0\.2/.test(speaker), true)
+check('the next batch is asked for while this one plays', /if \(running\.length >= 2\) await running\.shift\(\)/.test(speaker), true)
+check('and held until everything before it is scheduled', /await after\s+released = true/.test(speaker), true)
+check('speech never waits on the key spacing', /await pace\(provider, index, 0, this\.separate\(provider\), true\)/.test(read('src/main/cloud.ts')), true)
+check('but is still counted towards it', /const gap = urgent \? 0 : PROVIDERS\[provider\]\.minGapMs/.test(read('src/main/cloud.ts')), true)
+check('larger output buffers, so a busy page is not a click', /latencyHint: 'playback'/.test(earcons), true)
+check('the bar says the wait is the earbuds, not a model loading', /Waiting for the earbuds’ microphone/.test(turn), true)
 check('the typing stops at the first sound', /new Speaker\(\{ onSound: stopTicks, note \}\)/.test(turn), true)
 check('and not between sentences', /if \(!speaker\?\.busy\(\) && \(speaker\?\.idleFor\(\) \?\? Infinity\) > TYPING_AGAIN_MS\) startTicks\(\)/.test(turn), true)
 check('a stopped turn is silent at once', /speaker\?\.stop\(\)\s+note\('stopped'\)/.test(turn), true)

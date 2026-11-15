@@ -37,7 +37,9 @@ let out: { context: AudioContext; keep: AudioBufferSourceNode; woke: number } | 
 export function wakeOutput(): void {
   if (out) return
   try {
-    const context = new AudioContext({ latencyHint: 'interactive' })
+    /* 'playback': larger buffers, so a busy moment on the page is not a
+       click in the ear. Nothing here needs the last few milliseconds. */
+    const context = new AudioContext({ latencyHint: 'playback' })
     const buffer = context.createBuffer(1, context.sampleRate, context.sampleRate)
     const data = buffer.getChannelData(0)
     for (let i = 0; i < data.length; i++) data[i] = (Math.random() * 2 - 1) * 1e-4
