@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { actionFacts } from '../ledger'
-import type { Attachment, ChatMessage, NoteTopic } from '@shared/types'
+import type { Attachment, ChatMessage, LocalAsk, NoteTopic } from '@shared/types'
 import { BAIL_WINDOW_MS, hasBlock, returnsThePrompt } from '../abort'
 import { handsFree } from '../handsfree'
 import {
@@ -104,7 +104,13 @@ export interface ChatState {
   /** Records which option was chosen for a message's question. */
   recordAnswer(messageId: string, option: string): void
   /** Asks the user something without involving a model. */
-  askLocal(question: string, options: string[], kind: 'rename'): void
+  /** Returns the question's message id, for whoever acts on the answer. */
+  askLocal(
+    question: string,
+    options: string[],
+    kind: LocalAsk['kind'],
+    extra?: Pick<LocalAsk, 'values' | 'say' | 'spoken' | 'aliases'>
+  ): string
   /**
    * Stops the answer. Returns the question to put back in the box when the
    * user bailed out before anything had happened, or null.
@@ -465,19 +471,29 @@ export function useChat(): ChatState {
     context.current = ctx
   }, [])
 
-  const askLocal = useCallback((question: string, options: string[], kind: 'rename') => {
-    setMessages((prev) => [
-      ...prev,
-      {
-        id: nextId(),
-        role: 'assistant',
-        content: '',
-        createdAt: Date.now(),
-        local: true,
-        localAsk: { question, options, kind }
-      }
-    ])
-  }, [])
+  const askLocal = useCallback(
+    (
+      question: string,
+      options: string[],
+      kind: LocalAsk['kind'],
+      extra?: Pick<LocalAsk, 'values' | 'say' | 'spoken' | 'aliases'>
+    ): string => {
+      const id = nextId()
+      setMessages((prev) => [
+        ...prev,
+        {
+          id,
+          role: 'assistant',
+          content: '',
+          createdAt: Date.now(),
+          local: true,
+          localAsk: { question, options, kind, ...(extra ?? {}) }
+        }
+      ])
+      return id
+    },
+    []
+  )
 
   const recordAnswer = useCallback((messageId: string, option: string) => {
     setMessages((prev) => prev.map((m) => (m.id === messageId ? { ...m, answered: option } : m)))

@@ -118,6 +118,25 @@ itself is under Settings → Assistant).
   skipped by ignoring it. Clicking the card in the window answers it too.
 - **Saying "slash" types a command.** "Slash remember I like tea" is
   `/remember I like tea`, not the word "slash" sent to the model.
+- **Choosing a model out loud.** "Slash model" reads out five, quickly: the
+  three best overall, then the smartest and the fastest. Answer with a name,
+  roughly — "Nemotron super", "Gemma", even "Jemma" or "deep seek" — or a
+  place: "the second one", "the fastest". A name that fits several ("Nemotron")
+  reads those back, best first, and asks again. "Slash model fastest" reads
+  the three quickest instead. Typed, `/model nemotron` does the same matching
+  and offers the fits as buttons.
+- **Your chats, out loud.** "Slash resume" (or "resume a chat") reads your
+  twelve most recent chats with numbers; say a number or a title.
+- **It can run Wumpy's own commands.** Ask for it in words — "delete this
+  chat", "change the model to Gemma", "use the fastest model" — or ask the
+  model, which proposes the command on a card. Anything that cannot be undone
+  asks first: "Delete this chat, Fish pie? Say yes or no." Typing `/delete`
+  yourself still just does it. The model can never run `/key` or `/approve`.
+- **Music pauses while it listens and talks**, on both Omarchy (any MPRIS
+  player: Spotify, browsers, mpv) and Windows (the media session behind the
+  volume flyout), and only what was playing is resumed afterwards. Holding the
+  spacebar to dictate does the same. Calls are left alone. `/music off` turns
+  it off.
 - Triggering it again mid-turn cancels the turn.
 
 Holding the spacebar in the window dictates into the box instead (`/voice on`
@@ -576,10 +595,11 @@ or Enter to accept.
 | `/new`, `/clear` | Start a fresh chat (`Ctrl+N`) |
 | `/resume` | Pick up a previous chat (`Ctrl+R`) |
 | `/chats`, `/history` | Browse saved chats |
-| `/delete` | Delete a saved chat, same picker |
+| `/delete` | Delete this chat (`/delete pick` for the list) |
 | `/rename`, `/title <text>` | Retitle this chat |
 | `/tier`, `/level` | Switch thinking level, keeping context |
-| `/model` | Pick which installed model this tier uses |
+| `/model [name]` | Pick the model; a rough name ("nemotron super") is matched |
+| `/music on\|off` | Pause music while Wumpy listens and talks |
 | `/mode [quick\|dev]` | Toggle Quick / Developer |
 | `/dock` | Move the panel, from a list |
 | `/reasoning on\|off` | Show the scratchpad |

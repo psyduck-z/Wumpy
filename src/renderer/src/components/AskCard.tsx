@@ -1,5 +1,6 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useId, useRef, useState } from 'react'
 import { arrowNavigate } from '../keyboard'
+import { registerChoice } from '../aloud'
 import type { AskGroup } from './Markdown'
 
 /**
@@ -24,18 +25,54 @@ import type { AskGroup } from './Markdown'
 export function AskCard({
   groups,
   answered,
-  onAnswer
+  onAnswer,
+  aloud,
+  askedAt
 }: {
   groups: AskGroup[]
   /** The answer already given, if this block has been answered. */
   answered: string | null
   onAnswer(option: string): void
+  /**
+   * How a voice turn reads this one out, when Wumpy asked it: the list in
+   * its own words, how many of the options that list numbers, what else
+   * each option answers to, and whether it is a yes-or-no.
+   */
+  aloud?: { say?: string; spoken?: number; aliases?: string[][]; confirm?: boolean }
+  /** When the question was asked: see AloudChoice.askedAt. */
+  askedAt?: number
 }): React.JSX.Element {
   const multi = groups.length > 1
   const [picked, setPicked] = useState<Record<number, string>>({})
   const [shown, setShown] = useState(false)
   const cardRef = useRef<HTMLDivElement>(null)
   const done = answered !== null
+
+  /*
+   * Answerable out loud while it waits. One question only: a form of
+   * several is filled in on screen, and asking four questions in a row into
+   * somebody's ear is a survey, not a turn.
+   */
+  const key = useId()
+  const answerRef = useRef(onAnswer)
+  answerRef.current = onAnswer
+  const single = groups.length === 1 ? groups[0] : null
+  /* Parsed afresh on every render, so the effect keys on the words. */
+  const question = single?.question ?? ''
+  const optionKey = single ? single.options.join(String.fromCharCode(1)) : ''
+  useEffect(() => {
+    if (done || !single) return
+    const options = single.options
+    return registerChoice(key, {
+      question,
+      intro: aloud?.say,
+      options: options.map((label, i) => ({ id: label, label, names: aloud?.aliases?.[i] })),
+      numbered: aloud?.say ? options.slice(0, aloud.spoken ?? options.length) : undefined,
+      confirm: aloud?.confirm,
+      askedAt,
+      choose: (id) => answerRef.current(id)
+    })
+  }, [done, question, optionKey, key, aloud?.say, aloud?.spoken, aloud?.aliases, aloud?.confirm, askedAt])
 
   /**
    * The first option takes focus, so arrows work without a click first.

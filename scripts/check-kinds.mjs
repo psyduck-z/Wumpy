@@ -46,7 +46,7 @@ const styles = read('src/renderer/src/styles.css')
 /* ------------------------------------------------- every card is in a family */
 
 /**
- * The seven cards that ask permission for something, and the component that
+ * The eight cards that ask permission for something, and the component that
  * draws each one. The question card is deliberately absent: it asks
  * something, it does not touch anything, so it has nothing to mark.
  */
@@ -57,7 +57,8 @@ const CARDS = {
   screen: 'ScreenCard',
   look: 'LookCard',
   search: 'SearchCard',
-  link: 'LinkCard'
+  link: 'LinkCard',
+  app: 'AppCard'
 }
 
 check('every card kind has a family', Object.keys(K.KIND_FAMILY).sort(), Object.keys(CARDS).sort())

@@ -53,6 +53,12 @@ function readTitle(raw: string): { title: string; alternative: string | null } {
   return { title: trimmed, alternative: stripped }
 }
 
+/** A model named in a sentence: "the Nemotron", "nemotron super." */
+function modelNamed(raw: string): CommandAction | null {
+  const name = trimTail(raw).replace(/^(?:the|a)\s+/i, '').trim()
+  return name ? { kind: 'model', name } : null
+}
+
 const INTENTS: Intent[] = [
   {
     /*
@@ -105,6 +111,55 @@ const INTENTS: Intent[] = [
     pattern:
       /^(?:please\s+)?(?:show|list|open)\s+(?:me\s+)?(?:my\s+|the\s+)?(?:saved\s+)?(?:chats|conversations|chat history|conversation history)\.?$/i,
     build: () => ({ kind: 'resume' })
+  },
+  {
+    /*
+     * "delete this chat" - and because it was asked for in words rather
+     * than typed as /delete, it asks back first: "it's going to tell me,
+     * are you sure you want to delete this chat? And then I'm going to say
+     * yes." The word chat or conversation is required, as for rename:
+     * "delete this" one turn after talking about a file is the file.
+     */
+    pattern:
+      /^(?:please\s+)?(?:can\s+you\s+)?(?:delete|remove|trash|erase|get\s+rid\s+of)\s+(?:this|the\s+current|my\s+current|current|the)\s+(?:chat|conversation)\.?$/i,
+    build: () => ({ kind: 'delete', pick: false, confirm: true })
+  },
+  {
+    pattern:
+      /^(?:please\s+)?(?:can\s+you\s+)?(?:delete|remove)\s+(?:an?\s+|some\s+)?(?:old|older|other|another|previous|saved)\s+(?:chat|conversation)s?\.?$/i,
+    build: () => ({ kind: 'delete', pick: true })
+  },
+  {
+    /*
+     * "resume a chat", "go back to an old conversation". An adjective is
+     * required for every verb but resume itself: "continue the
+     * conversation" means keep talking, and must reach the model.
+     */
+    pattern:
+      /^(?:please\s+)?(?:can\s+you\s+)?(?:resume\s+(?:an?\s+|my\s+|the\s+)?(?:old\s+|older\s+|previous\s+|earlier\s+|last\s+|saved\s+)?|(?:reopen|open|go\s+back\s+to|pick\s+up)\s+(?:an?\s+|my\s+|the\s+)?(?:old|older|previous|earlier|other|another|saved)\s+)(?:chat|conversation)\.?$/i,
+    build: () => ({ kind: 'resume' })
+  },
+  {
+    /* "change the model", "switch models", "pick a model": the list. */
+    pattern:
+      /^(?:please\s+)?(?:can\s+you\s+)?(?:change|switch|pick|choose|select)\s+(?:the\s+|my\s+|a\s+|your\s+)?(?:ai\s+)?models?\.?$/i,
+    build: () => ({ kind: 'model', name: '' })
+  },
+  {
+    /*
+     * "change the model to gemma", "switch to the Nemotron model", "use
+     * the fastest model". The name is matched roughly, as /model does (see
+     * case 'model'), and the word model is required: "switch to Firefox"
+     * is a window, not a model.
+     */
+    pattern:
+      /^(?:please\s+)?(?:can\s+you\s+)?(?:switch|change|set)\s+(?:the\s+|your\s+|my\s+)?model\s+to\s+(.{2,60})$/i,
+    build: (m) => modelNamed(m[1])
+  },
+  {
+    pattern:
+      /^(?:please\s+)?(?:can\s+you\s+)?(?:switch\s+to|change\s+to|use)\s+(?:the\s+)?(.{2,50}?)\s+model\.?$/i,
+    build: (m) => modelNamed(m[1])
   },
   {
     /*

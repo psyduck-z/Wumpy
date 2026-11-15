@@ -21,8 +21,8 @@
  * does not touch anything, so it has nothing to mark.
  */
 
-/** The seven cards that ask for something. */
-export type CardKind = 'run' | 'write' | 'desktop' | 'screen' | 'look' | 'search' | 'link'
+/** The eight cards that ask for something. */
+export type CardKind = 'run' | 'write' | 'desktop' | 'screen' | 'look' | 'search' | 'link' | 'app'
 
 /** What is at stake, which is what the shape and the colour say. */
 export type Family = 'runs' | 'changes' | 'sees' | 'out'
@@ -50,7 +50,10 @@ export const KIND_FAMILY: Record<CardKind, Family> = {
   screen: 'sees',
   look: 'sees',
   search: 'out',
-  link: 'out'
+  link: 'out',
+  /* One of Wumpy's own commands, proposed by the model: it changes Wumpy -
+     a chat deleted, a model switched - which is still a change. */
+  app: 'changes'
 }
 
 /**

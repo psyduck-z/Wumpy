@@ -92,6 +92,7 @@ export function settingsRows(
     { what: 'reasoning shown', now: onOff(settings.showReasoning), change: '`/reasoning`' },
     { what: 'dictation tidied up', now: onOff(settings.voicePolish), change: '`/polish`' },
     { what: 'dictation stops at a pause', now: onOff(settings.voiceAutoStop), change: '`/autostop`' },
+    { what: 'music paused while talking', now: onOff(settings.pauseMusic ?? true), change: '`/music`' },
     {
       what: 'self-reflection',
       now: settings.reflect

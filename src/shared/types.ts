@@ -7,6 +7,32 @@ export type { AttachKind }
 
 export type Role = 'user' | 'assistant' | 'system'
 
+/**
+ * A question Wumpy asks itself, with no model involved.
+ *
+ *   rename      which of two readings of a quoted title was meant
+ *   model       which model, from `/model` said aloud or a name that fits several
+ *   resume      which saved chat to open
+ *   deletechat  which saved chat to delete (a confirm follows)
+ *   confirm     yes or no before something that cannot be undone; the first
+ *               option is yes
+ *
+ * `values` are what each option stands for (a model id, a chat id), in the
+ * same order, for the kinds where the label is not the thing itself. `say`
+ * is how it is read into the earbuds, and `aliases` what else each option
+ * answers to out loud ("fastest").
+ */
+export interface LocalAsk {
+  question: string
+  options: string[]
+  kind: 'rename' | 'model' | 'resume' | 'deletechat' | 'confirm'
+  values?: string[]
+  say?: string
+  /** How many of the options `say` reads out, first to last. */
+  spoken?: number
+  aliases?: string[][]
+}
+
 export interface ChatMessage {
   id: string
   role: Role
@@ -72,7 +98,7 @@ export interface ChatMessage {
    * Used where the app knows a request is ambiguous and a model would only
    * guess — or deliberate for minutes without reaching an answer.
    */
-  localAsk?: { question: string; options: string[]; kind: 'rename' }
+  localAsk?: LocalAsk
   /**
    * A line saying what Wumpy just did — ran this, searched for that.
    *
@@ -157,6 +183,7 @@ export type NoteTopic =
   | 'thinking'
   | 'lean'
   | 'voice'
+  | 'voice-music'
   | 'voice-polish'
   | 'voice-autostop'
   | 'reflect'
@@ -610,6 +637,11 @@ export interface WumpySettings {
   /** Magpie's voice for spoken answers, e.g. Magpie-Multilingual.EN-US.Aria. */
   speakVoice: string
   /**
+   * Pause whatever music is playing while Wumpy listens or talks - a voice
+   * turn, or holding the spacebar - and resume it after. See main/music.ts.
+   */
+  pauseMusic: boolean
+  /**
    * Self-reflection (/reflect): once the model has finished a task, a mentor
    * reviews it - on the other key where there are two - and the work goes
    * back for another pass until the mentor accepts it. See shared/reflect.ts.
@@ -858,6 +890,8 @@ export const IPC = {
   /** Main tells the panel to run a spoken turn (wumpy --voice). */
   voiceTurn: 'voice:turn',
   reflectReview: 'reflect:review',
+  musicHold: 'music:hold',
+  musicRelease: 'music:release',
   /**
    * A line from a listening session, straight into wumpy.log.
    *

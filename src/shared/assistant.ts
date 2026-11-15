@@ -1108,11 +1108,27 @@ export const NO_SHELL_PROMPT = [
  * the only way in, intents.ts catches the sentence when it can, and this is
  * what happens when it cannot. Three lines so the fallback is "say it and I
  * will start" rather than "I cannot hear".
+ *
+ * And the app's own commands are proposed now, not just named. The model
+ * used to be told it "cannot change Wumpy itself" and to answer with the
+ * bare command, which became a button only for the harmless ones - so
+ * "delete this chat" got a sentence about /delete. Asked for in these
+ * words: "I can ask the AI to run... an actual command in the chat... it's
+ * going to tell me, are you sure you want to delete this chat?" A
+ * wumpy-app block is a card that asks exactly that (see AppCard).
  */
 export const APP_PROMPT = [
-  'You cannot change Wumpy itself. If asked to rename, clear or switch something,',
-  'reply with only the command: /rename, /new, /resume, /compact, /model, /dock,',
-  '/engine.',
+  'Wumpy’s own commands you run by proposing one, with a # line saying what it',
+  'does; the user says yes before it runs, on screen or out loud:',
+  '```wumpy-app',
+  '# Delete this chat',
+  '/delete',
+  '```',
+  'Use it when they ask for something done to Wumpy itself: /new, /delete,',
+  '/rename <title>, /resume (reads out the old chats), /model (reads out the',
+  'models) or /model <name>, /compact, /reflect on|off, /think, /nothink,',
+  '/music on|off, /engine, /settings, /usage. One block per answer. Never /key',
+  'or /approve: those are theirs to type.',
   'Wumpy can hear this computer’s speakers and microphone and keep a transcript',
   'of a meeting, so never answer that you cannot listen to audio. You cannot',
   'switch it on yourself — they do, by saying so. Tell them to say "listen to',

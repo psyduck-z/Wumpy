@@ -325,6 +325,12 @@ const api = {
     /** A spoken turn was asked for (wumpy --voice, the tray). */
     onTurn: (cb: () => void) => on<void>(IPC.voiceTurn, cb)
   },
+  music: {
+    /** Pause what is playing while Wumpy listens or talks (main/music.ts). */
+    hold: (): Promise<void> => ipcRenderer.invoke(IPC.musicHold),
+    /** And resume it, once the last hold lets go. */
+    release: (): Promise<void> => ipcRenderer.invoke(IPC.musicRelease)
+  },
   reflect: {
     /** One mentor review of the task so far; null when none could be had. */
     review: (transcript: string): Promise<ReflectReview | null> =>

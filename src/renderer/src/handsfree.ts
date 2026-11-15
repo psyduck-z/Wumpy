@@ -14,8 +14,28 @@ let active = false
 
 export function setHandsFree(on: boolean): void {
   active = on
+  if (!on) told.length = 0
 }
 
 export function handsFree(): boolean {
   return active
+}
+
+/*
+ * Things to say out loud that are not an answer.
+ *
+ * "Deleted Fish pie", "Now on Nemotron Super": what a command did, which on
+ * screen is a toast or a note and through the earbuds would otherwise be
+ * nothing at all. The voice turn says each one as it arrives. Outside a
+ * voice turn there is nobody listening and these are dropped.
+ */
+const told: string[] = []
+
+export function tell(text: string): void {
+  if (active && text.trim()) told.push(text.trim())
+}
+
+/** Everything told since last asked, oldest first. */
+export function takeTold(): string[] {
+  return told.splice(0, told.length)
 }

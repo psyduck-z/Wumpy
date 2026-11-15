@@ -53,6 +53,7 @@ export const Message = memo(function Message({
   linkMode,
   searchEngine,
   onCommand,
+  onAppCommand,
   looseFences
 }: {
   message: ChatMessage
@@ -90,6 +91,8 @@ export const Message = memo(function Message({
   searchEngine?: string
   /** Runs one of Wumpy's own commands, when an answer offers one. */
   onCommand?: (command: string) => void
+  /** Runs a Wumpy command the model proposed, once approved. See AppCard. */
+  onAppCommand?: (command: string) => void
   /** This model writes ```powershell instead of ```wumpy-run. */
   looseFences?: boolean
   onSearch?: (
@@ -137,6 +140,13 @@ export const Message = memo(function Message({
           groups={[{ question: message.localAsk.question, options: message.localAsk.options }]}
           answered={message.answered ?? null}
           onAnswer={(option) => onAnswer?.(message.id, option)}
+          aloud={{
+            say: message.localAsk.say,
+            spoken: message.localAsk.spoken,
+            aliases: message.localAsk.aliases,
+            confirm: message.localAsk.kind === 'confirm'
+          }}
+          askedAt={message.createdAt}
         />
       </div>
     )
@@ -290,6 +300,7 @@ export const Message = memo(function Message({
                 onCommandResult={onCommandResult}
                 onAnswer={onAnswer ? (option) => onAnswer(message.id, option) : undefined}
                 answered={message.answered ?? null}
+                askedAt={message.createdAt}
                 onSearch={onSearch}
                 onSearchResults={onSearchResults}
                 onWriteFile={onWriteFile}
@@ -306,6 +317,7 @@ export const Message = memo(function Message({
                 linkMode={linkMode}
                 searchEngine={searchEngine}
                 onCommand={onCommand}
+                onAppCommand={onAppCommand}
                 looseFences={looseFences}
               />
             )

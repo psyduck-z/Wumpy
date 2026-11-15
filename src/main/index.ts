@@ -56,6 +56,7 @@ import { folderFacts, resolveUserFolders } from './folders'
 import { ContextStore } from './context'
 import { Speech } from './speech'
 import { DEFAULT_VOICE, recognize, synthesize } from './nvspeech'
+import { holdMusic, releaseAllMusic, releaseMusic } from './music'
 import { MENTOR_PROMPT, parseReview, type ReflectReview } from '@shared/reflect'
 import { openLink, openSearch } from './browser'
 import { inspectWriteTarget, writeProposedFile } from './writefile'
@@ -1280,6 +1281,18 @@ function registerIpc(): void {
     }
   })
 
+  /*
+   * Music off while Wumpy listens and talks. The setting is read on the
+   * hold only: a release always goes through, so turning it off mid-turn
+   * cannot leave somebody's song paused for good.
+   */
+  ipcMain.handle(IPC.musicHold, async () => {
+    if (settings.get('pauseMusic') !== false) await holdMusic()
+  })
+  ipcMain.handle(IPC.musicRelease, async () => {
+    await releaseMusic()
+  })
+
   /**
    * Turns a recorded clip into text for the composer.
    *
@@ -2337,6 +2350,7 @@ function startVoiceTurn(why: string): void {
 }
 
 app.on('will-quit', () => {
+  void releaseAllMusic()
   unregisterHotkeys()
   lowLevelHook?.stop()
   speech?.stop()

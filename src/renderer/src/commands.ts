@@ -21,8 +21,16 @@ export type CommandAction =
   | { kind: 'screen'; ask: string }
   | { kind: 'chats' }
   | { kind: 'resume' }
-  /** No argument deletes the chat you are in; `/delete pick` opens the list. */
-  | { kind: 'delete'; pick: boolean }
+  /**
+   * No argument deletes the chat you are in; `/delete pick` opens the list.
+   *
+   * `confirm` asks first, which typing `/delete` never does - but asking
+   * for it in words, or through the earbuds, or the model proposing it, is
+   * not the same as typing it, and those ask. `confirmed` is the answer
+   * having been yes. `chatId` is a chat other than the one open, picked
+   * from the list out loud.
+   */
+  | { kind: 'delete'; pick: boolean; confirm?: boolean; confirmed?: boolean; chatId?: string }
   | { kind: 'rename'; title: string }
   | { kind: 'renameChoice'; question: string; options: string[] }
   | { kind: 'model'; name: string }
@@ -41,7 +49,7 @@ export type CommandAction =
   | { kind: 'dock'; dock: Dock | null }
   | { kind: 'reasoning'; show: boolean | 'toggle' }
   | { kind: 'pin'; pinned: boolean | 'toggle' }
-  | { kind: 'voice'; setting: 'on' | 'polish' | 'autostop'; on: boolean | 'toggle' }
+  | { kind: 'voice'; setting: 'on' | 'polish' | 'autostop' | 'music'; on: boolean | 'toggle' }
   | { kind: 'reflect'; on: boolean | 'toggle'; rounds?: number; model?: string }
   /** Listening to the machine's own audio. See @shared/meeting. */
   | { kind: 'listen'; what: 'toggle' | 'stop' | 'notes' | 'source'; ask: string }
@@ -706,6 +714,18 @@ export const COMMANDS: CommandSpec[] = forThisWindow([
     arg: 'on|off',
     run: (arg) => ({ kind: 'voice', setting: 'autostop', on: bool(arg) })
   },
+  {
+    /*
+     * "When I'm using Wumpy, turn off the background music too." On by
+     * default - it is what was asked for - and a command to say otherwise
+     * for somebody who wants their music under everything.
+     */
+    name: 'music',
+    aliases: ['pausemusic'],
+    hint: 'Pause music while Wumpy listens and talks',
+    arg: 'on|off',
+    run: (arg) => ({ kind: 'voice', setting: 'music', on: bool(arg) })
+  },
   /*
    * THERE IS NO `/listen`, AND THAT IS THE POINT.
    *
@@ -1132,6 +1152,7 @@ export const CLICKABLE: readonly string[] = [
   'voice',
   'polish',
   'autostop',
+  'music',
   'reflect',
   'think',
   'nothink',
@@ -1183,4 +1204,72 @@ export function readCommandChip(text: string): string | null {
   if (arg.length > 32 || arg.split(/\s+/).length > 3) return null
   if (/[.!?,;:]$/.test(arg)) return null
   return line
+}
+
+/* ------------------------------------------------ commands the model runs */
+
+/**
+ * Commands the model may never propose, however it asks.
+ *
+ *   /key       takes a secret: a planted `/key nvidia <theirs>` swaps the
+ *              user's key for somebody else's.
+ *   /approve   decides what runs without being asked - the permission model
+ *              itself, which nothing the model says may change.
+ *   /open      has its own card (wumpy-open), which names the host and
+ *              refuses what it should.
+ *
+ * Everything else changes Wumpy and nothing outside it, and still waits for
+ * a yes. Asked for in these words: "I can ask the AI to run... an actual
+ * command in the chat... delete this chat. And then it's going to tell me,
+ * are you sure you want to delete this chat? And then I'm going to say yes."
+ */
+const NEVER_PROPOSED = new Set(['key', 'approve', 'open'])
+
+export interface AppProposal {
+  /** The command line, as typed: `/rename Fish pie`. */
+  line: string
+  /** The `# why` line, or what the command does when there is none. */
+  reason: string
+  /** Why it will not run, when it will not. */
+  refused: string | null
+  /**
+   * May run without asking on accept-all: the same rule as a clickable
+   * command in an answer, which only lets through the ones that change the
+   * app and nothing else and can be undone by doing it again.
+   */
+  harmless: boolean
+}
+
+/** Reads a ```wumpy-app block: a `# why` line and one command. */
+export function readAppProposal(body: string): AppProposal | null {
+  const lines = body.split(/\r?\n/).map((l) => l.trim())
+  const line = lines.find((l) => l.startsWith('/'))
+  if (!line) return null
+  const why = lines
+    .filter((l) => l.startsWith('#'))
+    .map((l) => l.replace(/^#+\s*/, ''))
+    .join(' ')
+    .trim()
+  const name = /^\/(\S+)/.exec(line)?.[1] ?? ''
+  const spec = findCommand(name)
+  const reason = why || spec?.hint || line
+  if (!spec) return { line, reason, refused: `Wumpy has no /${name} command.`, harmless: false }
+  if (NEVER_PROPOSED.has(spec.name)) {
+    return {
+      line,
+      reason,
+      refused: `/${spec.name} is yours to type. Wumpy never runs it for the model.`,
+      harmless: false
+    }
+  }
+  const action = parseCommand(line)
+  if (!action || action.kind === 'error' || action.kind === 'prompt' || action.kind === 'accounts') {
+    return {
+      line,
+      reason,
+      refused: action?.kind === 'error' ? action.message : `${line} is not something the model can run.`,
+      harmless: false
+    }
+  }
+  return { line, reason, refused: null, harmless: readCommandChip(line) !== null }
 }

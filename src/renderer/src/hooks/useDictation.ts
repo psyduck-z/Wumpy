@@ -180,6 +180,15 @@ export function useDictation(onText: (text: string) => void, commands: string[])
       }
 
       let recording: Recording
+      /* Music off while the microphone is open, so it hears the voice and
+         not the song; back on the moment it closes. */
+      void window.wumpy.music.hold()
+      let musicHeld = true
+      const letMusicGo = (): void => {
+        if (!musicHeld) return
+        musicHeld = false
+        void window.wumpy.music.release()
+      }
       try {
         setState('recording')
         /**
@@ -228,6 +237,7 @@ export function useDictation(onText: (text: string) => void, commands: string[])
         })
         segmentsRef.current = { partials, settled: () => chain }
       } catch (err) {
+        letMusicGo()
         // Almost always the microphone being refused, by Windows or by the user.
         wanted.current = false
         setState('error')
@@ -249,6 +259,7 @@ export function useDictation(onText: (text: string) => void, commands: string[])
       if (!wanted.current) recording.stop()
 
       const clip = await recording.done
+      letMusicGo()
       wanted.current = false
       live.current = null
       setLevel(0)

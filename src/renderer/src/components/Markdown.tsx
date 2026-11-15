@@ -27,6 +27,7 @@ import { SearchCard } from './SearchCard'
 import { ScreenCard } from './ScreenCard'
 import { LookCard } from './LookCard'
 import { DoCard } from './DoCard'
+import { AppCard } from './AppCard'
 import { LinkCard } from './LinkCard'
 import { WriteCard } from './WriteCard'
 import { DEFAULT_ENGINE, type LinkApproval } from '@shared/links'
@@ -267,6 +268,11 @@ function readDo(children: ReactNode): string | null {
   return readTagged(children, 'language-wumpy-do')
 }
 
+/** Pulls the command out of a `wumpy-app` block. */
+function readApp(children: ReactNode): string | null {
+  return readTagged(children, 'language-wumpy-app')
+}
+
 /** Pulls the query out of a `wumpy-search` block. */
 function readSearch(children: ReactNode): string | null {
   return readTagged(children, 'language-wumpy-search')
@@ -389,6 +395,8 @@ export interface MarkdownProps {
   onAnswer?: (option: string) => void
   /** The option already chosen for this message's question, if any. */
   answered?: string | null
+  /** When this message was written, for a question asked out loud. */
+  askedAt?: number
   /** Supplied for assistant turns that may propose commands. */
   onRunCommand?: (command: string, shell: ShellKind) => Promise<ShellResult | null>
   /** False while the message is still arriving, so half-written commands wait. */
@@ -443,6 +451,11 @@ export interface MarkdownProps {
    */
   onCommand?: (command: string) => void
   /**
+   * Runs one of Wumpy's own commands the model proposed in a wumpy-app
+   * block, once the user has said yes. See AppCard.
+   */
+  onAppCommand?: (command: string) => void
+  /**
    * Whether this model writes a plain shell fence where Wumpy asks for
    * ```wumpy-run. Declared per model in CLOUD_MODELS; see normaliseFences.
    */
@@ -491,6 +504,7 @@ export const Markdown = memo(function Markdown({
   onCommandResult,
   onAnswer,
   answered = null,
+  askedAt,
   complete = true,
   canAutoRun,
   messageId,
@@ -512,6 +526,7 @@ export const Markdown = memo(function Markdown({
   linkMode = 'manual',
   searchEngine = DEFAULT_ENGINE,
   onCommand,
+  onAppCommand,
   looseFences = false
 }: MarkdownProps) {
   // The one block still being written, if any. Everything else is final, even
@@ -617,9 +632,22 @@ export const Markdown = memo(function Markdown({
             )
           }
 
+          const app = onAppCommand ? readApp(children) : null
+          if (app !== null) {
+            return (
+              <AppCard
+                body={app}
+                complete={settled(app)}
+                mode={linkMode}
+                messageId={messageId ?? ''}
+                onRun={onAppCommand!}
+              />
+            )
+          }
+
           const ask = onAnswer ? readAsk(children) : null
           if (ask) {
-            return <AskCard groups={ask} answered={answered} onAnswer={onAnswer!} />
+            return <AskCard groups={ask} answered={answered} onAnswer={onAnswer!} askedAt={askedAt} />
           }
 
           const fence = onRunCommand ? readFence(children) : null

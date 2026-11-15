@@ -55,16 +55,30 @@ import {
   freshNote,
   modelTag,
   providerFor,
-  seesMedia
+  seesMedia,
+  type CloudModel
 } from '@shared/cloud'
 import {
   DEFAULT_ORDERING,
   ORDERINGS,
+  alive,
   isOrdering,
   orderNote,
   rankedModels,
+  readOrdering,
   type Ordering
 } from '@shared/order'
+import {
+  matchSpoken,
+  modelShortlist,
+  numberedSpeech,
+  sayModel,
+  shortlistSpeech,
+  spokenAnd,
+  type ShortEntry,
+  type ShortWhy
+} from '@shared/spokenpick'
+import { handsFree, tell } from './handsfree'
 import { useChat, nextId, type ChatStats } from './hooks/useChat'
 import { useListening } from './hooks/useListening'
 import type { AudioSource } from './loopback'
@@ -146,6 +160,19 @@ function tooLittle(heard: Listening | null): string {
     ? `Only ${words} words so far — too little to write anything from.`
     : 'Nothing heard yet.'
 }
+
+/**
+ * What the first model of each kind on the spoken list also answers to:
+ * "the fastest", "the best one", "the smartest".
+ */
+const SPOKEN_ALIASES: Record<ShortWhy, string[]> = {
+  balanced: ['best', 'recommended', 'balanced', 'top'],
+  smartest: ['smartest', 'cleverest', 'smart', 'clever'],
+  fastest: ['fastest', 'quickest', 'fast', 'quick']
+}
+
+/** How many saved chats are read out: past this it is minutes of titles. */
+const SPOKEN_CHATS = 12
 
 export default function App(): React.JSX.Element {
   const chat = useChat()
@@ -585,6 +612,17 @@ export default function App(): React.JSX.Element {
   const retitleRef = useRef(retitle)
   retitleRef.current = retitle
 
+  /*
+   * Answers to Wumpy's own questions act through these: the answer handler
+   * below is a stable callback, declared long before runCommand and
+   * openChat exist in this render.
+   */
+  const runCommandRef = useRef<(action: CommandAction, raw: string) => Promise<void>>(async () => {})
+  const openChatRef = useRef<(id: string) => Promise<void>>(async () => {})
+  /** What a yes does, for each delete-or-keep question still on screen. */
+  const confirms = useRef(new Map<string, () => void>())
+  openChatRef.current = openChat
+
   /**
    * Making room before a result is handed back, for callbacks defined above
    * the compaction they need.
@@ -614,6 +652,39 @@ export default function App(): React.JSX.Element {
       // Wumpy asked this one itself, so act on it rather than replying.
       retitleRef.current(option)
       return
+    }
+    if (asked) {
+      /* The rest carry what each option stands for - a model id, a chat id -
+         because the label on the button is not the thing itself. */
+      const index = asked.options.indexOf(option)
+      const value = asked.values?.[index] ?? option
+      switch (asked.kind) {
+        case 'model':
+          void runCommandRef.current({ kind: 'model', name: value }, `/model ${value}`)
+          return
+        case 'resume':
+          void openChatRef.current(value).then(() => tell(`Opened ${option}.`))
+          return
+        case 'deletechat':
+          void runCommandRef.current(
+            { kind: 'delete', pick: false, confirm: true, chatId: value },
+            '/delete'
+          )
+          return
+        case 'confirm': {
+          const then = confirms.current.get(messageId)
+          confirms.current.delete(messageId)
+          if (index !== 0) {
+            tell('Okay, left it.')
+            return
+          }
+          /* Asked in an earlier session: the yes it was waiting for has no
+             action any more, and guessing one would be worse than asking. */
+          if (then) then()
+          else live.note('That question is from before Wumpy restarted. Ask again.')
+          return
+        }
+      }
     }
     live.send(option)
   }, [])
@@ -1475,6 +1546,131 @@ function namedControls(shot: Attachment): string[] {
     [chat, listening]
   )
 
+  /* ------------------------------------------------- choosing out loud */
+
+  /** A key for it, or none needed. */
+  const providerReady = useCallback(
+    (p: CloudModel['provider']): boolean =>
+      PROVIDERS[p].keyless || (keyStatus?.configured.includes(p) ?? false),
+    [keyStatus]
+  )
+
+  /** The catalogue as one tab orders it, best first: only what can answer now. */
+  const readyModels = useCallback(
+    (ordering: Ordering): CloudModel[] => {
+      const latencies = settings?.latencies ?? {}
+      return rankedModels(CLOUD_MODELS, latencies, ordering)
+        .filter((r) => providerReady(r.model.provider) && alive(r.model, latencies))
+        .sort((a, b) => (a.rank ?? 99) - (b.rank ?? 99))
+        .map((r) => r.model)
+    },
+    [settings?.latencies, providerReady]
+  )
+
+  /**
+   * `/model` with nobody looking: the five worth knowing about, read out -
+   * "the top three overall for balanced, and then the smartest and the
+   * fastest" - and a question card that any of them answers, or any other
+   * model by name. `ordering` reads one tab's top three instead, for
+   * "/model fastest".
+   */
+  const askModelAloud = useCallback(
+    (ordering: Ordering | null): void => {
+      const balanced = readyModels('balanced')
+      if (!balanced.length) {
+        chat.note('No model can answer yet. Add a key with `/key nvidia <key>`.')
+        tell('No model is set up yet. Add an NVIDIA key first.')
+        return
+      }
+      const ids = (list: CloudModel[]): string[] => list.map((m) => m.id)
+      const labelOf = (id: string): string => CLOUD_MODELS.find((m) => m.id === id)?.label ?? id
+      let short: ShortEntry[]
+      let intro: string
+      if (ordering && ordering !== 'balanced') {
+        const why: ShortWhy = ordering === 'smarts' ? 'smartest' : 'fastest'
+        const top = readyModels(ordering).slice(0, 3)
+        short = top.map((m) => ({ id: m.id, why, top: true }))
+        intro = `${why === 'smartest' ? 'Smartest' : 'Fastest'} first: ${spokenAnd(
+          top.map((m) => sayModel(m.label))
+        )}.`
+      } else {
+        short = modelShortlist(ids(balanced), ids(readyModels('smarts')), ids(readyModels('speed')))
+        intro = shortlistSpeech(short, labelOf)
+      }
+      const listed = short
+        .map((e) => balanced.find((m) => m.id === e.id))
+        .filter((m): m is CloudModel => Boolean(m))
+      const order = [...listed, ...balanced.filter((m) => !listed.includes(m))]
+      /* "The fastest", "the best one": the real top of each list answers to
+         it, even when that one was read out among the balanced three and the
+         "next fastest" took the fifth place. */
+      const top: Record<ShortWhy, string | undefined> = {
+        balanced: balanced[0]?.id,
+        smartest: readyModels('smarts')[0]?.id,
+        fastest: readyModels('speed')[0]?.id
+      }
+      const aliases = order.map((m) =>
+        (Object.keys(top) as ShortWhy[]).flatMap((why) => (top[why] === m.id ? SPOKEN_ALIASES[why] : []))
+      )
+      const now = CLOUD_MODELS.find((m) => m.id === model)
+      chat.askLocal('Which model?', order.map((m) => m.label), 'model', {
+        values: ids(order),
+        say: `${now ? `You're on ${sayModel(now.label)}. ` : ''}${intro}`,
+        spoken: listed.length,
+        aliases
+      })
+    },
+    [chat, model, readyModels]
+  )
+
+  /**
+   * The saved chats, read out with numbers: "they tell me all of them
+   * quickly". The most recent twelve - past that it is minutes of titles -
+   * and every one on the card can be picked by its name or its number.
+   */
+  const askChatsAloud = useCallback(
+    async (kind: 'resume' | 'deletechat'): Promise<void> => {
+      const list = await refreshChats()
+      const pool = kind === 'resume' ? list.filter((c) => c.id !== chatId) : list
+      if (!pool.length) {
+        const none = kind === 'resume' ? 'No other saved chats yet.' : 'No saved chats to delete.'
+        say(none)
+        tell(none)
+        return
+      }
+      const shown = pool.slice(0, SPOKEN_CHATS)
+      /* Two chats with one title would be one button and one answer. */
+      const seen = new Map<string, number>()
+      const titles = shown.map((c) => {
+        const t = (c.title || 'Untitled').trim()
+        const n = (seen.get(t) ?? 0) + 1
+        seen.set(t, n)
+        return n > 1 ? `${t} (${n})` : t
+      })
+      const count =
+        pool.length > shown.length
+          ? `Your ${shown.length} most recent chats`
+          : shown.length === 1
+            ? 'One chat'
+            : `${shown.length} chats`
+      chat.askLocal(kind === 'resume' ? 'Which chat?' : 'Delete which chat?', titles, kind, {
+        values: shown.map((c) => c.id),
+        say: `${count}. ${numberedSpeech(titles, SPOKEN_CHATS)}`,
+        spoken: shown.length
+      })
+    },
+    [chat, chatId, refreshChats, say]
+  )
+
+  /** Yes or no, on screen and out loud, before something that cannot be undone. */
+  const askConfirm = useCallback(
+    (question: string, yes: string, no: string, then: () => void): void => {
+      const id = chat.askLocal(question, [yes, no], 'confirm')
+      confirms.current.set(id, then)
+    },
+    [chat]
+  )
+
   /* --------------------------------------------------------------- commands */
 
   const runCommand = useCallback(
@@ -1498,6 +1694,11 @@ function namedControls(shot: Attachment): string[] {
          */
         case 'chats':
         case 'resume': {
+          /* Through the earbuds a picker is a window nobody can see. */
+          if (handsFree()) {
+            await askChatsAloud('resume')
+            return
+          }
           if ((await refreshChats()).length === 0) {
             say('No saved chats yet.')
             return
@@ -1509,21 +1710,49 @@ function namedControls(shot: Attachment): string[] {
           /*
            * The one in front of you, unless asked for the list.
            *
-           * No confirmation. This is the same answer the user has given
-           * three times about accept-all - they own the machine and would
-           * rather have the thing happen than be asked - and unlike a
+           * No confirmation when typed. This is the same answer the user has
+           * given three times about accept-all - they own the machine and
+           * would rather have the thing happen than be asked - and unlike a
            * command on the filesystem, the cost of being wrong here is one
            * conversation. The chat is named in the confirmation so it is at
            * least obvious WHICH one went.
+           *
+           * Asked for any other way, it asks first: "delete this chat" in
+           * words, "slash delete" into the earbuds, or the model proposing
+           * it. "It's going to tell me, are you sure you want to delete this
+           * chat? And then I'm going to say yes." A recogniser mishearing
+           * is not the user's own hand on the keyboard.
            */
           if (!action.pick) {
-            const name = chatTitle ?? 'this chat'
-            const id = chatId
-            const saved = (await refreshChats()).some((c) => c.id === id)
-            newChat()
+            const id = action.chatId ?? chatId
+            const current = id === chatId
+            const list = await refreshChats()
+            const name = current
+              ? (chatTitle ?? 'this chat')
+              : (list.find((c) => c.id === id)?.title ?? 'that chat')
+            if (!action.confirmed && (action.confirm || handsFree())) {
+              askConfirm(
+                current ? `Delete this chat, "${name}"?` : `Delete "${name}"?`,
+                'Delete it',
+                'Keep it',
+                () =>
+                  void runCommandRef.current(
+                    { kind: 'delete', pick: false, confirmed: true, chatId: id },
+                    '/delete'
+                  )
+              )
+              return
+            }
+            const saved = list.some((c) => c.id === id)
+            if (current) newChat()
             if (saved) await window.wumpy.chats.delete(id)
             await refreshChats()
             say(saved ? `Deleted "${name}".` : 'Started a new chat; there was nothing saved yet.')
+            tell(saved ? `Deleted ${name}.` : 'Started a new chat. There was nothing saved yet.')
+            return
+          }
+          if (handsFree()) {
+            await askChatsAloud('deletechat')
             return
           }
           if ((await refreshChats()).length === 0) {
@@ -1707,23 +1936,71 @@ function namedControls(shot: Attachment): string[] {
          */
         case 'modelorder': {
           await patch({ modelOrder: action.ordering })
-          setPicker('model')
+          if (handsFree()) askModelAloud(action.ordering)
+          else setPicker('model')
           return
         }
 
         case 'model': {
           if (!action.name) {
-            setPicker('model')
+            if (handsFree()) askModelAloud(null)
+            else setPicker('model')
             return
           }
 
           // Named directly. A hosted model needs its key first, and a local
           // one has to be installed; anything else would set a tier that
           // cannot answer and fail at the next question instead of here.
-          const wanted = action.name
-          const hosted = CLOUD_MODELS.find(
+          /* "Use the fastest model": the top of that list, of the ones that
+             can answer now. Typed, `/model fastest` opens the list on that
+             tab instead - this is the sentence, which asks for the model. */
+          const ordering = readOrdering(action.name.replace(/\s+one$/i, ''))
+          const wanted = (ordering && readyModels(ordering)[0]?.id) || action.name
+          let hosted = CLOUD_MODELS.find(
             (m) => m.id === wanted || m.label.toLowerCase() === wanted.toLowerCase()
           )
+
+          /*
+           * NAMED ROUGHLY, AS PEOPLE DO. "/model nemotron super", "/model
+           * gemma", and said aloud "Jemma" or "deep seek": matched on the
+           * words of the names (see @shared/spokenpick), never on the
+           * exact id nobody remembers. One fit is that model. Several -
+           * "Nemotron" is four of them - are offered back, best first,
+           * rather than guessed between: "it's going to preview all of the
+           * Nemotrons ranked." An id typed in full (a slash or a colon)
+           * still goes straight through, for models the list does not have.
+           */
+          if (!hosted && providerFor(wanted) === null) {
+            const ranked = rankedModels(CLOUD_MODELS, settings?.latencies ?? {}, 'balanced')
+              .slice()
+              .sort((a, b) => (a.rank ?? 99) - (b.rank ?? 99))
+              .map((r) => r.model)
+            const hits = matchSpoken(
+              wanted,
+              ranked.map((m) => ({ id: m.id, names: [m.label, m.id] }))
+            )
+            const fits = hits
+              .map((id) => ranked.find((m) => m.id === id))
+              .filter((m): m is CloudModel => Boolean(m))
+            /* Ready ones first: offering a model that needs a key nobody
+               has is offering an error. Unless none of them is. */
+            const ready = fits.filter((m) => providerReady(m.provider))
+            const offer = ready.length ? ready : fits
+            if (offer.length === 1) hosted = offer[0]
+            else if (offer.length > 1) {
+              chat.askLocal(
+                'Which one?',
+                offer.map((m) => m.label),
+                'model',
+                {
+                  values: offer.map((m) => m.id),
+                  say: `${offer.length} of them: ${numberedSpeech(offer.map((m) => sayModel(m.label)))}`,
+                  spoken: offer.length
+                }
+              )
+              return
+            }
+          }
           const id = hosted?.id ?? wanted
 
           /**
@@ -1750,6 +2027,11 @@ function namedControls(shot: Attachment): string[] {
                 ? `No model called \`${id}\`. Did you mean \`/model ${near}\`?`
                 : `No model called \`${id}\`. \`/model\` lists them, \`/model check\` tests them.`
             )
+            /* Through the earbuds, the list to choose from instead. */
+            if (handsFree()) {
+              tell(`I don't know a model called ${wanted}.`)
+              askModelAloud(null)
+            }
             return
           }
 
@@ -1764,18 +2046,25 @@ function namedControls(shot: Attachment): string[] {
               `**${hosted.label}** needs a ${PROVIDERS[hosted.provider].label} key. ` +
                 `Add one with \`/key ${hosted.provider} <key>\`.`
             )
+            tell(`${sayModel(hosted.label)} needs a ${PROVIDERS[hosted.provider].label} key first.`)
             return
           }
 
           /* Typed rather than picked, so there IS an answer owed - but
              "now" is a change, and nothing changed. */
           if (id === model) {
-            chat.note(`Already answering with \`${id}\`.`)
+            chat.note(hosted ? `Already answering with **${hosted.label}**.` : `Already answering with \`${id}\`.`)
+            tell(`Already on ${hosted ? sayModel(hosted.label) : 'that one'}.`)
             return
           }
           await patch({ model: id })
           void window.wumpy.assistant.status().then(setAssistant)
-          chat.note(`Now answering with \`${id}\`.`)
+          chat.note(
+            hosted ? `Now answering with **${hosted.label}**. ${hosted.blurb}` : `Now answering with \`${id}\`.`,
+            false,
+            'model'
+          )
+          tell(`Now on ${hosted ? sayModel(hosted.label) : 'that model'}.`)
           return
         }
         case 'reasoning': {
@@ -2192,6 +2481,19 @@ function namedControls(shot: Attachment): string[] {
             )
             return
           }
+          if (action.setting === 'music') {
+            const next = action.on === 'toggle' ? !(settings?.pauseMusic ?? true) : action.on
+            await patch({ pauseMusic: next })
+            chat.note(
+              next
+                ? 'Music pauses while Wumpy listens and talks, and picks up again after.'
+                : 'Music keeps playing while Wumpy listens and talks.',
+              false,
+              'voice-music'
+            )
+            tell(next ? 'Music will pause while we talk.' : 'Music will keep playing.')
+            return
+          }
           const next = action.on === 'toggle' ? !settings?.voiceAutoStop : action.on
           await patch({ voiceAutoStop: next })
           chat.note(
@@ -2430,6 +2732,24 @@ function namedControls(shot: Attachment): string[] {
       chat.send(text, undefined, images)
     },
     [chat, compactHistory, listening, runCommand, settings, streaming, usage.used]
+  )
+
+  runCommandRef.current = runCommand
+
+  /**
+   * One of Wumpy's own commands that the model proposed in a wumpy-app
+   * block, and the user said yes to - on the card, with Ctrl+Enter, or out
+   * loud. Parsed like a typed line, so it reaches nothing typing cannot; and
+   * a delete goes through as already confirmed, because the card WAS the
+   * confirmation. See AppCard.
+   */
+  const runApprovedCommand = useCallback(
+    (line: string): void => {
+      const action = parseCommand(line)
+      if (!action) return
+      void runCommand(action.kind === 'delete' ? { ...action, confirmed: true } : action, line)
+    },
+    [runCommand]
   )
 
   /**
@@ -3528,6 +3848,7 @@ function namedControls(shot: Attachment): string[] {
                   linkMode={fresh ? linkMode : 'manual'}
                   searchEngine={settings?.searchEngine ?? DEFAULT_ENGINE}
                   onCommand={runNamedCommand}
+                  onAppCommand={runApprovedCommand}
                   looseFences={looseFences}
                 />
               )
