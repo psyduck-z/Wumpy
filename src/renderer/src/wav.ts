@@ -34,6 +34,23 @@ export function encodeWav(samples: Float32Array, rate: number): ArrayBuffer {
 }
 
 /**
+ * A quiet clip brought up to a normal level, in place.
+ *
+ * A laptop's own microphone can deliver speech at a hundredth of full
+ * scale (see recorder.ts, MIN_SPEECH_LEVEL), and a transcriber does better
+ * with a voice at the level it was trained on. Scaled so the loudest
+ * sample is at 0.9, by at most 30 dB, and never made quieter.
+ */
+export function louder(samples: Float32Array): Float32Array {
+  let peak = 0
+  for (const s of samples) peak = Math.max(peak, Math.abs(s))
+  if (peak <= 1e-4 || peak >= 0.5) return samples
+  const gain = Math.min(0.9 / peak, 31.6)
+  for (let i = 0; i < samples.length; i++) samples[i] *= gain
+  return samples
+}
+
+/**
  * A clip ready for transcription. Falls back to the clip as recorded if it
  * will not decode, so a strange container costs accuracy at worst, not the
  * dictation.
@@ -58,7 +75,7 @@ export async function clipForSpeech(
     source.connect(offline.destination)
     source.start()
     const rendered = await offline.startRendering()
-    return { audio: encodeWav(rendered.getChannelData(0), rate), extension: 'wav' }
+    return { audio: encodeWav(louder(rendered.getChannelData(0)), rate), extension: 'wav' }
   } catch {
     return { audio: raw, extension }
   }

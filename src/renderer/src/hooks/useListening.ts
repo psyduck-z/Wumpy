@@ -269,10 +269,10 @@ export function useListening(commands: () => string[]): ListeningSession {
            * Quantised before it touches state - see BARS - so a silent hour
            * is one render, not two hundred thousand.
            */
-          onLevel: (shown, raw) => {
+          onLevel: (shown, raw, speech) => {
             nowRef.current = raw
             if (raw > peakRef.current) peakRef.current = raw
-            if (raw > SPEECH_LEVEL) spokeRef.current = performance.now()
+            if (raw > speech) spokeRef.current = performance.now()
             const step = Math.round(shown * BARS)
             if (step === stepRef.current) return
             stepRef.current = step

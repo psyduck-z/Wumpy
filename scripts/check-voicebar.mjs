@@ -88,7 +88,7 @@ check('and is styled', css.includes('.voice-turn {'), true)
 for (const stage of ['starting', 'listening', 'hearing', 'thinking', 'speaking', 'done', 'nothing', 'cancelled', 'error']) {
   check(`the turn reaches "${stage}"`, turn.includes(`stage: '${stage}'`), true)
 }
-check('silence says whether the mic heard anything', /lastPeak < SPEECH_LEVEL/.test(turn), true)
+check('silence says whether the mic heard anything', /lastPeak < lastBar/.test(turn), true)
 check('a mic that will not open says so', /The microphone could not be opened/.test(turn), true)
 
 /* -------------------------------------------------------------- hearing */
@@ -137,6 +137,24 @@ check('a dead mic is exact zeros, a live one any sound', /level > 1e-5/.test(rec
 check('the chime waits until the mic is live', /recording\.live, sleep\(LIVE_WAIT_MS\)[\s\S]{0,900}await chime\('listen'\)[\s\S]{0,200}recording\.arm\(\)/.test(turn), true)
 check('no chime plays before the mic is open any more', /await chime\('listen'\)\s+const \w+ = await listen\(/.test(turn), false)
 check('the chime is not heard as speech', /if \(!armed\) return/.test(turn) && /armed: false/.test(turn), true)
+/* "Nothing worth sending" twice while talking: this MacBook's mic hears a
+   room at 0.00005 and a voice at 0.009, under a fixed bar of 0.02. */
+{
+  const R = await load('src/renderer/src/recorder.ts', 'recorder')
+  const W = await load('src/renderer/src/wav.ts', 'wav')
+  check('a mic that was fine before is judged as before', R.speechThreshold(0.01), 0.02)
+  check('a quiet laptop mic: speech is well above its room', R.speechThreshold(0.00005) < 0.009, true)
+  check('but never down at the noise itself', R.speechThreshold(0.00005), R.MIN_SPEECH_LEVEL)
+  check('no room heard yet: the old bar', R.speechThreshold(Infinity), 0.02)
+  check('the voice turn and dictation use it', /if \(rms >= speech\) spoke = true/.test(turn) && /if \(raw > speech\) spokeRef/.test(read('src/renderer/src/hooks/useListening.ts')), true)
+  check('and the recorder gates on it', /if \(armed && level > speech\)/.test(recorderSrc), true)
+  const quiet = Float32Array.from({ length: 100 }, (_, i) => 0.009 * Math.sin(i))
+  const peak = (a) => Math.max(...a.map(Math.abs))
+  check('a quiet clip is brought up for the transcriber', +peak(W.louder(quiet.slice())).toFixed(2), 0.28)
+  check('by no more than 30 dB', peak(W.louder(quiet.slice())) / peak(quiet) <= 31.7, true)
+  const loud = Float32Array.from({ length: 100 }, (_, i) => 0.7 * Math.sin(i))
+  check('a normal one is left alone', peak(W.louder(loud.slice())), peak(loud))
+}
 check('a mic that never wakes says so', /The microphone gave no sound at all/.test(turn), true)
 check('dictation uses the same mic', /const mic = await chosenMic\(\)\s+recording = await record\(\{\s+deviceId: mic\.deviceId/.test(dictation), true)
 check('the virtual "default" is not offered as a mic', /VIRTUAL = new Set\(\['default', 'communications'\]\)/.test(micPage), true)

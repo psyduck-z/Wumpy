@@ -42,9 +42,10 @@ export interface RecorderEvents {
    * `rms` is the raw figure SPEECH_LEVEL is compared against, so a caller
    * that wants to say whether anything is being heard, or write it into the
    * log, is reading the same quantity the gate reads rather than a
-   * sqrt-of-eight-times version of it.
+   * sqrt-of-eight-times version of it. `speech` is the level counted as
+   * speech right now (see speechThreshold), for the same reason.
    */
-  onLevel?(level: number, rms: number): void
+  onLevel?(level: number, rms: number, speech: number): void
   onStop?(reason: 'silence' | 'asked' | 'limit'): void
   /**
    * A piece of speech has finished and can be transcribed now.
@@ -156,6 +157,29 @@ export interface Recording {
  */
 export const SPEECH_LEVEL = 0.02
 
+/**
+ * ...and the quietest that can be counted as speech on any microphone.
+ *
+ * SPEECH_LEVEL was set on microphones where a quiet room is 0.01. This
+ * MacBook's own, the one a voice turn now uses so the earbuds need not
+ * switch to headset mode, is forty times quieter: its room measured
+ * 0.00005, and talking to it peaked at 0.009 - clearly speech, 45 dB above
+ * the room, and under the bar every time. Two turns in a row heard
+ * "nothing worth sending" while the person was talking.
+ *
+ * So the bar is set from the room, as heard in the moment before the
+ * chime: speech is SPEECH_ABOVE_ROOM times louder than it (about 20 dB),
+ * never below MIN_SPEECH_LEVEL and never above SPEECH_LEVEL - so a
+ * microphone that was fine before is judged exactly as before.
+ */
+export const MIN_SPEECH_LEVEL = 0.002
+export const SPEECH_ABOVE_ROOM = 10
+
+export function speechThreshold(room: number): number {
+  if (!Number.isFinite(room) || room <= 0) return SPEECH_LEVEL
+  return Math.min(SPEECH_LEVEL, Math.max(MIN_SPEECH_LEVEL, room * SPEECH_ABOVE_ROOM))
+}
+
 /** Formats the recorder can produce, best first. */
 const FORMATS = [
   { mime: 'audio/webm;codecs=opus', extension: 'webm' },
@@ -253,6 +277,7 @@ export async function record(opts: RecorderOptions = {}): Promise<Recording> {
   const startedAt = performance.now()
   let spokeAt = startedAt
   let heardSpeech = false
+  let room = Infinity
   let heardInSegment = false
   let frame: Frame | null = null
   let stopped = false
@@ -337,7 +362,11 @@ export async function record(opts: RecorderOptions = {}): Promise<Recording> {
      * and the difference between a mumble and a clear sentence is
      * visible rather than theoretical.
      */
-    opts.onLevel?.(Math.min(1, Math.sqrt(level * 8)), level)
+    /* The room: the quietest it gets, rising only slowly, so a pause in a
+       sentence is not mistaken for it and a noisier room is caught up with. */
+    if (level > 1e-5) room = level < room ? level : room + (level - room) * 0.002
+    const speech = speechThreshold(room)
+    opts.onLevel?.(Math.min(1, Math.sqrt(level * 8)), level, speech)
 
     const now = performance.now()
     /* Any sound at all, even a quiet room, is a live microphone; exact
@@ -346,7 +375,7 @@ export async function record(opts: RecorderOptions = {}): Promise<Recording> {
       isLive = true
       markLive(Math.round(now - startedAt))
     }
-    if (armed && level > SPEECH_LEVEL) {
+    if (armed && level > speech) {
       spokeAt = now
       heardSpeech = true
       heardInSegment = true

@@ -92,6 +92,8 @@ export function useVoiceTurn(deps: Deps): void {
     let stopSound: (() => void) | null = null
     /** The loudest the mic got in the last listen, to say WHY nothing was heard. */
     let lastPeak = 0
+    /** And what counted as speech on it. */
+    let lastBar = SPEECH_LEVEL
     /** The last listen's mic never delivered sound at all. */
     let micDead = false
     let micNamed = false
@@ -274,6 +276,7 @@ export function useVoiceTurn(deps: Deps): void {
       if (cancelled) return null
       let spoke = false
       let peak = 0
+      let bar = SPEECH_LEVEL
       let armed = false
       micDead = false
       stopTicks()
@@ -291,10 +294,11 @@ export function useVoiceTurn(deps: Deps): void {
           armed: false,
           silenceMs: pauseMs,
           maxMs,
-          onLevel: (level, rms) => {
+          onLevel: (level, rms, speech) => {
             showVoice({ level })
             if (!armed) return
-            if (rms >= SPEECH_LEVEL) spoke = true
+            bar = speech
+            if (rms >= speech) spoke = true
             if (rms > peak) peak = rms
           }
         })
@@ -344,9 +348,10 @@ export function useVoiceTurn(deps: Deps): void {
       clearTimeout(giveUp)
       stopListening = null
       lastPeak = peak
+      lastBar = bar
       note(
         `listened ${((Date.now() - opened) / 1000).toFixed(1)}s, loudest ${peak.toFixed(3)} ` +
-          `(speech counts from ${SPEECH_LEVEL}), ${clip ? 'kept the recording' : 'nothing worth sending'}`
+          `(speech counts from ${bar.toFixed(3)} here), ${clip ? 'kept the recording' : 'nothing worth sending'}`
       )
       if (!clip || cancelled) return null
       showVoice({ stage: 'hearing', level: 0 })
@@ -572,7 +577,7 @@ export function useVoiceTurn(deps: Deps): void {
           stage: 'nothing',
           detail: micDead
             ? 'The microphone gave no sound at all. /microphone shows which one is in use.'
-            : lastPeak < SPEECH_LEVEL
+            : lastPeak < lastBar
               ? 'The microphone stayed quiet. Is the right one selected, and not muted?'
               : 'It heard sound but no words. Try again, a little closer.'
         })
