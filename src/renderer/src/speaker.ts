@@ -100,7 +100,8 @@ export class Speaker {
 
   /** Seconds of sound already scheduled and not yet heard. */
   private ahead(): number {
-    return this.context ? Math.max(0, this.at - this.context.currentTime) : 0
+    if (!this.context || this.context.state === 'closed') return 0
+    return Math.max(0, this.at - this.context.currentTime)
   }
 
   private async run(): Promise<void> {
@@ -148,13 +149,17 @@ export class Speaker {
 
   private play(pcm: ArrayBuffer): void {
     if (this.stopped || pcm.byteLength < 2) return
-    if (!this.context) {
-      this.context = output()
-      if (!this.context) return
-      this.bus = this.context.createGain()
-      this.bus.connect(this.context.destination)
+    /* The turn's output, which is closed while the mic is open and opened
+       again after, so it is asked for each time rather than kept. */
+    const current = output()
+    if (!current) return
+    if (current !== this.context) {
+      this.context = current
+      this.bus = current.createGain()
+      this.bus.connect(current.destination)
+      this.at = 0
     }
-    const context = this.context
+    const context = current
     const samples = new Int16Array(pcm, 0, pcm.byteLength >> 1)
     const buffer = context.createBuffer(1, samples.length, RATE)
     const out = buffer.getChannelData(0)

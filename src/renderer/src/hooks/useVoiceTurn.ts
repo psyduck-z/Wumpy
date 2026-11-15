@@ -280,6 +280,30 @@ export function useVoiceTurn(deps: Deps): void {
       micDead = false
       stopTicks()
       showVoice({ stage: 'starting', level: 0, detail: prompt })
+
+      /*
+       * The chime, then silence, then the microphone.
+       *
+       * "I can't hear the chime that signals me to speak." It had been
+       * moved to after the mic went live, so it would mean "I can hear you
+       * now" - but opening the earbuds' mic switches them into headset
+       * mode, and on this machine's Bluetooth that switch fails over and
+       * over ("Failure in Bluetooth audio transport", logged at the start
+       * of every turn that morning), so a chime played after it was played
+       * into a link that was breaking. And every failure came while sound
+       * was going to the earbuds as they switched - this turn's own output,
+       * kept awake for the chime.
+       *
+       * So the chime plays first, in the earbuds' ordinary mode, where it
+       * was heard every time; then the output is closed, so nothing is
+       * playing while they switch; then the mic opens, and listening starts
+       * the moment it delivers sound (a few hundred milliseconds - about
+       * how long anyone takes to start talking after a beep).
+       */
+      await chime('listen')
+      releaseOutput()
+      if (cancelled) return null
+      await sleep(120)
       const opened = Date.now()
       let recording: Awaited<ReturnType<typeof record>>
       try {
@@ -308,13 +332,9 @@ export function useVoiceTurn(deps: Deps): void {
         note(`microphone: ${recording.device}`)
       }
 
-      /*
-       * The chime means "I can hear you now", so it waits until that is
-       * true. It used to play first and the mic opened after, and with the
-       * earbuds' mic that was a Bluetooth switch to headset mode - seconds
-       * of exact silence, sometimes a failure - with the person already
-       * talking into it.
-       */
+      /* Listening counts from when the mic delivers sound, not from when it
+         was asked for: the switch to headset mode is not the person's
+         silence. */
       const liveMs = await Promise.race([recording.live, sleep(LIVE_WAIT_MS).then(() => -1)])
       if (cancelled) {
         recording.stop()
@@ -328,15 +348,10 @@ export function useVoiceTurn(deps: Deps): void {
         recording.stop()
         await recording.done
         stopListening = null
+        wakeOutput()
         return null
       }
       note(`microphone live after ${liveMs}ms`)
-      await chime('listen')
-      if (cancelled) {
-        recording.stop()
-        await recording.done
-        return null
-      }
       armed = true
       recording.arm()
       showVoice({ stage: 'listening', level: 0, detail: prompt })
@@ -347,6 +362,9 @@ export function useVoiceTurn(deps: Deps): void {
       const clip = await recording.done
       clearTimeout(giveUp)
       stopListening = null
+      /* The mic is closed and the earbuds go back to their ordinary mode:
+         sound again, for "got it" and the answer. */
+      wakeOutput()
       lastPeak = peak
       lastBar = bar
       note(

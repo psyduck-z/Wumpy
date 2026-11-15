@@ -223,11 +223,13 @@ check('a pause of a second ends what was said', /export const END_PAUSE_MS = 100
 /* The output. "There was no chime, so I thought it didn't work": the
    chime played into Bluetooth earbuds that were still waking up. */
 check('a turn opens one output and keeps it awake', /wakeOutput\(\)\s+speaker = new Speaker/.test(turn), true)
+check('except while the mic is open', /await chime\('listen'\)\s+releaseOutput\(\)/.test(turn), true)
 check('with a signal far below hearing', /\(Math\.random\(\) \* 2 - 1\) \* 1e-4/.test(earcons), true)
 check('and lets it sleep when the turn ends', /speaker = null\s+releaseOutput\(\)/.test(turn), true)
 check('a chime waits for the output to be awake', /const context = await awake\(\)/.test(earcons), true)
 check('so does the first typing', /WAKE_MS - \(Date\.now\(\) - out\.woke\)\) \/ 1000/.test(earcons), true)
-check('the voice goes through the same output', /this\.context = output\(\)/.test(speaker), true)
+check('the voice goes through the same output', /const current = output\(\)/.test(speaker), true)
+check('and follows it when it is opened again', /if \(current !== this\.context\) \{/.test(speaker), true)
 check('no sound opens an output of its own', /new AudioContext\(/.test(speaker) || (earcons.match(/new AudioContext\(/g) ?? []).length !== 1, false)
 
 /* "Also add a chime after the recording of my voice finished and when it

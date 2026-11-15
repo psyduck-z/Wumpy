@@ -364,9 +364,11 @@ export async function record(opts: RecorderOptions = {}): Promise<Recording> {
      * and the difference between a mumble and a clear sentence is
      * visible rather than theoretical.
      */
-    /* The room: the quietest it gets, rising only slowly, so a pause in a
-       sentence is not mistaken for it and a noisier room is caught up with. */
-    if (level > 1e-5) room = level < room ? level : room + (level - room) * 0.002
+    /* The room: the quietest it gets, rising again over a couple of seconds
+       so a noisier room is caught up with. Not the near-silence of a
+       Bluetooth mic still switching on, which is no room at all and set
+       the bar so low that its hiss counted as talking. */
+    if (level > 1e-4) room = level < room ? level : room + (level - room) * 0.02
     const speech = speechThreshold(room)
     opts.onLevel?.(Math.min(1, Math.sqrt(level * 8)), level, speech)
 

@@ -134,8 +134,15 @@ check('no microphone is chosen: the system default', /deviceId/.test(turn) || /d
 check('no /microphone command', /name: 'microphone'/.test(read('src/renderer/src/commands.ts')), false)
 check('the log names the mic that opened', /note\(`microphone: \$\{recording\.device\}`\)/.test(turn), true)
 check('a dead mic is exact zeros, a live one any sound', /level > 1e-5/.test(recorderSrc), true)
-check('the chime waits until the mic is live', /recording\.live, sleep\(LIVE_WAIT_MS\)[\s\S]{0,900}await chime\('listen'\)[\s\S]{0,200}recording\.arm\(\)/.test(turn), true)
-check('no chime plays before the mic is open any more', /await chime\('listen'\)\s+const \w+ = await listen\(/.test(turn), false)
+/* "I can't hear the chime that signals me to speak": played after the mic
+   opened, it went into earbuds switching to headset mode, which failed on
+   every turn that morning. */
+check('the chime plays first, in the earbuds’ ordinary mode', /await chime\('listen'\)\s+releaseOutput\(\)[\s\S]{0,600}recording = await record\(/.test(turn), true)
+check('nothing plays while they switch', /releaseOutput\(\)\s+if \(cancelled\) return null\s+await sleep\(120\)/.test(turn), true)
+check('listening starts when the mic delivers sound', /recording\.live, sleep\(LIVE_WAIT_MS\)[\s\S]{0,700}armed = true\s+recording\.arm\(\)/.test(turn), true)
+check('and sound comes back once it closes', /stopListening = null[\s\S]{0,200}wakeOutput\(\)/.test(turn), true)
+check('the room is not the silence of a mic switching on', /if \(level > 1e-4\) room =/.test(recorderSrc), true)
+check('a chime never plays into an open mic again', /note\(`microphone live after \$\{liveMs\}ms`\)\s+await chime/.test(turn), false)
 check('the chime is not heard as speech', /if \(!armed\) return/.test(turn) && /armed: false/.test(turn), true)
 /* "Nothing worth sending" twice while talking: this MacBook's mic hears a
    room at 0.00005 and a voice at 0.009, under a fixed bar of 0.02. */
