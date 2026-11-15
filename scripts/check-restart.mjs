@@ -48,6 +48,16 @@ const proposal = K.readAppProposal('# Restart Wumpy\n/restart')
 check('the model can propose it', proposal.refused, null)
 check('and it asks first, even on accept-all', proposal.harmless, false)
 
+/* --------------------------------------------------- running in the background */
+
+check('/startup on', K.parseCommand('/startup on'), { kind: 'startup', on: true })
+check('/startup off', K.parseCommand('/startup off'), { kind: 'startup', on: false })
+check('/autostart alone toggles', K.parseCommand('/autostart'), { kind: 'startup', on: 'toggle' })
+check('the model may propose it, and it asks', K.readAppProposal('# Start with the computer\n/startup on').harmless, false)
+check('/microphone auto', K.parseCommand('/microphone auto'), { kind: 'mic', choice: 'auto' })
+check('/microphone alone lists them', K.parseCommand('/microphone'), { kind: 'mic', choice: '' })
+check('/mic is still dictation on or off', K.parseCommand('/mic').kind, 'voice')
+
 /* ------------------------------------------------------------ said aloud */
 
 const intent = (t) => I.matchIntent(t)
@@ -97,6 +107,9 @@ check('and opens it again at startup', /launchChat\(\)\.then\(\(id\) => \{\s+if 
 check('the earbuds hear that it is restarting', /tell\('Restarting\.'\)\s+afterTurn\(/.test(app), true)
 check('the preload carries it', /restart: \(chatId: string \| null, why: string\)/.test(preload), true)
 check('the model knows it may propose it', prompt.includes('/restart,'), true)
+check('/startup changes the login setting', /case 'startup': \{[\s\S]{0,200}patch\(\{ launchAtLogin: next \}\)/.test(app), true)
+check('which writes the autostart entry', /if \(patch\.launchAtLogin !== undefined\) syncLaunchAtLogin\(patch\.launchAtLogin\)/.test(main), true)
+check('and starts hidden, in the tray', /Exec="\$\{exec\}" --hidden/.test(main), true)
 
 console.log(`\n${failures === 0 ? 'all' : `${failures} FAILED of the`} restart checks${failures ? '' : ' correct'}`)
 process.exit(failures ? 1 : 0)

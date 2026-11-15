@@ -120,11 +120,28 @@ export interface RecorderOptions extends RecorderEvents {
    * mixing graph with more to tear down than tracks.
    */
   stream?: MediaStream
+  /** The microphone to open, by deviceId; absent is the system default. */
+  deviceId?: string
+  /**
+   * False to ignore speech until arm() is called: a voice turn opens the
+   * mic, waits for it to be live, then chimes - and the chime, in an earbud
+   * beside the microphone, must not count as the person starting to talk.
+   */
+  armed?: boolean
 }
 
 export interface Recording {
   /** Ends it early. Safe to call twice. */
   stop(): void
+  /**
+   * Resolves, with the milliseconds it took, once the microphone delivers
+   * actual sound. A Bluetooth mic delivers exact zeros while the earbuds
+   * switch to headset mode - seconds, sometimes - and anything said then
+   * is lost. Never resolves if the mic stays dead.
+   */
+  live: Promise<number>
+  /** Start counting speech, for a recording opened with armed: false. */
+  arm(): void
   /** Resolves with the audio once it has ended, or null if nothing was said. */
   done: Promise<{ blob: Blob; extension: string; ms: number } | null>
 }
@@ -190,6 +207,7 @@ export async function record(opts: RecorderOptions = {}): Promise<Recording> {
     opts.stream ??
     (await navigator.mediaDevices.getUserMedia({
       audio: {
+        ...(opts.deviceId ? { deviceId: { exact: opts.deviceId } } : {}),
         channelCount: 1,
         // Whisper was trained on ordinary recordings, and these are what makes a
         // laptop microphone in a room sound like one.
@@ -240,6 +258,12 @@ export async function record(opts: RecorderOptions = {}): Promise<Recording> {
   let stopped = false
   let rotating = false
   let reason: 'silence' | 'asked' | 'limit' = 'asked'
+  let armed = opts.armed !== false
+  let markLive: (ms: number) => void = () => {}
+  let isLive = false
+  const live = new Promise<number>((resolve) => {
+    markLive = resolve
+  })
 
   const silenceMs = opts.silenceMs === undefined ? 1400 : opts.silenceMs
   const maxMs = opts.maxMs ?? 60_000
@@ -316,7 +340,13 @@ export async function record(opts: RecorderOptions = {}): Promise<Recording> {
     opts.onLevel?.(Math.min(1, Math.sqrt(level * 8)), level)
 
     const now = performance.now()
-    if (level > SPEECH_LEVEL) {
+    /* Any sound at all, even a quiet room, is a live microphone; exact
+       zeros are one that is not delivering yet. */
+    if (!isLive && level > 1e-5) {
+      isLive = true
+      markLive(Math.round(now - startedAt))
+    }
+    if (armed && level > SPEECH_LEVEL) {
       spokeAt = now
       heardSpeech = true
       heardInSegment = true
@@ -394,5 +424,14 @@ export async function record(opts: RecorderOptions = {}): Promise<Recording> {
   recorder.start()
   frame = nextFrame(watch)
 
-  return { stop: () => finish('asked'), done }
+  return {
+    stop: () => finish('asked'),
+    done,
+    live,
+    arm: () => {
+      if (armed) return
+      armed = true
+      spokeAt = performance.now()
+    }
+  }
 }

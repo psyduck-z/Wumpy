@@ -97,7 +97,7 @@ check('it ticks while it works', /function startTicks\(\)/.test(turn), true)
 check('quietly - about half the chime, a little up from a third', /exponentialRampToValueAtTime\(0\.055,/.test(turn), true)
 check('from the moment it has the recording', /showVoice\(\{ stage: 'hearing', level: 0 \}\)\s+startTicks\(\)/.test(turn), true)
 check('and while the answer is coming', /runningCount\(\) > 0\) \{\s+quietSince = 0\s+startTicks\(\)/.test(turn), true)
-check('never while the mic is open', /let peak = 0\s+stopTicks\(\)/.test(turn), true)
+check('never while the mic is open', /micDead = false\s+stopTicks\(\)/.test(turn), true)
 check('nor over a chime', /async function chime[^{]*\{\s+stopTicks\(\)/.test(turn), true)
 check('and stops once the answer is actually playing', /audio\.onplaying = \(\) => \{\s+started = true\s+stopTicks\(\)/.test(turn), true)
 
@@ -115,6 +115,30 @@ check('the answer stays on the bar after it is said', /stage: 'done', detail: te
    between the answer arriving and hearing it; a card registers in a frame. */
 check('the answer is read without a long pause first', /export const QUIET_AFTER_MS = 600\b/.test(turn), true)
 check('and when the turn ends, however it ends', /\.finally\(\(\) => \{\s+stopTicks\(\)/.test(turn), true)
+
+/* ------------------------------------------------------------- the mic */
+
+/*
+ * "Sometimes the mic takes time to like get picked up." The default mic was
+ * the earbuds', which only exists in headset mode: opening it switched them
+ * out of A2DP, taking seconds and sometimes failing ("Failure in Bluetooth
+ * audio transport"), while the chime had already told the person to talk.
+ */
+const micMain = read('src/main/mic.ts')
+const micPage = read('src/renderer/src/mic.ts')
+const recorderSrc = read('src/renderer/src/recorder.ts')
+const dictation = read('src/renderer/src/hooks/useDictation.ts')
+check('auto prefers this computer’s mic over a Bluetooth headset’s', /current\.startsWith\('bluez_'\)/.test(micMain) && /!s\.name\.startsWith\('bluez_'\)/.test(micMain), true)
+check('never a speaker monitor', /!s\.name\.endsWith\('\.monitor'\)/.test(micMain), true)
+check('/microphone earbuds is the system default', /pick === 'default'\) return \{ label: null/.test(micMain), true)
+check('the page opens the chosen device', /deviceId: \{ exact: opts\.deviceId \}/.test(recorderSrc), true)
+check('a dead mic is exact zeros, a live one any sound', /level > 1e-5/.test(recorderSrc), true)
+check('the chime waits until the mic is live', /recording\.live, sleep\(LIVE_WAIT_MS\)[\s\S]{0,900}await chime\('listen'\)[\s\S]{0,200}recording\.arm\(\)/.test(turn), true)
+check('no chime plays before the mic is open any more', /await chime\('listen'\)\s+const \w+ = await listen\(/.test(turn), false)
+check('the chime is not heard as speech', /if \(!armed\) return/.test(turn) && /armed: false/.test(turn), true)
+check('a mic that never wakes says so', /The microphone gave no sound at all/.test(turn), true)
+check('dictation uses the same mic', /const mic = await chosenMic\(\)\s+recording = await record\(\{\s+deviceId: mic\.deviceId/.test(dictation), true)
+check('the virtual "default" is not offered as a mic', /VIRTUAL = new Set\(\['default', 'communications'\]\)/.test(micPage), true)
 
 /* -------------------------------------------------------------- the log */
 

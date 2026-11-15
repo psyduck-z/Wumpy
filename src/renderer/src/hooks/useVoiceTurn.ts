@@ -15,6 +15,7 @@ import { newestPending, pendingCount, runningCount } from '../pending'
 import { setHandsFree, takeTold } from '../handsfree'
 import { choiceMark, newestChoice, stillWaiting, type AloudChoice, type AloudOption } from '../aloud'
 import { setVoiceStopper, showVoice } from '../voiceview'
+import { chosenMic } from '../mic'
 
 /**
  * A spoken turn, run from the hidden panel: `wumpy --voice` (a gesture on the
@@ -56,6 +57,9 @@ export const TICK_MS = 550
 /** How long nothing new must happen after an answer before it is read out. */
 export const QUIET_AFTER_MS = 600
 
+/** How long a microphone may take to deliver sound before it counts as dead. */
+export const LIVE_WAIT_MS = 6000
+
 export function useVoiceTurn(deps: Deps): void {
   const depsRef = useRef(deps)
   depsRef.current = deps
@@ -67,6 +71,8 @@ export function useVoiceTurn(deps: Deps): void {
     let stopSound: (() => void) | null = null
     /** The loudest the mic got in the last listen, to say WHY nothing was heard. */
     let lastPeak = 0
+    /** The last listen's mic never delivered sound at all. */
+    let micDead = false
     let micNamed = false
 
     /*
@@ -271,36 +277,69 @@ export function useVoiceTurn(deps: Deps): void {
       if (cancelled) return null
       let spoke = false
       let peak = 0
+      let armed = false
+      micDead = false
       stopTicks()
-      showVoice({ stage: 'listening', level: 0, detail: prompt })
+      showVoice({ stage: 'starting', level: 0, detail: prompt })
       const opened = Date.now()
+      const mic = await chosenMic()
+      if (!micNamed) {
+        micNamed = true
+        note(`microphone: ${mic.label} - ${mic.why}`)
+      }
       let recording: Awaited<ReturnType<typeof record>>
       try {
         recording = await record({
+          deviceId: mic.deviceId,
+          armed: false,
           silenceMs: pauseMs,
           maxMs,
           onLevel: (level, rms) => {
+            showVoice({ level })
+            if (!armed) return
             if (rms >= SPEECH_LEVEL) spoke = true
             if (rms > peak) peak = rms
-            showVoice({ level })
           }
         })
       } catch (err) {
         note(`the microphone could not be opened: ${String(err)}`)
         throw new Error(`The microphone could not be opened (${String(err)}).`)
       }
-      if (!micNamed) {
-        micNamed = true
-        void navigator.mediaDevices
-          .enumerateDevices()
-          .then((all) => {
-            const inputs = all.filter((d) => d.kind === 'audioinput')
-            const used = inputs.find((d) => d.deviceId === 'default') ?? inputs[0]
-            note(`microphone: ${used?.label || 'unnamed'}`)
-          })
-          .catch(() => undefined)
-      }
       stopListening = () => recording.stop()
+
+      /*
+       * The chime means "I can hear you now", so it waits until that is
+       * true. It used to play first and the mic opened after, and with the
+       * earbuds' mic that was a Bluetooth switch to headset mode - seconds
+       * of exact silence, sometimes a failure - with the person already
+       * talking into it.
+       */
+      const liveMs = await Promise.race([recording.live, sleep(LIVE_WAIT_MS).then(() => -1)])
+      if (cancelled) {
+        recording.stop()
+        await recording.done
+        return null
+      }
+      if (liveMs < 0) {
+        note(`the microphone gave no sound for ${LIVE_WAIT_MS / 1000}s`)
+        micDead = true
+        lastPeak = 0
+        recording.stop()
+        await recording.done
+        stopListening = null
+        return null
+      }
+      note(`microphone live after ${liveMs}ms`)
+      await chime('listen')
+      if (cancelled) {
+        recording.stop()
+        await recording.done
+        return null
+      }
+      armed = true
+      recording.arm()
+      showVoice({ stage: 'listening', level: 0, detail: prompt })
+
       const giveUp = setTimeout(() => {
         if (!spoke) recording.stop()
       }, waitMs)
@@ -331,7 +370,6 @@ export function useVoiceTurn(deps: Deps): void {
         await say(asked ? 'Yes or no?' : `${approvalQuestion(entry)} Say yes or no.`)
         asked = true
         if (cancelled || newestPending() !== entry) continue
-        await chime('listen')
         const answer = await listen(900, 8000, 10_000, 'Say yes or no.')
         // Clicked in the panel while it was listening: that is an answer too.
         if (newestPending() !== entry) continue
@@ -376,7 +414,6 @@ export function useVoiceTurn(deps: Deps): void {
           await say(asked ? 'Yes or no?' : `${choice.question} Say yes or no.`)
           asked = true
           if (!open()) break
-          await chime('listen')
           const heard = await listen(900, 8000, 10_000)
           if (!open()) break
           const said = heard ? yesNo(heard.heard) : null
@@ -400,7 +437,6 @@ export function useVoiceTurn(deps: Deps): void {
       while (open()) {
         await say(prompt, quick)
         if (!open()) break
-        await chime('listen')
         const heard = await listen(1100, 8000, 15_000)
         if (!open()) break
         const said = heard?.heard ?? ''
@@ -506,15 +542,15 @@ export function useVoiceTurn(deps: Deps): void {
         showVoice({ stage: 'error', detail: 'Voice needs an NVIDIA key, or the local transcriber installed.' })
         return
       }
-      await chime('listen')
       const heard = await listen(1300, 8000, 45_000)
       if (!heard) {
         if (cancelled) return
         await chime('cancel')
         showVoice({
           stage: 'nothing',
-          detail:
-            lastPeak < SPEECH_LEVEL
+          detail: micDead
+            ? 'The microphone gave no sound at all. /microphone shows which one is in use.'
+            : lastPeak < SPEECH_LEVEL
               ? 'The microphone stayed quiet. Is the right one selected, and not muted?'
               : 'It heard sound but no words. Try again, a little closer.'
         })

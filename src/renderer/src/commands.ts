@@ -50,6 +50,10 @@ export type CommandAction =
   | { kind: 'reasoning'; show: boolean | 'toggle' }
   | { kind: 'pin'; pinned: boolean | 'toggle' }
   | { kind: 'voice'; setting: 'on' | 'polish' | 'autostop' | 'music'; on: boolean | 'toggle' }
+  /** `/startup on|off` — start in the background at login. */
+  | { kind: 'startup'; on: boolean | 'toggle' }
+  /** `/microphone [auto|earbuds|<number>]` — which microphone to listen with. */
+  | { kind: 'mic'; choice: string }
   | { kind: 'reflect'; on: boolean | 'toggle'; rounds?: number; model?: string }
   /** Listening to the machine's own audio. See @shared/meeting. */
   | { kind: 'listen'; what: 'toggle' | 'stop' | 'notes' | 'source'; ask: string }
@@ -703,6 +707,39 @@ export const COMMANDS: CommandSpec[] = forThisWindow([
     arg: 'on|off',
     run: (arg) => ({ kind: 'voice', setting: 'music', on: bool(arg) })
   },
+  {
+    /*
+     * Asked for as: "allow the AI to work without Wumpy physically being
+     * open, but in the background." Closing the window already only hides
+     * it, and a voice turn already runs hidden - what was missing was
+     * Wumpy running at all after a reboot. Starting at login used to be a
+     * tray checkbox and nothing else; this says it in words, and out loud.
+     * Not a chip: it writes to the login session, so a model proposing it
+     * is asked about first.
+     */
+    /*
+     * Which microphone voice turns and dictation open. See main/mic.ts:
+     * the earbuds' mic forces them into headset mode, which is slow and on
+     * this machine sometimes fails, so 'auto' prefers the computer's own.
+     */
+    name: 'microphone',
+    aliases: ['mics'],
+    hint: 'Choose the microphone for talking to Wumpy',
+    arg: 'auto|earbuds|<number>',
+    /* A button bare, as the settings sheet offers it: it lists them. */
+    clickBareOnly: true,
+    run: (arg) => ({ kind: 'mic', choice: arg.trim() })
+  },
+  {
+    name: 'startup',
+    aliases: ['autostart'],
+    hint: 'Start Wumpy in the background when you log in',
+    arg: 'on|off',
+    /* A button bare, as the settings sheet offers it; with on or off from
+       the model it is asked about first. */
+    clickBareOnly: true,
+    run: (arg) => ({ kind: 'startup', on: bool(arg) })
+  },
   /*
    * THERE IS NO `/listen`, AND THAT IS THE POINT.
    *
@@ -1139,6 +1176,8 @@ export const CLICKABLE: readonly string[] = [
   'polish',
   'autostop',
   'music',
+  'microphone',
+  'startup',
   'reflect',
   'think',
   'nothink',
