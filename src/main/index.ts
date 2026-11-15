@@ -55,7 +55,16 @@ import { cleanTitle, titleBrief, titleSource } from '@shared/titles'
 import { folderFacts, resolveUserFolders } from './folders'
 import { ContextStore } from './context'
 import { Speech } from './speech'
-import { DEFAULT_VOICE, recognize, synthesize } from './nvspeech'
+import {
+  DEFAULT_VOICE,
+  TTS_RATE,
+  closeSpeech,
+  recognize,
+  synthesize,
+  synthesizeStream,
+  warmSpeech
+} from './nvspeech'
+import { VOICE_FIRST_TOKEN_MS, quickerModel } from '@shared/voicequick'
 import { holdMusic, releaseAllMusic, releaseMusic } from './music'
 import { micPlan } from './mic'
 import { MENTOR_PROMPT, parseReview, type ReflectReview } from '@shared/reflect'
@@ -401,14 +410,28 @@ function quotaFacts(): string[] {
  * was on the earbuds a minute ago should go back to normal answers once the
  * person is typing again.
  */
+/*
+ * A tone, asked for lightly: "add like kind of a tone to the AI... just don't
+ * make it too heavy. And make it fast, quick, responsive... I also need a bit
+ * of smartness, because that's the whole point of it." So one line of
+ * character, the same on the screen and in the ear, and the rest is about
+ * getting to the answer.
+ */
+const TONE =
+  '- Tone: a sharp, easygoing friend - warm, quick, a light touch of humour when it fits, never chatty.'
+
 function channelFacts(handsFree: boolean): string[] {
   if (!handsFree)
-    return ['- The user is at the screen, reading your answers (not on their earbuds).']
+    return ['- The user is at the screen, reading your answers (not on their earbuds).', TONE]
   return [
     '- RIGHT NOW THE USER IS ON THEIR EARBUDS, not looking at the screen. They spoke this, and',
     '  your answer will be read aloud to them. Only plain prose is read: code, tables and links',
     '  are skipped. So answer like a person talking - one to three short sentences, plain words,',
     '  no markdown, no lists, no headings, no emoji.',
+    TONE,
+    '- Lead with the answer itself: "Five." - not "The answer to two plus three is five." Your first',
+    '  sentence is spoken while you are still writing the rest, so make it the one that matters.',
+    '  No filler, no "Great question", no repeating the question back.',
     '- Commands still work. When the answer depends on this computer, propose ONE command as',
     '  usual. Its # line is what they hear as the question ("Can I <# line>?") and they answer',
     '  yes or no out loud - so write it as a short plain action: "# Check how full the disk is".',
@@ -746,9 +769,25 @@ function registerIpc(): void {
      */
     let blind = false
 
-    async function attempt(on: string, announce: string | null): Promise<string | null> {
+    async function attempt(on: string, announce: string | null, patient = true): Promise<string | null> {
       let streamed = false
       let fallbackTo: string | null = null
+
+      /* A voice turn's model gets VOICE_FIRST_TOKEN_MS to start, when there
+         is a quicker one to hand it to (see @shared/voicequick). */
+      let gaveUp = false
+      const quicker =
+        !patient && req.context.handsFree === true
+          ? quickerModel(on, settings.get('latencies') ?? {}, (id) => !spentToday.has(id) && cloud.ready(id).ok)
+          : null
+      const watchdog = quicker
+        ? setTimeout(() => {
+            if (streamed) return
+            gaveUp = true
+            console.log(`[wumpy] ${on} said nothing in ${VOICE_FIRST_TOKEN_MS}ms of a voice turn; asking ${quicker}`)
+            cloud.abort(req.requestId)
+          }, VOICE_FIRST_TOKEN_MS)
+        : null
 
       if (announce) {
         panel.send(IPC.chatDelta, { requestId: req.requestId, content: announce })
@@ -766,10 +805,14 @@ function registerIpc(): void {
         },
         {
           onDelta: (delta) => {
+            if (gaveUp) return
             if (delta.content || delta.thinking) streamed = true
             panel.send(IPC.chatDelta, { requestId: req.requestId, ...delta })
           },
           onDone: (stats) => {
+            /* Aborted by the watchdog: not the end of the turn, which goes
+               on with the quicker model. */
+            if (gaveUp) return
             // Counted here rather than inside either client, so both are
             // counted the same way and neither knows a usage store exists.
             usage.add({
@@ -785,6 +828,7 @@ function registerIpc(): void {
             panel.send(IPC.chatDone, { requestId: req.requestId, ...stats })
           },
           onError: (message, failure) => {
+            if (gaveUp) return
             /* Not an error the user has anything to do about: the picture
                was refused, the model is now on record as text-only, and the
                turn is about to be asked again with a description in place of
@@ -859,10 +903,15 @@ function registerIpc(): void {
           }
         }
       )
+      if (watchdog) clearTimeout(watchdog)
+      if (gaveUp && quicker) {
+        fallbackWhy = `had not started after ${VOICE_FIRST_TOKEN_MS / 1000}s`
+        return quicker
+      }
       return fallbackTo
     }
 
-    let fallback = await attempt(model, null)
+    let fallback = await attempt(model, null, false)
 
     /**
      * The picture was refused, so it is looked at by something that can.
@@ -1313,6 +1362,32 @@ function registerIpc(): void {
     } catch (err) {
       console.warn('[wumpy] Magpie could not speak:', err)
       return null
+    }
+  })
+
+  /**
+   * The same, streamed: each piece of sound goes to the panel as Magpie
+   * makes it (IPC.voiceAudio), and this resolves once the last has gone,
+   * with how many there were - so the panel knows when it has them all.
+   * Null when there is no hosted voice or it failed before saying anything;
+   * the panel then uses the system's voice for that sentence.
+   */
+  ipcMain.handle(IPC.voiceSpeakStream, async (e, req: { id: string; text: string }) => {
+    const text = String(req?.text ?? '').trim().slice(0, 1800)
+    const id = String(req?.id ?? '')
+    if (!text || !id || !cloudSpeech()) return null
+    const borrowed = await cloud.speechKey('magpie')
+    if (!borrowed) return null
+    let sent = 0
+    try {
+      const result = await synthesizeStream(text, borrowed, settings.get('speakVoice') || DEFAULT_VOICE, (pcm) => {
+        sent++
+        e.sender.send(IPC.voiceAudio, { id, pcm: pcm.buffer.slice(pcm.byteOffset, pcm.byteOffset + pcm.byteLength) })
+      })
+      return { pieces: result.pieces, rate: TTS_RATE, firstMs: result.firstMs, ms: result.ms, streamed: result.streamed }
+    } catch (err) {
+      console.warn('[wumpy] Magpie could not speak:', err)
+      return sent ? { pieces: sent, rate: TTS_RATE, firstMs: -1, ms: -1, streamed: true } : null
     }
   })
 
@@ -2377,6 +2452,12 @@ app.on('second-instance', (_event, argv) => {
     askRestart('wumpy --restart')
     return
   }
+  /* How long hearing and speaking take from here, measured without a
+     sound or a microphone: see speechCheck. */
+  if (argv.includes('--speech-check')) {
+    void speechCheck()
+    return
+  }
   // A spoken turn: the earbuds gesture (through Nothing X) runs wumpy --voice.
   if (argv.includes('--voice')) {
     startVoiceTurn('wumpy --voice')
@@ -2417,7 +2498,7 @@ let launchChat: string | null =
 if (launchChat && !/^[\w-]{1,80}$/.test(launchChat)) launchChat = null
 
 /** Wumpy's own launch flags, which describe one start and are not carried over. */
-const OWN_FLAGS = /^--(?:hidden|voice|toggle|restart|resume-chat=.*)$/
+const OWN_FLAGS = /^--(?:hidden|voice|toggle|restart|speech-check|resume-chat=.*)$/
 
 async function restartWumpy(why: string, chatId: string | null): Promise<void> {
   if (restarting) return
@@ -2467,10 +2548,61 @@ function askRestart(why: string): void {
  * that has not subscribed yet is simply lost; so it waits for the load, and a
  * moment for the app to mount.
  */
+/**
+ * `wumpy --speech-check`: how long Magpie takes from this machine, on this
+ * network, written to the log. Nothing is played and no microphone opens -
+ * it measures the connection, a short answer the plain way and streamed,
+ * and the first sound of a longer one. Four requests on the speech keys.
+ *
+ * Here because the time between an answer arriving and hearing it is
+ * mostly network, and that differs between a desk and a phone's hotspot.
+ */
+async function speechCheck(): Promise<void> {
+  if (!cloudSpeech()) {
+    console.log('[wumpy] speech check: hosted speech is off or has no key')
+    return
+  }
+  const voice = settings.get('speakVoice') || DEFAULT_VOICE
+  closeSpeech()
+  console.log(`[wumpy] speech check: connected in ${await warmSpeech()}ms`)
+  const timed = async (label: string, run: (k: NonNullable<Awaited<ReturnType<typeof cloud.speechKey>>>) => Promise<string>): Promise<void> => {
+    const borrowed = await cloud.speechKey('magpie')
+    if (!borrowed) {
+      console.log(`[wumpy] speech check: ${label}: no key free`)
+      return
+    }
+    const started = Date.now()
+    try {
+      console.log(`[wumpy] speech check: ${label}: ${await run(borrowed)}`)
+    } catch (err) {
+      console.log(`[wumpy] speech check: ${label}: failed after ${Date.now() - started}ms (${String(err)})`)
+    }
+  }
+  await timed('"Five." in one piece', async (k) => `${(await synthesize('Five.', k, voice)).ms}ms`)
+  await timed('"Five." streamed', async (k) => {
+    const r = await synthesizeStream('Five.', k, voice, () => {})
+    return `first sound ${r.firstMs}ms, all ${r.ms}ms, ${r.pieces} pieces${r.streamed ? '' : ' (not streamed)'}`
+  })
+  const long =
+    'Your disk is about two thirds full, with roughly ninety gigabytes free, so there is plenty of room for now.'
+  await timed('a long sentence in one piece', async (k) => `${(await synthesize(long, k, voice)).ms}ms`)
+  await timed('a long sentence streamed', async (k) => {
+    const r = await synthesizeStream(long, k, voice, () => {})
+    return `first sound ${r.firstMs}ms, all ${r.ms}ms, ${r.pieces} pieces${r.streamed ? '' : ' (not streamed)'}`
+  })
+}
+
 function startVoiceTurn(why: string): void {
   const contents = panel?.browserWindow?.webContents
   if (!contents) return
   console.log(`[wumpy] voice turn: ${why}`)
+  /* The connections to Parakeet and Magpie, opened while the person talks,
+     so neither the transcript nor the first spoken word waits on one. */
+  if (cloudSpeech()) {
+    void warmSpeech().then((ms) => {
+      if (ms >= 0) console.log(`[wumpy] speech connections ready in ${ms}ms`)
+    })
+  }
   if (contents.isLoading()) {
     contents.once('did-finish-load', () => setTimeout(() => panel.send(IPC.voiceTurn, null), 900))
     return
@@ -2483,6 +2615,7 @@ app.on('will-quit', () => {
   unregisterHotkeys()
   lowLevelHook?.stop()
   speech?.stop()
+  closeSpeech()
   /*
    * The two ledgers, in case this is the one exit that gets a say.
    *

@@ -873,6 +873,10 @@ export const IPC = {
   voiceTidy: 'voice:tidy',
   /** Text to speech: the main process answers with a WAV, or null. */
   voiceSpeak: 'voice:speak',
+  /** Text to speech as it is made: pieces arrive on voiceAudio, then this resolves. */
+  voiceSpeakStream: 'voice:speak-stream',
+  /** One piece of streamed speech: { id, pcm } with 16-bit mono PCM. */
+  voiceAudio: 'voice:audio',
   /** Which microphone to open: see main/mic.ts. */
   voiceMicPlan: 'voice:mic-plan',
   /** Main tells the panel to run a spoken turn (wumpy --voice). */

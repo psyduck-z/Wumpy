@@ -2952,7 +2952,8 @@ function namedControls(shot: Attachment): string[] {
   useVoiceTurn({
     send: (text) => onSendRef.current(text),
     streaming: () => chatRef.current.streaming,
-    messages: () => chatRef.current.messages
+    messages: () => chatRef.current.messages,
+    stop: () => void chatRef.current.stop()
   })
 
   /* Self-reflection (/reflect): a mentor reviews each finished task and sends

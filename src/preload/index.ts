@@ -322,6 +322,14 @@ const api = {
     onStatus: (cb: (s: VoiceStatus) => void) => on<VoiceStatus>(IPC.voiceStatusChanged, cb),
     /** Text to speech: a WAV to play, or null to use the system voice. */
     speak: (text: string): Promise<ArrayBuffer | null> => ipcRenderer.invoke(IPC.voiceSpeak, { text }),
+    /** The same, streamed: pieces arrive through onAudio, then this resolves with their count. */
+    speakStream: (
+      id: string,
+      text: string
+    ): Promise<{ pieces: number; rate: number; firstMs: number; ms: number; streamed: boolean } | null> =>
+      ipcRenderer.invoke(IPC.voiceSpeakStream, { id, text }),
+    onAudio: (cb: (piece: { id: string; pcm: ArrayBuffer }) => void) =>
+      on<{ id: string; pcm: ArrayBuffer }>(IPC.voiceAudio, cb),
     /** Which microphone to open, by label; null is the system default. */
     micPlan: (): Promise<{ label: string | null; why: string }> => ipcRenderer.invoke(IPC.voiceMicPlan),
     /** A spoken turn was asked for (wumpy --voice, the tray). */

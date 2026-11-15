@@ -79,7 +79,9 @@ o.bind("SUPER + SHIFT + D", "Wumpy", "wumpy --toggle")
 
 `wumpy --toggle` shows or hides the window, `wumpy --voice` starts a spoken
 turn (below), `wumpy --hidden` starts it in the tray and `wumpy --restart`
-restarts it on the chat it was on.
+restarts it on the chat it was on. `wumpy --speech-check` writes how long
+NVIDIA's voice takes from this machine and network to the log, without
+playing anything — worth running on a hotspot.
 
 What is different from Windows, on purpose:
 
@@ -111,6 +113,20 @@ itself is under Settings → Assistant).
   add every key from a different account. With
   no key, dictation falls back to local Whisper (`npm run speech:install`) and
   answers to the system voice.
+- **The gesture, again.** Pinch once to ask; it chimes (two notes, up) when
+  it can hear you, and a pause of a second ends what you said. While it
+  works you hear soft typing, in threes, until the answer starts. To ask
+  something else, pinch again — and pinching while it is still talking stops
+  it and listens, the way you would talk over someone. Pinching while it
+  listens, or while it asks yes or no, cancels. A pinch the earbuds report
+  twice in quick succession counts once.
+- **It speaks while it writes.** Each sentence is said as soon as it is
+  finished, while the model is still writing the next, and Magpie's sound is
+  played as it is made rather than once the whole answer is ready. The
+  connection to NVIDIA opens while you are still talking.
+- **A stalled model does not leave you in silence.** If the model has said
+  nothing after five seconds, the question goes to the quickest model the
+  background ranking has seen answer, and the window notes which one did.
 - **It knows it is on your earbuds.** Every request in a voice turn says so,
   and the model answers in a sentence or two of plain speech instead of tables
   and lists; typed turns are told you are at the screen. Messages that came

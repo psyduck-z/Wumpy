@@ -82,6 +82,69 @@ function httpStatus(code: number | undefined): number {
   }
 }
 
+/*
+ * One connection per service, kept open between turns.
+ *
+ * Every call used to open its own: a fresh TLS handshake and HTTP/2 setup
+ * to grpc.nvcf.nvidia.com before a word could be heard or said, then closed
+ * again. That is most of the "one Mississippi, two Mississippi" between the
+ * answer arriving and hearing it - measured as 2.8 to 4.1s for a four-letter
+ * answer, and worse on a phone's hotspot, where every round trip is longer.
+ * gRPC multiplexes calls over one channel, and the key goes in per call, so
+ * one channel serves every key in the rotation.
+ */
+const clients = new Map<grpc.ServiceClientConstructor, grpc.Client>()
+
+function clientFor(Client: grpc.ServiceClientConstructor): grpc.Client {
+  let client = clients.get(Client)
+  if (!client) {
+    client = new Client(HOST, grpc.credentials.createSsl(), {
+      /* Without this a channel left alone for a while is found dead only by
+         the next call, which then waits out the reconnect. */
+      'grpc.keepalive_time_ms': 60_000,
+      'grpc.keepalive_timeout_ms': 10_000
+    })
+    clients.set(Client, client)
+  }
+  return client
+}
+
+/** A channel that failed is dropped, so the next call starts a clean one. */
+function dropClient(Client: grpc.ServiceClientConstructor, code: number | undefined): void {
+  if (code !== grpc.status.UNAVAILABLE && code !== grpc.status.INTERNAL && code !== grpc.status.UNKNOWN) return
+  clients.get(Client)?.close()
+  clients.delete(Client)
+}
+
+/**
+ * Connects both channels now, so the handshake happens while the person is
+ * still talking rather than after. Called when a voice turn starts. Free:
+ * no request is made and no key is spent.
+ */
+export function warmSpeech(): Promise<number> {
+  const started = Date.now()
+  let services: Loaded
+  try {
+    services = load()
+  } catch {
+    return Promise.resolve(-1)
+  }
+  return Promise.all(
+    [services.asr, services.tts].map(
+      (Client) =>
+        new Promise<void>((resolve) => {
+          clientFor(Client).waitForReady(Date.now() + 8000, () => resolve())
+        })
+    )
+  ).then(() => Date.now() - started)
+}
+
+/** Closes the channels, for quitting. */
+export function closeSpeech(): void {
+  for (const client of clients.values()) client.close()
+  clients.clear()
+}
+
 function call<Req, Res>(
   Client: grpc.ServiceClientConstructor,
   method: string,
@@ -90,7 +153,7 @@ function call<Req, Res>(
   functionId: string,
   timeoutMs: number
 ): Promise<Res> {
-  const client = new Client(HOST, grpc.credentials.createSsl())
+  const client = clientFor(Client)
   const metadata = new grpc.Metadata()
   metadata.set('function-id', functionId)
   metadata.set('authorization', `Bearer ${borrowed.key}`)
@@ -101,10 +164,11 @@ function call<Req, Res>(
       metadata,
       { deadline: Date.now() + timeoutMs },
       (err: grpc.ServiceError | null, response: Res) => {
-        client.close()
         borrowed.done(httpStatus(err?.code ?? grpc.status.OK))
-        if (err) reject(new Error(`NVIDIA ${method}: ${err.details || err.message}`))
-        else resolve(response)
+        if (err) {
+          dropClient(Client, err.code)
+          reject(new Error(`NVIDIA ${method}: ${err.details || err.message}`))
+        } else resolve(response)
       }
     )
   })
@@ -217,3 +281,92 @@ export async function synthesize(
   if (pcm.length === 0) throw new Error('NVIDIA Synthesize returned no audio')
   return { wav: wavFrom(Buffer.from(pcm), TTS_RATE), ms: Date.now() - started }
 }
+
+/**
+ * Magpie's voice for `text`, delivered as it is made: `onAudio` gets each
+ * piece of 16-bit mono PCM at TTS_RATE the moment it arrives, so the first
+ * words play while the rest are still being generated.
+ *
+ * Streamed with SynthesizeOnline; if the service will not stream (it is
+ * NVIDIA's choice per model, and has changed before), the same text goes
+ * through Synthesize and arrives as one piece. Resolves with the number of
+ * pieces sent, and when the first one came.
+ */
+/** NVIDIA said it does not stream this voice: ask the plain way from then on. */
+let onlineRefused = false
+
+export async function synthesizeStream(
+  text: string,
+  borrowed: BorrowedKey,
+  voice: string,
+  onAudio: (pcm: Buffer) => void
+): Promise<{ pieces: number; firstMs: number; ms: number; streamed: boolean }> {
+  const started = Date.now()
+  const request = {
+    text,
+    language_code: 'en-US',
+    encoding: 'LINEAR_PCM',
+    sample_rate_hz: TTS_RATE,
+    voice_name: voice
+  }
+  const Client = load().tts
+  const metadata = new grpc.Metadata()
+  metadata.set('function-id', SPEECH_MODELS.talk)
+  metadata.set('authorization', `Bearer ${borrowed.key}`)
+
+  let pieces = 0
+  let firstMs = -1
+  if (onlineRefused) {
+    const response = await call<unknown, { audio?: Buffer }>(Client, 'Synthesize', request, borrowed, SPEECH_MODELS.talk, 30_000)
+    const pcm = response.audio ?? Buffer.alloc(0)
+    if (pcm.length === 0) throw new Error('NVIDIA Synthesize returned no audio')
+    onAudio(Buffer.from(pcm))
+    return { pieces: 1, firstMs: Date.now() - started, ms: Date.now() - started, streamed: false }
+  }
+  const streamed = await new Promise<{ ok: true } | { ok: false; code: number | undefined; why: string }>((resolve) => {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const stream = (clientFor(Client) as any).SynthesizeOnline(metadata, { deadline: Date.now() + 30_000 })
+    stream.on('data', (response: { audio?: Buffer }) => {
+      const pcm = response.audio
+      if (!pcm || pcm.length === 0) return
+      if (firstMs < 0) firstMs = Date.now() - started
+      pieces++
+      onAudio(Buffer.from(pcm))
+    })
+    stream.on('error', (err: grpc.ServiceError) =>
+      resolve({ ok: false, code: err.code, why: err.details || err.message })
+    )
+    stream.on('end', () => resolve({ ok: true }))
+    stream.write(request)
+    stream.end()
+  })
+
+  if (streamed.ok) {
+    borrowed.done(200)
+    if (pieces === 0) throw new Error('NVIDIA SynthesizeOnline returned no audio')
+    return { pieces, firstMs, ms: Date.now() - started, streamed: true }
+  }
+  /* Half an answer already played: saying it again from the top would be
+     worse than stopping where it broke. */
+  if (pieces > 0) {
+    borrowed.done(httpStatus(streamed.code))
+    dropClient(Client, streamed.code)
+    throw new Error(`NVIDIA SynthesizeOnline broke off: ${streamed.why}`)
+  }
+  /* A key problem is the same problem on the other method; anything else -
+     not streamed here, a dropped channel - is worth one plain try. */
+  const status = httpStatus(streamed.code)
+  if (status === 401 || status === 403 || status === 429) {
+    borrowed.done(status)
+    throw new Error(`NVIDIA SynthesizeOnline: ${streamed.why}`)
+  }
+  if (streamed.code === grpc.status.UNIMPLEMENTED) onlineRefused = true
+  dropClient(Client, streamed.code)
+  const response = await call<unknown, { audio?: Buffer }>(Client, 'Synthesize', request, borrowed, SPEECH_MODELS.talk, 30_000)
+  const pcm = response.audio ?? Buffer.alloc(0)
+  if (pcm.length === 0) throw new Error('NVIDIA Synthesize returned no audio')
+  onAudio(Buffer.from(pcm))
+  return { pieces: 1, firstMs: Date.now() - started, ms: Date.now() - started, streamed: false }
+}
+
+export { TTS_RATE }

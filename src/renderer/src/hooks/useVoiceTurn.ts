@@ -14,8 +14,11 @@ import { clipForSpeech } from '../wav'
 import { newestPending, pendingCount, runningCount } from '../pending'
 import { setHandsFree, takeTold } from '../handsfree'
 import { choiceMark, newestChoice, stillWaiting, type AloudChoice, type AloudOption } from '../aloud'
-import { setVoiceStopper, showVoice } from '../voiceview'
+import { setVoiceStopper, showVoice, voiceView } from '../voiceview'
 import { chosenMic } from '../mic'
+import { chime, startTicks, stopTicks } from '../earcons'
+import { Speaker } from '../speaker'
+import { readyToSay, sentences } from '@shared/speakahead'
 
 /**
  * A spoken turn, run from the hidden panel: `wumpy --voice` (a gesture on the
@@ -47,18 +50,36 @@ interface Deps {
   send(text: string): void
   streaming(): boolean
   messages(): ChatMessage[]
+  /** Stops the answer being written, for a gesture that interrupts it. */
+  stop(): void
 }
 
 const sleep = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms))
-
-/** The gap between thinking ticks: a steady pulse, not a rhythm to follow. */
-export const TICK_MS = 550
 
 /** How long nothing new must happen after an answer before it is read out. */
 export const QUIET_AFTER_MS = 600
 
 /** How long a microphone may take to deliver sound before it counts as dead. */
 export const LIVE_WAIT_MS = 6000
+
+/**
+ * How long a pause ends what you are saying. It was 1.3s, all of it spent
+ * waiting after the last word before anything else could start; a second
+ * is still longer than the gaps inside a sentence said at a normal pace.
+ */
+export const END_PAUSE_MS = 1000
+
+/**
+ * A second gesture this soon after the first is the same one. The earbuds
+ * sometimes report a pinch twice, half a second apart (logged: 0.54s), and
+ * the second used to cancel the turn the first had just started - which is
+ * what "sometimes it works, sometimes it doesn't" looked like from outside.
+ * Nobody means to cancel a question before they have had time to ask it.
+ */
+export const SAME_GESTURE_MS = 1200
+
+/** After talking, how long quiet must last before the typing starts again. */
+const TYPING_AGAIN_MS = 1500
 
 export function useVoiceTurn(deps: Deps): void {
   const depsRef = useRef(deps)
@@ -85,52 +106,17 @@ export function useVoiceTurn(deps: Deps): void {
     const noteLine = note
 
     /*
-     * Soft ticks while it works: from the moment it has your words until it
-     * speaks or asks you something.
-     *
-     * Asked for in these words: "after I send it, sometimes the AI takes
-     * some time... like the three dots loading... tut, tut, tut... at least
-     * it gives me active feedback that I know it's thinking and it's
-     * working." Without it the earbuds were silent for as long as the model
-     * took, and silence could not be told apart from a turn that had died.
-     *
-     * Quieter than the chimes (about half their level - it was a third,
-     * and "make the tut tut a bit louder, by a little bit, so I can hear
-     * it a bit better") and short, so it reads as a pulse rather than a
-     * sound to listen to. Stopped by
+     * The typing sound while it works (see earcons.ts): from the moment it
+     * has your words until it speaks or asks you something. Stopped by
      * anything that makes a sound or opens the mic, so the mic never hears
      * it and it never talks over an answer.
      */
-    let ticker: { context: AudioContext; timer: ReturnType<typeof setInterval> } | null = null
-    function startTicks(): void {
-      if (ticker || cancelled) return
-      try {
-        const context = new AudioContext()
-        const tick = (): void => {
-          const at = context.currentTime + 0.01
-          const osc = context.createOscillator()
-          const gain = context.createGain()
-          osc.type = 'sine'
-          osc.frequency.value = 520
-          gain.gain.setValueAtTime(0.0001, at)
-          gain.gain.exponentialRampToValueAtTime(0.055, at + 0.008)
-          gain.gain.exponentialRampToValueAtTime(0.0001, at + 0.07)
-          osc.connect(gain).connect(context.destination)
-          osc.start(at)
-          osc.stop(at + 0.08)
-        }
-        tick()
-        ticker = { context, timer: setInterval(tick, TICK_MS) }
-      } catch {
-        /* no sound device: the bar on screen still says it is working */
-      }
-    }
-    function stopTicks(): void {
-      if (!ticker) return
-      clearInterval(ticker.timer)
-      void ticker.context.close()
-      ticker = null
-    }
+    /** Speaks this turn's sentences as they come; replaced each turn. */
+    let speaker: Speaker | null = null
+    /** Asking yes or no, or which one: a gesture then cancels, never interrupts. */
+    let asking = false
+    /** How many sentences of each answer have been handed to the voice. */
+    const fed = new Map<string, number>()
 
     /** Plays a WAV in an audio element. False when it could not start. */
     function playElement(wav: ArrayBuffer, quick: boolean): Promise<boolean> {
@@ -191,40 +177,22 @@ export function useVoiceTurn(deps: Deps): void {
       }
     }
 
-    /** Short tones, so the earbuds say what is happening without words. */
-    async function chime(kind: 'listen' | 'done' | 'cancel'): Promise<void> {
-      stopTicks()
-      const notes = kind === 'listen' ? [660, 990] : kind === 'done' ? [990, 660] : [300, 220]
-      try {
-        const context = new AudioContext()
-        const step = 0.11
-        notes.forEach((hz, i) => {
-          const osc = context.createOscillator()
-          const gain = context.createGain()
-          osc.type = 'sine'
-          osc.frequency.value = hz
-          const at = context.currentTime + i * step
-          gain.gain.setValueAtTime(0.0001, at)
-          gain.gain.exponentialRampToValueAtTime(0.12, at + 0.015)
-          gain.gain.exponentialRampToValueAtTime(0.0001, at + step)
-          osc.connect(gain).connect(context.destination)
-          osc.start(at)
-          osc.stop(at + step)
-        })
-        await sleep(notes.length * step * 1000 + 60)
-        void context.close()
-      } catch {
-        /* no sound device: the turn goes on without its cue */
-      }
-    }
-
     /**
      * Speaks, and returns once it has finished, so listening never hears it.
-     * `quick` is for lists: a fifth faster, at the same pitch.
+     * Streamed, sentence by sentence (see speaker.ts). `quick` is for lists:
+     * a fifth faster at the same pitch, which only an audio element can do,
+     * so those are made in one piece and played the old way.
      */
     async function say(text: string, quick = false): Promise<void> {
       if (!text || cancelled) return
       showVoice({ stage: 'speaking', level: 0, detail: text.length > 160 ? `${text.slice(0, 157)}…` : text })
+      if (!quick && speaker) {
+        note(`speaking ${text.length} characters with Magpie, as it is made`)
+        speaker.say(sentences(text))
+        await speaker.drain()
+        return
+      }
+      await speaker?.drain()
       const wav = await window.wumpy.voice.speak(text).catch(() => null)
       if (cancelled) return
       note(`speaking ${text.length} characters with ${wav ? 'Magpie' : 'the system voice, since Magpie gave nothing'}`)
@@ -265,6 +233,33 @@ export function useVoiceTurn(deps: Deps): void {
     }
 
     /**
+     * Hands every finished sentence of this turn's answers to the voice,
+     * while they are still being written: the newest answer up to its last
+     * full stop, and any answer that has finished, all of it. In order, and
+     * each sentence once. Returns whether anything has been said this way.
+     */
+    function speakAhead(since: number): boolean {
+      if (!speaker || cancelled) return false
+      const writing = depsRef.current.streaming()
+      const answers = depsRef.current
+        .messages()
+        .filter((m) => m.createdAt >= since && m.role === 'assistant' && !m.local && !m.error)
+      answers.forEach((m, i) => {
+        const done = !(writing && i === answers.length - 1)
+        const ready = readyToSay(m.content, done)
+        const already = fed.get(m.id) ?? 0
+        if (ready.length <= already) return
+        const fresh = ready.slice(already)
+        fed.set(m.id, ready.length)
+        const shown = ready.join(' ')
+        showVoice({ stage: 'speaking', level: 0, detail: shown.length > 160 ? `${shown.slice(0, 157)}…` : shown })
+        if (already === 0) note(`speaking the answer as it is written${done ? '' : ', starting before it is finished'}`)
+        speaker!.say(fresh)
+      })
+      return fed.size > 0
+    }
+
+    /**
      * One utterance: waits up to `waitMs` for speech to start, then until a
      * pause of `pauseMs` ends it. Null for silence, which costs no request.
      */
@@ -274,6 +269,8 @@ export function useVoiceTurn(deps: Deps): void {
       maxMs: number,
       prompt = ''
     ): Promise<{ text: string; heard: string } | null> {
+      if (cancelled) return null
+      await speaker?.drain()
       if (cancelled) return null
       let spoke = false
       let peak = 0
@@ -363,6 +360,14 @@ export function useVoiceTurn(deps: Deps): void {
 
     /** Asks about whatever is waiting, until it is answered yes or no. */
     async function approve(): Promise<void> {
+      asking = true
+      try {
+        await approveNow()
+      } finally {
+        asking = false
+      }
+    }
+    async function approveNow(): Promise<void> {
       let asked = false
       for (;;) {
         const entry = newestPending()
@@ -395,7 +400,15 @@ export function useVoiceTurn(deps: Deps): void {
      * that matched nothing - so the turn does not ask it again. It stays on
      * screen either way, for a click.
      */
-    async function answerChoice(entry: {
+    async function answerChoice(entry: { seq: number; choice: AloudChoice }): Promise<'answered' | 'left'> {
+      asking = true
+      try {
+        return await answerChoiceNow(entry)
+      } finally {
+        asking = false
+      }
+    }
+    async function answerChoiceNow(entry: {
       seq: number
       choice: AloudChoice
     }): Promise<'answered' | 'left'> {
@@ -498,6 +511,7 @@ export function useVoiceTurn(deps: Deps): void {
       let talked = false
       const left = new Set<number>()
       while (!cancelled && Date.now() < deadline) {
+        speakAhead(since)
         const told = takeTold()
         if (told.length) {
           await say(told.join(' '))
@@ -520,8 +534,10 @@ export function useVoiceTurn(deps: Deps): void {
         }
         if (depsRef.current.streaming() || runningCount() > 0) {
           quietSince = 0
-          startTicks()
-          await sleep(200)
+          /* Typing while nothing is being said; not between two sentences
+             of an answer that is still coming. */
+          if (!speaker?.busy() && (speaker?.idleFor() ?? Infinity) > TYPING_AGAIN_MS) startTicks()
+          await sleep(120)
           continue
         }
         if (!quietSince) quietSince = Date.now()
@@ -542,7 +558,7 @@ export function useVoiceTurn(deps: Deps): void {
         showVoice({ stage: 'error', detail: 'Voice needs an NVIDIA key, or the local transcriber installed.' })
         return
       }
-      const heard = await listen(1300, 8000, 45_000)
+      const heard = await listen(END_PAUSE_MS, 8000, 45_000)
       if (!heard) {
         if (cancelled) return
         await chime('cancel')
@@ -566,19 +582,24 @@ export function useVoiceTurn(deps: Deps): void {
       await sleep(300)
       const talked = await settle(mark, started)
       if (cancelled) return
+      /* Whatever is left of the answers, now that they are finished. */
+      const spokeAnswer = speakAhead(started)
       const since = depsRef.current.messages().filter((m) => m.createdAt >= started)
       const answer = [...since]
         .reverse()
         .find((m) => m.role === 'assistant' && !m.local && m.content.trim() && !m.error)
       /* A command's own note ("Reflection on.") when there was no answer and
          nothing else was said - otherwise the turn ends in a bare chime. */
-      const note = talked
+      const note = talked || spokeAnswer
         ? undefined
         : [...since].reverse().find((m) => m.role === 'assistant' && m.local && m.content.trim())
       const text = answer ? speakable(answer.content) : note ? speakable(note.content, 300) : ''
-      if (!text) noteLine(talked ? 'nothing more to say' : 'no answer came back to read out')
-      if (text) await say(text)
-      else await chime('done')
+      if (spokeAnswer) await speaker?.drain()
+      else if (note) await say(text)
+      else {
+        noteLine(talked ? 'nothing more to say' : 'no answer came back to read out')
+        await chime('done')
+      }
       /* The answer stays on the bar after it is said, for a glance. */
       if (!cancelled) showVoice({ stage: 'done', detail: text.length > 160 ? `${text.slice(0, 157)}…` : text })
     }
@@ -590,19 +611,23 @@ export function useVoiceTurn(deps: Deps): void {
       stopTicks()
       stopListening?.()
       stopSound?.()
+      speaker?.stop()
       note('stopped')
       showVoice({ stage: 'cancelled', level: 0 })
     }
     setVoiceStopper(cancel)
 
-    const off = window.wumpy.voice.onTurn(() => {
-      if (busy) {
-        cancel()
-        return
-      }
+    let startedAt = 0
+    /** A gesture came while it was answering: listen again once this ends. */
+    let again = false
+
+    const begin = (): void => {
       busy = true
       cancelled = false
       micNamed = false
+      startedAt = Date.now()
+      fed.clear()
+      speaker = new Speaker({ onSound: stopTicks, note })
       note('started')
       showVoice({ stage: 'starting', level: 0, heard: '', detail: '' })
       setHandsFree(true)
@@ -616,10 +641,42 @@ export function useVoiceTurn(deps: Deps): void {
         })
         .finally(() => {
           stopTicks()
+          speaker?.stop()
+          speaker = null
           busy = false
           setHandsFree(false)
           void window.wumpy.music.release()
+          if (again) {
+            again = false
+            begin()
+          }
         })
+    }
+
+    const off = window.wumpy.voice.onTurn(() => {
+      if (!busy) {
+        begin()
+        return
+      }
+      const after = Date.now() - startedAt
+      if (after < SAME_GESTURE_MS) {
+        note(`a second gesture ${after}ms after the first, taken as the same one`)
+        return
+      }
+      /*
+       * Pinched while it is answering: that is someone with something to
+       * say, as when you talk over a person - so it stops, and listens.
+       * The answer being written stops too, or the new question could not
+       * be sent until it finished. While it is listening, or asking yes or
+       * no, a pinch still just cancels.
+       */
+      const stage = voiceView().stage
+      if (!asking && (stage === 'speaking' || stage === 'thinking')) {
+        note('interrupted: listening again')
+        again = true
+        if (depsRef.current.streaming()) depsRef.current.stop()
+      }
+      cancel()
     })
     return () => {
       off()
