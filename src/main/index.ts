@@ -2453,11 +2453,13 @@ function askRestart(why: string): void {
  * Asks the panel to run a spoken turn: listen, answer out loud, ask for any
  * approval out loud too.
  *
- * And SHOWS the panel, which it did not: "make the process something I can
- * see, not a background process." A turn that ran hidden and heard nothing
- * left nothing to look at; now the window comes up with the voice bar
- * (VoiceTurnBar) saying what it is doing - listening and how loud, what it
- * heard, thinking, speaking, or what went wrong.
+ * In the background again, now that it works. For a while it brought the
+ * window up ("make the process something I can see, not a background
+ * process"), which is how the real faults were found: a recorder that heard
+ * nothing on another workspace, and an answer the page refused to play.
+ * With both fixed: "now allow the wumpy to run in the background, now that
+ * it works." The voice bar (VoiceTurnBar) still shows every stage whenever
+ * the window is open, and every stage is still in wumpy.log.
  *
  * At a cold start the page may still be loading, and a message sent to a page
  * that has not subscribed yet is simply lost; so it waits for the load, and a
@@ -2467,7 +2469,6 @@ function startVoiceTurn(why: string): void {
   const contents = panel?.browserWindow?.webContents
   if (!contents) return
   console.log(`[wumpy] voice turn: ${why}`)
-  panel.show('voice turn')
   if (contents.isLoading()) {
     contents.once('did-finish-load', () => setTimeout(() => panel.send(IPC.voiceTurn, null), 900))
     return

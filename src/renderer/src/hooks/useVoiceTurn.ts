@@ -88,8 +88,10 @@ export function useVoiceTurn(deps: Deps): void {
      * working." Without it the earbuds were silent for as long as the model
      * took, and silence could not be told apart from a turn that had died.
      *
-     * Quieter than the chimes (a third of their level) and short, so it
-     * reads as a pulse rather than a sound to listen to. Stopped by
+     * Quieter than the chimes (about half their level - it was a third,
+     * and "make the tut tut a bit louder, by a little bit, so I can hear
+     * it a bit better") and short, so it reads as a pulse rather than a
+     * sound to listen to. Stopped by
      * anything that makes a sound or opens the mic, so the mic never hears
      * it and it never talks over an answer.
      */
@@ -105,7 +107,7 @@ export function useVoiceTurn(deps: Deps): void {
           osc.type = 'sine'
           osc.frequency.value = 520
           gain.gain.setValueAtTime(0.0001, at)
-          gain.gain.exponentialRampToValueAtTime(0.04, at + 0.008)
+          gain.gain.exponentialRampToValueAtTime(0.055, at + 0.008)
           gain.gain.exponentialRampToValueAtTime(0.0001, at + 0.07)
           osc.connect(gain).connect(context.destination)
           osc.start(at)

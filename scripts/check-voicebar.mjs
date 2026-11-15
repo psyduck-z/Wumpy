@@ -78,7 +78,9 @@ const app = read('src/renderer/src/App.tsx')
 const bar = read('src/renderer/src/components/VoiceTurnBar.tsx')
 const css = read('src/renderer/src/styles.css')
 
-check('a voice turn brings the window up', /console\.log\(`\[wumpy\] voice turn: \$\{why\}`\)\s+panel\.show\('voice turn'\)/.test(main), true)
+/* It brought the window up while the faults were being found, and runs in
+   the background again now that it works - asked for both ways. */
+check('a voice turn runs in the background', /function startVoiceTurn[\s\S]{0,400}panel\.show\(/.test(main), false)
 check('the bar is on the page', app.includes('<VoiceTurnBar />'), true)
 check('it shows the mic level while listening', /stage === 'listening' && \(\s+<span className="voice-turn-meter"/.test(bar), true)
 check('and has a Stop', bar.includes('onClick={stopVoice}'), true)
@@ -92,7 +94,7 @@ check('a mic that will not open says so', /The microphone could not be opened/.t
 /* -------------------------------------------------------------- hearing */
 
 check('it ticks while it works', /function startTicks\(\)/.test(turn), true)
-check('quietly - a third of the chime', /exponentialRampToValueAtTime\(0\.04,/.test(turn), true)
+check('quietly - about half the chime, a little up from a third', /exponentialRampToValueAtTime\(0\.055,/.test(turn), true)
 check('from the moment it has the recording', /showVoice\(\{ stage: 'hearing', level: 0 \}\)\s+startTicks\(\)/.test(turn), true)
 check('and while the answer is coming', /runningCount\(\) > 0\) \{\s+quietSince = 0\s+startTicks\(\)/.test(turn), true)
 check('never while the mic is open', /let peak = 0\s+stopTicks\(\)/.test(turn), true)
