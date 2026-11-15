@@ -1,4 +1,5 @@
 import { nextBatch } from '@shared/speakahead'
+import { output } from './earcons'
 
 /**
  * Speaks sentences as Magpie makes them.
@@ -38,7 +39,10 @@ function receive(): void {
 const RATE = 22050
 
 export class Speaker {
+  /** The turn's output (see earcons.ts), shared so it is already awake. */
   private context: AudioContext | null = null
+  /** Everything this speaker plays goes through here, so stop() can cut it. */
+  private bus: GainNode | null = null
   /** When the next piece of sound starts, on the context's clock. */
   private at = 0
   private readonly live = new Set<AudioBufferSourceNode>()
@@ -89,7 +93,8 @@ export class Speaker {
     }
     this.live.clear()
     if ('speechSynthesis' in window) speechSynthesis.cancel()
-    void this.context?.close()
+    this.bus?.disconnect()
+    this.bus = null
     this.context = null
   }
 
@@ -143,7 +148,12 @@ export class Speaker {
 
   private play(pcm: ArrayBuffer): void {
     if (this.stopped || pcm.byteLength < 2) return
-    if (!this.context) this.context = new AudioContext()
+    if (!this.context) {
+      this.context = output()
+      if (!this.context) return
+      this.bus = this.context.createGain()
+      this.bus.connect(this.context.destination)
+    }
     const context = this.context
     const samples = new Int16Array(pcm, 0, pcm.byteLength >> 1)
     const buffer = context.createBuffer(1, samples.length, RATE)
@@ -151,7 +161,7 @@ export class Speaker {
     for (let i = 0; i < samples.length; i++) out[i] = samples[i] / 32768
     const source = context.createBufferSource()
     source.buffer = buffer
-    source.connect(context.destination)
+    source.connect(this.bus!)
     const quiet = this.ahead() <= 0.02
     const start = Math.max(this.at, context.currentTime + 0.03)
     source.start(start)

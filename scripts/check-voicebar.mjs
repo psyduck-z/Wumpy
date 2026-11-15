@@ -96,7 +96,7 @@ check('a mic that will not open says so', /The microphone could not be opened/.t
 /* The sounds moved to earcons.ts; how loud they are is check-speakahead's. */
 const earcons = read('src/renderer/src/earcons.ts')
 check('it ticks while it works', /export function startTicks\(\)/.test(earcons) && /startTicks/.test(turn), true)
-check('from the moment it has the recording', /showVoice\(\{ stage: 'hearing', level: 0 \}\)\s+startTicks\(\)/.test(turn), true)
+check('from the moment it has the recording', /showVoice\(\{ stage: 'hearing', level: 0 \}\)[\s\S]{0,600}await chime\('heard'\)\s+startTicks\(\)/.test(turn), true)
 check('and while the answer is coming', /runningCount\(\) > 0\) \{\s+quietSince = 0[\s\S]{0,400}\) startTicks\(\)/.test(turn), true)
 check('never while the mic is open', /micDead = false\s+stopTicks\(\)/.test(turn), true)
 check('nor over a chime', /async function chime[^{]*\{\s+stopTicks\(\)/.test(earcons), true)

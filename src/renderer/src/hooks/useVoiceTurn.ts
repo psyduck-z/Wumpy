@@ -16,7 +16,7 @@ import { setHandsFree, takeTold } from '../handsfree'
 import { choiceMark, newestChoice, stillWaiting, type AloudChoice, type AloudOption } from '../aloud'
 import { setVoiceStopper, showVoice, voiceView } from '../voiceview'
 import { chosenMic } from '../mic'
-import { chime, startTicks, stopTicks } from '../earcons'
+import { chime, releaseOutput, startTicks, stopTicks, wakeOutput } from '../earcons'
 import { Speaker } from '../speaker'
 import { readyToSay, sentences } from '@shared/speakahead'
 
@@ -350,9 +350,15 @@ export function useVoiceTurn(deps: Deps): void {
       )
       if (!clip || cancelled) return null
       showVoice({ stage: 'hearing', level: 0 })
+      /* "Got it" the moment it stops recording, while the words are already
+         on their way to be transcribed - the chime costs no time. */
+      const transcribing = clipForSpeech(clip.blob, clip.extension).then((ready) =>
+        window.wumpy.voice.transcribe(ready.audio, ready.extension, [])
+      )
+      transcribing.catch(() => {}) // thrown again below, where it is awaited
+      await chime('heard')
       startTicks()
-      const ready = await clipForSpeech(clip.blob, clip.extension)
-      const result = await window.wumpy.voice.transcribe(ready.audio, ready.extension, [])
+      const result = await transcribing
       const heard = (result.heard || result.text || '').trim()
       note(heard ? `heard "${heard.slice(0, 120)}"` : 'the transcriber returned no words')
       return heard ? { text: (result.text || heard).trim(), heard } : null
@@ -579,7 +585,10 @@ export function useVoiceTurn(deps: Deps): void {
       const mark = choiceMark()
       const slash = spokenSlash(heard.heard)
       depsRef.current.send(slash ?? heard.text)
-      await sleep(300)
+      /* And "sent": the words have gone to the AI, and the typing that
+         follows is it working on them. */
+      await chime('sent')
+      await sleep(150)
       const talked = await settle(mark, started)
       if (cancelled) return
       /* Whatever is left of the answers, now that they are finished. */
@@ -627,6 +636,7 @@ export function useVoiceTurn(deps: Deps): void {
       micNamed = false
       startedAt = Date.now()
       fed.clear()
+      wakeOutput()
       speaker = new Speaker({ onSound: stopTicks, note })
       note('started')
       showVoice({ stage: 'starting', level: 0, heard: '', detail: '' })
@@ -643,6 +653,7 @@ export function useVoiceTurn(deps: Deps): void {
           stopTicks()
           speaker?.stop()
           speaker = null
+          releaseOutput()
           busy = false
           setHandsFree(false)
           void window.wumpy.music.release()

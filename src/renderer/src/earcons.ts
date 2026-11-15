@@ -5,11 +5,80 @@
  * Made here with Web Audio rather than played from files, so they cost
  * nothing to ship and can vary a little each time, the way a real key does.
  * Loudness was set by comparing A-weighted energy against the sounds they
- * replaced (scripts/check-earcons.mjs renders both and compares), since "a
- * titchy bit louder" is about 1.5 dB and not something to guess at.
+ * replaced (scripts/check-speakahead.mjs renders both and compares), since
+ * "a titchy bit louder" is about 1.5 dB and not something to guess at.
  */
 
 const sleep = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms))
+
+/*
+ * ONE OUTPUT, AWAKE FOR THE WHOLE TURN.
+ *
+ * Reported in these words: "there was no chime, so I thought it didn't
+ * work." The log shows the chime's turn exactly as it should be - mic live
+ * after 122ms, chime, listening - and nothing heard, because nothing was
+ * said. The chime had played into earbuds that were asleep: the audio
+ * system suspends a Bluetooth output a few seconds after the last sound,
+ * waking it takes a few hundred milliseconds, and the whole chime is 0.3s.
+ * Every sound also opened an output of its own, so any of them - the chime,
+ * the first typing, the first word of an answer - could land in that gap.
+ *
+ * So a turn opens one output when it starts and keeps it awake with a
+ * signal far below hearing (about -80 dB: a hiss no earbud can reproduce
+ * at any volume), and every sound in the turn goes through it. The first
+ * chime waits until the output has had WAKE_MS to come up, which mostly
+ * overlaps with the microphone opening anyway.
+ */
+export const WAKE_MS = 450
+
+let out: { context: AudioContext; keep: AudioBufferSourceNode; woke: number } | null = null
+
+/** Opens the turn's output and keeps it awake. Called when a turn starts. */
+export function wakeOutput(): void {
+  if (out) return
+  try {
+    const context = new AudioContext({ latencyHint: 'interactive' })
+    const buffer = context.createBuffer(1, context.sampleRate, context.sampleRate)
+    const data = buffer.getChannelData(0)
+    for (let i = 0; i < data.length; i++) data[i] = (Math.random() * 2 - 1) * 1e-4
+    const keep = context.createBufferSource()
+    keep.buffer = buffer
+    keep.loop = true
+    keep.connect(context.destination)
+    keep.start()
+    out = { context, keep, woke: Date.now() }
+  } catch {
+    /* no sound device: every sound below is skipped */
+  }
+}
+
+/** Lets the output sleep again. Called when a turn ends. */
+export function releaseOutput(): void {
+  stopTicks()
+  if (!out) return
+  try {
+    out.keep.stop()
+  } catch {
+    /* already stopped */
+  }
+  void out.context.close()
+  out = null
+}
+
+/** The turn's output, opened now if no turn opened one. */
+export function output(): AudioContext | null {
+  if (!out) wakeOutput()
+  return out?.context ?? null
+}
+
+/** The output, once it has had time to wake. */
+async function awake(): Promise<AudioContext | null> {
+  const context = output()
+  if (!out) return null
+  const wait = WAKE_MS - (Date.now() - out.woke)
+  if (wait > 0) await sleep(wait)
+  return out?.context === context ? context : null
+}
 
 /*
  * Chimes.
@@ -19,19 +88,31 @@ const sleep = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms
  * 0.11s each, the same timbre as the ticks, so the two blurred together.
  * Now each note is struck, like a soft mallet on wood: a round fundamental,
  * a quick bright overtone at four times it that gives the "d" of "doo", and
- * a longer ring. Up a fifth to start listening, down to finish, low for
- * cancelled. About 1.5 dB above the old notes, mostly from ringing longer
- * rather than from a harder hit.
+ * a longer ring. About 1.5 dB above the old notes, mostly from ringing
+ * longer rather than from a harder hit.
+ *
+ * Then: "also add a chime after the recording of my voice finished and
+ * when it sends the message." So a turn is five cues, each its own shape:
+ *
+ *   listen   doo-DOO, up a fifth      I can hear you, talk now
+ *   heard    doo, one note             got it, you can stop talking
+ *   sent     bi-bip, high and quick    your words have gone to the AI
+ *   done     DOO-doo, down a fifth     finished, with nothing to say
+ *   cancel   two low notes             stopped, or nothing was heard
  */
 const CHIMES = {
-  listen: [587.33, 880],
-  done: [880, 587.33],
-  cancel: [293.66, 220]
+  listen: { notes: [587.33, 880], step: 0.13, level: 1 },
+  heard: { notes: [880], step: 0.13, level: 0.9 },
+  sent: { notes: [1174.66, 1479.98], step: 0.07, level: 0.7 },
+  done: { notes: [880, 587.33], step: 0.13, level: 1 },
+  cancel: { notes: [293.66, 220], step: 0.13, level: 1 }
 } as const
+
+export type ChimeKind = keyof typeof CHIMES
 
 export const CHIME_PEAK = 0.11
 
-function strike(context: AudioContext, hz: number, at: number): void {
+function strike(context: AudioContext, bus: AudioNode, hz: number, at: number, level: number): void {
   const partial = (freq: number, peak: number, ring: number): void => {
     const osc = context.createOscillator()
     const gain = context.createGain()
@@ -40,26 +121,28 @@ function strike(context: AudioContext, hz: number, at: number): void {
     gain.gain.setValueAtTime(0.0001, at)
     gain.gain.exponentialRampToValueAtTime(peak, at + 0.006)
     gain.gain.exponentialRampToValueAtTime(0.0001, at + ring)
-    osc.connect(gain).connect(context.destination)
+    osc.connect(gain).connect(bus)
     osc.start(at)
     osc.stop(at + ring + 0.02)
   }
-  partial(hz, CHIME_PEAK, 0.2)
-  partial(hz * 2, CHIME_PEAK * 0.15, 0.12)
-  partial(hz * 4, 0.02, 0.05)
+  partial(hz, CHIME_PEAK * level, 0.2)
+  partial(hz * 2, CHIME_PEAK * level * 0.15, 0.12)
+  partial(hz * 4, 0.02 * level, 0.05)
 }
 
-export async function chime(kind: keyof typeof CHIMES): Promise<void> {
+export async function chime(kind: ChimeKind): Promise<void> {
   stopTicks()
-  const notes = CHIMES[kind]
-  const step = 0.13
+  const { notes, step, level } = CHIMES[kind]
   try {
-    const context = new AudioContext()
-    notes.forEach((hz, i) => strike(context, hz, context.currentTime + 0.01 + i * step))
+    const context = await awake()
+    if (!context) return
+    const bus = context.createGain()
+    bus.connect(context.destination)
+    notes.forEach((hz, i) => strike(context, bus, hz, context.currentTime + 0.01 + i * step, level))
     /* Back as soon as the last note is struck and mostly rung: the mic
        opens after this, and the tail is quieter than any voice. */
     await sleep((notes.length - 1) * step * 1000 + 160)
-    setTimeout(() => void context.close(), 400)
+    setTimeout(() => bus.disconnect(), 400)
   } catch {
     /* no sound device: the turn goes on without its cue */
   }
@@ -82,8 +165,9 @@ export async function chime(kind: keyof typeof CHIMES): Promise<void> {
  * typing.
  *
  * Scheduled on the audio clock a second ahead, not by timers, so the
- * rhythm stays even however busy the page is; closing the context cuts it
- * off mid-group the instant the answer starts.
+ * rhythm stays even however busy the page is. It all goes through one
+ * gain, and disconnecting that cuts it off mid-group the instant the
+ * answer starts.
  */
 export const TYPING = {
   /** Between presses within a group of three. */
@@ -96,9 +180,15 @@ export const TYPING = {
   lowpass: 1700
 }
 
-let typing: { context: AudioContext; timer: ReturnType<typeof setInterval>; next: number } | null = null
+let typing: { bus: GainNode; timer: ReturnType<typeof setInterval> } | null = null
+let noise: AudioBuffer | null = null
 
-function press(context: AudioContext, noise: AudioBuffer, at: number, weight: number): void {
+function press(context: AudioContext, bus: AudioNode, at: number, weight: number): void {
+  if (!noise || noise.sampleRate !== context.sampleRate) {
+    noise = context.createBuffer(1, Math.round(context.sampleRate * 0.05), context.sampleRate)
+    const data = noise.getChannelData(0)
+    for (let i = 0; i < data.length; i++) data[i] = Math.random() * 2 - 1
+  }
   const src = context.createBufferSource()
   src.buffer = noise
   const filter = context.createBiquadFilter()
@@ -109,7 +199,7 @@ function press(context: AudioContext, noise: AudioBuffer, at: number, weight: nu
   click.gain.setValueAtTime(0.0001, at)
   click.gain.exponentialRampToValueAtTime(TYPING.click * weight, at + 0.002)
   click.gain.exponentialRampToValueAtTime(0.0001, at + 0.035)
-  src.connect(filter).connect(click).connect(context.destination)
+  src.connect(filter).connect(click).connect(bus)
   src.start(at)
   src.stop(at + 0.05)
 
@@ -121,31 +211,31 @@ function press(context: AudioContext, noise: AudioBuffer, at: number, weight: nu
   body.gain.setValueAtTime(0.0001, at)
   body.gain.exponentialRampToValueAtTime(TYPING.knock * weight, at + 0.003)
   body.gain.exponentialRampToValueAtTime(0.0001, at + 0.05)
-  knock.connect(body).connect(context.destination)
+  knock.connect(body).connect(bus)
   knock.start(at)
   knock.stop(at + 0.06)
 }
 
 export function startTicks(): void {
-  if (typing) return
+  if (typing || !out) return
   try {
-    const context = new AudioContext()
-    const noise = context.createBuffer(1, Math.round(context.sampleRate * 0.05), context.sampleRate)
-    const data = noise.getChannelData(0)
-    for (let i = 0; i < data.length; i++) data[i] = Math.random() * 2 - 1
-    const state = { context, timer: 0 as unknown as ReturnType<typeof setInterval>, next: context.currentTime + 0.02 }
+    const context = out.context
+    const bus = context.createGain()
+    bus.connect(context.destination)
+    /* Not before the output is awake, or the first group is lost. */
+    const wake = Math.max(0, WAKE_MS - (Date.now() - out.woke)) / 1000
+    let next = context.currentTime + 0.02 + wake
     const fill = (): void => {
-      while (state.next < context.currentTime + 1) {
+      while (next < context.currentTime + 1) {
         for (let i = 0; i < 3; i++) {
           const jitter = (Math.random() - 0.5) * 0.024
-          press(context, noise, state.next + i * TYPING.gap + jitter, [1, 0.85, 0.95][i] * (0.92 + Math.random() * 0.16))
+          press(context, bus, next + i * TYPING.gap + jitter, [1, 0.85, 0.95][i] * (0.92 + Math.random() * 0.16))
         }
-        state.next += TYPING.cycle
+        next += TYPING.cycle
       }
     }
     fill()
-    state.timer = setInterval(fill, 250)
-    typing = state
+    typing = { bus, timer: setInterval(fill, 250) }
   } catch {
     /* no sound device: the bar on screen still says it is working */
   }
@@ -154,7 +244,7 @@ export function startTicks(): void {
 export function stopTicks(): void {
   if (!typing) return
   clearInterval(typing.timer)
-  void typing.context.close()
+  typing.bus.disconnect()
   typing = null
 }
 

@@ -114,8 +114,10 @@ itself is under Settings → Assistant).
   no key, dictation falls back to local Whisper (`npm run speech:install`) and
   answers to the system voice.
 - **The gesture, again.** Pinch once to ask; it chimes (two notes, up) when
-  it can hear you, and a pause of a second ends what you said. While it
-  works you hear soft typing, in threes, until the answer starts. To ask
+  it can hear you, and a pause of a second ends what you said. One note
+  says it has your words, a quick high "bi-bip" that they have gone to the
+  AI, and while it works you hear soft typing, in threes, until the answer
+  starts. To ask
   something else, pinch again — and pinching while it is still talking stops
   it and listens, the way you would talk over someone. Pinching while it
   listens, or while it asks yes or no, cancels. A pinch the earbuds report

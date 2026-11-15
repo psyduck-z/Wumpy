@@ -217,8 +217,25 @@ check('pieces play back to back on one clock', /Math\.max\(this\.at, context\.cu
 check('the typing stops at the first sound', /new Speaker\(\{ onSound: stopTicks, note \}\)/.test(turn), true)
 check('and not between sentences', /if \(!speaker\?\.busy\(\) && \(speaker\?\.idleFor\(\) \?\? Infinity\) > TYPING_AGAIN_MS\) startTicks\(\)/.test(turn), true)
 check('a stopped turn is silent at once', /speaker\?\.stop\(\)\s+note\('stopped'\)/.test(turn), true)
-check('typing is scheduled on the audio clock', /while \(state\.next < context\.currentTime \+ 1\)/.test(earcons), true)
+check('typing is scheduled on the audio clock', /while \(next < context\.currentTime \+ 1\)/.test(earcons), true)
 check('a pause of a second ends what was said', /export const END_PAUSE_MS = 1000/.test(turn) && /listen\(END_PAUSE_MS, 8000, 45_000\)/.test(turn), true)
+
+/* The output. "There was no chime, so I thought it didn't work": the
+   chime played into Bluetooth earbuds that were still waking up. */
+check('a turn opens one output and keeps it awake', /wakeOutput\(\)\s+speaker = new Speaker/.test(turn), true)
+check('with a signal far below hearing', /\(Math\.random\(\) \* 2 - 1\) \* 1e-4/.test(earcons), true)
+check('and lets it sleep when the turn ends', /speaker = null\s+releaseOutput\(\)/.test(turn), true)
+check('a chime waits for the output to be awake', /const context = await awake\(\)/.test(earcons), true)
+check('so does the first typing', /WAKE_MS - \(Date\.now\(\) - out\.woke\)\) \/ 1000/.test(earcons), true)
+check('the voice goes through the same output', /this\.context = output\(\)/.test(speaker), true)
+check('no sound opens an output of its own', /new AudioContext\(/.test(speaker) || (earcons.match(/new AudioContext\(/g) ?? []).length !== 1, false)
+
+/* "Also add a chime after the recording of my voice finished and when it
+   sends the message." */
+check('a chime when it stops recording', /await chime\('heard'\)\s+startTicks\(\)/.test(turn), true)
+check('while the words are already being transcribed', /const transcribing = clipForSpeech[\s\S]{0,300}await chime\('heard'\)[\s\S]{0,60}await transcribing/.test(turn), true)
+check('and one when they are sent', /depsRef\.current\.send\(slash \?\? heard\.text\)[\s\S]{0,200}await chime\('sent'\)/.test(turn), true)
+check('five cues, each its own shape', /listen: \{[\s\S]*heard: \{[\s\S]*sent: \{[\s\S]*done: \{[\s\S]*cancel: \{/.test(earcons), true)
 
 /* The gesture. */
 check('a double report of one pinch is one pinch', /if \(after < SAME_GESTURE_MS\) \{/.test(turn), true)
