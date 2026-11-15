@@ -656,29 +656,14 @@ export const CLOUD_MODELS: CloudModel[] = [
     blurb: '38/42 · 10.9s · 6/6 eyesight — the sharpest here.',
     measured: { clean: 38, of: 42, runs: 2, medianMs: 10_923, on: '2026-10-21' }
   },
-  {
-    id: 'z-ai/glm-5.3',
-    provider: 'nvidia',
-    label: 'GLM 5.3',
-    /* Refused outright, measured 19 Oct: "Invalid request" for any
-       message carrying an image part. Explicit, because absent now means
-       sighted and this one is not. */
-    sees: false,
-    /*
-     * The index said it was the best free model there is. The full ladder
-     * puts it below its own Flash sibling - 33 against 38 - and 88 seconds
-     * is not a turn anyone sits through. Listed so the measurement is
-     * visible rather than folklore.
-     *
-     * Worse than slow, as of 18 Oct: two probes with a four-word prompt
-     * returned 104,315ms and then nothing at all, aborted at the 180s
-     * ceiling. Not a latency any more, an unreliability - which is the
-     * distinction `/model check` now draws, and the reason it asks twice.
-     */
-    blurb: '33/41 · 90s when it answers, and often nothing · text only.',
-    measured: { clean: 33, of: 41, runs: 1, medianMs: 120_000, on: '2026-10-19' }
-  },
-
+  /*
+   * GLM 5.3 IS GONE TOO: HTTP 410 on 15 Nov, from the background ranker,
+   * while GLM 5.3 Flash and Nemotron Super answered on the same key either
+   * side of it - and it is no longer in NVIDIA's /v1/models at all. It was
+   * 33/41 at ninety seconds when it answered and often nothing, and it was
+   * the last row here marked `sees: false`. Same treatment as Nemotron 3
+   * Super above: the routing stays, the row goes.
+   */
   /*
    * --- found on 21 Oct, by asking the endpoint what it has ----------------
    *
@@ -1183,8 +1168,7 @@ export function siblingModel(model: string, spent: ReadonlySet<string>): string 
               // is per-minute rather than per-model - so there is no "more
               // likely to have requests left" to weigh against capability.
               // Every one of these has been called once; v4-pro used to be
-              // here and answers 410.
-              'z-ai/glm-5.3',
+              // here and answers 410, and so does glm-5.3 since 15 Nov.
               /*
                * Kimi is not here any more, and the name was wrong as well.
                *

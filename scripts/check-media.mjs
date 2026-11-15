@@ -129,8 +129,11 @@ check('and so can the lite one', C.seesMedia('gemini-3.1-flash-lite'), true)
  */
 check('an unmeasured model is assumed to see', C.seesMedia('codestral-latest'), true)
 check('and so is one nobody has heard of', C.seesMedia('someone/brand-new-model'), true)
-/* Proved blind, so not even tried. */
+/* Proved blind, so not even tried. Learned from the endpoint now: the
+   last row marked blind, GLM 5.3, was withdrawn on 15 Nov. */
+C.rememberBlind('z-ai/glm-5.3')
 check('a model the endpoint refused does not', C.seesMedia('z-ai/glm-5.3'), false)
+C.forgetBlind()
 check('and nothing is not a model', C.seesMedia(''), false)
 
 /*
@@ -170,8 +173,10 @@ check('the vision model on NVIDIA can see', C.seesMedia('nvidia/nemotron-3.5-sup
    the row gone, `sees` is absent for it - and absent now means sighted,
    so it is no longer an example of anything. The example has to be an
    entry that is still offered AND still refuses. */
-check('the big GLM cannot', C.seesMedia('z-ai/glm-5.3'), false)
-check('and it is still in the list to say so', C.CLOUD_MODELS.some((m) => m.id === 'z-ai/glm-5.3'), true)
+/* And the big GLM stood here until NVIDIA withdrew it on 15 Nov (HTTP
+   410). It was the last row marked blind, so no row is now: blindness is
+   learned from the endpoint's refusal, as rememberBlind records it. */
+check('no row is marked blind any more', C.CLOUD_MODELS.some((m) => m.sees === false), false)
 /*
  * Exactly these, and each one asked rather than assumed.
  *
@@ -280,6 +285,7 @@ check('and that is four of the six', C.CLOUD_MODELS.filter((m) => m.sees).length
   check('the retry cannot repeat', /blind = false/.test(index), true)
 }
 
+C.rememberBlind('z-ai/glm-5.3')
 check(
   'the quickest accurate eye is the one borrowed',
   C.eyeFor('z-ai/glm-5.3')?.id,
@@ -300,6 +306,7 @@ check(
  */
 check('both are equally accurate', C.CLOUD_MODELS.find((m) => m.id === 'gemma4:31b-cloud')?.vision?.clean, 6)
 check('and the quicker one is chosen', C.eyeFor('z-ai/glm-5.3')?.vision?.medianMs, 370)
+C.forgetBlind()
 
 /*
  * THE BADGE SHOWS A SCORE ONLY WHEN THERE IS ONE.
@@ -340,7 +347,11 @@ check('the Ollama one can see', C.seesMedia('gemma4:31b-cloud'), true)
  * example has to be one the endpoint actually refuses, or this measures
  * nothing.
  */
+/* And GLM 5.3, the last row the catalogue marked blind, was withdrawn on
+   15 Nov - so the example is one the endpoint refused at run time, which
+   is how blindness is learned now. */
 const BLIND = 'z-ai/glm-5.3'
+C.rememberBlind(BLIND)
 check('a model that cannot see gets an eye', C.eyeFor(BLIND)?.id, 'nvidia/nemotron-3.5-super-vl-120b-a12b')
 check('one that can see does not need one', C.eyeFor('nvidia/nemotron-3.5-super-vl-120b-a12b'), null)
 check('nor does a Gemini typed in by hand', C.eyeFor('gemini-3.8-flash'), null)

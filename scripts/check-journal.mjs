@@ -729,12 +729,13 @@ check('nor the window furniture', changed({ compactWidth: 462, smoothText: true 
     check('a sweep is announced once', sweeps.length, 1)
     check('with every model in the catalogue', sweeps[0]?.asked, catalogue)
     check('and every one of them measured', sweeps[0]?.models, catalogue)
-    /* Nine models, thirty-one fake seconds apart: four and a half minutes of
-       work. The number that must be right is the SHAPE of it - minutes, not
-       zero and not the hour the queue sat waiting. */
+    /* Eight models since GLM 5.3 was withdrawn, thirty-one fake seconds
+       apart: about four minutes of work. The number that must be right is
+       the SHAPE of it - minutes, not zero and not the hour the queue sat
+       waiting. */
     check(
       'timed from the first measurement, not the queue',
-      sweeps[0]?.tookMs > 4 * MINUTE && sweeps[0]?.tookMs < 6 * MINUTE,
+      sweeps[0]?.tookMs > 3 * MINUTE && sweeps[0]?.tookMs < 6 * MINUTE,
       true
     )
     check('which is the line it turns into', J.sweepLine(sweeps[0]), `${catalogue} models in 4 min`)

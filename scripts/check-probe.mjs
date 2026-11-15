@@ -277,7 +277,10 @@ check('and there is a ceiling on asking', P.MAX_RUNS, 5)
     M('z-ai/glm-5.3-flash', 4577),
     M('nvidia/nemotron-3.5-super-vl-120b-a12b', 10_923),
     M('deepseek-ai/deepseek-v4.1-flash', 112_211),
-    M('z-ai/glm-5.3', 120_000, 'timeout')
+    /* Flaky: StepFun scores 36/42 at two seconds and would otherwise be
+       near the top - which is what makes it the example. GLM 5.3 was,
+       until NVIDIA withdrew it on 15 Nov. */
+    M('stepfun-ai/step-5-preview', 120_000, 'timeout')
   ]
   const ranked = P.recommend(live)
 
@@ -323,7 +326,7 @@ check('and there is a ceiling on asking', P.MAX_RUNS, 5)
 
   /* Flaky is not recommendable whatever it scores: "use this, it works
      about half the time" is not a recommendation. */
-  check('a flaky model is never offered', ranked.some((p) => p.model === 'z-ai/glm-5.3'), false)
+  check('a flaky model is never offered', ranked.some((p) => p.model === 'stepfun-ai/step-5-preview'), false)
 
   const text = P.recommendLines(live, '').join(NL)
   /* A label and the facts: "Recommended: x - 93%, 4.6s", not a sentence
@@ -358,16 +361,17 @@ check('and there is a ceiling on asking', P.MAX_RUNS, 5)
    * and that is itself the finding.
    *
    * It used to be nemotron-3-super - genuinely refused images, quick
-   * enough to win - and NVIDIA withdrew it on 21 Oct. Every remaining
-   * model that is fast, measured and blind is now only glm-5.3, which is
-   * past the floor under the recommendation and so is never the pick.
+   * enough to win - and NVIDIA withdrew it on 21 Oct. Then the only blind
+   * row was glm-5.3, past the floor and never the pick, and NVIDIA
+   * withdrew that on 15 Nov. No row is marked blind now: blindness is
+   * learned from the endpoint at run time (rememberBlind).
    *
    * So the branch is asserted at the source rather than exercised, and
    * the reason is written down: a test that quietly stopped covering
    * anything is worse than one that says it cannot.
    */
   const blind = C.CLOUD_MODELS.filter((m) => m.sees === false && m.measured)
-  check('every blind model left is too slow to recommend', blind.length > 0, true)
+  check('no row is marked blind, so none can be the blind pick', blind.length, 0)
   check(
     'so none of them can be the pick',
     blind.every((m) => (m.measured?.medianMs ?? 0) > P.TOO_SLOW_TO_SUGGEST_MS),
@@ -720,7 +724,7 @@ check('the catalogue is the only source of ids', /const queue = CLOUD_MODELS\.sl
       at(real, 'ok', 6_213),
       at(other, 'slow', 37_323),
       at('nvidia/nemotron-3-ultra-550b-a55b', 'empty', 0),
-      at('z-ai/glm-5.3', 'limited', 900),
+      at('nvidia/nemotron-3.5-lightning-30b-a3b', 'limited', 900),
       at('gemma4:31b-cloud', 'nokey', 0),
       at('stepfun-ai/step-5-preview', 'offline', 0),
       at('someone/typed-this-by-hand', 'ok', 500)
@@ -733,7 +737,7 @@ check('the catalogue is the only source of ids', /const queue = CLOUD_MODELS\.sl
   check('an empty answer is recorded as a failure', kept['nvidia/nemotron-3-ultra-550b-a55b'].ok, false)
   /* Quota is the account's, not the model's, and the round trip to a
      refusal is not a speed. */
-  check('a 429 teaches nothing about speed', kept['z-ai/glm-5.3'], undefined)
+  check('a 429 teaches nothing about speed', kept['nvidia/nemotron-3.5-lightning-30b-a3b'], undefined)
   check('nor does a model nobody asked', kept['gemma4:31b-cloud'], undefined)
   check('nor does the wifi being off', kept['stepfun-ai/step-5-preview'], undefined)
   /* The ranking is of the catalogue; a hand-typed id has no row to move. */

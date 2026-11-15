@@ -166,7 +166,13 @@ check('and nothing else', [O.readOrdering('nemotron'), O.readOrdering('gemma4:31
   /* Nothing past the floor can lead, which is the 19 Oct rule and the
      only one of the three tabs it applies to. */
   check('the leader answers in time', ms(bal[0]) < C.UNUSABLY_SLOW_MS, true)
-  check('and everything past the floor is at the bottom', bal.slice(-2).every((m) => ms(m) > C.UNUSABLY_SLOW_MS), true)
+  /* One of them now - DeepSeek; GLM 5.3 was the other until 15 Nov. */
+  const past = bal.filter((m) => ms(m) > C.UNUSABLY_SLOW_MS)
+  check(
+    'and everything past the floor is at the bottom',
+    past.length > 0 && bal.slice(-past.length).every((m) => ms(m) > C.UNUSABLY_SLOW_MS),
+    true
+  )
   /* Monotonic in the blended score within the group that answers. */
   const quick = bal.filter((m) => ms(m) < C.UNUSABLY_SLOW_MS)
   const points = (m) => O.balanceScore(share(m), ms(m))
@@ -261,14 +267,17 @@ check('and one usable-speed floor, not two', P.TOO_SLOW_TO_SUGGEST_MS, C.UNUSABL
    * happening to exist. The tiering is three steps now: works, slow,
    * silent.
    */
+  /* The two-minute model was GLM 5.3 until NVIDIA withdrew it on 15 Nov,
+     so one is made: GLM 5.3 Flash, measured at two minutes. */
+  const slowToo = { ...dead, 'z-ai/glm-5.3-flash': { ms: 120_000, runs: 2, on: '2026-10-23', ok: true } }
   check(
     'a failure is below even the models that take two minutes',
-    listed('balanced', dead)
+    listed('balanced', slowToo)
       .slice(-3)
       .map((m) => m.id.split('/').pop()),
     /* The weakest model that works, then the one that takes two minutes,
        then the one that said nothing. */
-    ['nemotron-3-nano-omni-30b-a3b-reasoning', 'glm-5.3', 'deepseek-v4.1-flash']
+    ['nemotron-3-nano-omni-30b-a3b-reasoning', 'glm-5.3-flash', 'deepseek-v4.1-flash']
   )
   /* Its caption stops naming it, because it is no longer what the tab
      just did. */

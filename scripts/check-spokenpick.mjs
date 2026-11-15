@@ -62,9 +62,15 @@ check('"Nemotron Ultra" is the one', labels('Nemotron Ultra'), ['Nemotron 3 Ultr
 check('"the nemotron 30B" is the two that are 30B', labels('the nemotron 30B').length, 2)
 check('misheard: "Jemma" is Gemma', labels('Jemma'), ['Gemma 4 31B (Ollama cloud)'])
 check('split: "deep seek" is DeepSeek', labels('deep seek'), ['DeepSeek V4.1 Flash'])
-check('spelled out: "GLM five point three" is GLM 5.3', labels('GLM five point three'), ['GLM 5.3'])
-check('named in full beats a longer name', labels('GLM 5.3'), ['GLM 5.3'])
-check('"GLM" alone is both', labels('GLM').length, 2)
+check('spelled out: "GLM five point three" is GLM 5.3 Flash', labels('GLM five point three'), ['GLM 5.3 Flash'])
+/* Two names where one is the start of the other - GLM 5.3 and its Flash
+   were, until NVIDIA withdrew GLM 5.3 on 15 Nov - so made up here. */
+const pair = [
+  { id: 'big', names: ['GLM 5.3'] },
+  { id: 'flash', names: ['GLM 5.3 Flash'] }
+]
+check('named in full beats a longer name', P.matchSpoken('GLM 5.3', pair), ['big'])
+check('"GLM" alone is both', P.matchSpoken('GLM', pair).length, 2)
 check('"step fun" is StepFun', labels('step fun'), ['StepFun Step 5 600B'])
 check('a whole sentence around the name', labels('switch to the gemma model please'), ['Gemma 4 31B (Ollama cloud)'])
 check('"the Nemotron one" is not a model number', labels('the Nemotron one'), nemotrons)

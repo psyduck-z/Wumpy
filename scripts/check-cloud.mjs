@@ -452,7 +452,7 @@ check('it does not need the system fold', C.PROVIDERS.nvidia.foldSystem, false)
 // sending it would be a no-op that reads like a setting.
 check(
   'reasoning_effort is not sent to it',
-  C.reasoningEffortFor('nvidia', false, 'z-ai/glm-5.3'),
+  C.reasoningEffortFor('nvidia', false, 'z-ai/glm-5.3-flash'),
   null
 )
 // The switch that does reach the model is inside chat_template_kwargs, where
@@ -552,7 +552,6 @@ check(
    "Function 'ac74040f-...': Not found", while Ultra answered 200 on the
    same key a second later. Its routing is kept; the row is gone. */
 const NV_PROBED = [
-  'z-ai/glm-5.3',
   'z-ai/glm-5.3-flash',
   'moonshotai/kimi-k3',
   'nvidia/nemotron-3-ultra-550b-a55b',
@@ -595,8 +594,13 @@ check(
  * which is the invariant worth holding: codestral routes to Mistral and is
  * not in the catalogue, so there is nothing to step to.
  */
-check('a catalogued NVIDIA model can step sideways', typeof C.siblingModel('z-ai/glm-5.3', new Set()), 'string')
-check('and it stays on its own provider', C.providerFor(C.siblingModel('z-ai/glm-5.3', new Set())), 'nvidia')
+check('a catalogued NVIDIA model can step sideways', typeof C.siblingModel('z-ai/glm-5.3-flash', new Set()), 'string')
+check('and it stays on its own provider', C.providerFor(C.siblingModel('z-ai/glm-5.3-flash', new Set())), 'nvidia')
+/* GLM 5.3 answers 410 since 15 Nov: its row went, its name still routes,
+   and the sideways list no longer steps onto it. */
+check('a withdrawn model still routes when typed', C.providerFor('z-ai/glm-5.3'), 'nvidia')
+check('but is not offered', C.CLOUD_MODELS.some((m) => m.id === 'z-ai/glm-5.3'), false)
+check('nor stepped onto', C.siblingModel('z-ai/glm-5.3-flash', new Set()) !== 'z-ai/glm-5.3', true)
 check('a model the app does not ship has no sibling', C.siblingModel('codestral-latest', new Set()), null)
 /* One Ollama model, so nowhere to go - and that is the right answer rather
    than a hop onto a hosted provider the user did not choose. */
@@ -1414,7 +1418,7 @@ check('and the badge knows which order it is a place in', /ordering\?: Ordering/
   check('and a failure is said plainly', at(0, false), 'did not answer when last checked')
   /* Crossing the usable line is always worth saying, even if the ratio is
      small - it is the one change that moves the row in the list. */
-  const slowish = C.CLOUD_MODELS.find((x) => x.id === 'z-ai/glm-5.3')
+  const slowish = C.CLOUD_MODELS.find((x) => x.id === 'deepseek-ai/deepseek-v4.1-flash')
   check(
     'and so is crossing back under the slow line',
     C.freshNote(slowish, { [slowish.id]: { ms: 29_000, runs: 2, on: '2026-10-22', ok: true } }),
