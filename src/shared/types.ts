@@ -870,6 +870,12 @@ export const IPC = {
   reflectReview: 'reflect:review',
   musicHold: 'music:hold',
   musicRelease: 'music:release',
+  /** The panel restarts Wumpy, naming the chat to come back to (/restart). */
+  appRestart: 'app:restart',
+  /** Main asks the panel to restart (tray, wumpy --restart), so the chat is saved first. */
+  appRestartAsked: 'app:restart-asked',
+  /** The chat a restart left, to open again: once, and null on an ordinary start. */
+  appLaunchChat: 'app:launch-chat',
   /**
    * A line from a listening session, straight into wumpy.log.
    *

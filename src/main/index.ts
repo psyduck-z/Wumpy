@@ -1291,6 +1291,17 @@ function registerIpc(): void {
     await releaseMusic()
   })
 
+  ipcMain.on(IPC.appRestart, (_e, req: { chatId?: string | null; why?: string }) => {
+    void restartWumpy(String(req?.why ?? '/restart'), req?.chatId ?? null)
+  })
+  /* Once: a reload of the page later must not drag the user back to it. */
+  ipcMain.handle(IPC.appLaunchChat, () => {
+    const id = launchChat
+    launchChat = null
+    if (id) console.log(`[wumpy] back on chat ${id} after a restart`)
+    return id
+  })
+
   /**
    * Turns a recorded clip into text for the composer.
    *
@@ -2281,7 +2292,8 @@ void app.whenReady().then(async () => {
     settings,
     getHotkeyState: () => hotkeyState,
     getAssistantStatus: assistantStatus,
-    onToggleLaunchAtLogin: syncLaunchAtLogin
+    onToggleLaunchAtLogin: syncLaunchAtLogin,
+    onRestart: () => askRestart('the tray menu')
   }) as Tray & { refresh(): void }
 
   applyHotkeys()
@@ -2312,6 +2324,11 @@ void app.whenReady().then(async () => {
  */
 app.on('second-instance', (_event, argv) => {
   if (argv.includes('--hidden')) return
+  // `wumpy --restart`: the same restart as /restart and the tray's.
+  if (argv.includes('--restart')) {
+    askRestart('wumpy --restart')
+    return
+  }
   // A spoken turn: the earbuds gesture (through Nothing X) runs wumpy --voice.
   if (argv.includes('--voice')) {
     startVoiceTurn('wumpy --voice')
@@ -2324,6 +2341,67 @@ app.on('second-instance', (_event, argv) => {
   }
   panel?.show('a second Wumpy was started')
 })
+
+/**
+ * Restarting, from /restart, the tray, `wumpy --restart`, or "restart
+ * yourself" through the earbuds.
+ *
+ * Asked for by name: "add a restart command". Until now a restart meant
+ * killing the process by its PID and starting it again by hand, which is
+ * what an update or a stuck model actually needs and nobody should have to
+ * know how to do.
+ *
+ * It comes back as it was: on the chat it left (saved first, by the panel,
+ * which is the one that holds it), and with the panel on screen only if it
+ * was on screen. A restart from a voice turn, with the panel hidden, stays
+ * hidden. app.relaunch starts the new copy as this one exits, so the
+ * single-instance lock has been let go by the time it asks for it.
+ *
+ * Through app.quit rather than app.exit, so will-quit runs and the day's
+ * counts are flushed; the music is resumed first and awaited, because
+ * will-quit cannot wait for it and a restart in the middle of a voice turn
+ * would otherwise leave the song paused for good.
+ */
+let restarting = false
+/** The chat a restart left, from --resume-chat=<id>. Taken once. */
+let launchChat: string | null =
+  process.argv.find((a) => a.startsWith('--resume-chat='))?.slice('--resume-chat='.length) ?? null
+if (launchChat && !/^[\w-]{1,80}$/.test(launchChat)) launchChat = null
+
+/** Wumpy's own launch flags, which describe one start and are not carried over. */
+const OWN_FLAGS = /^--(?:hidden|voice|toggle|restart|resume-chat=.*)$/
+
+async function restartWumpy(why: string, chatId: string | null): Promise<void> {
+  if (restarting) return
+  restarting = true
+  clearTimeout(restartFallback)
+  console.log(`[wumpy] restarting: ${why}`)
+  journal?.add('start', `restarting (${why})`)
+  const args = process.argv.slice(1).filter((a) => !OWN_FLAGS.test(a))
+  if (!panel?.onScreen) args.push('--hidden')
+  if (chatId && /^[\w-]{1,80}$/.test(chatId)) args.push(`--resume-chat=${chatId}`)
+  await releaseAllMusic().catch(() => undefined)
+  app.relaunch({ args })
+  app.quit()
+}
+
+/**
+ * A restart that did not start in the panel: the panel is asked to do it,
+ * so the chat is saved and named on the way out. If it does not answer -
+ * and a panel that has stopped answering is one reason to restart - it
+ * happens anyway, on an empty chat rather than not at all.
+ */
+let restartFallback: ReturnType<typeof setTimeout> | undefined
+function askRestart(why: string): void {
+  const contents = panel?.browserWindow?.webContents
+  if (!contents || contents.isLoading() || contents.isCrashed()) {
+    void restartWumpy(why, null)
+    return
+  }
+  panel.send(IPC.appRestartAsked, why)
+  clearTimeout(restartFallback)
+  restartFallback = setTimeout(() => void restartWumpy(`${why}, without the panel`, null), 4000)
+}
 
 /**
  * Asks the panel to run a spoken turn: listen, answer out loud, ask for any

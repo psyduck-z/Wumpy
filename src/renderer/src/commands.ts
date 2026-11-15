@@ -106,6 +106,8 @@ export type CommandAction =
    */
   | { kind: 'shortcuts' }
   | { kind: 'quit' }
+  /** `/restart` — restart Wumpy and come back to this chat. */
+  | { kind: 'restart' }
   /** Send to the model, but wrapped in a prompt that shapes the answer. */
   | { kind: 'prompt'; text: string; label: string }
 
@@ -764,7 +766,16 @@ export const COMMANDS: CommandSpec[] = forThisWindow([
     hint: 'Every keyboard shortcut',
     run: () => ({ kind: 'shortcuts' })
   },
-  { name: 'quit', aliases: ['exit'], hint: 'Quit Wumpy', run: () => ({ kind: 'quit' }) },
+  /* Closes the panel, as Esc does - the app goes on in the tray, and the
+     tray menu is where it quits. The hint said "Quit Wumpy", which it never
+     did. */
+  { name: 'quit', aliases: ['exit'], hint: 'Close the panel, like Esc', run: () => ({ kind: 'quit' }) },
+  {
+    name: 'restart',
+    aliases: ['relaunch', 'reboot'],
+    hint: 'Restart Wumpy and come back to this chat',
+    run: () => ({ kind: 'restart' })
+  },
 
   ...PROMPT_COMMANDS.map((p): CommandSpec => ({
     name: p.name,

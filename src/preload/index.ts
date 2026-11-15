@@ -325,6 +325,15 @@ const api = {
     /** A spoken turn was asked for (wumpy --voice, the tray). */
     onTurn: (cb: () => void) => on<void>(IPC.voiceTurn, cb)
   },
+  app: {
+    /** Restart Wumpy and open this chat again; null starts on an empty one. */
+    restart: (chatId: string | null, why: string): void =>
+      ipcRenderer.send(IPC.appRestart, { chatId, why }),
+    /** Main wants a restart (the tray, wumpy --restart): save, then restart. */
+    onRestartAsked: (cb: (why: string) => void) => on<string>(IPC.appRestartAsked, cb),
+    /** The chat the last restart left, once; null on an ordinary start. */
+    launchChat: (): Promise<string | null> => ipcRenderer.invoke(IPC.appLaunchChat)
+  },
   music: {
     /** Pause what is playing while Wumpy listens or talks (main/music.ts). */
     hold: (): Promise<void> => ipcRenderer.invoke(IPC.musicHold),

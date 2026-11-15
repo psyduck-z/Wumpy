@@ -78,7 +78,7 @@ import {
   type ShortEntry,
   type ShortWhy
 } from '@shared/spokenpick'
-import { handsFree, tell } from './handsfree'
+import { afterTurn, handsFree, tell } from './handsfree'
 import { useChat, nextId, type ChatStats } from './hooks/useChat'
 import { useListening } from './hooks/useListening'
 import type { AudioSource } from './loopback'
@@ -1671,6 +1671,37 @@ function namedControls(shot: Attachment): string[] {
     [chat]
   )
 
+  /**
+   * Restarts Wumpy, saving this chat first so the restarted one opens it
+   * again (see restartWumpy in the main process). Through a ref, so a
+   * restart asked for by the tray or `wumpy --restart` saves the chat as it
+   * is now and not as it was when the listener was attached.
+   *
+   * The chat is only named for reopening when it was saved here: with
+   * autosave off there is no file, and the restarted Wumpy would open on
+   * "That chat could not be opened."
+   */
+  const restartRef = useRef<(why: string) => Promise<void>>(async () => {})
+  restartRef.current = async (why: string): Promise<void> => {
+    const real = chat.messages.filter((m) => !m.local)
+    let keep = false
+    if (real.length && (settings?.autoSave ?? true)) {
+      keep = await window.wumpy.chats
+        .save({ id: chatId, title: chatTitle ?? undefined, messages: chat.messages, titleLocked })
+        .then((saved) => saved !== null)
+        .catch(() => false)
+    }
+    window.wumpy.app.restart(keep ? chatId : null, why)
+  }
+  useEffect(() => window.wumpy.app.onRestartAsked((why) => void restartRef.current(why)), [])
+
+  /* Back on the chat a restart left, once, at startup. */
+  useEffect(() => {
+    void window.wumpy.app.launchChat().then((id) => {
+      if (id) void openChatRef.current(id)
+    })
+  }, [])
+
   /* --------------------------------------------------------------- commands */
 
   const runCommand = useCallback(
@@ -2557,6 +2588,18 @@ function namedControls(shot: Attachment): string[] {
         case 'quit':
           window.wumpy.panel.hide()
           return
+        case 'restart': {
+          const why = raw.trim().startsWith('/') ? '/restart' : `"${raw.trim()}"`
+          /* Through the earbuds: say so, and restart once the turn is over
+             rather than in the middle of saying it. */
+          if (handsFree()) {
+            tell('Restarting.')
+            afterTurn(() => void restartRef.current(why))
+            return
+          }
+          await restartRef.current(why)
+          return
+        }
         case 'prompt':
           chat.send(action.text, raw)
           return

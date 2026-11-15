@@ -1127,7 +1127,7 @@ export const APP_PROMPT = [
   'Use it when they ask for something done to Wumpy itself: /new, /delete,',
   '/rename <title>, /resume (reads out the old chats), /model (reads out the',
   'models) or /model <name>, /compact, /reflect on|off, /think, /nothink,',
-  '/music on|off, /engine, /settings, /usage. One block per answer. Never /key',
+  '/music on|off, /restart, /engine, /settings, /usage. One block per answer. Never /key',
   'or /approve: those are theirs to type.',
   'Wumpy can hear this computer’s speakers and microphone and keep a transcript',
   'of a meeting, so never answer that you cannot listen to audio. You cannot',

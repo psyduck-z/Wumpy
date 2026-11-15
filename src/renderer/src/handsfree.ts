@@ -14,7 +14,25 @@ let active = false
 
 export function setHandsFree(on: boolean): void {
   active = on
-  if (!on) told.length = 0
+  if (!on) {
+    told.length = 0
+    for (const run of after.splice(0, after.length)) run()
+  }
+}
+
+/*
+ * Things to do once the voice turn is over.
+ *
+ * "Restart yourself", said into the earbuds: restarting there and then
+ * would cut off the "Restarting." that says it heard, and leave the turn
+ * half-finished. So it waits for the turn to end. Outside a voice turn
+ * there is nothing to wait for, and it runs now.
+ */
+const after: Array<() => void> = []
+
+export function afterTurn(run: () => void): void {
+  if (active) after.push(run)
+  else run()
 }
 
 export function handsFree(): boolean {

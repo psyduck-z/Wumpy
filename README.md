@@ -78,7 +78,8 @@ o.bind("SUPER + SHIFT + D", "Wumpy", "wumpy --toggle")
 ```
 
 `wumpy --toggle` shows or hides the window, `wumpy --voice` starts a spoken
-turn (below) and `wumpy --hidden` starts it in the tray.
+turn (below), `wumpy --hidden` starts it in the tray and `wumpy --restart`
+restarts it on the chat it was on.
 
 What is different from Windows, on purpose:
 
@@ -602,6 +603,7 @@ or Enter to accept.
 | `/tier`, `/level` | Switch thinking level, keeping context |
 | `/model [name]` | Pick the model; a rough name ("nemotron super") is matched |
 | `/music on\|off` | Pause music while Wumpy listens and talks |
+| `/restart` | Restart Wumpy and come back to the same chat (also in the tray menu, as `wumpy --restart`, or say "restart yourself") |
 | `/mode [quick\|dev]` | Toggle Quick / Developer |
 | `/dock` | Move the panel, from a list |
 | `/reasoning on\|off` | Show the scratchpad |

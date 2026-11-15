@@ -10,6 +10,8 @@ export interface TrayDeps {
   getHotkeyState(): HotkeyState
   getAssistantStatus(): AssistantStatus
   onToggleLaunchAtLogin(enabled: boolean): void
+  /** Restart Wumpy, coming back to the chat it was on. */
+  onRestart(): void
 }
 
 /** Resolves a resource both in dev (repo root) and in a packaged build. */
@@ -168,6 +170,7 @@ export function createTray(deps: TrayDeps): Tray {
           click: () => void shell.openPath(join(app.getPath('userData'), 'chats'))
         },
         { type: 'separator' },
+        { label: 'Restart Wumpy', click: () => deps.onRestart() },
         { label: 'Quit Wumpy', click: () => app.quit() }
       ])
     )

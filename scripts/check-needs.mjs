@@ -153,8 +153,11 @@ const tokensFor = (list) => A.preambleTokens({ ...FULL, needs: list })
    change Wumpy itself"; now it proposes a wumpy-app block and the card
    asks, on screen and out loud. 87 tokens, ungateable for the same reason
    as the last one: "delete this chat" needs no screen, shell or search. */
-check('everything, as it was', A.preambleTokens(FULL), 15556)
-check('a turn about nothing in particular', tokensFor([]), 8629)
+/* 8,629 -> 8,631 (15,556 -> 15,559 in all): /restart joins that list, so
+   "restart yourself" asked in a sentence the intents do not catch is a
+   card rather than an apology. */
+check('everything, as it was', A.preambleTokens(FULL), 15559)
+check('a turn about nothing in particular', tokensFor([]), 8631)
 check('which is a third of it gone', A.preambleTokens(FULL) - tokensFor([]) > 4500, true)
 check('a turn about the screen', tokensFor(['desktop']) < A.preambleTokens(FULL), true)
 check('a turn about a website', tokensFor(['open']) < A.preambleTokens(FULL), true)
@@ -378,10 +381,10 @@ check('nor one about opening a site', needs(said('I opened vocabulary.com for yo
 
 /* ------------------------------------------------------- the shape contract */
 
-check('no list at all means everything', A.preambleTokens({ ...FULL }), 15556)
-check('an empty list is a real answer, not everything', tokensFor([]) < 15556, true)
+check('no list at all means everything', A.preambleTokens({ ...FULL }), 15559)
+check('an empty list is a real answer, not everything', tokensFor([]) < 15559, true)
 check('one capability is not the other', tokensFor(['open']) !== tokensFor(['desktop']), true)
-check('every topic together is everything', tokensFor(ALL), 15556)
+check('every topic together is everything', tokensFor(ALL), 15559)
 
 /* --------------------------------------------------------------- the wiring */
 

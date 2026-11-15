@@ -140,6 +140,16 @@ const INTENTS: Intent[] = [
     build: () => ({ kind: 'resume' })
   },
   {
+    /*
+     * "restart wumpy", "restart yourself". Wumpy or yourself is required:
+     * "restart the server" or "restart my computer" is the user's work, and
+     * belongs to the model.
+     */
+    pattern:
+      /^(?:please\s+)?(?:can\s+you\s+)?(?:restart|reboot|relaunch|reload)\s+(?:wumpy|yourself)(?:\s+please)?\.?$/i,
+    build: () => ({ kind: 'restart' })
+  },
+  {
     /* "change the model", "switch models", "pick a model": the list. */
     pattern:
       /^(?:please\s+)?(?:can\s+you\s+)?(?:change|switch|pick|choose|select)\s+(?:the\s+|my\s+|a\s+|your\s+)?(?:ai\s+)?models?\.?$/i,
