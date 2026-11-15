@@ -125,14 +125,14 @@ check('and when the turn ends, however it ends', /\.finally\(\(\) => \{\s+stopTi
  * out of A2DP, taking seconds and sometimes failing ("Failure in Bluetooth
  * audio transport"), while the chime had already told the person to talk.
  */
-const micMain = read('src/main/mic.ts')
-const micPage = read('src/renderer/src/mic.ts')
 const recorderSrc = read('src/renderer/src/recorder.ts')
 const dictation = read('src/renderer/src/hooks/useDictation.ts')
-check('auto prefers this computer’s mic over a Bluetooth headset’s', /current\.startsWith\('bluez_'\)/.test(micMain) && /!s\.name\.startsWith\('bluez_'\)/.test(micMain), true)
-check('never a speaker monitor', /!s\.name\.endsWith\('\.monitor'\)/.test(micMain), true)
-check('/microphone earbuds is the system default', /pick === 'default'\) return \{ label: null/.test(micMain), true)
-check('the page opens the chosen device', /deviceId: \{ exact: opts\.deviceId \}/.test(recorderSrc), true)
+/* Then: "If I'm using Wumpy with the buds, the buds are the microphone.
+   Don't overcomplicate it with extra commands." So there is no choosing:
+   the system's default mic, which is the earbuds' when they are connected. */
+check('no microphone is chosen: the system default', /deviceId/.test(turn) || /deviceId/.test(dictation), false)
+check('no /microphone command', /name: 'microphone'/.test(read('src/renderer/src/commands.ts')), false)
+check('the log names the mic that opened', /note\(`microphone: \$\{recording\.device\}`\)/.test(turn), true)
 check('a dead mic is exact zeros, a live one any sound', /level > 1e-5/.test(recorderSrc), true)
 check('the chime waits until the mic is live', /recording\.live, sleep\(LIVE_WAIT_MS\)[\s\S]{0,900}await chime\('listen'\)[\s\S]{0,200}recording\.arm\(\)/.test(turn), true)
 check('no chime plays before the mic is open any more', /await chime\('listen'\)\s+const \w+ = await listen\(/.test(turn), false)
@@ -156,8 +156,6 @@ check('the chime is not heard as speech', /if \(!armed\) return/.test(turn) && /
   check('a normal one is left alone', peak(W.louder(loud.slice())), peak(loud))
 }
 check('a mic that never wakes says so', /The microphone gave no sound at all/.test(turn), true)
-check('dictation uses the same mic', /const mic = await chosenMic\(\)\s+recording = await record\(\{\s+deviceId: mic\.deviceId/.test(dictation), true)
-check('the virtual "default" is not offered as a mic', /VIRTUAL = new Set\(\['default', 'communications'\]\)/.test(micPage), true)
 
 /* -------------------------------------------------------------- the log */
 

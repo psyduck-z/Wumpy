@@ -621,7 +621,6 @@ or Enter to accept.
 | `/tier`, `/level` | Switch thinking level, keeping context |
 | `/model [name]` | Pick the model; a rough name ("nemotron super") is matched |
 | `/music on\|off` | Pause music while Wumpy listens and talks |
-| `/microphone [auto\|earbuds\|<number>]` | Which microphone to talk to Wumpy with. `auto` (the default) uses this computer's own when the default is a Bluetooth headset's, so the earbuds don't have to switch to headset mode first |
 | `/startup on\|off` | Start Wumpy in the background when you log in, so the earbuds gesture works without opening it |
 | `/restart` | Restart Wumpy and come back to the same chat (also in the tray menu, as `wumpy --restart`, or say "restart yourself") |
 | `/mode [quick\|dev]` | Toggle Quick / Developer |

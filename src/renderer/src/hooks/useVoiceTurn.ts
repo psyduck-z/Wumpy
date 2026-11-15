@@ -15,7 +15,6 @@ import { newestPending, pendingCount, runningCount } from '../pending'
 import { setHandsFree, takeTold } from '../handsfree'
 import { choiceMark, newestChoice, stillWaiting, type AloudChoice, type AloudOption } from '../aloud'
 import { setVoiceStopper, showVoice, voiceView } from '../voiceview'
-import { chosenMic } from '../mic'
 import { chime, releaseOutput, startTicks, stopTicks, wakeOutput } from '../earcons'
 import { Speaker } from '../speaker'
 import { readyToSay, sentences } from '@shared/speakahead'
@@ -282,15 +281,12 @@ export function useVoiceTurn(deps: Deps): void {
       stopTicks()
       showVoice({ stage: 'starting', level: 0, detail: prompt })
       const opened = Date.now()
-      const mic = await chosenMic()
-      if (!micNamed) {
-        micNamed = true
-        note(`microphone: ${mic.label} - ${mic.why}`)
-      }
       let recording: Awaited<ReturnType<typeof record>>
       try {
+        /* The system's default microphone: the earbuds', when they are
+           connected. "If I'm using Wumpy with the buds, the buds are the
+           microphone." */
         recording = await record({
-          deviceId: mic.deviceId,
           armed: false,
           silenceMs: pauseMs,
           maxMs,
@@ -307,6 +303,10 @@ export function useVoiceTurn(deps: Deps): void {
         throw new Error(`The microphone could not be opened (${String(err)}).`)
       }
       stopListening = () => recording.stop()
+      if (!micNamed) {
+        micNamed = true
+        note(`microphone: ${recording.device}`)
+      }
 
       /*
        * The chime means "I can hear you now", so it waits until that is
@@ -576,7 +576,7 @@ export function useVoiceTurn(deps: Deps): void {
         showVoice({
           stage: 'nothing',
           detail: micDead
-            ? 'The microphone gave no sound at all. /microphone shows which one is in use.'
+            ? 'The microphone gave no sound at all. Are the earbuds connected, and out of the case?'
             : lastPeak < lastBar
               ? 'The microphone stayed quiet. Is the right one selected, and not muted?'
               : 'It heard sound but no words. Try again, a little closer.'

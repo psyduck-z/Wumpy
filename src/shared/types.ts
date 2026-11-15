@@ -185,7 +185,6 @@ export type NoteTopic =
   | 'voice'
   | 'voice-music'
   | 'startup'
-  | 'mic'
   | 'voice-polish'
   | 'voice-autostop'
   | 'reflect'
@@ -622,12 +621,6 @@ export interface WumpySettings {
    */
   pauseMusic: boolean
   /**
-   * The microphone for voice turns and dictation: 'auto' (this computer's
-   * own when the default is a Bluetooth headset's - see main/mic.ts),
-   * 'default' (the system's), or a device's label chosen with /microphone.
-   */
-  voiceMic: string
-  /**
    * Self-reflection (/reflect): once the model has finished a task, a mentor
    * reviews it - on the other key where there are two - and the work goes
    * back for another pass until the mentor accepts it. See shared/reflect.ts.
@@ -877,8 +870,6 @@ export const IPC = {
   voiceSpeakStream: 'voice:speak-stream',
   /** One piece of streamed speech: { id, pcm } with 16-bit mono PCM. */
   voiceAudio: 'voice:audio',
-  /** Which microphone to open: see main/mic.ts. */
-  voiceMicPlan: 'voice:mic-plan',
   /** Main tells the panel to run a spoken turn (wumpy --voice). */
   voiceTurn: 'voice:turn',
   reflectReview: 'reflect:review',

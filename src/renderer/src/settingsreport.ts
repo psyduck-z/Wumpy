@@ -95,16 +95,6 @@ export function settingsRows(
     { what: 'music paused while talking', now: onOff(settings.pauseMusic ?? true), change: '`/music`' },
     { what: 'starts in the background at login', now: onOff(settings.launchAtLogin), change: '`/startup`' },
     {
-      what: 'microphone',
-      now:
-        (settings.voiceMic ?? 'auto') === 'auto'
-          ? 'auto (this computer’s over a Bluetooth headset’s)'
-          : settings.voiceMic === 'default'
-            ? 'the system default'
-            : settings.voiceMic,
-      change: '`/microphone`'
-    },
-    {
       what: 'self-reflection',
       now: settings.reflect
         ? `on, up to ${settings.reflectRounds} reviews${settings.reflectModel ? ` by ${settings.reflectModel}` : ''}`

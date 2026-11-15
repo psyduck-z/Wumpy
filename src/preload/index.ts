@@ -331,7 +331,6 @@ const api = {
     onAudio: (cb: (piece: { id: string; pcm: ArrayBuffer }) => void) =>
       on<{ id: string; pcm: ArrayBuffer }>(IPC.voiceAudio, cb),
     /** Which microphone to open, by label; null is the system default. */
-    micPlan: (): Promise<{ label: string | null; why: string }> => ipcRenderer.invoke(IPC.voiceMicPlan),
     /** A spoken turn was asked for (wumpy --voice, the tray). */
     onTurn: (cb: () => void) => on<void>(IPC.voiceTurn, cb)
   },

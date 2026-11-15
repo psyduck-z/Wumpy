@@ -141,6 +141,8 @@ export interface Recording {
    * is lost. Never resolves if the mic stays dead.
    */
   live: Promise<number>
+  /** The microphone's name, as the system gives it. */
+  device: string
   /** Start counting speech, for a recording opened with armed: false. */
   arm(): void
   /** Resolves with the audio once it has ended, or null if nothing was said. */
@@ -457,6 +459,7 @@ export async function record(opts: RecorderOptions = {}): Promise<Recording> {
     stop: () => finish('asked'),
     done,
     live,
+    device: stream.getAudioTracks()[0]?.label || 'the system default',
     arm: () => {
       if (armed) return
       armed = true

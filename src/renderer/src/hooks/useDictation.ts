@@ -1,4 +1,3 @@
-import { chosenMic } from '../mic'
 import { clipForSpeech } from '../wav'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type { VoiceStatus } from '@shared/types'
@@ -210,12 +209,7 @@ export function useDictation(onText: (text: string) => void, commands: string[])
         const partials = new Map<number, string>()
         let chain: Promise<void> = Promise.resolve()
 
-        /* The same microphone a voice turn uses - this computer's, rather
-           than a Bluetooth headset's that has to switch modes first. See
-           main/mic.ts. */
-        const mic = await chosenMic()
         recording = await record({
-          deviceId: mic.deviceId,
           onLevel: setLevel,
           // Held: the release ends it, so no silence timeout at all. Otherwise
           // null means push-to-talk with Ctrl+M at both ends.

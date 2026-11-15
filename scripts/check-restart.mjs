@@ -54,8 +54,6 @@ check('/startup on', K.parseCommand('/startup on'), { kind: 'startup', on: true 
 check('/startup off', K.parseCommand('/startup off'), { kind: 'startup', on: false })
 check('/autostart alone toggles', K.parseCommand('/autostart'), { kind: 'startup', on: 'toggle' })
 check('the model may propose it, and it asks', K.readAppProposal('# Start with the computer\n/startup on').harmless, false)
-check('/microphone auto', K.parseCommand('/microphone auto'), { kind: 'mic', choice: 'auto' })
-check('/microphone alone lists them', K.parseCommand('/microphone'), { kind: 'mic', choice: '' })
 check('/mic is still dictation on or off', K.parseCommand('/mic').kind, 'voice')
 
 /* ------------------------------------------------------------ said aloud */

@@ -136,7 +136,6 @@ import { clampRounds } from '@shared/reflect'
 import { Message } from './components/Message'
 import { Composer } from './components/Composer'
 import { VoiceTurnBar } from './components/VoiceTurnBar'
-import { microphones } from './mic'
 import { StatusBar } from './components/StatusBar'
 import logo from './assets/logo.png'
 import { Picker, type PickerProps } from './components/Picker'
@@ -2619,44 +2618,6 @@ function namedControls(shot: Attachment): string[] {
         case 'quit':
           window.wumpy.panel.hide()
           return
-        case 'mic': {
-          const choice = action.choice.toLowerCase()
-          const list = await microphones()
-          const current = settings?.voiceMic ?? 'auto'
-          let next: string | null = null
-          if (['auto', 'computer', 'laptop', 'builtin', 'built-in'].includes(choice)) next = 'auto'
-          else if (['earbuds', 'buds', 'default', 'system', 'headset'].includes(choice)) next = 'default'
-          else if (/^\d+$/.test(choice)) {
-            const picked = list[Number(choice) - 1]
-            if (!picked) {
-              chat.note(`There is no microphone ${choice}. \`/mic\` lists them.`, true)
-              return
-            }
-            next = picked
-          } else if (choice) {
-            chat.note('Say `/microphone auto`, `/microphone earbuds`, or a number from `/microphone`.', true)
-            return
-          }
-          if (next !== null) await patch({ voiceMic: next })
-          const plan = await window.wumpy.voice.micPlan()
-          const using = plan.label ?? 'the system default'
-          const name = (v: string): string =>
-            v === 'auto' ? 'auto' : v === 'default' ? 'the system default (earbuds)' : v
-          chat.note(
-            [
-              `**Listening with ${using}** — ${plan.why}. Set to ${name(next ?? current)}.`,
-              '',
-              ...list.map((label, i) => `${i + 1}. ${label}`),
-              '',
-              '`/microphone auto` uses this computer’s microphone whenever the default is a Bluetooth ' +
-                'headset’s, `/microphone earbuds` always uses the system default, and `/microphone <number>` picks one.'
-            ].join(NEWLINE),
-            false,
-            'mic'
-          )
-          tell(`Listening with ${using}.`)
-          return
-        }
         case 'startup': {
           const next = action.on === 'toggle' ? !(settings?.launchAtLogin ?? false) : action.on
           await patch({ launchAtLogin: next })
