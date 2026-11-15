@@ -121,6 +121,65 @@ export function useVoiceTurn(deps: Deps): void {
       ticker = null
     }
 
+    /** Plays a WAV in an audio element. False when it could not start. */
+    function playElement(wav: ArrayBuffer, quick: boolean): Promise<boolean> {
+      const url = URL.createObjectURL(new Blob([wav], { type: 'audio/wav' }))
+      const audio = new Audio(url)
+      audio.preservesPitch = true
+      audio.playbackRate = quick ? 1.2 : 1
+      return new Promise<boolean>((resolve) => {
+        let started = false
+        const end = (ok: boolean): void => {
+          stopSound = null
+          URL.revokeObjectURL(url)
+          resolve(ok)
+        }
+        stopSound = () => {
+          audio.pause()
+          end(true)
+        }
+        audio.onplaying = () => {
+          started = true
+          stopTicks()
+        }
+        audio.onended = () => end(true)
+        audio.onerror = () => {
+          note(`the speech could not be played: ${audio.error?.message || 'unknown error'}`)
+          end(started)
+        }
+        void audio.play().catch((err) => {
+          note(`the speech could not be played: ${String(err)}`)
+          end(started)
+        })
+      })
+    }
+
+    /** The same WAV through Web Audio. False when it could not be decoded. */
+    async function playWebAudio(wav: ArrayBuffer): Promise<boolean> {
+      try {
+        const context = new AudioContext()
+        const buffer = await context.decodeAudioData(wav.slice(0))
+        const source = context.createBufferSource()
+        source.buffer = buffer
+        source.connect(context.destination)
+        await new Promise<void>((resolve) => {
+          stopSound = () => {
+            source.stop()
+            resolve()
+          }
+          source.onended = () => resolve()
+          stopTicks()
+          source.start()
+        })
+        stopSound = null
+        void context.close()
+        return true
+      } catch (err) {
+        note(`Web Audio could not play the speech: ${String(err)}`)
+        return false
+      }
+    }
+
     /** Short tones, so the earbuds say what is happening without words. */
     async function chime(kind: 'listen' | 'done' | 'cancel'): Promise<void> {
       stopTicks()
@@ -157,34 +216,24 @@ export function useVoiceTurn(deps: Deps): void {
       showVoice({ stage: 'speaking', level: 0, detail: text.length > 160 ? `${text.slice(0, 157)}…` : text })
       const wav = await window.wumpy.voice.speak(text).catch(() => null)
       if (cancelled) return
-      /* Ticking through the synthesis too, which can take a second or two;
-         stopped the moment there is something to play. */
-      stopTicks()
       note(`speaking ${text.length} characters with ${wav ? 'Magpie' : 'the system voice, since Magpie gave nothing'}`)
+      /*
+       * Magpie's answer never played, the first time a whole turn worked:
+       * "Failed to load because no supported source was found." The WAV was
+       * fine - the page's security policy had no media-src, so a blob: URL
+       * fell under default-src 'self' and the audio element refused it. The
+       * policy allows blob: audio now, and if the element refuses anyway,
+       * the same WAV goes through Web Audio, which no media policy governs.
+       * The ticks run until sound actually comes out, not until bytes
+       * arrive.
+       */
       if (wav) {
-        const url = URL.createObjectURL(new Blob([wav], { type: 'audio/wav' }))
-        const audio = new Audio(url)
-        audio.preservesPitch = true
-        audio.playbackRate = quick ? 1.2 : 1
-        await new Promise<void>((resolve) => {
-          stopSound = () => {
-            audio.pause()
-            resolve()
-          }
-          audio.onended = () => resolve()
-          audio.onerror = () => {
-            note('the speech could not be played')
-            resolve()
-          }
-          void audio.play().catch((err) => {
-            note(`the speech could not be played: ${String(err)}`)
-            resolve()
-          })
-        })
-        stopSound = null
-        URL.revokeObjectURL(url)
-        return
+        if ((await playElement(wav, quick)) || cancelled) return
+        note('playing it through Web Audio instead')
+        if ((await playWebAudio(wav)) || cancelled) return
+        note('Web Audio could not play it either; using the system voice')
       }
+      stopTicks()
       // No NVIDIA voice: the system's own, where there is one.
       if ('speechSynthesis' in window) {
         await new Promise<void>((resolve) => {
@@ -486,7 +535,8 @@ export function useVoiceTurn(deps: Deps): void {
       if (!text) noteLine(talked ? 'nothing more to say' : 'no answer came back to read out')
       if (text) await say(text)
       else await chime('done')
-      if (!cancelled) showVoice({ stage: 'done', detail: '' })
+      /* The answer stays on the bar after it is said, for a glance. */
+      if (!cancelled) showVoice({ stage: 'done', detail: text.length > 160 ? `${text.slice(0, 157)}…` : text })
     }
 
     /* A second gesture, or Stop on the bar: ends the turn where it is. */

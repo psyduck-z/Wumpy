@@ -47,7 +47,7 @@ export function showVoice(next: Partial<VoiceView>): void {
   view = { ...view, ...next }
   clearTimeout(clear)
   if (FINISHED.has(view.stage)) {
-    clear = setTimeout(() => showVoice({ ...IDLE }), view.stage === 'error' ? 15_000 : 6000)
+    clear = setTimeout(() => showVoice({ ...IDLE }), view.stage === 'error' ? 15_000 : 10_000)
   }
   for (const l of listeners) l()
 }

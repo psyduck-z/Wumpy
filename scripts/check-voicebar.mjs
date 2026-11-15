@@ -97,7 +97,18 @@ check('from the moment it has the recording', /showVoice\(\{ stage: 'hearing', l
 check('and while the answer is coming', /runningCount\(\) > 0\) \{\s+quietSince = 0\s+startTicks\(\)/.test(turn), true)
 check('never while the mic is open', /let peak = 0\s+stopTicks\(\)/.test(turn), true)
 check('nor over a chime', /async function chime[^{]*\{\s+stopTicks\(\)/.test(turn), true)
-check('and stops once there is speech to play', /stopTicks\(\)\s+note\(`speaking/.test(turn), true)
+check('and stops once the answer is actually playing', /audio\.onplaying = \(\) => \{\s+started = true\s+stopTicks\(\)/.test(turn), true)
+
+/* ------------------------------------------------------------ the answer */
+
+/* The first whole turn heard "What's one plus one?", got the answer, and
+   said nothing: the page's policy had no media-src, so the blob: WAV was
+   refused as "no supported source". */
+const html = read('src/renderer/index.html')
+check('the page lets a spoken answer play', /media-src 'self' blob:/.test(html), true)
+check('and if the element refuses, Web Audio plays it', /if \(\(await playWebAudio\(wav\)\) \|\| cancelled\) return/.test(turn), true)
+check('the element is tried first, for the faster lists', /if \(\(await playElement\(wav, quick\)\) \|\| cancelled\) return/.test(turn), true)
+check('the answer stays on the bar after it is said', /stage: 'done', detail: text/.test(turn), true)
 check('and when the turn ends, however it ends', /\.finally\(\(\) => \{\s+stopTicks\(\)/.test(turn), true)
 
 /* -------------------------------------------------------------- the log */
