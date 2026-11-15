@@ -316,7 +316,16 @@ export default function App(): React.JSX.Element {
     return window.wumpy.hotkey.onChange(setHotkey)
   }, [])
 
-  useEffect(() => window.wumpy.assistant.onStatus(setAssistant), [])
+  /* A status change can be Ollama starting or stopping, which only the key
+     status carries - so both are read again. */
+  useEffect(
+    () =>
+      window.wumpy.assistant.onStatus((s) => {
+        setAssistant(s)
+        void window.wumpy.keys.status().then(setKeyStatus)
+      }),
+    []
+  )
 
   // The tray menu can change approval mode and the rest from outside the panel.
   useEffect(() => window.wumpy.settings.onChange(setSettings), [])
@@ -1549,9 +1558,13 @@ function namedControls(shot: Attachment): string[] {
   /* ------------------------------------------------- choosing out loud */
 
   /** A key for it, or none needed. */
+  /* A keyless provider is ready when its daemon answers, not because it
+     needs no key: see localUp in the main process. */
   const providerReady = useCallback(
     (p: CloudModel['provider']): boolean =>
-      PROVIDERS[p].keyless || (keyStatus?.configured.includes(p) ?? false),
+      PROVIDERS[p].keyless
+        ? (keyStatus?.local?.includes(p) ?? false)
+        : (keyStatus?.configured.includes(p) ?? false),
     [keyStatus]
   )
 
@@ -2033,6 +2046,22 @@ function namedControls(shot: Attachment): string[] {
             )
             tell(`${sayModel(hosted.label)} needs a ${PROVIDERS[hosted.provider].label} key first.`)
             return
+          }
+
+          /* Keyless, so no key to ask for - but the daemon has to be there.
+             Asked fresh, so one started a moment ago counts. */
+          if (hosted && PROVIDERS[hosted.provider].keyless) {
+            const fresh = await window.wumpy.keys.status()
+            setKeyStatus(fresh)
+            if (!(fresh.local?.includes(hosted.provider) ?? false)) {
+              const daemon = PROVIDERS[hosted.provider].label
+              chat.note(
+                `**${hosted.label}** runs through ${daemon}, which is not running on this computer. ` +
+                  `Start ${daemon}, or pick another model with \`/model\`.`
+              )
+              tell(`${sayModel(hosted.label)} needs ${daemon}, and it isn't running here.`)
+              return
+            }
           }
 
           /* Typed rather than picked, so there IS an answer owed - but
@@ -3493,11 +3522,14 @@ function namedControls(shot: Attachment): string[] {
        * one without a key explains how to get a key - which is more use than
        * hiding it and leaving them to guess.
        */
-      /* A keyless provider is ready as soon as it is listed: Ollama runs on
-         this machine and is authorised at the daemon, so "needs a key" would
-         be advice nobody can follow and the model would never be pickable. */
+      /* A keyless provider is ready when its daemon answers: Ollama runs on
+         this machine and is authorised there, so "needs a key" would be
+         advice nobody can follow - and "ready" on a machine without it
+         was a row that failed every message. */
       const usable = (p: (typeof CLOUD_MODELS)[number]['provider']): boolean =>
-        PROVIDERS[p].keyless || (keyStatus?.configured.includes(p) ?? false)
+        PROVIDERS[p].keyless
+          ? (keyStatus?.local?.includes(p) ?? false)
+          : (keyStatus?.configured.includes(p) ?? false)
 
       /*
        * Ordered by what each one scored, not by the order they were typed
@@ -3541,7 +3573,13 @@ function namedControls(shot: Attachment): string[] {
             id: m.id,
             title: m.label,
             meta:
-              `${PROVIDERS[m.provider].label}  ·  ${ready ? m.blurb : 'needs a key — /key ' + m.provider}` +
+              `${PROVIDERS[m.provider].label}  ·  ${
+                ready
+                  ? m.blurb
+                  : PROVIDERS[m.provider].keyless
+                    ? 'not running on this computer'
+                    : 'needs a key — /key ' + m.provider
+              }` +
               (note ? `  ·  ${note}` : ''),
             ...(tag ? { tag } : {}),
             /*

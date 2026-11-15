@@ -302,6 +302,42 @@ function backgroundModel(): string | null {
   return resolveModel()
 }
 
+/**
+ * Which keyless providers' daemons are answering on this machine.
+ *
+ * Ollama has no key, so "configured" could never say whether it was there,
+ * and everything treated it as ready the moment it was named. On a machine
+ * without Ollama that meant the Gemma row was pickable, recommended in the
+ * spoken shortlist, and probed by the ranker - and then every message to it
+ * failed to connect. So it is asked: its OpenAI-style /models, on localhost,
+ * at startup and every half minute after. Nothing listening is a refused
+ * connection and costs nothing; a request about to be sent asks again
+ * rather than trusting a stale "no" (CloudClient.freshLocal).
+ */
+const localUp = new Set<ProviderId>()
+let localChecking: Promise<void> | null = null
+
+function checkLocal(): Promise<void> {
+  localChecking ??= (async () => {
+    let changed = false
+    for (const id of PROVIDER_IDS) {
+      if (!PROVIDERS[id].keyless) continue
+      const up = await fetch(`${PROVIDERS[id].base}/models`, { signal: AbortSignal.timeout(1500) })
+        .then((r) => r.ok)
+        .catch(() => false)
+      if (up === localUp.has(id)) continue
+      changed = true
+      if (up) localUp.add(id)
+      else localUp.delete(id)
+      console.log(`[wumpy] ${PROVIDERS[id].label} ${up ? 'is answering' : 'stopped answering'} on this machine`)
+    }
+    if (changed && panel) await refreshModels()
+  })().finally(() => {
+    localChecking = null
+  })
+  return localChecking
+}
+
 async function refreshModels(): Promise<void> {
   panel.send(IPC.assistantStatus, assistantStatus())
   tray?.refresh()
@@ -1894,8 +1930,14 @@ ${command}`
     return { ok: result.ok, why: result.why, text: notes.read(), truncated: notes.truncated() }
   })
 
-  ipcMain.handle(IPC.keyStatus, () => ({
+  ipcMain.handle(IPC.keyStatus, async () => ({
     configured: keys.configured(),
+    /* Asked again when something is down, so a daemon started a moment
+       ago counts now. A refused connection on localhost is instant. */
+    local: await (PROVIDER_IDS.some((id) => PROVIDERS[id].keyless && !localUp.has(id))
+      ? checkLocal()
+      : Promise.resolve()
+    ).then(() => [...localUp]),
     canStore: keys.available(),
     counts: Object.fromEntries(PROVIDER_IDS.map((id) => [id, keys.count(id)]))
   }))
@@ -2145,7 +2187,7 @@ void app.whenReady().then(async () => {
   keys = new KeyStore()
   notes = new ContextStore()
   pools = new PoolStore()
-  cloud = new CloudClient(keys, pools)
+  cloud = new CloudClient(keys, pools, { up: (p) => localUp.has(p), refresh: checkLocal })
   usage = new UsageStore()
   /* The panel is told about every line, so a `/log` on screen keeps up
      with the hourly ranking rather than being a snapshot of the moment it
@@ -2300,6 +2342,10 @@ void app.whenReady().then(async () => {
   void startLowLevelHook()
   syncLaunchAtLogin(settings.get('launchAtLogin'))
 
+  /* Before the first status, so a model on a daemon that is not running
+     is never reported ready for the half minute until the next look. */
+  await checkLocal()
+  setInterval(() => void checkLocal(), 30_000).unref()
   await refreshModels()
 
   // Launched by the login item, or by a restart during development: stay in

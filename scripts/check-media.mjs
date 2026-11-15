@@ -297,9 +297,10 @@ check(
  * Preferring the FREE one was tried on 21 Oct and backed out. gemma4 is
  * the user's own Ollama account and costs nothing from the per-minute
  * ceiling, which is a good argument - but a keyless provider is a daemon
- * and a daemon can be off. `ready()` calls keyless providers ready the
- * moment they are named, so the eye would have been offered with nothing
- * configured, and returned nothing quietly when Ollama was down.
+ * and a daemon can be off. `ready()` called keyless providers ready the
+ * moment they were named (until 15 Nov, when it started asking the
+ * daemon), so the eye would have been offered with nothing configured,
+ * and returned nothing quietly when Ollama was down.
  *
  * These two checks are what caught it, which is why they are worth
  * keeping sharp: an eye on a provider that cannot answer is not an eye.

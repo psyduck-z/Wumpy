@@ -728,7 +728,7 @@ check('availability is asked per model', /availableCount\(Date\.now\(\), model\)
 check('a wait is said in units people use', /friendlyWait\(wait\)/.test(cloud), true)
 
 const main = readFileSync('src/main/index.ts', 'utf8')
-check('the pool ledger is given to the client', /new CloudClient\(keys, pools\)/.test(main), true)
+check('the pool ledger is given to the client', /new CloudClient\(keys, pools, \{/.test(main), true)
 /* There is no account setting any more: every key is its own account. */
 check('and no account setting is read', main.includes('keyAccounts'), false)
 check('the report carries the pool', /pool: cloud\.poolFor\(model, cap\)/.test(main), true)

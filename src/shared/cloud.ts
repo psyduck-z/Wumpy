@@ -1365,8 +1365,9 @@ export function eyeFor(model: string): CloudModel | null {
    * one request that need not have cost anything.
    *
    * What killed it: a keyless provider is a DAEMON, and a daemon can be
-   * off. `ready()` calls keyless providers ready the moment they are
-   * named, because there is no key to check - so the eye would have been
+   * off. `ready()` called keyless providers ready the moment they were
+   * named, because there was no key to check (it asks the daemon now, since
+   * 15 Nov - see localUp in the main process) - so the eye would have been
    * offered with nothing configured at all, and when Ollama was not
    * running it would have returned nothing, quietly. The description
    * would simply be absent and the user would never learn why.

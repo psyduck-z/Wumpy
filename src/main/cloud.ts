@@ -252,8 +252,26 @@ export class CloudClient {
    */
   constructor(
     private readonly keys: KeyStore,
-    private readonly ledger?: { get(p: ProviderId): PoolDay | null; save(p: ProviderId, d: PoolDay): void }
+    private readonly ledger?: { get(p: ProviderId): PoolDay | null; save(p: ProviderId, d: PoolDay): void },
+    /**
+     * Whether a keyless provider's daemon is answering on this machine, and
+     * a way to ask it again. Optional, so a script can build a client
+     * without a network; absent means "assume it is up", as it always was.
+     */
+    private readonly local?: { up(p: ProviderId): boolean; refresh(): Promise<void> }
   ) {}
+
+  /**
+   * Asks a keyless provider's daemon again before a real request, when the
+   * last answer was "not running" - so starting Ollama works on the next
+   * message rather than the next poll. A refused connection is instant, so
+   * this costs nothing when it is still down.
+   */
+  private async freshLocal(model: string): Promise<void> {
+    const provider = providerFor(model)
+    if (!provider || !PROVIDERS[provider].keyless || !this.local) return
+    if (!this.local.up(provider)) await this.local.refresh()
+  }
 
   /** Does each key here carry its own ceiling? See `keysAreSeparate`. */
   private separate(provider: ProviderId): boolean {
@@ -280,7 +298,21 @@ export class CloudClient {
      * both of which read "you have not set this up yet" - would be
      * permanently true and the model permanently unreachable.
      */
-    if (PROVIDERS[provider].keyless) return { ok: true, why: '', provider }
+    if (PROVIDERS[provider].keyless) {
+      /* Ready when the daemon answers, not merely when it is named: on a
+         machine without Ollama the Gemma row was offered, recommended out
+         loud, and picked - and then every message failed to connect. */
+      if (this.local && !this.local.up(provider)) {
+        return {
+          ok: false,
+          why:
+            `${PROVIDERS[provider].label} is not running on this computer. ` +
+            'Start it, or pick another model with /model.',
+          provider
+        }
+      }
+      return { ok: true, why: '', provider }
+    }
     if (!this.keys.available()) {
       return { ok: false, why: 'This PC cannot store a key securely.', provider }
     }
@@ -888,6 +920,7 @@ export class CloudClient {
     opts: ChatOptions,
     handlers: StreamHandlers
   ): Promise<void> {
+    await this.freshLocal(model)
     const check = this.ready(model)
     if (!check.ok || !check.provider) {
       handlers.onError(check.why)
@@ -1498,6 +1531,7 @@ export class CloudClient {
       otherKey?: boolean
     }
   ): Promise<string | null> {
+    await this.freshLocal(model)
     const check = this.ready(model)
     if (!check.ok || !check.provider) return null
     const provider = check.provider

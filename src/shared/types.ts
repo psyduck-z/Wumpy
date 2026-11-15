@@ -1037,6 +1037,12 @@ export interface UsageReport {
 
 export interface KeyStatus {
   configured: ProviderName[]
+  /**
+   * The keyless providers whose daemon answered on this machine lately -
+   * Ollama, when it is installed and running. A keyless provider is ready
+   * when it is here, not merely because it needs no key.
+   */
+  local?: ProviderName[]
   /** False when the OS cannot encrypt, in which case Wumpy stores nothing. */
   canStore: boolean
   /**
