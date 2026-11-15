@@ -250,7 +250,12 @@ export class Ranker {
         this.deps.record(result)
         console.log(
           `[wumpy] ranked ${result.model} on key ${verdict.key + 1}: ` +
-            `${result.state} in ${result.ms}ms, ${this.left.length} left this sweep`
+            /* The reason too, when it failed: "error" alone could not tell
+               a withdrawn model (404) from a refused request (400), and
+               the two mean different things for the catalogue. It never
+               carries key material - the probe strips it. */
+            `${result.state}${result.state !== 'ok' && result.why ? ` (${result.why})` : ''} ` +
+            `in ${result.ms}ms, ${this.left.length} left this sweep`
         )
       }
       if (!this.left.length) this.finish()
