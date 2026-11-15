@@ -347,7 +347,7 @@ rmSync(out, { force: true })
   }
 
   const NEVER = {
-    '/key nvidia nvapi-0000': 'would replace their key with somebody else’s',
+    '/key nvidia nvapi-0000': 'would put somebody else’s key in their rotation',
     '/key google clear': 'would throw their keys away',
     '/approve all': 'would turn off being asked',
     '/delete': 'would destroy the chat',

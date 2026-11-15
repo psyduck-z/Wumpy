@@ -2256,7 +2256,7 @@ function namedControls(shot: Attachment): string[] {
            * Reported by POSITION, because that is what the main process
            * sends: a key never crosses that boundary, not even masked, so
            * "key 1, 2 and 3" is the most that can be said - and it is
-           * enough, since /key google <the rest> replaces the list.
+           * enough, since /key google replace <the rest> replaces the list.
            */
           if (action.check) {
             chat.note(`Checking the ${label} keys…`)
@@ -2285,7 +2285,7 @@ function namedControls(shot: Attachment): string[] {
                 'They are out of the rotation now, and stay out across restarts and across ' +
                   'midnight — a refused key is not something waiting fixes.',
                 `Drop them with \`/key ${provider} drop ${dead.map((k) => k.number).join(' ')}\`, ` +
-                  `or replace the whole list with \`/key ${provider} <key…>\`.`
+                  `or replace the whole list with \`/key ${provider} replace <key…>\`.`
               ].join(NEWLINE)
             )
             setKeyStatus(await window.wumpy.keys.status())
@@ -2325,14 +2325,15 @@ function namedControls(shot: Attachment): string[] {
             chat.note(
               has
                 ? `${status.counts?.[provider] ?? 1} ${label} key(s) saved. Add another with ` +
-                    `\`/key ${provider} add <key>\`, replace them all with ` +
-                    `\`/key ${provider} <key…>\`, or remove them with \`/key ${provider} clear\`.`
+                    `\`/key ${provider} <key>\`, replace them all with ` +
+                    `\`/key ${provider} replace <key…>\`, or remove them with \`/key ${provider} clear\`.`
                 : `No ${label} key yet. Get one at ${PROVIDERS[provider].keyUrl} ` +
                     `and paste it with \`/key ${provider} <key>\`.`
             )
             return
           }
 
+          const before = (await window.wumpy.keys.status()).counts?.[provider] ?? 0
           const result = action.add
             ? await window.wumpy.keys.add(provider, action.value)
             : await window.wumpy.keys.set(provider, action.value)
@@ -2346,13 +2347,19 @@ function namedControls(shot: Attachment): string[] {
            * the paste landed as several rather than one.
            */
           const total = result.total ?? 1
+          /* An add that changed nothing was a key already saved - said so,
+             or "1 stored" after pasting a second one reads as a lost key. */
+          const already = action.add && total === before
           chat.note(
-            result.ok
-              ? `${action.add ? 'Added' : 'Saved'} the ${label} key${total === 1 ? '' : 's'}, ` +
-                  `encrypted for this Windows account. ${total} stored` +
-                  (total > 1 ? ', used in turn so each limit counts separately. ' : '. ') +
-                  'Pick a model with `/model`.'
-              : result.why
+            !result.ok
+              ? result.why
+              : already
+                ? `That ${label} key was already saved. ${total} stored. ` +
+                    'Each key has to come from a different account.'
+                : `${action.add ? 'Added' : 'Saved'} the ${label} key${total === 1 ? '' : 's'}, ` +
+                    `encrypted on this computer. ${total} stored` +
+                    (total > 1 ? ', used in turn so each limit counts separately. ' : '. ') +
+                    'Pick a model with `/model`.'
           )
           return
         }

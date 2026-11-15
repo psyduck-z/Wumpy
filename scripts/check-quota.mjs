@@ -647,7 +647,7 @@ check('the reply is numbers and reasons only', /number: index \+ 1, ok: true/.te
 
 const cmds = readFileSync('src/renderer/src/commands.ts', 'utf8')
 check('/key google check exists', /\(check\|test\|verify\)/.test(cmds), true)
-check('and is advertised in the hint', /add\|check\|drop\|clear/.test(cmds), true)
+check('and is advertised in the hint', /\[check\|drop\|clear\|replace\]/.test(cmds), true)
 
 const appSrc = readFileSync('src/renderer/src/App.tsx', 'utf8')
 check('the chat names the dead keys by position', /Refused: key \$\{dead\.map/.test(appSrc), true)
@@ -681,6 +681,10 @@ check('the models are refreshed after', /keys\.drop\(provider, asked\)[\s\S]{0,2
 
 const cmdSrc = readFileSync('src/renderer/src/commands.ts', 'utf8')
 check('/key google drop parses numbers', /\(drop\|remove\|delete\)/.test(cmdSrc), true)
+/* A key ADDS: two keys entered one at a time are two keys. It replaced,
+   and that kept exactly one of somebody's two NVIDIA keys. */
+check('a key on its own is added to the others', /add: !replacing/.test(cmdSrc), true)
+check('only replace starts the list again', /\^\(replace\|reset\)\\s/.test(cmdSrc), true)
 check('and refuses words', /Which ones\?/.test(cmdSrc), true)
 check('the check offers the exact command', /drop \$\{dead\.map/.test(appSrc), true)
 check('and says the counts restart', /the positions moved/.test(appSrc), true)

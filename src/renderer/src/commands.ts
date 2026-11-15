@@ -504,7 +504,7 @@ export const COMMANDS: CommandSpec[] = forThisWindow([
     name: 'key',
     aliases: ['apikey'],
     hint: 'Add or remove hosted-model API keys (several rotate)',
-    arg: 'google|groq|mistral|nvidia [add|check|drop|clear] <key…>',
+    arg: 'google|groq|mistral|nvidia [check|drop|clear|replace] <key…>',
     argRequired: true,
     /**
      * Parsed here rather than in a dialog because a key is pasted, and the
@@ -574,14 +574,21 @@ export const COMMANDS: CommandSpec[] = forThisWindow([
         return { kind: 'key', provider, value: '', clear: false, add: false, drop: numbers }
       }
       /**
-       * `add` keeps what is already stored, which matters once there is
-       * more than one. Gemini's free tier is five requests a minute PER
-       * PROJECT, so several keys is the normal case rather than the odd
-       * one, and replacing four of them by pasting the fifth is a trap.
+       * A key ADDS to what is stored; only `replace` starts the list again.
+       *
+       * It was the other way round, with `add` to keep what was there, and
+       * it caught exactly the person it was written to protect: two NVIDIA
+       * keys entered one at a time, three `/key nvidia` lines, and one key
+       * stored at the end - each replaced by the next, with "Saved" to say
+       * it had gone well. Every key here is its own account, so several is
+       * the normal case and adding is what entering one means. A key
+       * entered twice is still one key: the store drops the duplicate.
+       *
+       * `add` still works, for anyone who learned it.
        */
-      const adding = /^(add|more|another)\s/i.test(rest)
-      if (adding) rest = rest.replace(/^\S+\s+/, '')
-      return { kind: 'key', provider, value: rest, clear: false, add: adding }
+      const replacing = /^(replace|reset)\s/i.test(rest)
+      if (replacing || /^(add|more|another)\s/i.test(rest)) rest = rest.replace(/^\S+\s+/, '')
+      return { kind: 'key', provider, value: rest, clear: false, add: !replacing }
     }
   },
   {
