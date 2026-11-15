@@ -1074,19 +1074,13 @@ check('a local model has no sibling', C.siblingModel('phi4-mini:3.8b', new Set()
  * another, so a three-step sequence paid twenty-one seconds of nothing
  * while nineteen keys were idle.
  *
- * Per ACCOUNT, for everyone else, and this half was added the day a second
- * NVIDIA key arrived. That ceiling is the account's: two keys each keeping
- * their own 1,700ms gap put about seventy requests a minute through a limit
- * of forty, so the second key would have made refusals likelier than one
- * key was - the opposite of the reason for adding it.
- *
- * UNLESS THE KEYS ARE ON SEPARATE ACCOUNTS, which no amount of looking at a
- * key will reveal and the user simply knows. `/key <provider> accounts
- * separate` is them saying so, and then two keys really are two ceilings
- * and pace independently again. The decision lives in CloudClient.separate
- * because it needs both halves: the provider's metering, and the setting.
- *
- * All three are the same rule. None is safe to apply to the others.
+ * Everywhere else the ceiling is the ACCOUNT'S, and two keys on one account
+ * each keeping their own 1,700ms gap would put about seventy requests a
+ * minute through a limit of forty. So every key here comes from its own
+ * account - the user's rule, "the keys should always be separate accounts"
+ * - which makes two keys two ceilings, paced independently, for every
+ * provider. That used to be a setting, `/key <provider> accounts separate`,
+ * and is now simply true. The decision lives in keysAreSeparate.
  */
 {
   const main = read('src/main/cloud.ts')
@@ -1096,11 +1090,9 @@ check('a local model has no sibling', C.siblingModel('phi4-mini:3.8b', new Set()
     true
   )
   check('Google is still the per-key case', C.PROVIDERS.google.quotaPerKey, true)
-  check('and NVIDIA shares one queue by default', C.keysAreSeparate('nvidia'), false)
-  check('until the user says otherwise', C.keysAreSeparate('nvidia', 'separate'), true)
-  /* And saying "shared" cannot take Google's away, because that one is a
-     fact about the metering rather than about the setup. */
-  check('which cannot be said away for Google', C.keysAreSeparate('google', 'shared'), true)
+  check('and so is every NVIDIA key, each its own account', C.keysAreSeparate('nvidia'), true)
+  check('and every other provider\'s', ['groq', 'mistral'].every((p) => C.keysAreSeparate(p)), true)
+  check('no provider is one queue', C.keysAreSeparate(null), false)
   check(
     'and the sender paces the key it picked',
     /await pace\(provider, index, 0, this\.separate\(provider\)\)/.test(main),

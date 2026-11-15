@@ -1832,52 +1832,6 @@ function namedControls(shot: Attachment): string[] {
          * sat silent through it would read as a command that did nothing -
          * which is how someone ends up running it twice and paying twice.
          */
-        /*
-         * One account or several, which Wumpy cannot work out and the user
-         * knows for certain. It changes the pace between requests, how much
-         * allowance the meter believes in, and whether one key's refusal
-         * stands the others down with it.
-         */
-        case 'accounts': {
-          const label = PROVIDERS[action.provider].label
-          const held = keyStatus?.counts?.[action.provider] ?? 0
-          const fixed = PROVIDERS[action.provider].quotaPerKey === true
-
-          if (fixed) {
-            chat.note(
-              `Every ${label} key is its own project with its own allowance — ` +
-                'that is how their free tier is metered, so there is nothing to tell me.'
-            )
-            return
-          }
-
-          const current = settings?.keyAccounts?.[action.provider] ?? 'shared'
-          if (action.mode === null) {
-            chat.note(
-              current === 'separate'
-                ? `Assuming your ${held} ${label} key(s) are on **separate accounts**, ` +
-                    'so each has its own rate limit. Say `shared` if that is wrong.'
-                : `Assuming all ${held} ${label} key(s) are on **one account**, so they ` +
-                    'share one rate limit. If each is from its own account, say ' +
-                    `\`/key ${action.provider} accounts separate\` — it is worth saying.`
-            )
-            return
-          }
-
-          await patch({
-            keyAccounts: { ...(settings?.keyAccounts ?? {}), [action.provider]: action.mode }
-          })
-          chat.note(
-            action.mode === 'separate'
-              ? `Noted: ${held} ${label} key(s), one account each. Wumpy will now pace ` +
-                  'them independently, count every account into the meter, and stop ' +
-                  'standing one down because another was refused.'
-              : `Noted: all ${held} ${label} key(s) on one account. They share a queue ` +
-                  'and a ceiling, which is the cautious reading and the default.'
-          )
-          return
-        }
-
         case 'models': {
           const runs = action.runs ?? DEFAULT_RUNS
           /*

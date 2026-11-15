@@ -846,18 +846,5 @@ export function diffSettings(
     )
   }
 
-  /* Separately, because it is a map and not a value: one line per provider
-     whose answer changed. It is worth a line - it doubles the pace and
-     stops one account's refusal standing the other down. See keyAccounts. */
-  const providers = new Set([
-    ...Object.keys(before.keyAccounts ?? {}),
-    ...Object.keys(after.keyAccounts ?? {})
-  ])
-  for (const p of [...providers].sort()) {
-    const was = before.keyAccounts?.[p as keyof typeof before.keyAccounts] ?? 'shared'
-    const now = after.keyAccounts?.[p as keyof typeof after.keyAccounts] ?? 'shared'
-    if (was !== now) out.push(entry('setting', `${p} keys → ${now} accounts`, at))
-  }
-
   return out
 }

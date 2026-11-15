@@ -145,7 +145,9 @@ const LITE = 'gemini-3.1-flash-lite'
   }
 
   check('so three Google keys are three budgets', C.budgetsFor('google', 3), 3)
-  check('and three NVIDIA keys are one', C.budgetsFor('nvidia', 3), 1)
+  /* And three NVIDIA keys are three too: not by NVIDIA's metering, which is
+     per account, but because every key here is from its own account. */
+  check('and so are three NVIDIA keys, one account each', C.budgetsFor('nvidia', 3), 3)
   /* Zero keys is no provider configured, not a zero allowance: a zero here
      divides a meter by nothing. */
   check('no keys still counts as one budget', C.budgetsFor('nvidia', 0), 1)
@@ -711,10 +713,9 @@ check('a daily cap takes out one model', /rotation\.out\(index, model, nextPacif
 check('a throttle still holds the key', /rotation\.rest\(index, until, 'per-minute'\)/.test(cloud), true)
 check('a shared daily cap takes out every key', /rotation\.outAll\(model, nextPacificMidnight\(\)\)/.test(cloud), true)
 check('and a shared throttle rests the pool', /rotation\.restAll\(until, 'per-minute \(account\)'\)/.test(cloud), true)
-/* Decided by the provider's metering AND the user's answer about accounts,
-   which is what CloudClient.separate joins together. */
-check('which is decided by both halves', /const shared = !this\.separate\(provider\)/.test(cloud), true)
-check('reading the provider and the setting', /keysAreSeparate\(provider, this\.accountMode\?\.\(provider\)\)/.test(cloud), true)
+/* Decided in one place, which says every key is its own account. */
+check('which is decided in one place', /const shared = !this\.separate\(provider\)/.test(cloud), true)
+check('the one that says keys are separate', /return keysAreSeparate\(provider\)/.test(cloud), true)
 check('the per-key count is read before the rest', cloud.indexOf('const spentHere') < cloud.indexOf('rotation.out(index'), true)
 check('and travels with the failure', /afterRequests: spentHere/.test(cloud), true)
 check('the model being spent is stated, not spelled', /spent: true/.test(cloud), true)
@@ -723,14 +724,9 @@ check('availability is asked per model', /availableCount\(Date\.now\(\), model\)
 check('a wait is said in units people use', /friendlyWait\(wait\)/.test(cloud), true)
 
 const main = readFileSync('src/main/index.ts', 'utf8')
-check('the pool ledger is given to the client', /new CloudClient\(keys, pools,/.test(main), true)
-/* And the account setting as a function, not a value: the user can change
-   it mid-session and a value read at construction would go stale. */
-check(
-  'along with a live read of the account setting',
-  /\(p\) => settings\.get\('keyAccounts'\)\[p\]/.test(main),
-  true
-)
+check('the pool ledger is given to the client', /new CloudClient\(keys, pools\)/.test(main), true)
+/* There is no account setting any more: every key is its own account. */
+check('and no account setting is read', main.includes('keyAccounts'), false)
 check('the report carries the pool', /pool: cloud\.poolFor\(model, cap\)/.test(main), true)
 check('with the cap this machine measured', /perKeyCapFor\(usage\.today\(\)/.test(main), true)
 check('a spent model is recognised by the flag', /failure\.spent === true/.test(main), true)

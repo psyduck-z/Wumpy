@@ -163,7 +163,8 @@ check('and hours, once it has been a while', R.ago(3 * 3600_000), '3 h ago')
      rather than quietly never running. */
   const lines = R.rankLines({ ...CLEAR.state, keys: 1 }, CLEAR.traffic, Infinity, 0).join('\n')
   check('one key is explained, not hidden', lines.includes('needs a second key'), true)
-  check('with the command that fixes it', lines.includes('accounts separate'), true)
+  check('with the command that fixes it', lines.includes('/key nvidia <key>'), true)
+  check('from another account', lines.includes('another account'), true)
 }
 check(
   'the settings line is short',

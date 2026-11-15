@@ -18,13 +18,12 @@
  * somebody is waiting on, and a check that makes the thing it checks slower
  * is worse than no check.
  *
- * WHAT A SECOND KEY ACTUALLY BUYS depends on a setting only the user knows.
- * With `/key nvidia accounts separate` the keys are separate allowances with
- * separate pacing queues, and a background probe on key two genuinely costs
- * the user nothing. Shared - the default - means one allowance and one
- * queue, so a probe in flight can put one pacing gap in front of the next
- * question. That is why the quiet window exists at all, and why this says so
- * out loud rather than promising isolation it cannot deliver.
+ * WHAT A SECOND KEY BUYS is a second account: every key is added from its
+ * own, so the keys are separate allowances with separate pacing queues, and
+ * a background probe on key two costs the user's next question nothing.
+ * The quiet window still exists because "nothing" assumes the provider
+ * meters the accounts the way it says it does, and a measurement is never
+ * worth finding out otherwise in the middle of somebody's turn.
  *
  * Pure, so every rule can be driven from a check without a key, a network or
  * an hour to wait.
@@ -149,9 +148,8 @@ export function isDue(state: RankerState): boolean {
  * Which key the ranking may use: the last one, never the first.
  *
  * The rotation starts at the front, so the back of the list is the one the
- * next question is least likely to want. With separate accounts this is a
- * different allowance entirely; with shared accounts it is at least a
- * different key, which is what the pool counts per key.
+ * next question is least likely to want, and since every key is its own
+ * account it is a different allowance entirely.
  */
 export function rankingKey(keys: number): number {
   return Math.max(0, keys - 1)
@@ -248,9 +246,8 @@ export function rankLines(
       'It needs a second key and there ' +
         (state.keys === 1 ? 'is one' : 'are none') +
         ': the whole idea is that one key measures while the other answers. ' +
-        'Add one with `/key`, and say `/key nvidia accounts separate` if they ' +
-        'are different logins — then the measuring cannot slow a question down ' +
-        'at all.'
+        'Add one from another account with `/key nvidia <key>` — then the ' +
+        'measuring cannot slow a question down at all.'
     )
     return lines
   }

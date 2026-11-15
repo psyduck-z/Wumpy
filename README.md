@@ -105,7 +105,9 @@ earbud gesture (set a gesture to *Desktop assistant* under Controls; the command
 itself is under Settings → Assistant).
 
 - **Hearing** is NVIDIA's Parakeet and **speaking** is NVIDIA's Magpie, on the
-  same NVIDIA keys as chat (`/key nvidia <key>`), from the same rotation. With
+  same NVIDIA keys as chat (`/key nvidia <key1> <key2>`), from the same
+  rotation. Each key is treated as its own account with its own rate limit, so
+  add every key from a different account. With
   no key, dictation falls back to local Whisper (`npm run speech:install`) and
   answers to the system voice.
 - **It knows it is on your earbuds.** Every request in a voice turn says so,

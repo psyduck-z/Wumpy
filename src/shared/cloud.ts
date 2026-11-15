@@ -1006,25 +1006,25 @@ export function modelTag(
 /**
  * Does each of this provider's keys carry an allowance of its own?
  *
- * Two ways it can be true, and they are different kinds of fact.
+ * Yes, for every provider, and for two different reasons.
  *
- * `quotaPerKey` is a property of the PROVIDER and is known here: a Google
- * key is a Cloud project and the meters are keyed PerProjectPerModel, so
- * keys multiply whatever the user does.
+ * `quotaPerKey` is a property of the PROVIDER: a Google key is a Cloud
+ * project and the meters are keyed PerProjectPerModel, so keys multiply
+ * whatever anyone does.
  *
- * `mode` is a property of the USER'S SETUP and cannot be known here: two
- * NVIDIA keys are two doors into one account's ceiling, or one door each
- * into two accounts' ceilings, and the keys are identical either way. The
- * endpoint will not say, the key will not say, and the only one who knows
- * is the person who made them. So they tell us, and until they do the
- * answer is the cautious one.
+ * Everywhere else the ceiling belongs to the account, and two keys look
+ * identical whether they came from one login or two. This used to be a
+ * setting, `/key <provider> accounts separate`, defaulting to "one account".
+ * It went because the answer is always the same here - in the user's words,
+ * "the keys should always be separate accounts" - so every key is added
+ * from its own account, and a command to say so was one more thing to
+ * remember to type.
+ *
+ * Null - no provider - is one allowance, so a meter never divides by
+ * nothing.
  */
-export function keysAreSeparate(
-  provider: ProviderId | null,
-  mode?: 'shared' | 'separate'
-): boolean {
-  if (!provider) return false
-  return PROVIDERS[provider].quotaPerKey === true || mode === 'separate'
+export function keysAreSeparate(provider: ProviderId | null): boolean {
+  return provider !== null
 }
 
 /**
@@ -1037,13 +1037,9 @@ export function keysAreSeparate(
  * At least one, always. Zero keys is not a zero allowance, it is no
  * provider configured, and a zero here would divide a meter by nothing.
  */
-export function budgetsFor(
-  provider: ProviderId | null,
-  keys: number,
-  mode?: 'shared' | 'separate'
-): number {
+export function budgetsFor(provider: ProviderId | null, keys: number): number {
   const counted = Math.max(1, Math.floor(keys))
-  return keysAreSeparate(provider, mode) ? counted : 1
+  return keysAreSeparate(provider) ? counted : 1
 }
 
 export function providerFor(model: string): ProviderId | null {

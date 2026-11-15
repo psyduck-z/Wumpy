@@ -571,10 +571,9 @@ check('and there is a ceiling on asking', P.MAX_RUNS, 5)
 {
   const cloud = readFileSync('src/main/cloud.ts', 'utf8')
   check('lanes come from the budget count', /budgetsFor\(id, this\.keys\.count\(id\)/.test(cloud), true)
-  /* One unless told otherwise, so the cautious behaviour is the default
-     and nobody gets 429s for a setting they never set. */
-  check('which is one until accounts are declared separate', C.budgetsFor('nvidia', 2), 1)
-  check('and two once they are', C.budgetsFor('nvidia', 2, 'separate'), 2)
+  /* One per key, because every key is its own account. */
+  check('two NVIDIA keys are two lanes', C.budgetsFor('nvidia', 2), 2)
+  check('one key is one lane', C.budgetsFor('nvidia', 1), 1)
   check('never fewer than one', /Math\.max\(\s*1,/.test(cloud), true)
 
   /* Each lane pinned to its own key: two lanes drawing from the rotation
@@ -606,12 +605,12 @@ const app = readFileSync('src/renderer/src/App.tsx', 'utf8')
  * broken.
  *
  * The rule survives; the number changed. Lanes are the count of separate
- * accounts, which is one unless the user has declared otherwise - so the
- * old behaviour is still what happens by default, and parallelism only
- * appears where there is genuinely a second ceiling to use.
+ * accounts, which is one per key since every key is its own account - so
+ * parallelism only appears where there is genuinely a second ceiling to
+ * use, and one key is still one lane.
  */
 check('concurrency is bounded by the budgets', /Array\.from\(\{ length: lanes \}/.test(cloud), true)
-check('and defaults to one', C.budgetsFor('nvidia', 5), 1)
+check('and one key is one lane', C.budgetsFor('nvidia', 1), 1)
 check('it honours the pacer', /await pace\(provider, index, 0, this\.separate\(provider\)\)[\s\S]{0,400}chat\/completions/.test(cloud), true)
 
 /* Small on purpose: this measures whether words come back, not how many. */

@@ -567,28 +567,6 @@ export interface WumpySettings {
    */
   searchApiKey: string
   /**
-   * Whether this provider's keys are on one account or several.
-   *
-   * ONLY THE USER KNOWS THIS, and it changes three numbers. A rate limit
-   * belongs to an account everywhere except Google, where a key IS a
-   * project and so carries its own. So two NVIDIA keys are either two ways
-   * into one 40-a-minute ceiling or two ceilings of forty, and nothing in
-   * a key says which - they are the same shape, from the same provider,
-   * and the endpoint answers both identically.
-   *
-   * Left out means 'shared', because that is the half of the guess that
-   * cannot do damage: it paces slower than it needs to and reports less
-   * allowance than there is. 'separate' is the user asserting a fact,
-   * through `/key <provider> accounts separate`, and it is worth asserting
-   * - it doubles the pace and stops one account's refusal from standing
-   * the other one down.
-   *
-   * Not in keys.bin, because it is not a secret: it is a fact ABOUT the
-   * keys, and keeping it here means the renderer can show it and no
-   * encrypted blob needs migrating.
-   */
-  keyAccounts: Partial<Record<ProviderName, 'shared' | 'separate'>>
-  /**
    * What `/model check` last measured, by model id. See cloud.Fresh.
    *
    * Kept in settings rather than recomputed, because the check costs real

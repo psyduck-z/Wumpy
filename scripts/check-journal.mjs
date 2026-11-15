@@ -623,11 +623,6 @@ check('the inverted one is not passed on inverted', changed({ hideOnBlur: true }
 check('an on/off reads on or off', changed({ thinking: true })[0].what, 'thinking first → on')
 check('a path, or where it really goes', changed({ shellCwd: 'D:\\Dev' })[0].what, 'commands run in → D:\\Dev')
 check('two changes at once are two lines', changed({ dock: 'left', thinking: true }).length, 2)
-check(
-  'the accounts answer, which changes the pacing',
-  changed({ keyAccounts: { nvidia: 'separate' } })[0].what,
-  'nvidia keys → separate accounts'
-)
 
 /**
  * AND THE TWO THAT MUST NEVER APPEAR.

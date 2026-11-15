@@ -881,16 +881,14 @@ function registerIpc(): void {
    * meter immediately instead of after a restart.
    */
   /**
-   * How many separate allowances there are to spend, which is not the same
-   * as how many keys there are. See `budgetsFor`: only Google's keys are
-   * separate projects with separate meters. Three NVIDIA keys on one login
-   * share one ceiling, and counting them as three would show the user half
-   * a tank that is already empty.
+   * How many separate allowances there are to spend. One per key: a Google
+   * key is its own project, and every other key is added from its own
+   * account. See `budgetsFor`.
    */
   const freeTiers = (): number => {
     const provider = providerFor(activeModel())
     if (!provider) return 1
-    return budgetsFor(provider, keys.count(provider), settings.get('keyAccounts')[provider])
+    return budgetsFor(provider, keys.count(provider))
   }
 
   /**
@@ -2136,9 +2134,7 @@ void app.whenReady().then(async () => {
   keys = new KeyStore()
   notes = new ContextStore()
   pools = new PoolStore()
-  /* The third argument is the user's answer to a question nothing else can
-     answer: are these keys on one account or several. See keyAccounts. */
-  cloud = new CloudClient(keys, pools, (p) => settings.get('keyAccounts')[p])
+  cloud = new CloudClient(keys, pools)
   usage = new UsageStore()
   /* The panel is told about every line, so a `/log` on screen keeps up
      with the hourly ranking rather than being a snapshot of the moment it

@@ -252,22 +252,12 @@ export class CloudClient {
    */
   constructor(
     private readonly keys: KeyStore,
-    private readonly ledger?: { get(p: ProviderId): PoolDay | null; save(p: ProviderId, d: PoolDay): void },
-    /**
-     * Whether this provider's keys are on separate accounts, which only the
-     * user knows. A function rather than a value because they can change it
-     * with `/key <provider> accounts` while the app is running, and reading
-     * it once at construction would keep the old answer until a restart.
-     *
-     * Optional like the ledger, so a script can build a client without a
-     * settings file; absent means the cautious answer.
-     */
-    private readonly accountMode?: (p: ProviderId) => 'shared' | 'separate' | undefined
+    private readonly ledger?: { get(p: ProviderId): PoolDay | null; save(p: ProviderId, d: PoolDay): void }
   ) {}
 
   /** Does each key here carry its own ceiling? See `keysAreSeparate`. */
   private separate(provider: ProviderId): boolean {
-    return keysAreSeparate(provider, this.accountMode?.(provider))
+    return keysAreSeparate(provider)
   }
 
   abort(requestId: string): void {
@@ -470,9 +460,8 @@ export class CloudClient {
      * on a second account has its own per-minute ceiling, so two
      * requests on two accounts are not competing at all, and `pace`
      * already keys its queue per account rather than per key. The lanes
-     * are exactly the number of separate budgets - which is 1 unless the
-     * user has said `/key <provider> accounts separate`, so the cautious
-     * behaviour is still what happens by default.
+     * are exactly the number of separate budgets: one per key, since every
+     * key is its own account (see keysAreSeparate).
      *
      * Each lane is pinned to its own key index rather than drawing from
      * the rotation, or two lanes would take the same key and serialise
@@ -481,7 +470,7 @@ export class CloudClient {
     const lanes = Math.max(
       1,
       ...PROVIDER_IDS.map((id) =>
-        budgetsFor(id, this.keys.count(id), this.accountMode?.(id))
+        budgetsFor(id, this.keys.count(id))
       )
     )
 
@@ -841,8 +830,7 @@ export class CloudClient {
       nextPacificMidnight(),
       Date.now(),
       /* Whether these keys are separate allowances or separate doors into
-         one. Google's always are; anyone else's are when the user has said
-         so. See keysAreSeparate. */
+         one. See keysAreSeparate. */
       this.separate(provider)
     )
   }

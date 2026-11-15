@@ -75,11 +75,6 @@ export type CommandAction =
       /** `/key google drop 1 2 3` - remove these by position. */
       drop?: number[]
     }
-  /**
-   * `/key <provider> accounts separate|shared` — are these keys one account
-   * or several? Null reports rather than sets. See WumpySettings.keyAccounts.
-   */
-  | { kind: 'accounts'; provider: ProviderName; mode: 'shared' | 'separate' | null }
   | { kind: 'remember'; value: string; clear: boolean }
   | { kind: 'usage'; reset: boolean }
   /**
@@ -509,7 +504,7 @@ export const COMMANDS: CommandSpec[] = forThisWindow([
     name: 'key',
     aliases: ['apikey'],
     hint: 'Add or remove hosted-model API keys (several rotate)',
-    arg: 'google|groq|mistral|nvidia [add|check|drop|clear|accounts] <key…>',
+    arg: 'google|groq|mistral|nvidia [add|check|drop|clear] <key…>',
     argRequired: true,
     /**
      * Parsed here rather than in a dialog because a key is pasted, and the
@@ -556,33 +551,6 @@ export const COMMANDS: CommandSpec[] = forThisWindow([
        */
       if (/^(check|test|verify)$/i.test(rest)) {
         return { kind: 'key', provider, value: '', clear: false, add: false, check: true }
-      }
-      /*
-       * `accounts separate` tells Wumpy something it cannot find out.
-       *
-       * A rate limit belongs to the account on every provider but Google,
-       * and two keys look identical whether they came from one login or
-       * two. Said wrong in the cautious direction the app simply paces
-       * slower than it could; said right it uses what the user actually
-       * paid in sign-ups for. With no argument it reports what it thinks.
-       */
-      const accounts = /^accounts?(?:\s+(.*))?$/i.exec(rest)
-      if (accounts) {
-        const word = (accounts[1] ?? '').trim().toLowerCase()
-        if (!word) return { kind: 'accounts', provider, mode: null }
-        if (/^(separate|different|several|many|own)$/.test(word)) {
-          return { kind: 'accounts', provider, mode: 'separate' }
-        }
-        if (/^(shared|same|one|single)$/.test(word)) {
-          return { kind: 'accounts', provider, mode: 'shared' }
-        }
-        return {
-          kind: 'error',
-          message:
-            `\`/key ${provider} accounts separate\` if each key is from its own ` +
-            `account, \`shared\` if they are all from one. ` +
-            `\`/key ${provider} accounts\` says which it currently assumes.`
-        }
       }
       /*
        * `drop 1 2 3` removes by position, which is what `check` reports.
@@ -1263,7 +1231,7 @@ export function readAppProposal(body: string): AppProposal | null {
     }
   }
   const action = parseCommand(line)
-  if (!action || action.kind === 'error' || action.kind === 'prompt' || action.kind === 'accounts') {
+  if (!action || action.kind === 'error' || action.kind === 'prompt') {
     return {
       line,
       reason,
