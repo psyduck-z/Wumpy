@@ -2451,8 +2451,13 @@ function askRestart(why: string): void {
 
 /**
  * Asks the panel to run a spoken turn: listen, answer out loud, ask for any
- * approval out loud too. The panel stays hidden - it is where the recorder,
- * the conversation and the cards live, not something to look at here.
+ * approval out loud too.
+ *
+ * And SHOWS the panel, which it did not: "make the process something I can
+ * see, not a background process." A turn that ran hidden and heard nothing
+ * left nothing to look at; now the window comes up with the voice bar
+ * (VoiceTurnBar) saying what it is doing - listening and how loud, what it
+ * heard, thinking, speaking, or what went wrong.
  *
  * At a cold start the page may still be loading, and a message sent to a page
  * that has not subscribed yet is simply lost; so it waits for the load, and a
@@ -2462,6 +2467,7 @@ function startVoiceTurn(why: string): void {
   const contents = panel?.browserWindow?.webContents
   if (!contents) return
   console.log(`[wumpy] voice turn: ${why}`)
+  panel.show('voice turn')
   if (contents.isLoading()) {
     contents.once('did-finish-load', () => setTimeout(() => panel.send(IPC.voiceTurn, null), 900))
     return

@@ -135,6 +135,7 @@ import { APP_WINDOW } from './appwindow'
 import { clampRounds } from '@shared/reflect'
 import { Message } from './components/Message'
 import { Composer } from './components/Composer'
+import { VoiceTurnBar } from './components/VoiceTurnBar'
 import { StatusBar } from './components/StatusBar'
 import logo from './assets/logo.png'
 import { Picker, type PickerProps } from './components/Picker'
@@ -3976,6 +3977,8 @@ function namedControls(shot: Attachment): string[] {
       />
 
       <Toast message={toast} onDone={() => setToast(null)} />
+
+      <VoiceTurnBar />
 
       <Composer
         onSend={onSend}

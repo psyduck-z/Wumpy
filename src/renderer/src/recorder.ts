@@ -153,16 +153,21 @@ function pickFormat(): { mime: string; extension: string } | null {
 }
 
 /**
- * The level meter's clock. Animation frames while the panel is on screen;
- * a timer when it is not, because a voice turn records from the hidden panel
- * and a window nobody can see may be given no frames at all - the meter would
- * stop, and with it the silence detection that ends the recording.
+ * The level meter's clock: a timer, always, never animation frames.
+ *
+ * It was animation frames whenever the page said it was visible, and a
+ * timer otherwise. On Wayland that test is not enough: Wumpy's window on
+ * another Hyprland workspace is still "visible" to the page, but the
+ * compositor sends it no frame callbacks, so no frames come. The meter
+ * stopped, and with it the speech detection - an earbud gesture opened the
+ * mic, nothing you said was ever noticed, and after eight seconds the turn
+ * quietly gave up. Twenty-five looks a second is plenty for a level bar and
+ * for hearing a pause, and a timer runs wherever the window is
+ * (backgroundThrottling is off for the panel).
  */
 type Frame = { raf: boolean; id: number }
 function nextFrame(cb: () => void): Frame {
-  return document.visibilityState === 'visible'
-    ? { raf: true, id: requestAnimationFrame(cb) }
-    : { raf: false, id: window.setTimeout(cb, 40) }
+  return { raf: false, id: window.setTimeout(cb, 40) }
 }
 function stopFrame(frame: Frame | null | undefined): void {
   if (!frame) return

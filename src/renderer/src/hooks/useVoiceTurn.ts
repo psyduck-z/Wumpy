@@ -14,6 +14,7 @@ import { clipForSpeech } from '../wav'
 import { newestPending, pendingCount, runningCount } from '../pending'
 import { setHandsFree, takeTold } from '../handsfree'
 import { choiceMark, newestChoice, stillWaiting, type AloudChoice, type AloudOption } from '../aloud'
+import { setVoiceStopper, showVoice } from '../voiceview'
 
 /**
  * A spoken turn, run from the hidden panel: `wumpy --voice` (a gesture on the
@@ -49,6 +50,9 @@ interface Deps {
 
 const sleep = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms))
 
+/** The gap between thinking ticks: a steady pulse, not a rhythm to follow. */
+export const TICK_MS = 550
+
 export function useVoiceTurn(deps: Deps): void {
   const depsRef = useRef(deps)
   depsRef.current = deps
@@ -58,9 +62,68 @@ export function useVoiceTurn(deps: Deps): void {
     let cancelled = false
     let stopListening: (() => void) | null = null
     let stopSound: (() => void) | null = null
+    /** The loudest the mic got in the last listen, to say WHY nothing was heard. */
+    let lastPeak = 0
+    let micNamed = false
+
+    /*
+     * Every stage into wumpy.log, so a turn that "did nothing" says where it
+     * stopped: whether the mic opened and which one, how loud it got, what
+     * was heard, whether Magpie spoke. It went quiet before, and eight turns
+     * from the earbuds left eight identical lines and no way to tell why.
+     */
+    const note = (line: string): void => window.wumpy.voice.log(`voice turn: ${line}`)
+    const noteLine = note
+
+    /*
+     * Soft ticks while it works: from the moment it has your words until it
+     * speaks or asks you something.
+     *
+     * Asked for in these words: "after I send it, sometimes the AI takes
+     * some time... like the three dots loading... tut, tut, tut... at least
+     * it gives me active feedback that I know it's thinking and it's
+     * working." Without it the earbuds were silent for as long as the model
+     * took, and silence could not be told apart from a turn that had died.
+     *
+     * Quieter than the chimes (a third of their level) and short, so it
+     * reads as a pulse rather than a sound to listen to. Stopped by
+     * anything that makes a sound or opens the mic, so the mic never hears
+     * it and it never talks over an answer.
+     */
+    let ticker: { context: AudioContext; timer: ReturnType<typeof setInterval> } | null = null
+    function startTicks(): void {
+      if (ticker || cancelled) return
+      try {
+        const context = new AudioContext()
+        const tick = (): void => {
+          const at = context.currentTime + 0.01
+          const osc = context.createOscillator()
+          const gain = context.createGain()
+          osc.type = 'sine'
+          osc.frequency.value = 520
+          gain.gain.setValueAtTime(0.0001, at)
+          gain.gain.exponentialRampToValueAtTime(0.04, at + 0.008)
+          gain.gain.exponentialRampToValueAtTime(0.0001, at + 0.07)
+          osc.connect(gain).connect(context.destination)
+          osc.start(at)
+          osc.stop(at + 0.08)
+        }
+        tick()
+        ticker = { context, timer: setInterval(tick, TICK_MS) }
+      } catch {
+        /* no sound device: the bar on screen still says it is working */
+      }
+    }
+    function stopTicks(): void {
+      if (!ticker) return
+      clearInterval(ticker.timer)
+      void ticker.context.close()
+      ticker = null
+    }
 
     /** Short tones, so the earbuds say what is happening without words. */
     async function chime(kind: 'listen' | 'done' | 'cancel'): Promise<void> {
+      stopTicks()
       const notes = kind === 'listen' ? [660, 990] : kind === 'done' ? [990, 660] : [300, 220]
       try {
         const context = new AudioContext()
@@ -91,8 +154,13 @@ export function useVoiceTurn(deps: Deps): void {
      */
     async function say(text: string, quick = false): Promise<void> {
       if (!text || cancelled) return
+      showVoice({ stage: 'speaking', level: 0, detail: text.length > 160 ? `${text.slice(0, 157)}…` : text })
       const wav = await window.wumpy.voice.speak(text).catch(() => null)
       if (cancelled) return
+      /* Ticking through the synthesis too, which can take a second or two;
+         stopped the moment there is something to play. */
+      stopTicks()
+      note(`speaking ${text.length} characters with ${wav ? 'Magpie' : 'the system voice, since Magpie gave nothing'}`)
       if (wav) {
         const url = URL.createObjectURL(new Blob([wav], { type: 'audio/wav' }))
         const audio = new Audio(url)
@@ -104,8 +172,14 @@ export function useVoiceTurn(deps: Deps): void {
             resolve()
           }
           audio.onended = () => resolve()
-          audio.onerror = () => resolve()
-          void audio.play().catch(() => resolve())
+          audio.onerror = () => {
+            note('the speech could not be played')
+            resolve()
+          }
+          void audio.play().catch((err) => {
+            note(`the speech could not be played: ${String(err)}`)
+            resolve()
+          })
         })
         stopSound = null
         URL.revokeObjectURL(url)
@@ -137,17 +211,41 @@ export function useVoiceTurn(deps: Deps): void {
     async function listen(
       pauseMs: number,
       waitMs: number,
-      maxMs: number
+      maxMs: number,
+      prompt = ''
     ): Promise<{ text: string; heard: string } | null> {
       if (cancelled) return null
       let spoke = false
-      const recording = await record({
-        silenceMs: pauseMs,
-        maxMs,
-        onLevel: (_level, rms) => {
-          if (rms >= SPEECH_LEVEL) spoke = true
-        }
-      })
+      let peak = 0
+      stopTicks()
+      showVoice({ stage: 'listening', level: 0, detail: prompt })
+      const opened = Date.now()
+      let recording: Awaited<ReturnType<typeof record>>
+      try {
+        recording = await record({
+          silenceMs: pauseMs,
+          maxMs,
+          onLevel: (level, rms) => {
+            if (rms >= SPEECH_LEVEL) spoke = true
+            if (rms > peak) peak = rms
+            showVoice({ level })
+          }
+        })
+      } catch (err) {
+        note(`the microphone could not be opened: ${String(err)}`)
+        throw new Error(`The microphone could not be opened (${String(err)}).`)
+      }
+      if (!micNamed) {
+        micNamed = true
+        void navigator.mediaDevices
+          .enumerateDevices()
+          .then((all) => {
+            const inputs = all.filter((d) => d.kind === 'audioinput')
+            const used = inputs.find((d) => d.deviceId === 'default') ?? inputs[0]
+            note(`microphone: ${used?.label || 'unnamed'}`)
+          })
+          .catch(() => undefined)
+      }
       stopListening = () => recording.stop()
       const giveUp = setTimeout(() => {
         if (!spoke) recording.stop()
@@ -155,10 +253,18 @@ export function useVoiceTurn(deps: Deps): void {
       const clip = await recording.done
       clearTimeout(giveUp)
       stopListening = null
+      lastPeak = peak
+      note(
+        `listened ${((Date.now() - opened) / 1000).toFixed(1)}s, loudest ${peak.toFixed(3)} ` +
+          `(speech counts from ${SPEECH_LEVEL}), ${clip ? 'kept the recording' : 'nothing worth sending'}`
+      )
       if (!clip || cancelled) return null
+      showVoice({ stage: 'hearing', level: 0 })
+      startTicks()
       const ready = await clipForSpeech(clip.blob, clip.extension)
       const result = await window.wumpy.voice.transcribe(ready.audio, ready.extension, [])
       const heard = (result.heard || result.text || '').trim()
+      note(heard ? `heard "${heard.slice(0, 120)}"` : 'the transcriber returned no words')
       return heard ? { text: (result.text || heard).trim(), heard } : null
     }
 
@@ -172,7 +278,7 @@ export function useVoiceTurn(deps: Deps): void {
         asked = true
         if (cancelled || newestPending() !== entry) continue
         await chime('listen')
-        const answer = await listen(900, 8000, 10_000)
+        const answer = await listen(900, 8000, 10_000, 'Say yes or no.')
         // Clicked in the panel while it was listening: that is an answer too.
         if (newestPending() !== entry) continue
         const said = answer ? yesNo(answer.heard) : null
@@ -324,6 +430,7 @@ export function useVoiceTurn(deps: Deps): void {
         }
         if (depsRef.current.streaming() || runningCount() > 0) {
           quietSince = 0
+          startTicks()
           await sleep(200)
           continue
         }
@@ -337,15 +444,26 @@ export function useVoiceTurn(deps: Deps): void {
     async function turn(): Promise<void> {
       const status = await window.wumpy.voice.start()
       if (status.kind !== 'ready') {
+        noteLine(`speech is not ready (${status.kind})`)
         await say('Voice needs an NVIDIA key, or the local transcriber installed.')
+        showVoice({ stage: 'error', detail: 'Voice needs an NVIDIA key, or the local transcriber installed.' })
         return
       }
       await chime('listen')
       const heard = await listen(1300, 8000, 45_000)
       if (!heard) {
+        if (cancelled) return
         await chime('cancel')
+        showVoice({
+          stage: 'nothing',
+          detail:
+            lastPeak < SPEECH_LEVEL
+              ? 'The microphone stayed quiet. Is the right one selected, and not muted?'
+              : 'It heard sound but no words. Try again, a little closer.'
+        })
         return
       }
+      showVoice({ stage: 'thinking', heard: heard.heard, detail: '' })
       /* By time, not by position: a chat opened by this turn replaces the
          transcript, and its old answers are not this turn's to read. */
       const started = Date.now()
@@ -365,29 +483,53 @@ export function useVoiceTurn(deps: Deps): void {
         ? undefined
         : [...since].reverse().find((m) => m.role === 'assistant' && m.local && m.content.trim())
       const text = answer ? speakable(answer.content) : note ? speakable(note.content, 300) : ''
+      if (!text) noteLine(talked ? 'nothing more to say' : 'no answer came back to read out')
       if (text) await say(text)
       else await chime('done')
+      if (!cancelled) showVoice({ stage: 'done', detail: '' })
     }
 
-    return window.wumpy.voice.onTurn(() => {
+    /* A second gesture, or Stop on the bar: ends the turn where it is. */
+    const cancel = (): void => {
+      if (!busy) return
+      cancelled = true
+      stopTicks()
+      stopListening?.()
+      stopSound?.()
+      note('stopped')
+      showVoice({ stage: 'cancelled', level: 0 })
+    }
+    setVoiceStopper(cancel)
+
+    const off = window.wumpy.voice.onTurn(() => {
       if (busy) {
-        cancelled = true
-        stopListening?.()
-        stopSound?.()
+        cancel()
         return
       }
       busy = true
       cancelled = false
+      micNamed = false
+      note('started')
+      showVoice({ stage: 'starting', level: 0, heard: '', detail: '' })
       setHandsFree(true)
       /* Music off while it listens and talks, back on after. */
       void window.wumpy.music.hold()
       void turn()
-        .catch((err) => console.warn('[wumpy] voice turn failed:', err))
+        .catch((err) => {
+          const why = err instanceof Error ? err.message : String(err)
+          note(`failed: ${why}`)
+          showVoice({ stage: 'error', level: 0, detail: why })
+        })
         .finally(() => {
+          stopTicks()
           busy = false
           setHandsFree(false)
           void window.wumpy.music.release()
         })
     })
+    return () => {
+      off()
+      setVoiceStopper(() => {})
+    }
   }, [])
 }
