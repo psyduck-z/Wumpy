@@ -53,8 +53,19 @@ export class Speech {
    * different faster-whisper, or a numpy that fights with it, and silently
    * picking that one up would make failures depend on the user's other projects.
    */
+  /**
+   * Where the speech environment lives: %LOCALAPPDATA% on Windows,
+   * ~/.local/share on Linux - the same places scripts/install-speech.mjs
+   * creates it, which is the whole point of agreeing on them.
+   */
+  private localData(): string {
+    if (process.platform === 'win32')
+      return process.env.LOCALAPPDATA ?? join(app.getPath('home'), 'AppData', 'Local')
+    return join(app.getPath('home'), '.local', 'share')
+  }
+
   private interpreters(): string[] {
-    const local = process.env.LOCALAPPDATA ?? join(app.getPath('home'), 'AppData', 'Local')
+    const local = this.localData()
     const configured = process.env.WUMPY_PYTHON
     return [
       ...(configured ? [configured] : []),
@@ -64,7 +75,7 @@ export class Speech {
   }
 
   private modelsDir(): string {
-    const local = process.env.LOCALAPPDATA ?? join(app.getPath('home'), 'AppData', 'Local')
+    const local = this.localData()
     const dir = join(local, 'Wumpy', 'speech', 'models')
     mkdirSync(dir, { recursive: true })
     return dir

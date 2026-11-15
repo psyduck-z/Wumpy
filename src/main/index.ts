@@ -1,5 +1,7 @@
 import { app, clipboard, dialog, ipcMain, nativeImage, session, Tray } from 'electron'
 import { cpus, homedir } from 'node:os'
+import { existsSync, mkdirSync, unlinkSync, writeFileSync } from 'node:fs'
+import { dirname, join } from 'node:path'
 import { IPC } from '@shared/types'
 import type {
   Attachment,
@@ -18,7 +20,7 @@ import type {
 } from '@shared/types'
 import { DEFAULT_MODEL, assistantFor, assemblePrompt, type PromptShape } from '@shared/assistant'
 import type { Footprint } from '@shared/footprint'
-import type { RankView } from '@shared/types'
+import type { RankView, Transcript, VoiceStatus } from '@shared/types'
 import { Ranker } from './ranker'
 import { SettingsStore } from './store'
 import { capDiskCache, reclaimCache } from './disk'
@@ -53,6 +55,8 @@ import { cleanTitle, titleBrief, titleSource } from '@shared/titles'
 import { folderFacts, resolveUserFolders } from './folders'
 import { ContextStore } from './context'
 import { Speech } from './speech'
+import { DEFAULT_VOICE, recognize, synthesize } from './nvspeech'
+import { MENTOR_PROMPT, parseReview, type ReflectReview } from '@shared/reflect'
 import { openLink, openSearch } from './browser'
 import { inspectWriteTarget, writeProposedFile } from './writefile'
 import { runPlan, visibleElements } from './input'
@@ -123,6 +127,13 @@ if (!isPrimary) {
 }
 
 app.setAppUserModelId('dev.psyduckz.wumpy')
+/*
+ * Linux: keys are encrypted by the desktop keyring. Chromium only picks it
+ * when it recognises the desktop, and it does not recognise Hyprland - so it
+ * would fall back to storing nothing safely, and the key store would refuse
+ * every key. Omarchy runs gnome-keyring, so ask for it by name.
+ */
+if (process.platform === 'linux') app.commandLine.appendSwitch('password-store', 'gnome-libsecret')
 /* Before anything opens the cache, which is why it is here and not in the
    ready handler: see @main/disk, where the 26 MB came from. */
 capDiskCache()
@@ -171,6 +182,53 @@ let hotkeyState: HotkeyState = { active: null, failed: [], intercepted: null }
 let lowLevelHook: LowLevelHook | null = null
 let priority: PriorityManager
 let speech: Speech
+
+/** Hosted speech is used whenever an NVIDIA key exists (see nvspeech.ts). */
+function cloudSpeech(): boolean {
+  return settings.get('voiceCloud') !== false && keys.available() && keys.has('nvidia')
+}
+
+/**
+ * Ready when either way of hearing is: Parakeet with a key, or Whisper.
+ *
+ * When neither is, the reason names the easy way first. Whisper's own reason
+ * is about a Python environment, which is true and is the last thing someone
+ * holding the spacebar wants to read: what they are missing is a key, and
+ * the key they already have for chat is the one that hears them too.
+ */
+function voiceStatus(): VoiceStatus {
+  if (cloudSpeech()) return { kind: 'ready', model: 'NVIDIA Parakeet', loadMs: 0 }
+  const local = speech.status()
+  if (local.kind !== 'absent') return local
+  const why =
+    settings.get('voiceCloud') === false
+      ? 'Hosted speech is turned off in settings, and'
+      : keys.has('nvidia')
+        ? 'The key store is locked, and'
+        : 'Talking needs an NVIDIA key - add one with /key nvidia <key> - or'
+  return {
+    kind: 'absent',
+    detail: `${why} there is no local transcriber (npm run speech:install sets one up).`
+  }
+}
+
+/**
+ * One clip to text: Parakeet first when it can be used, Whisper otherwise
+ * and whenever Parakeet fails, so a network blip costs accuracy, not the turn.
+ */
+async function hear(audio: Uint8Array, extension: string): Promise<Transcript> {
+  if (cloudSpeech() && extension === 'wav') {
+    const borrowed = await cloud.speechKey('parakeet')
+    if (borrowed) {
+      try {
+        return await recognize(audio, borrowed)
+      } catch (err) {
+        console.warn('[wumpy] Parakeet could not hear that, trying Whisper:', err)
+      }
+    }
+  }
+  return speech.transcribe(audio, extension)
+}
 
 /* --------------------------------------------------------- the assistant */
 
@@ -293,7 +351,36 @@ function quotaFacts(): string[] {
  * Deliberately no clock time and no message count. Both changed on every turn
  * and bought nothing, while making this block differ each time.
  */
-function factsFor(chatTitle: string | null, actions: string[] = []): string {
+/**
+ * How the person is talking to Wumpy this turn: through the earbuds, or at
+ * the screen.
+ *
+ * A voice turn reads the answer aloud and skips everything that is not
+ * prose, so an answer written for the screen - a table, a list of steps, a
+ * link - arrives as a few disconnected words or as silence. The model cannot
+ * tell from the text alone: a dictated question and a spoken one look the
+ * same. So the app, which knows, says. Both ways round, because a chat that
+ * was on the earbuds a minute ago should go back to normal answers once the
+ * person is typing again.
+ */
+function channelFacts(handsFree: boolean): string[] {
+  if (!handsFree)
+    return ['- The user is at the screen, reading your answers (not on their earbuds).']
+  return [
+    '- RIGHT NOW THE USER IS ON THEIR EARBUDS, not looking at the screen. They spoke this, and',
+    '  your answer will be read aloud to them. Only plain prose is read: code, tables and links',
+    '  are skipped. So answer like a person talking - one to three short sentences, plain words,',
+    '  no markdown, no lists, no headings, no emoji.',
+    '- Commands still work. When the answer depends on this computer, propose ONE command as',
+    '  usual. Its # line is what they hear as the question ("Can I <# line>?") and they answer',
+    '  yes or no out loud - so write it as a short plain action: "# Check how full the disk is".',
+    '- When output comes back, say what it means in a sentence. Never read output, paths or',
+    '  numbers with many digits aloud unless they asked for exactly that.',
+    '- If something needs their eyes or a click, say so in a sentence: they will look later.'
+  ]
+}
+
+function factsFor(chatTitle: string | null, actions: string[] = [], handsFree = false): string {
   const now = new Date()
   return [
     'Facts about right now. If the user asks about any of these, just state the answer.',
@@ -304,13 +391,16 @@ function factsFor(chatTitle: string | null, actions: string[] = []): string {
       year: 'numeric'
     })}.`,
     `- This chat is titled ${chatTitle ? `"${chatTitle}"` : 'untitled so far'}.`,
-    `- The user is on Windows. Commands run from ${settings.get('shellCwd') || homedir()}.`,
+    process.platform === 'win32'
+      ? `- The user is on Windows. Commands run from ${settings.get('shellCwd') || homedir()}.`
+      : `- The user is on Omarchy (Arch Linux, Hyprland). Commands run in bash from ${settings.get('shellCwd') || homedir()}.`,
     // Resolved by asking Windows at startup, not guessed. Documents,
     // Pictures and Desktop are redirected to OneDrive here, and the model
     // guessed $env:USERPROFILE\Documents - which returned an empty stdout
     // and an empty stderr, so the wrong folder was indistinguishable from
     // an empty one.
     ...folderFacts(),
+    ...channelFacts(handsFree),
     // One file the user owns, carried from chat to chat. See context.ts.
     ...notes.forPrompt(),
     // Silent unless something is running out. See quotaFacts.
@@ -387,6 +477,7 @@ function promptShape(
     /* An environment variable as well, because the benchmarks set it and a
        bench should not have to write the user's settings file to run. */
     lean: settings.get('leanPrompt') || process.env.WUMPY_LEAN === '1',
+    platform: process.platform === 'linux' ? 'linux' : process.platform === 'darwin' ? 'darwin' : 'win32',
     /* Which of the two screen sections is true for this model. The bytes are
        dropped for the ones that cannot read them, so promising a photograph
        would describe a turn that cannot happen. */
@@ -464,16 +555,24 @@ function applyHotkeys(): void {
 }
 
 /**
- * Claims Win+C through the helper process. RegisterHotKey cannot take it
- * because the shell holds it for Copilot, so we intercept it a layer lower.
+ * Claims Win+Shift+D through the helper process - the same shortcut Omarchy
+ * gets through a Hyprland binding, so it is one combination on every machine.
+ * The helper sits below the shell, so the keystroke never reaches anything
+ * else (the dedicated Copilot key is still caught too).
  */
 async function startLowLevelHook(): Promise<void> {
-  lowLevelHook = new LowLevelHook('C', () => panel.toggle())
+  /* Linux has no keyboard hook to install: Hyprland owns the keys, and a
+     binding there runs `wumpy --toggle` (see the README). */
+  if (process.platform === 'linux') {
+    hotkeyState.intercepted = 'Super+Shift+D'
+    return
+  }
+  lowLevelHook = new LowLevelHook('D', () => panel.toggle(), true)
   const ok = await lowLevelHook.start()
-  hotkeyState.intercepted = ok ? 'Super+C' : null
+  hotkeyState.intercepted = ok ? 'Super+Shift+D' : null
   if (!ok) {
     lowLevelHook = null
-    console.warn('[wumpy] Win+C interception unavailable; use the tray icon')
+    console.warn('[wumpy] Win+Shift+D interception unavailable; use the tray icon')
   } else {
     /**
      * The helper takes the foreground, not Wumpy.
@@ -530,7 +629,7 @@ function registerIpc(): void {
        process and a model load. Same warm-up as at startup; see where
        Speech is constructed for why it is worth doing early. */
     if (patch.voiceEnabled === true) {
-      void speech.start().then(() => panel.send(IPC.voiceStatusChanged, speech.status()))
+      void speech.start().then(() => panel.send(IPC.voiceStatusChanged, voiceStatus()))
     }
     tray?.refresh()
     return next
@@ -1121,15 +1220,64 @@ function registerIpc(): void {
 
   /* ------------------------------------------------------------------- voice */
 
-  ipcMain.handle(IPC.voiceStatus, () => speech.status())
+  ipcMain.handle(IPC.voiceStatus, () => voiceStatus())
 
   // Starting the transcriber loads a model, so it is done when the panel asks
-  // rather than at launch: someone who never dictates never pays for it.
+  // rather than at launch: someone who never dictates never pays for it. With
+  // hosted speech there is nothing to load at all.
   ipcMain.handle(IPC.voiceStart, async () => {
-    await speech.start()
-    const status = speech.status()
+    if (!cloudSpeech()) await speech.start()
+    const status = voiceStatus()
     panel.send(IPC.voiceStatusChanged, status)
     return status
+  })
+
+  /**
+   * Self-reflection's mentor: one review of a finished task.
+   *
+   * The same model as the worker unless /reflect model chose another, and on
+   * the other key where there are two (complete's otherKey), so the review
+   * spends the allowance the work did not. Thinking is off in complete(), and
+   * the budget is enough for a numbered list of changes, not an essay. Null
+   * when no review could be had - the renderer then says so and stops rather
+   * than calling unreviewed work accepted.
+   */
+  ipcMain.handle(
+    IPC.reflectReview,
+    async (_e, req: { transcript: string }): Promise<ReflectReview | null> => {
+      const chosen = settings.get('reflectModel')
+      const model = chosen && cloud.ready(chosen).ok ? chosen : resolveModel()
+      if (!model || !req.transcript.trim()) return null
+      const raw = await cloud.complete(
+        model,
+        [
+          { role: 'system', content: MENTOR_PROMPT },
+          { role: 'user', content: `The task and the worker's work so far:\n\n${req.transcript}` }
+        ],
+        { numPredict: 900, otherKey: true }
+      )
+      const review = raw ? parseReview(raw) : null
+      return review ? { ...review, model } : null
+    }
+  )
+
+  /**
+   * An answer, spoken. Magpie when hosted speech is on; null otherwise, and
+   * the panel then uses the system's own voice. Never throws: a voice that
+   * fails is a turn that stays silent, not a turn that breaks.
+   */
+  ipcMain.handle(IPC.voiceSpeak, async (_e, req: { text: string }) => {
+    const text = String(req?.text ?? '').trim().slice(0, 1800)
+    if (!text || !cloudSpeech()) return null
+    const borrowed = await cloud.speechKey('magpie')
+    if (!borrowed) return null
+    try {
+      const { wav } = await synthesize(text, borrowed, settings.get('speakVoice') || DEFAULT_VOICE)
+      return wav.buffer.slice(wav.byteOffset, wav.byteOffset + wav.byteLength)
+    } catch (err) {
+      console.warn('[wumpy] Magpie could not speak:', err)
+      return null
+    }
   })
 
   /**
@@ -1197,7 +1345,7 @@ function registerIpc(): void {
   ipcMain.handle(
     IPC.voiceTranscribe,
     async (_e, req: { audio: ArrayBuffer; extension?: string; commands?: string[] }) => {
-      const clip = await speech.transcribe(new Uint8Array(req.audio), req.extension ?? 'webm')
+      const clip = await hear(new Uint8Array(req.audio), req.extension ?? 'webm')
       return finishTranscript(clip.text.trim(), req.commands ?? [], clip.confidence, clip.ms)
     }
   )
@@ -1926,11 +2074,38 @@ ${command}`
  * whatever Windows is still finishing.
  */
 function syncLaunchAtLogin(enabled: boolean): void {
+  if (process.platform === 'linux') {
+    linuxAutostart(enabled)
+    return
+  }
   app.setLoginItemSettings({
     openAtLogin: enabled,
     path: process.execPath,
     args: app.isPackaged ? ['--hidden'] : [app.getAppPath(), '--hidden']
   })
+}
+
+/**
+ * Electron's login item does nothing on Linux; desktops start what is in
+ * ~/.config/autostart instead (Omarchy's session included). Written only when
+ * packaged: a development checkout started at every login is not wanted.
+ */
+function linuxAutostart(enabled: boolean): void {
+  const file = join(homedir(), '.config', 'autostart', 'wumpy.desktop')
+  try {
+    if (!enabled || !app.isPackaged) {
+      if (existsSync(file)) unlinkSync(file)
+      return
+    }
+    mkdirSync(dirname(file), { recursive: true })
+    const exec = process.env.APPIMAGE ?? process.execPath
+    writeFileSync(
+      file,
+      ['[Desktop Entry]', 'Type=Application', 'Name=Wumpy', `Exec="${exec}" --hidden`, 'Icon=wumpy', ''].join('\n')
+    )
+  } catch (err) {
+    console.warn('[wumpy] could not update the autostart entry:', err)
+  }
 }
 
 /* ------------------------------------------------------------------ bootup */
@@ -2073,10 +2248,10 @@ void app.whenReady().then(async () => {
    * nobody has enabled is not a warm-up, it is a background process
    * somebody did not ask for.
    */
-  if (settings.get('voiceEnabled')) {
+  if (settings.get('voiceEnabled') && !cloudSpeech()) {
     void speech.start().then((ok) => {
       console.log(`[wumpy] speech ${ok ? 'warmed and waiting' : 'could not be started early'}`)
-      panel.send(IPC.voiceStatusChanged, speech.status())
+      panel.send(IPC.voiceStatusChanged, voiceStatus())
     })
   }
 
@@ -2108,7 +2283,8 @@ void app.whenReady().then(async () => {
 
   // Launched by the login item, or by a restart during development: stay in
   // the tray instead of opening over whatever the user is doing.
-  if (!process.argv.includes('--hidden')) panel.show('launch')
+  if (process.argv.includes('--voice')) startVoiceTurn('started with --voice')
+  else if (!process.argv.includes('--hidden')) panel.show('launch')
 
   /* Last, and not awaited by anything above it: reclaiming a cache is
      housekeeping, and the panel should not wait on a disk walk to open. */
@@ -2127,8 +2303,38 @@ void app.whenReady().then(async () => {
  */
 app.on('second-instance', (_event, argv) => {
   if (argv.includes('--hidden')) return
+  // A spoken turn: the earbuds gesture (through Nothing X) runs wumpy --voice.
+  if (argv.includes('--voice')) {
+    startVoiceTurn('wumpy --voice')
+    return
+  }
+  // The shortcut (Super+Shift+D through a Hyprland binding on Linux).
+  if (argv.includes('--toggle')) {
+    panel?.toggle()
+    return
+  }
   panel?.show('a second Wumpy was started')
 })
+
+/**
+ * Asks the panel to run a spoken turn: listen, answer out loud, ask for any
+ * approval out loud too. The panel stays hidden - it is where the recorder,
+ * the conversation and the cards live, not something to look at here.
+ *
+ * At a cold start the page may still be loading, and a message sent to a page
+ * that has not subscribed yet is simply lost; so it waits for the load, and a
+ * moment for the app to mount.
+ */
+function startVoiceTurn(why: string): void {
+  const contents = panel?.browserWindow?.webContents
+  if (!contents) return
+  console.log(`[wumpy] voice turn: ${why}`)
+  if (contents.isLoading()) {
+    contents.once('did-finish-load', () => setTimeout(() => panel.send(IPC.voiceTurn, null), 900))
+    return
+  }
+  panel.send(IPC.voiceTurn, null)
+}
 
 app.on('will-quit', () => {
   unregisterHotkeys()
@@ -2155,7 +2361,11 @@ app.on('will-quit', () => {
  * nearly free and removes a whole class of confident wrong answers.
  */
 function withContext(req: ChatRequest): Array<Pick<ChatMessage, 'role' | 'content' | 'images'>> {
-  const facts = factsFor(req.context.chatTitle, req.context.actions ?? [])
+  const facts = factsFor(
+    req.context.chatTitle,
+    req.context.actions ?? [],
+    req.context.handsFree === true
+  )
 
   /*
    * Only the newest screenshots go out, which was costing a fortune.

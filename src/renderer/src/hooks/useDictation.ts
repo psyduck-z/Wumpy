@@ -1,6 +1,8 @@
+import { clipForSpeech } from '../wav'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type { VoiceStatus } from '@shared/types'
 import { canRecord, record, type Recording } from '../recorder'
+import { ON_LINUX } from '../appwindow'
 
 export type DictationState =
   /** No transcriber installed, or this build cannot record. */
@@ -165,6 +167,15 @@ export function useDictation(onText: (text: string) => void, commands: string[])
       if (status.kind !== 'ready') {
         wanted.current = false
         apply(status)
+        /*
+         * Asked for and refused: say why, out loud. 'unavailable' on its own
+         * only greys the button and keeps the reason in a tooltip, so holding
+         * the spacebar looked like a key that did nothing at all.
+         */
+        if (status.kind === 'absent' || status.kind === 'failed') {
+          setState('error')
+          setDetail(status.detail)
+        }
         return
       }
 
@@ -200,10 +211,10 @@ export function useDictation(onText: (text: string) => void, commands: string[])
             chain = chain.then(async () => {
               if (cancelled.current) return
               try {
-                const buffer = await seg.blob.arrayBuffer()
+                const clip = await clipForSpeech(seg.blob, seg.extension)
                 const part = await window.wumpy.voice.transcribe(
-                  buffer,
-                  seg.extension,
+                  clip.audio,
+                  clip.extension,
                   commandsRef.current
                 )
                 if (part.heard?.trim()) partials.set(seg.index, part.heard.trim())
@@ -222,7 +233,9 @@ export function useDictation(onText: (text: string) => void, commands: string[])
         setState('error')
         setDetail(
           err instanceof Error && /denied|not allowed|NotAllowed/i.test(err.message)
-            ? 'Windows did not allow the microphone. Check Settings - Privacy - Microphone.'
+            ? ON_LINUX
+              ? 'The microphone was refused. Check it is not muted (wpctl status).'
+              : 'Windows did not allow the microphone. Check Settings - Privacy - Microphone.'
             : err instanceof Error
               ? err.message
               : 'Could not start recording.'
@@ -291,11 +304,10 @@ export function useDictation(onText: (text: string) => void, commands: string[])
          */
         const result = joined
           ? await window.wumpy.voice.tidy(joined, commandsRef.current)
-          : await window.wumpy.voice.transcribe(
-              await clip.blob.arrayBuffer(),
-              clip.extension,
-              commandsRef.current
-            )
+          : await (async () => {
+              const ready = await clipForSpeech(clip.blob, clip.extension)
+              return window.wumpy.voice.transcribe(ready.audio, ready.extension, commandsRef.current)
+            })()
         setState('idle')
         setHeard(result.heard || null)
         setPolished(result.polished)

@@ -1,3 +1,4 @@
+import { clipForSpeech } from '../wav'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { listenTo, type AudioSource } from '../loopback'
 import { record, SPEECH_LEVEL, type Recording } from '../recorder'
@@ -284,11 +285,8 @@ export function useListening(commands: () => string[]): ListeningSession {
             setPending((n) => n + 1)
             chain.current = chain.current.then(async () => {
               try {
-                const part = await window.wumpy.voice.transcribe(
-                  await seg.blob.arrayBuffer(),
-                  seg.extension,
-                  commands()
-                )
+                const ready = await clipForSpeech(seg.blob, seg.extension)
+                const part = await window.wumpy.voice.transcribe(ready.audio, ready.extension, commands())
                 const text = (part.text || part.heard || '').trim()
                 if (text) {
                   piecesRef.current.push({ at: Math.max(0, at), text })

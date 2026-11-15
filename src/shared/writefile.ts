@@ -113,9 +113,16 @@ const FORBIDDEN = [
   /^[a-z]:\\windows(\\|$)/i,
   /^[a-z]:\\program files( \(x86\))?(\\|$)/i,
   /^[a-z]:\\programdata\\microsoft\\windows\\start menu(\\|$)/i,
-  /\\\.ssh(\\|$)/i,
-  /\\\.aws(\\|$)/i,
-  /\\appdata\\roaming\\microsoft\\windows\\recent(\\|$)/i
+  /[\\/]\.ssh([\\/]|$)/i,
+  /[\\/]\.aws([\\/]|$)/i,
+  /[\\/]\.gnupg([\\/]|$)/i,
+  /\\appdata\\roaming\\microsoft\\windows\\recent(\\|$)/i,
+  // Linux: the places that start things at login, which is what Startup is
+  // on Windows - an autostart entry and a user service. (Hyprland's config
+  // and the shell's start-up files are protected places below: asked about,
+  // not refused, since a keybinding is a fair thing to want.)
+  /\/\.config\/autostart(\/|$)/,
+  /\/\.config\/systemd(\/|$)/
 ]
 
 /** Windows's own reserved device names, which are not files and behave oddly. */
@@ -312,7 +319,13 @@ const PROTECTED_PLACES: Array<{ name: string; pattern: RegExp }> = [
   { name: 'the Windows folder', pattern: /[a-z]:[\\/]+windows[\\/]/i },
   { name: 'Program Files', pattern: /[a-z]:[\\/]+program files( \(x86\))?[\\/]/i },
   { name: 'the .ssh folder, where keys live', pattern: /[\\/]\.ssh([\\/]|["'\s]|$)/i },
-  { name: 'the .aws folder, where credentials live', pattern: /[\\/]\.aws([\\/]|["'\s]|$)/i }
+  { name: 'the .aws folder, where credentials live', pattern: /[\\/]\.aws([\\/]|["'\s]|$)/i },
+  { name: 'the .gnupg folder, where keys live', pattern: /[\\/]\.gnupg([\\/]|["'\s]|$)/i },
+  // Linux places that run things at every login, like Startup on Windows.
+  { name: 'autostart, so it runs at every login', pattern: /\.config\/autostart\b/ },
+  { name: 'systemd, so it runs as a service', pattern: /\.config\/systemd\b/ },
+  { name: 'Hyprland’s config, which runs things at every login', pattern: /\.config\/hypr\b/ },
+  { name: 'a shell start-up file', pattern: /[\\/]\.(bashrc|bash_profile|profile|zshrc|zprofile)(["'\s]|$)/ }
 ]
 
 /** Which protected place a command text mentions, or null. */

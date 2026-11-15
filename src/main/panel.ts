@@ -2,6 +2,7 @@ import { BrowserWindow, desktopCapturer, screen, app } from 'electron'
 import { log } from './log'
 import { openLink } from './browser'
 import { join } from 'node:path'
+import { execFile } from 'node:child_process'
 import { IPC, type Dock } from '@shared/types'
 import { geometryFor as layoutFor, type Rect } from '@shared/geometry'
 import type { SettingsStore } from './store'
@@ -14,6 +15,28 @@ import type { SettingsStore } from './store'
  * startup and only ever shown or hidden, so the hotkey feels instant rather
  * than booting a renderer on every press.
  */
+/**
+ * On Linux, Wumpy is an ordinary window rather than an overlay.
+ *
+ * The overlay - frameless glass, always on top, placed by the app, hidden
+ * when it loses focus - is a Windows idea of a summoned panel. On Omarchy the
+ * compositor places windows, a tiling layout is the point of the desktop, and
+ * a window that floats over everything and vanishes on a click elsewhere is
+ * the odd one out. So there it is a normal, resizable window: Hyprland tiles
+ * it, it stays where it was put, and Super+Shift+D still shows and hides it.
+ */
+export const REGULAR_WINDOW = process.platform === 'linux'
+
+/**
+ * Set once the app is really quitting, so closing the window can tell
+ * "Super+W on the window" (go to the tray, keep the chat and the voice turn
+ * alive) from "Quit Wumpy" (let it go).
+ */
+let quitting = false
+app.on('before-quit', () => {
+  quitting = true
+})
+
 export class Panel {
   private window: BrowserWindow | null = null
   /** While pinned the panel survives focus loss, so the user can work alongside it. */
@@ -81,16 +104,17 @@ export class Panel {
       width,
       height,
       show: false,
+      title: 'Wumpy',
       frame: false,
-      transparent: true,
-      resizable: false,
-      movable: false,
-      minimizable: false,
-      maximizable: false,
-      fullscreenable: false,
-      skipTaskbar: true,
-      hasShadow: false,
-      backgroundColor: '#00000000',
+      transparent: !REGULAR_WINDOW,
+      resizable: REGULAR_WINDOW,
+      movable: REGULAR_WINDOW,
+      minimizable: REGULAR_WINDOW,
+      maximizable: REGULAR_WINDOW,
+      fullscreenable: REGULAR_WINDOW,
+      skipTaskbar: !REGULAR_WINDOW,
+      hasShadow: REGULAR_WINDOW,
+      backgroundColor: REGULAR_WINDOW ? '#060607' : '#00000000',
       /**
        * NOT type: 'toolbar'.
        *
@@ -125,7 +149,13 @@ export class Panel {
          * exactly the window where the throttle is still on. The focus retry
          * loop was driven by rAF and simply never got a second attempt.
          */
-        backgroundThrottling: false
+        backgroundThrottling: false,
+        /*
+         * A voice turn speaks from the hidden panel, prompted by a gesture
+         * on the earbuds rather than a click in this window - so the default
+         * rule that sound needs a user gesture first would keep it silent.
+         */
+        autoplayPolicy: 'no-user-gesture-required'
       }
     })
 
@@ -237,14 +267,32 @@ export class Panel {
     this.traceVisibility(this.window)
 
     // 'screen-saver' is the only level that reliably floats over fullscreen browsers.
-    this.window.setAlwaysOnTop(true, 'screen-saver')
-    this.window.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true })
+    if (!REGULAR_WINDOW) {
+      this.window.setAlwaysOnTop(true, 'screen-saver')
+      this.window.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true })
+    }
 
     this.window.on('blur', () => {
+      // A regular window stays put when you click somewhere else.
+      if (REGULAR_WINDOW) return
       if (this.pinned) return
       if (!this.settings.get('hideOnBlur')) return
       this.hide('lost focus')
     })
+
+    /*
+     * Closing an app window on Omarchy (Super+W, or the close button) puts it
+     * in the tray rather than destroying it: the page holds the conversation
+     * in progress and listens for the earbuds, and a window rebuilt from
+     * nothing would lose both. Quit from the tray menu still quits.
+     */
+    if (REGULAR_WINDOW) {
+      this.window.on('close', (e) => {
+        if (quitting) return
+        e.preventDefault()
+        this.hide('the window was closed')
+      })
+    }
 
     this.window.on('closed', () => {
       this.window = null
@@ -324,7 +372,8 @@ export class Panel {
   }
 
   private reposition(): void {
-    if (!this.window) return
+    // The compositor places a regular window; moving it would fight the tiling.
+    if (!this.window || REGULAR_WINDOW) return
     this.window.setBounds(this.geometryFor(this.settings.get('dock')))
   }
 
@@ -370,6 +419,27 @@ export class Panel {
     this.because = why
     this.openedAt = Date.now()
     const win = this.window ?? this.create()
+    if (REGULAR_WINDOW) {
+      // An ordinary window: shown where the compositor puts it, and focused.
+      // None of the foreground workarounds below are needed off Windows.
+      const wasVisible = win.isVisible()
+      if (win.isMinimized()) win.restore()
+      win.show()
+      win.focus()
+      win.webContents.focus()
+      /*
+       * Already open on another workspace: go to it, the way Omarchy's own
+       * launch-or-focus does. focus() alone cannot - Wayland lets the
+       * compositor refuse, and Hyprland does - so Super+Shift+D from the
+       * wrong workspace did nothing you could see. A hidden window needs
+       * none of this: it is mapped again on the workspace you are on.
+       */
+      if (wasVisible && process.env.HYPRLAND_INSTANCE_SIGNATURE) {
+        execFile('hyprctl', ['dispatch', 'focuswindow', `pid:${process.pid}`], () => {})
+      }
+      win.webContents.send(IPC.panelShown)
+      return
+    }
     /*
      * Everything that changes how the window LOOKS happens before it is on
      * screen, and only then is it shown.
@@ -534,6 +604,11 @@ export class Panel {
   forceFocus(): void {
     const win = this.window
     if (!win || !win.isVisible()) return
+    if (REGULAR_WINDOW) {
+      win.focus()
+      win.webContents.focus()
+      return
+    }
     this.because = 'forceFocus'
     console.log('[wumpy] renderer reports no keyboard; forcing the foreground')
 

@@ -1,3 +1,5 @@
+import { useVoiceTurn } from './hooks/useVoiceTurn'
+import { useReflect } from './hooks/useReflect'
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import type {
   ChatSummary,
@@ -115,6 +117,8 @@ import {
   type Visit
 } from '@shared/circling'
 import { DOCK_CYCLE, Header } from './components/Header'
+import { APP_WINDOW } from './appwindow'
+import { clampRounds } from '@shared/reflect'
 import { Message } from './components/Message'
 import { Composer } from './components/Composer'
 import { StatusBar } from './components/StatusBar'
@@ -2135,6 +2139,32 @@ function namedControls(shot: Attachment): string[] {
           )
           return
         }
+        case 'reflect': {
+          if (action.model !== undefined) {
+            await patch({ reflect: true, reflectModel: action.model })
+            chat.note(
+              action.model
+                ? `Self-reflection on — the mentor is **${action.model}**.`
+                : 'Self-reflection on — the mentor is the same model as the worker.',
+              false,
+              'reflect'
+            )
+            return
+          }
+          const rounds = clampRounds(action.rounds ?? settings?.reflectRounds ?? 3)
+          const next = action.on === 'toggle' ? !settings?.reflect : action.on
+          await patch({ reflect: next, reflectRounds: rounds })
+          chat.note(
+            next
+              ? `Self-reflection on — when a task is done, a mentor reviews it on your other key ` +
+                  `and sends it back until it passes, up to **${rounds}** review${rounds === 1 ? '' : 's'}. ` +
+                  '`/reflect off` to stop.'
+              : 'Self-reflection off.',
+            false,
+            'reflect'
+          )
+          return
+        }
         case 'voice': {
           if (action.setting === 'on') {
             const next = action.on === 'toggle' ? !settings?.voiceEnabled : action.on
@@ -2509,6 +2539,26 @@ function namedControls(shot: Attachment): string[] {
    */
   const onSendRef = useRef(onSend)
   onSendRef.current = onSend
+
+  /* A spoken turn (wumpy --voice): the same send as typing, so commands and
+     intents work by voice; see hooks/useVoiceTurn. */
+  useVoiceTurn({
+    send: (text) => onSendRef.current(text),
+    streaming: () => chatRef.current.streaming,
+    messages: () => chatRef.current.messages
+  })
+
+  /* Self-reflection (/reflect): a mentor reviews each finished task and sends
+     it back until it passes; see hooks/useReflect and shared/reflect. */
+  useReflect({
+    enabled: settings?.reflect ?? false,
+    rounds: settings?.reflectRounds ?? 3,
+    streaming,
+    messages,
+    send: (text) => chatRef.current.send(text, undefined, undefined, true),
+    liveNote: (content) => chatRef.current.liveNote(content),
+    update: (id, content) => chatRef.current.update(id, content)
+  })
   useEffect(() => {
     if (streaming || queued.length === 0) return
     const [text] = queued
@@ -2805,7 +2855,8 @@ function namedControls(shot: Attachment): string[] {
         e.preventDefault()
         if (streaming) stopAndMaybeEdit()
         else if (picker) setPicker(null)
-        else close()
+        // An app window is not dismissed by Esc - only the overlay is.
+        else if (!APP_WINDOW) close()
         return
       }
 
@@ -2869,7 +2920,7 @@ function namedControls(shot: Attachment): string[] {
         // Ctrl+D cycles the dock. Free since Quick/Developer mode went, and
         // moving the panel was otherwise a mouse click or a typed command -
         // the one piece of the window you could not drive from the keyboard.
-        if (e.key.toLowerCase() === 'd') {
+        if (e.key.toLowerCase() === 'd' && !APP_WINDOW) {
           e.preventDefault()
           const order = DOCK_CYCLE
           const next = order[(order.indexOf(dock) + 1) % order.length]
@@ -2880,7 +2931,7 @@ function namedControls(shot: Attachment): string[] {
         // Ctrl+P pins and unpins. Pinning decides whether the panel survives
         // you clicking away, which is the thing most worth changing without
         // clicking away to do it.
-        if (e.key.toLowerCase() === 'p') {
+        if (e.key.toLowerCase() === 'p' && !APP_WINDOW) {
           e.preventDefault()
           togglePin()
           return
@@ -3555,6 +3606,8 @@ function namedControls(shot: Attachment): string[] {
           )
         }
         onCycleApproval={() => void runCommand({ kind: 'approve', mode: 'cycle' }, '/approve')}
+        reflect={settings?.reflect ?? false}
+        onReflectOff={() => void runCommand({ kind: 'reflect', on: false }, '/reflect off')}
         onCompact={() => void compactHistory()}
         onQuota={() => void runCommand({ kind: 'usage', reset: false }, '/usage')}
       />

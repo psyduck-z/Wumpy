@@ -12,6 +12,12 @@ export interface PendingCommand {
   skip(): void
   /** Shown in the hint strip so the key has something to refer to. */
   command: string
+  /**
+   * How to say it, for a voice turn asking out loud: "write notes.md", read
+   * as "Can I write notes.md?". Commands leave it out - their "# why" line
+   * already reads as a question (see @shared/spoken).
+   */
+  spoken?: string
 }
 
 const waiting = new Map<string, PendingCommand>()
@@ -44,4 +50,31 @@ export function pendingCount(): number {
 export function onPendingChange(cb: () => void): () => void {
   listeners.add(cb)
   return () => listeners.delete(cb)
+}
+
+/* ------------------------------------------------------- what is running */
+
+/**
+ * Commands that have been approved and are still going.
+ *
+ * A voice turn has to tell "nothing is happening, the answer is final" from
+ * "an install is half way through": in both, no answer is streaming and
+ * nothing is waiting for a click. This is the difference.
+ */
+let running = 0
+
+export function startedRunning(): () => void {
+  running++
+  announce()
+  let ended = false
+  return () => {
+    if (ended) return
+    ended = true
+    running = Math.max(0, running - 1)
+    announce()
+  }
+}
+
+export function runningCount(): number {
+  return running
 }

@@ -476,11 +476,18 @@ check('the joined text still gets the cleanup', dictationHook.includes('voice.ti
   check('the transcriber is started before it is asked for', /void speech\.start\(\)\.then/.test(main), true)
   /* Only when the feature is on: a Python process spawned for something
      nobody enabled is not a warm-up. */
-  check('and only when dictation is enabled', /if \(settings\.get\('voiceEnabled'\)\) \{/.test(main), true)
+  /* And only when Whisper is the one that will hear it: with NVIDIA speech
+     the transcriber is a fallback, and a model held in memory for a fallback
+     is the background process this rule is here to prevent. */
+  check(
+    'and only when dictation is enabled',
+    /if \(settings\.get\('voiceEnabled'\)( && !cloudSpeech\(\))?\) \{/.test(main),
+    true
+  )
   /* Nothing waits for it, or the panel would be held open by a model
      load that has nothing to do with showing a window. */
   check('nothing waits for it', /void speech\.start/.test(main), true)
-  check('and the panel is told when it lands', /voiceStatusChanged, speech\.status\(\)/.test(main), true)
+  check('and the panel is told when it lands', /voiceStatusChanged, (speech\.status|voiceStatus)\(\)/.test(main), true)
   /* And turning it on mid-session warms it then, rather than leaving the
      first key press after `/voice on` to pay the whole cost. */
   check('turning it on warms it immediately', /patch\.voiceEnabled === true/.test(main), true)

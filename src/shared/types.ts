@@ -45,6 +45,11 @@ export interface ChatMessage {
    */
   automatic?: boolean
   /**
+   * Said through the earbuds in a voice turn, not typed at the screen. Shown
+   * as a small mark on the message, and the reason the answer was short.
+   */
+  spoken?: boolean
+  /**
    * A compaction summary standing in for earlier turns. Sent to the model as a
    * system message so it reads as context rather than as something it said.
    */
@@ -154,6 +159,7 @@ export type NoteTopic =
   | 'voice'
   | 'voice-polish'
   | 'voice-autostop'
+  | 'reflect'
 
 /* -------------------------------------------------------- the one assistant */
 
@@ -596,6 +602,24 @@ export interface WumpySettings {
   /** Stop recording by itself once you stop talking. */
   voiceAutoStop: boolean
   /**
+   * Hear and speak with NVIDIA's hosted speech models (Parakeet, Magpie) when
+   * an NVIDIA key exists. Audio then goes to NVIDIA like a chat turn does;
+   * off, dictation uses local Whisper and voice mode the system's own voice.
+   */
+  voiceCloud: boolean
+  /** Magpie's voice for spoken answers, e.g. Magpie-Multilingual.EN-US.Aria. */
+  speakVoice: string
+  /**
+   * Self-reflection (/reflect): once the model has finished a task, a mentor
+   * reviews it - on the other key where there are two - and the work goes
+   * back for another pass until the mentor accepts it. See shared/reflect.ts.
+   */
+  reflect: boolean
+  /** Reviews per task before it stops asking, accepted or not. */
+  reflectRounds: number
+  /** The mentor's model; empty means the same model as the worker. */
+  reflectModel: string
+  /**
    * Send the short form of the instructions.
    *
    * The preamble is the largest single cost of every turn, and most of what
@@ -687,6 +711,11 @@ export interface ChatRequest {
      * app has the receipt, so the app says.
      */
     actions: string[]
+    /**
+     * The person is on their earbuds in a voice turn, not at the screen: the
+     * answer will be read aloud. See renderer/src/handsfree.ts.
+     */
+    handsFree?: boolean
   }
 }
 
@@ -824,6 +853,11 @@ export const IPC = {
   voiceStart: 'voice:start',
   voiceTranscribe: 'voice:transcribe',
   voiceTidy: 'voice:tidy',
+  /** Text to speech: the main process answers with a WAV, or null. */
+  voiceSpeak: 'voice:speak',
+  /** Main tells the panel to run a spoken turn (wumpy --voice). */
+  voiceTurn: 'voice:turn',
+  reflectReview: 'reflect:review',
   /**
    * A line from a listening session, straight into wumpy.log.
    *

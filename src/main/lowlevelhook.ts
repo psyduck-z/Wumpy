@@ -22,7 +22,9 @@ export class LowLevelHook {
 
   constructor(
     private readonly key: string,
-    private readonly onTrigger: () => void
+    private readonly onTrigger: () => void,
+    /** Shift must be held too: Win+Shift+D, the same shortcut as on Linux. */
+    private readonly shift = false
   ) {}
 
   /** Resolves true once the helper reports that its hook is installed. */
@@ -41,7 +43,8 @@ export class LowLevelHook {
       try {
         // stdin stays open on purpose: the helper exits when it hits EOF, which
         // guarantees it cannot outlive this process even on a hard crash.
-        this.child = spawn(exe, [this.key, `--grant-foreground=${process.pid}`], {
+        const args = [this.key, `--grant-foreground=${process.pid}`, ...(this.shift ? ['--shift'] : [])]
+        this.child = spawn(exe, args, {
           stdio: ['pipe', 'pipe', 'pipe'],
           windowsHide: true
         })

@@ -1,4 +1,5 @@
 import type { AssistantStatus, Dock } from '@shared/types'
+import { APP_WINDOW } from '../appwindow'
 import logo from '../assets/logo.png'
 
 /** The order the dock button and Ctrl+D both step through. */
@@ -113,47 +114,57 @@ export function Header({
           </svg>
         </button>
 
-        <button
-          type="button"
-          onClick={() => onCycleDock(nextDock)}
-          title={`Move panel — now ${dock}, next ${nextDock}`}
-        >
-          <DockGlyph dock={dock} />
-        </button>
+        {/* The overlay's own controls. An app window on Omarchy is placed by
+            Hyprland and never floats, so it has neither (see appwindow.ts). */}
+        {!APP_WINDOW && (
+          <>
+            <button
+              type="button"
+              onClick={() => onCycleDock(nextDock)}
+              title={`Move panel — now ${dock}, next ${nextDock}`}
+            >
+              <DockGlyph dock={dock} />
+            </button>
+
+            <button
+              type="button"
+              onClick={onTogglePin}
+              className={pinned ? 'is-on' : ''}
+              title={
+                pinned
+                  ? 'Pinned — stays on top. Click to let it hide when you click away.'
+                  : 'Auto-hide — closes when it loses focus. Click to keep it on top.'
+              }
+            >
+              <svg viewBox="0 0 16 16" width="13" height="13" aria-hidden="true">
+                <path
+                  d="M6 2h4l-.6 4.2 2.1 2.1H4.5l2.1-2.1z M8 8.3V14"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="1.5"
+                  strokeLinejoin="round"
+                  strokeLinecap="round"
+                />
+                {/* Struck through when unpinned, so the state is visible at a glance. */}
+                {!pinned && (
+                  <path
+                    d="M3 13L13 3"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="1.5"
+                    strokeLinecap="round"
+                  />
+                )}
+              </svg>
+            </button>
+          </>
+        )}
 
         <button
           type="button"
-          onClick={onTogglePin}
-          className={pinned ? 'is-on' : ''}
-          title={
-            pinned
-              ? 'Pinned — stays on top. Click to let it hide when you click away.'
-              : 'Auto-hide — closes when it loses focus. Click to keep it on top.'
-          }
+          onClick={onClose}
+          title={APP_WINDOW ? 'Hide to the tray' : 'Close (Esc)'}
         >
-          <svg viewBox="0 0 16 16" width="13" height="13" aria-hidden="true">
-            <path
-              d="M6 2h4l-.6 4.2 2.1 2.1H4.5l2.1-2.1z M8 8.3V14"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="1.5"
-              strokeLinejoin="round"
-              strokeLinecap="round"
-            />
-            {/* Struck through when unpinned, so the state is visible at a glance. */}
-            {!pinned && (
-              <path
-                d="M3 13L13 3"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="1.5"
-                strokeLinecap="round"
-              />
-            )}
-          </svg>
-        </button>
-
-        <button type="button" onClick={onClose} title="Close (Esc)">
           <svg viewBox="0 0 16 16" width="13" height="13" aria-hidden="true">
             <path
               d="M4 4l8 8M12 4l-8 8"

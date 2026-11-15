@@ -5,6 +5,7 @@ import { readOrdering, type Ordering } from '@shared/order'
 import { readKind, type EventKind } from '@shared/journal'
 import { nearest } from '@shared/nearest'
 import { markLines } from './kinds'
+import { APP_WINDOW, PANEL_ONLY_COMMANDS } from './appwindow'
 
 /**
  * What a command asks the app to do. Commands are parsed in the renderer and
@@ -41,6 +42,7 @@ export type CommandAction =
   | { kind: 'reasoning'; show: boolean | 'toggle' }
   | { kind: 'pin'; pinned: boolean | 'toggle' }
   | { kind: 'voice'; setting: 'on' | 'polish' | 'autostop'; on: boolean | 'toggle' }
+  | { kind: 'reflect'; on: boolean | 'toggle'; rounds?: number; model?: string }
   /** Listening to the machine's own audio. See @shared/meeting. */
   | { kind: 'listen'; what: 'toggle' | 'stop' | 'notes' | 'source'; ask: string }
   /** A plain boolean in the settings file, with no machinery behind it. */
@@ -208,7 +210,17 @@ function bool(arg: string, fallback: boolean | 'toggle' = 'toggle'): boolean | '
   return fallback
 }
 
-export const COMMANDS: CommandSpec[] = [
+/**
+ * The commands this window has. /dock and /pin move and float the overlay
+ * panel, and on Omarchy, where Wumpy is an ordinary window, there is no panel
+ * to move: they are left out of the palette and the menu rather than offered
+ * and then doing nothing. See appwindow.ts.
+ */
+function forThisWindow(all: CommandSpec[]): CommandSpec[] {
+  return APP_WINDOW ? all.filter((c) => !PANEL_ONLY_COMMANDS.has(c.name)) : all
+}
+
+export const COMMANDS: CommandSpec[] = forThisWindow([
   {
     name: 'new',
     aliases: ['clear', 'reset'],
@@ -597,6 +609,29 @@ export const COMMANDS: CommandSpec[] = [
     }
   },
   {
+    /*
+     * Self-reflection. The worker keeps going; when it is done a mentor - on
+     * the other key - reviews it, and REVISE sends it back for another pass.
+     * Toggled, because most questions do not need a second opinion and every
+     * review is a request against the same allowance.
+     */
+    name: 'reflect',
+    aliases: ['mentor', 'reflection', 'selfreflect'],
+    hint: 'Self-reflection: a mentor reviews finished work until it passes',
+    arg: 'on|off|<rounds>|model <id>',
+    /* A button only bare: the rounds and the mentor model decide how many
+       requests each task costs, and that is typed, not clicked in an answer. */
+    clickBareOnly: true,
+    run: (arg) => {
+      const a = arg.trim()
+      const model = /^model\s+(\S+)$/i.exec(a)
+      if (model) return { kind: 'reflect', on: true, model: model[1] }
+      if (/^model$/i.test(a)) return { kind: 'reflect', on: true, model: '' }
+      if (/^[1-9]\d*$/.test(a)) return { kind: 'reflect', on: true, rounds: Number(a) }
+      return { kind: 'reflect', on: bool(a) }
+    }
+  },
+  {
     name: 'voice',
     aliases: ['dictate', 'dictation', 'mic'],
     hint: 'Talk instead of typing — hold the spacebar',
@@ -749,7 +784,7 @@ export const COMMANDS: CommandSpec[] = [
         ? { kind: 'prompt', text: p.wrap(arg.trim()), label: p.label }
         : { kind: 'error', message: `Usage: /${p.name} <text>` }
   }))
-]
+])
 
 /**
  * Every key, in one place.
@@ -833,8 +868,11 @@ export const KEYS: readonly {
   { keys: 'Ctrl+Shift+C', what: 'Copy the last answer' },
 
   { keys: 'Ctrl+C', what: 'Stop the answer (copies instead if text is selected)' },
-  { keys: 'Esc', what: 'Back to the box, then close the panel' }
-]
+  {
+    keys: 'Esc',
+    what: APP_WINDOW ? 'Stop the answer, or back to the box' : 'Back to the box, then close the panel'
+  }
+].filter((k) => !(APP_WINDOW && k.runs?.some((r) => PANEL_ONLY_COMMANDS.has(r))))
 
 /**
  * Keys that reach a command directly, shown beside it in the menu.
@@ -1094,6 +1132,7 @@ export const CLICKABLE: readonly string[] = [
   'voice',
   'polish',
   'autostop',
+  'reflect',
   'think',
   'nothink',
   'lean',

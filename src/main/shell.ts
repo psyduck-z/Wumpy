@@ -61,6 +61,12 @@ const RISKY: Array<{ pattern: RegExp; why: string; reversible?: boolean }> = [
     why: 'rewrites or publishes git state'
   },
   { pattern: />\s*\/dev\/sd|dd\s+if=/i, why: 'writes directly to a device' },
+  // Linux.
+  { pattern: /(^|[\s;&|(])(sudo|pkexec|doas|su)\s/i, why: 'runs as root' },
+  { pattern: /\bmkfs(\.[a-z0-9]+)?\b|\bwipefs\b|\b(fdisk|parted|sgdisk)\b/i, why: 'partitions or formats a disk' },
+  { pattern: /\b(chmod|chown)\s+(-[a-z]*R[a-z]*\s+)/, why: 'changes permissions recursively' },
+  { pattern: /\b(pacman|yay|paru)\s+-R/, why: 'removes a package', reversible: true },
+  { pattern: /\bsystemctl\s+(--user\s+)?(disable|mask|stop)\b/i, why: 'turns a service off', reversible: true },
   /**
    * Uninstalling, which was not here and should have been.
    *
@@ -314,7 +320,39 @@ const READ_ONLY = new Set([
   'git',
   'code',
   'pwsh',
-  'powershell'
+  'powershell',
+  // Linux: reports about the machine, which change nothing.
+  'ps',
+  'df',
+  'du',
+  'free',
+  'uptime',
+  'uname',
+  'nproc',
+  'lsblk',
+  'lscpu',
+  'lspci',
+  'lsusb',
+  'id',
+  'groups',
+  'pwd',
+  'realpath',
+  'readlink',
+  'basename',
+  'dirname',
+  'stat',
+  'file',
+  'which',
+  'whereis',
+  'printenv',
+  'sensors',
+  // Linux tools that both read and change things: only their reads, below.
+  'pacman',
+  'yay',
+  'hyprctl',
+  'systemctl',
+  'bluetoothctl',
+  'wpctl'
 ])
 
 /**
@@ -352,6 +390,14 @@ const READ_SUBCOMMANDS: Record<string, string[]> = {
    * Get-Service and Get-NetFirewallProfile answer both questions.
    */
   'manage-bde': ['-status', '/status'],
+  // Queries only: -S installs, -R removes, dispatch and keyword change the
+  // desktop, start and enable change services.
+  pacman: ['-Q', '-Qi', '-Qs', '-Ql', '-Qe', '-Qm', '-Qo', '-Qq', '-Qqe', '-Qdt', '-Si', '-Ss', '-Sl'],
+  yay: ['-Q', '-Qi', '-Qs', '-Qm', '-Si', '-Ss'],
+  hyprctl: ['version', 'monitors', 'workspaces', 'activeworkspace', 'clients', 'activewindow', 'devices', 'getoption', 'binds', 'layers', 'instances', 'cursorpos', 'systeminfo'],
+  systemctl: ['status', 'list-units', 'list-unit-files', 'list-timers', 'is-active', 'is-enabled', 'is-failed', 'show', 'cat'],
+  bluetoothctl: ['devices', 'info', 'show', 'list', 'paired-devices'],
+  wpctl: ['status', 'inspect', 'get-volume'],
   // Interpreters and editors get nothing but their version and help flags:
   // every one of them can run arbitrary code given an argument.
   node: [],
@@ -661,6 +707,9 @@ const SECRET_FILES: Array<{ pattern: RegExp; why: string }> = [
 
 /** Argv for each supported shell. */
 function launcher(kind: ShellKind, command: string): { file: string; args: string[] } {
+  // Off Windows there is no PowerShell or cmd: every block runs in bash,
+  // whichever tag the model gave it (the Linux prompt asks for bash).
+  if (process.platform !== 'win32') kind = 'bash'
   switch (kind) {
     case 'cmd':
       return { file: 'cmd.exe', args: ['/d', '/s', '/c', command] }

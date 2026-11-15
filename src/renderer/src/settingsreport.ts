@@ -1,6 +1,7 @@
 import type { WumpySettings } from '@shared/types'
 import { SEARCH_ENGINES, isSearchEngine, DEFAULT_ENGINE } from '@shared/links'
 import { DEFAULT_ORDERING, isOrdering, orderingSpec } from '@shared/order'
+import { APP_WINDOW } from './appwindow'
 
 /**
  * What Wumpy is set to, in one place.
@@ -92,6 +93,13 @@ export function settingsRows(
     { what: 'dictation tidied up', now: onOff(settings.voicePolish), change: '`/polish`' },
     { what: 'dictation stops at a pause', now: onOff(settings.voiceAutoStop), change: '`/autostop`' },
     {
+      what: 'self-reflection',
+      now: settings.reflect
+        ? `on, up to ${settings.reflectRounds} reviews${settings.reflectModel ? ` by ${settings.reflectModel}` : ''}`
+        : 'off',
+      change: '`/reflect`'
+    },
+    {
       what: 'instructions',
       now: settings.leanPrompt ? 'short form' : 'full',
       change: '`/lean`'
@@ -126,9 +134,10 @@ export function settingsLines(
     '',
     '| | now | change it |',
     '| --- | --- | --- |',
-    ...settingsRows(settings, model, pool, rank).map(
-      (r) => `| ${r.what} | ${r.now} | ${r.change} |`
-    ),
+    ...settingsRows(settings, model, pool, rank)
+      // The overlay's placement and pinning, which an app window does not have.
+      .filter((r) => !(APP_WINDOW && /`\/(dock|pin)`/.test(r.change)))
+      .map((r) => `| ${r.what} | ${r.now} | ${r.change} |`),
     '',
     '_Everything else is in Ctrl+K._'
   ]

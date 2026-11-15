@@ -238,7 +238,13 @@ check('closing does not wait for an animation', /setTimeout\(\(\) => window\.wum
 check('the panel is still told when it is shown', /panel\.onShown/.test(appSrc), true)
 /* Bounds and z-order before the window is on screen, not after. */
 {
-  const show = panelSrc.slice(panelSrc.indexOf('  show(why'), panelSrc.indexOf('win.moveTop()'))
+  /* The overlay's path. On Linux show() returns early for an ordinary app
+     window (REGULAR_WINDOW), which has no bounds or z-order of its own to
+     set; what is checked here is the path after that branch. */
+  const start = panelSrc.indexOf('  show(why')
+  const linuxBranch = panelSrc.indexOf('if (REGULAR_WINDOW) {', start)
+  const from = linuxBranch >= 0 ? panelSrc.indexOf('return', linuxBranch) : start
+  const show = panelSrc.slice(from, panelSrc.indexOf('win.moveTop()'))
   check('bounds are set before showing', show.indexOf('this.reposition()') < show.indexOf('win.show()'), true)
   check('and the always-on-top level too', show.indexOf('setAlwaysOnTop') < show.indexOf('win.show()'), true)
 }

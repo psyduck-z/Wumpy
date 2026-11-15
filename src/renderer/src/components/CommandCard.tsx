@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { registerPending } from '../pending'
+import { registerPending, startedRunning } from '../pending'
 import { claimOnce, wasClaimed } from '../once'
 import { liveOutput, onLive, forgetLive } from '../live'
 import { runningPhase, tailLines } from '@shared/running'
@@ -257,7 +257,13 @@ export function CommandCard({
     setStartedAt(Date.now())
     setElapsed(0)
     setState('running')
-    const res = await onRun(command, shell, ranKey)
+    const ended = startedRunning()
+    let res: Awaited<ReturnType<typeof onRun>>
+    try {
+      res = await onRun(command, shell, ranKey)
+    } finally {
+      ended()
+    }
     forgetLive(ranKey)
     if (!res) {
       // Null means the native confirmation was declined.

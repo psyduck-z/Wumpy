@@ -21,11 +21,24 @@ extraResources:
   # src/main/speech.ts for how one is found.
   - from: resources/speech
     to: speech
-  # The Win+C interception helper; see src/hook.
+  # NVIDIA's Riva protocol files for hosted speech; see src/main/nvspeech.ts.
+  - from: resources/riva
+    to: riva
+  # The Win+Shift+W interception helper (Windows only); see src/hook.
   - from: resources/hook
     to: hook
     filter:
       - WumpyHook.exe
+
+linux:
+  # A plain folder: no AppImage (which needs FUSE) and no system package.
+  # scripts/install-linux.mjs puts it in ~/.local/share/wumpy and adds the
+  # `wumpy` command and a launcher entry.
+  target:
+    - target: dir
+  executableName: wumpy
+  icon: resources/icon.png
+  category: Utility
 
 win:
   target:

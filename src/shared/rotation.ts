@@ -92,10 +92,10 @@ export class KeyRotation {
    * project: a key that is out of one model is still the right key for
    * another, and skipping it for everything was quota thrown away.
    */
-  next(now: number = Date.now(), model = ''): number | null {
+  next(now: number = Date.now(), model = '', avoid: number | null = null): number | null {
     if (this.count <= 0) return null
     this.fresh(now)
-    const index = chooseKey(this.pool, model, now, this.cursor)
+    const index = chooseKey(this.pool, model, now, this.cursor, avoid)
     if (index === null) return null
     this.cursor = (index + 1) % this.count
     this.pool = spendOn(this.pool, index, model, now)

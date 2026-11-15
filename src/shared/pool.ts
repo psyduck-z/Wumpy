@@ -357,7 +357,13 @@ export function chooseKey(
   pool: PoolDay,
   model: string,
   now: number,
-  cursor = 0
+  cursor = 0,
+  /**
+   * A key to stay off if any other is ready - the one the worker just used,
+   * when self-reflection's mentor wants the other. Still chosen when it is
+   * the only one ready: a review on the same key beats no review.
+   */
+  avoid: number | null = null
 ): number | null {
   const slots = pool.spend.length
   if (slots <= 0) return null
@@ -372,6 +378,7 @@ export function chooseKey(
     const index = (cursor + step) % slots
     const spend = pool.spend[index]
     if (!isReady(spend, key, now)) continue
+    if (index === avoid && slots > 1) continue
     const rank: [number, number, number, number] = [
       spend?.models[key] ?? 0,
       requestsTotalOn(pool, index),
@@ -383,6 +390,7 @@ export function chooseKey(
       bestRank = rank
     }
   }
+  if (best === null && avoid !== null && slots > 1) return chooseKey(pool, model, now, cursor, null)
   return best
 }
 

@@ -190,6 +190,8 @@ export function StatusBar({
   pool,
   compact,
   approvalMode,
+  reflect,
+  onReflectOff,
   listening,
   onCycleApproval,
   onCompact,
@@ -207,6 +209,13 @@ export function StatusBar({
   /** The panel is in its small corner shape, so drop the optional parts. */
   compact: boolean
   approvalMode: ApprovalMode
+  /**
+   * Self-reflection is on: every finished task costs a review as well. Shown
+   * while it is on, for the same reason as the meeting pill - a setting that
+   * changes what each turn costs should not be invisible. Click to turn off.
+   */
+  reflect: boolean
+  onReflectOff(): void
   /**
    * A meeting being transcribed, when one is. Words, or null.
    *
@@ -281,6 +290,17 @@ export function StatusBar({
       )}
 
       <span className="spacer" />
+
+      {reflect && (
+        <button
+          type="button"
+          className="approval is-reflect"
+          onClick={onReflectOff}
+          title="Self-reflection: a mentor reviews each finished task. Click to turn off (/reflect off)."
+        >
+          reflect
+        </button>
+      )}
 
       {/* Never leave the user guessing what will run without them. */}
       <button

@@ -242,6 +242,8 @@ async function pace(
 
 export class CloudClient {
   private inflight = new Map<string, AbortController>()
+  /** The key the last chat request went out on, per provider. See complete's otherKey. */
+  private lastChatKey = new Map<ProviderId, number>()
 
   /**
    * The ledger is optional so a test or a script can build a client without
@@ -845,6 +847,38 @@ export class CloudClient {
     )
   }
 
+  /**
+   * A key for one NVIDIA speech request, recognition or synthesis.
+   *
+   * Taken from the same rotation and paced by the same account clock as chat,
+   * so a voice turn spends the one per-minute allowance rather than a second,
+   * imaginary one. `done` reports how it went, in HTTP terms: 401/403 retires
+   * the key until it is checked, 429 rests it (or the account) for a minute.
+   */
+  async speechKey(model: string): Promise<{ key: string; done(status: number): void } | null> {
+    const provider: ProviderId = 'nvidia'
+    if (!this.keys.available() || !this.keys.has(provider)) return null
+    const rotation = this.rotation(provider)
+    const index = rotation.next(Date.now(), model)
+    if (index === null) return null
+    this.remember(provider, rotation)
+    await pace(provider, index, 0, this.separate(provider))
+    const key = this.keys.secrets(provider)[index]
+    if (!key) return null
+    return {
+      key,
+      done: (status: number): void => {
+        if (status === 401 || status === 403) rotation.reject(index)
+        else if (status === 429) {
+          const until = Date.now() + 60_000
+          if (this.separate(provider)) rotation.rest(index, until, 'per-minute')
+          else rotation.restAll(until, 'per-minute (account)')
+        }
+        this.remember(provider, rotation)
+      }
+    }
+  }
+
   private headers(provider: ProviderId, index: number): Record<string, string> {
     return {
       'Content-Type': 'application/json',
@@ -1068,6 +1102,7 @@ export class CloudClient {
     for (let attempt = 0; attempt < keyCount + 2; attempt++) {
       /* By model, because a key out of one model is the right key for another. */
       const index = rotation.next(Date.now(), model)
+      if (index !== null) this.lastChatKey.set(provider, index)
       if (index === null) {
         // Every key is resting. Say for how long rather than failing blank.
         const wait = rotation.waitMs(Date.now(), model)
@@ -1464,7 +1499,16 @@ export class CloudClient {
      * name a tab. The one caller that wants them is the borrowed eye, where
      * the picture IS the question.
      */
-    opts: { numPredict?: number; pictures?: boolean }
+    opts: {
+      numPredict?: number
+      pictures?: boolean
+      /**
+       * Go out on a different key from the last chat request when there is
+       * one free: self-reflection's mentor, reviewing on the key the worker
+       * did not use, so the two halves spend two allowances.
+       */
+      otherKey?: boolean
+    }
   ): Promise<string | null> {
     const check = this.ready(model)
     if (!check.ok || !check.provider) return null
@@ -1479,7 +1523,8 @@ export class CloudClient {
        * title is not worth refusing outright.
        */
       const background = this.rotation(provider)
-      const index = background.next(Date.now(), model) ?? 0
+      const avoid = opts.otherKey ? (this.lastChatKey.get(provider) ?? null) : null
+      const index = background.next(Date.now(), model, avoid) ?? 0
       this.remember(provider, background)
       /* Chosen before the wait, not after: pacing a key nobody had picked
          yet is what made a compaction block the answer it was making room

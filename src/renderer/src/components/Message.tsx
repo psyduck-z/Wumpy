@@ -230,6 +230,20 @@ export const Message = memo(function Message({
           </div>
         ) : null}
         {message.content ? <div className="msg-body">{message.content}</div> : null}
+        {message.spoken ? (
+          <span className="msg-spoken" title="Said through the earbuds">
+            <svg viewBox="0 0 16 16" width="10" height="10" aria-hidden="true">
+              <path
+                d="M3 9V8a5 5 0 0 1 10 0v1M3 9h2v4H4a1 1 0 0 1-1-1zM13 9h-2v4h1a1 1 0 0 0 1-1z"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="1.4"
+                strokeLinejoin="round"
+              />
+            </svg>
+            earbuds
+          </span>
+        ) : null}
       </div>
     )
   }

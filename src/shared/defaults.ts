@@ -71,6 +71,11 @@ export const DEFAULT_SETTINGS: WumpySettings = {
   // and should be opted into rather than inherited.
   voicePolish: false,
   voiceAutoStop: true,
+  voiceCloud: true,
+  speakVoice: 'Magpie-Multilingual.EN-US.Aria',
+  reflect: false,
+  reflectRounds: 3,
+  reflectModel: '',
 
   // Off: the saving is large and measured, the shorter wording is not. The
   // full text is what is known to work on this model. See WumpySettings.

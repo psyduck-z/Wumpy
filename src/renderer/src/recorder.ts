@@ -152,6 +152,24 @@ function pickFormat(): { mime: string; extension: string } | null {
   return FORMATS.find((f) => MediaRecorder.isTypeSupported(f.mime)) ?? null
 }
 
+/**
+ * The level meter's clock. Animation frames while the panel is on screen;
+ * a timer when it is not, because a voice turn records from the hidden panel
+ * and a window nobody can see may be given no frames at all - the meter would
+ * stop, and with it the silence detection that ends the recording.
+ */
+type Frame = { raf: boolean; id: number }
+function nextFrame(cb: () => void): Frame {
+  return document.visibilityState === 'visible'
+    ? { raf: true, id: requestAnimationFrame(cb) }
+    : { raf: false, id: window.setTimeout(cb, 40) }
+}
+function stopFrame(frame: Frame | null | undefined): void {
+  if (!frame) return
+  if (frame.raf) cancelAnimationFrame(frame.id)
+  else clearTimeout(frame.id)
+}
+
 export function canRecord(): boolean {
   return Boolean(navigator.mediaDevices?.getUserMedia) && pickFormat() !== null
 }
@@ -213,7 +231,7 @@ export async function record(opts: RecorderOptions = {}): Promise<Recording> {
   let spokeAt = startedAt
   let heardSpeech = false
   let heardInSegment = false
-  let frame = 0
+  let frame: Frame | null = null
   let stopped = false
   let rotating = false
   let reason: 'silence' | 'asked' | 'limit' = 'asked'
@@ -264,7 +282,7 @@ export async function record(opts: RecorderOptions = {}): Promise<Recording> {
     if (stopped) return
     stopped = true
     reason = why
-    cancelAnimationFrame(frame)
+    stopFrame(frame)
     if (recorder.state !== 'inactive') recorder.stop()
   }
 
@@ -326,7 +344,7 @@ export async function record(opts: RecorderOptions = {}): Promise<Recording> {
       finish('silence')
       return
     }
-    frame = requestAnimationFrame(watch)
+    frame = nextFrame(watch)
   }
 
   let attachFinal: (r: MediaRecorder) => void = () => {}
@@ -369,7 +387,7 @@ export async function record(opts: RecorderOptions = {}): Promise<Recording> {
   })
 
   recorder.start()
-  frame = requestAnimationFrame(watch)
+  frame = nextFrame(watch)
 
   return { stop: () => finish('asked'), done }
 }

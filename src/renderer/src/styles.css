@@ -374,6 +374,16 @@ body {
   word-break: break-word;
 }
 
+.msg-spoken {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin-top: 3px;
+  font-size: 10px;
+  letter-spacing: 0.02em;
+  color: rgb(var(--accent) / 0.75);
+}
+
 .msg-assistant {
   position: relative;
 }
@@ -1916,6 +1926,11 @@ body {
 
 .approval:hover {
   color: rgb(var(--text));
+}
+
+.approval.is-reflect {
+  color: rgb(var(--accent));
+  border-color: rgb(var(--accent) / 0.4);
 }
 
 /* ---- how much runs without you, as a shape ----

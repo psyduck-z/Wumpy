@@ -494,7 +494,14 @@ check(
   false
 )
 check('and says why not', panelSrc.includes('WS_EX_TOOLWINDOW'), true)
-check('it still stays off the taskbar', panelSrc.includes('skipTaskbar: true'), true)
+// On Windows. On Linux it is an ordinary app window (REGULAR_WINDOW) and
+// belongs wherever the compositor lists windows.
+check(
+  'it still stays off the taskbar',
+  /skipTaskbar: (true|!REGULAR_WINDOW)\b/.test(panelSrc) &&
+    panelSrc.includes("REGULAR_WINDOW = process.platform === 'linux'"),
+  true
+)
 // The ordinary route first, so the usual case pays nothing.
 check('app.focus is still tried first', /app\.focus\(\{ steal: true \}\)/.test(panelSrc), true)
 // Immediately, inside show(). Measured: the same calls made ~600ms later

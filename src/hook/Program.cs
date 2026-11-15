@@ -49,6 +49,7 @@ internal static class Program
     private const int VK_RWIN = 0x5C;
     private const int VK_CONTROL = 0x11;
     private const int VK_F23 = 0x86;
+    private const int VK_SHIFT = 0x10;
 
     private const uint LLKHF_INJECTED = 0x10;
     private const uint INPUT_KEYBOARD = 1;
@@ -272,6 +273,13 @@ internal static class Program
     private static uint _targetVk = 'C';
 
     /// <summary>
+    /// Whether Shift must be held too (`--shift`). Wumpy asks for Win+Shift+D,
+    /// the same combination it uses on Linux, so the shortcut is one thing to
+    /// remember across machines; Win+C stays the default for the selftest.
+    /// </summary>
+    private static bool _requireShift;
+
+    /// <summary>
     /// The key whose current press has already been reported, or 0 for none.
     ///
     /// Auto-repeat is generated below this hook, so holding the combination
@@ -324,6 +332,7 @@ internal static class Program
             UiTree.Owner = grantPid;
         }
 
+        _requireShift = Array.Exists(args, a => a == "--shift");
         var key = Array.Find(args, a => a.Length > 0 && !a.StartsWith('-'));
         if (key is not null)
         {
@@ -465,7 +474,7 @@ internal static class Program
     /// written to agree with them. The repeat bug this exists to catch is
     /// invisible to any test that only presses the key once.
     /// </summary>
-    private static Act Decide(bool isDown, bool isUp, uint vkCode, bool winHeld, bool injected, long now)
+    private static Act Decide(bool isDown, bool isUp, uint vkCode, bool winHeld, bool shiftHeld, bool injected, long now)
     {
         if (!isDown && !isUp) return Act.Pass;
 
@@ -489,7 +498,8 @@ internal static class Program
 
         // The dedicated Copilot key reports as Shift+Win+F23 rather than its own code.
         var isCopilotKey = vkCode == VK_F23 && winHeld;
-        if (!((winHeld && vkCode == _targetVk) || isCopilotKey)) return Act.Pass;
+        var isTarget = winHeld && vkCode == _targetVk && (!_requireShift || shiftHeld);
+        if (!(isTarget || isCopilotKey)) return Act.Pass;
 
         _firedVk = vkCode;
         _firedAt = now;
@@ -580,7 +590,8 @@ internal static class Program
         var winHeld = (GetAsyncKeyState(VK_LWIN) & 0x8000) != 0
                       || (GetAsyncKeyState(VK_RWIN) & 0x8000) != 0;
 
-        var act = Decide(isDown, isUp, data.vkCode, winHeld, injected, Environment.TickCount64);
+        var shiftHeld = (GetAsyncKeyState(VK_SHIFT) & 0x8000) != 0;
+        var act = Decide(isDown, isUp, data.vkCode, winHeld, shiftHeld, injected, Environment.TickCount64);
         if (act == Act.Pass) return CallNextHookEx(_hook, nCode, wParam, lParam);
 
         if (act == Act.Toggle)
@@ -803,8 +814,8 @@ internal static class Program
         // Each scenario starts from nothing held.
         void Fresh() => _firedVk = 0;
 
-        Act Down(uint vk, bool win, long now = 0) => Decide(true, false, vk, win, false, now);
-        Act Up(uint vk, bool win, long now = 0) => Decide(false, true, vk, win, false, now);
+        Act Down(uint vk, bool win, long now = 0) => Decide(true, false, vk, win, false, false, now);
+        Act Up(uint vk, bool win, long now = 0) => Decide(false, true, vk, win, false, false, now);
 
         // A plain tap.
         Fresh();
@@ -858,7 +869,20 @@ internal static class Program
 
         // Our own Ctrl tap must never come back round as a press.
         Fresh();
-        Check("injected input is ignored", Decide(true, false, 'C', true, true, 0) == Act.Pass);
+        Check("injected input is ignored", Decide(true, false, 'C', true, false, true, 0) == Act.Pass);
+
+        // Win+Shift+W, the combination Wumpy asks for with `W --shift`.
+        var savedVk = _targetVk;
+        _targetVk = 'W';
+        _requireShift = true;
+        _firedVk = 0;
+        Check("Win+W without Shift is not ours", Decide(true, false, 'W', true, false, false, 0) == Act.Pass);
+        Check("Win+Shift+W reports once", Decide(true, false, 'W', true, true, false, 0) == Act.Toggle);
+        Check("and its release is swallowed", Decide(false, true, 'W', true, true, false, 40) == Act.Swallow);
+        Check("Shift+W without Win is typing", Decide(true, false, 'W', false, true, false, 100) == Act.Pass);
+        _targetVk = savedVk;
+        _requireShift = false;
+        _firedVk = 0;
 
         // Other keys keep working during the hold.
         Fresh();

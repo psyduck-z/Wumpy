@@ -1,3 +1,4 @@
+import { LINUX_APPS_PROMPT, LINUX_CLOSE_PROMPT, LINUX_SHELL_PROMPT, linuxVoice } from './linux'
 import type { Assistant } from './types'
 import { WRITE_PROMPT } from './writefile'
 import { LOOK_PROMPT } from './look'
@@ -1578,7 +1579,13 @@ export interface PromptShape {
    * every block still named. Off unless the user asks for it: see
    * WumpySettings.leanPrompt for why that is not a default.
    */
-  lean?: boolean
+lean?: boolean
+  /**
+   * Which machine the prompt is for: Linux gets bash and Omarchy's tools in
+   * place of PowerShell, and no Windows screen-automation section (its
+   * helper is Windows-only). Absent means Windows, as it always was.
+   */
+  platform?: 'win32' | 'linux' | 'darwin'
   /**
    * Whether this model can read a picture at all.
    *
@@ -1695,6 +1702,7 @@ export function shellFor(needs?: readonly Capability[]): string {
 
 /** The sections, in the order they are sent, with the empties dropped. */
 export function promptSections(shape: PromptShape): string[] {
+  if (shape.platform === 'linux') return linuxSections(shape)
   const { scope, search, screen, browser, quota } = shape
   /*
    * Undefined means "everything", which is what every caller meant before
@@ -1761,6 +1769,57 @@ export function promptSections(shape: PromptShape): string[] {
 }
 
 /** The preamble itself. One assembly, used by the sender and the meter. */
+/**
+ * The Linux prompt: the same sections in the same order, with the shell and
+ * close sections restated for bash and Hyprland and the persona told where it
+ * lives. The lean variant is built from Windows paragraphs, so Linux always
+ * takes the full one.
+ */
+/**
+ * The open section on Linux: its web half unchanged, its app half (Start menu,
+ * Windows Search, winget) replaced by desktop entries, pacman and Hyprland.
+ */
+function linuxOpen(engine?: SearchEngine): string {
+  const full = openFor(engine)
+  const cut = full.indexOf('ASKING ABOUT AN APP IS NOT ASKING YOU TO OPEN IT.')
+  return [cut > 0 ? full.slice(0, cut).trimEnd() : full, LINUX_APPS_PROMPT].join(
+    String.fromCharCode(10, 10)
+  )
+}
+
+function linuxSections(shape: PromptShape): string[] {
+  const { scope, search, screen, browser, quota } = shape
+  const wants = (capability: Capability): boolean =>
+    shape.needs === undefined || shape.needs.includes(capability)
+  const looking =
+    shape.sees === false ? (shape.eye ? EYES_PROMPT : NAMES_PROMPT) : SCREEN_PROMPT
+  const shell =
+    scope === 'none'
+      ? NO_SHELL_PROMPT
+      : [
+          LINUX_SHELL_PROMPT,
+          WRITE_PROMPT,
+          'On this machine the same refusal covers ~/.config/autostart and',
+          '~/.config/systemd, which start things at login. ~/.config/hypr and the',
+          'shell start-up files (.bashrc, .profile) are asked about first.'
+        ].join(String.fromCharCode(10, 10))
+  return [
+    linuxVoice(shape.base ?? VOICE_PROMPT),
+    APP_PROMPT,
+    shell,
+    scope === 'full' ? LINUX_CLOSE_PROMPT : '',
+    scope !== 'none' && search ? SEARCH_PROMPT : '',
+    scope !== 'none' && browser ? (wants('open') ? linuxOpen(shape.engine) : STUBS.open) : '',
+    // Starting and controlling apps is a shell matter here, so it is offered
+    // whenever commands are, not only when the browser is on.
+    scope !== 'none' && !browser ? LINUX_APPS_PROMPT : '',
+    screen ? looking : '',
+    screen && wants('picture') ? LOOK_PROMPT : '',
+    quota ? QUOTA_PROMPT : '',
+    ASK_PROMPT
+  ].filter(Boolean)
+}
+
 export function assemblePrompt(shape: PromptShape): string {
   return promptSections(shape).join(String.fromCharCode(10, 10))
 }

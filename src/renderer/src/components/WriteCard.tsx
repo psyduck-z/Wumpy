@@ -98,6 +98,7 @@ export function WriteCard({
     if (!waiting) return
     return registerPending(messageId + (target?.path ?? path ?? 'a file'), {
       command: target?.path ?? path ?? 'a file',
+      spoken: `write ${(target?.path ?? path ?? 'a file').split(/[\\/]/).pop()}`,
       run: () => void go(),
       skip: () => setState('skipped')
     })

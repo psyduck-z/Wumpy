@@ -24,6 +24,13 @@ import { pathToFileURL } from 'node:url'
 import { spawn } from 'node:child_process'
 import { homedir } from 'node:os'
 
+/* Every check here asks real PowerShell what the Windows prompt claims, so
+   it means nothing elsewhere: Windows CI runs it, Linux skips it whole. */
+if (process.platform !== 'win32') {
+  console.log('path checks skipped: they run real PowerShell, which only Windows has')
+  process.exit(0)
+}
+
 const NL = String.fromCharCode(10)
 const out = join(process.cwd(), '.paths-check.mjs')
 await build({

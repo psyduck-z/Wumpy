@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { actionFacts } from '../ledger'
 import type { Attachment, ChatMessage, NoteTopic } from '@shared/types'
 import { BAIL_WINDOW_MS, hasBlock, returnsThePrompt } from '../abort'
+import { handsFree } from '../handsfree'
 import {
   collapsed,
   repeatOf,
@@ -272,7 +273,8 @@ export function useChat(): ChatState {
       content: displayText ?? trimmed,
       createdAt: Date.now(),
       ...(images?.length ? { images } : {}),
-      ...(automatic ? { automatic: true } : {})
+      ...(automatic ? { automatic: true } : {}),
+      ...(handsFree() && !automatic ? { spoken: true } : {})
     }
     const assistantMessage: ChatMessage = {
       id: nextId(),
@@ -326,7 +328,8 @@ export function useChat(): ChatState {
       context: {
         chatTitle: context.current.chatTitle,
         messageCount: history.length,
-        actions: actionFacts()
+        actions: actionFacts(),
+        handsFree: handsFree()
       }
     })
     return true

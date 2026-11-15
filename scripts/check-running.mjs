@@ -176,10 +176,16 @@ check('and do not count as a line', tailLines(`${ESC}[2K${CR}ok`, 6), ['ok'])
  * The reason this exists: a three-minute install used to show one unchanging
  * word. If the output only turns up at the end, nothing above matters.
  */
+const WINDOWS = process.platform === 'win32'
+/* The same programs in each platform's shell: PowerShell on Windows, bash
+   elsewhere (which is what Wumpy runs commands in there). */
+const SAY = (word) => (WINDOWS ? `Write-Output "${word}"` : `echo "${word}"`)
 const seen = []
 const t0 = Date.now()
 const body = ['Write-Output "line $i"', 'Start-Sleep -Milliseconds 400'].join('; ')
-const script = `foreach ($i in 1..4) { ${body} }`
+const script = WINDOWS
+  ? `foreach ($i in 1..4) { ${body} }`
+  : 'for i in 1 2 3 4; do echo "line $i"; sleep 0.4; done'
 const slow = await runCommand(script, 'powershell', process.cwd(), (text) =>
   seen.push({ at: Date.now() - t0, text })
 )
@@ -194,12 +200,12 @@ check('and it is the real output', tailLines(seen.at(-1).text, 1), ['line 4'])
  * output that was plainly in the result.
  */
 const quick = []
-await runCommand('Write-Output "once"', 'powershell', process.cwd(), (t) => quick.push(t))
+await runCommand(SAY('once'), 'powershell', process.cwd(), (t) => quick.push(t))
 check('a command faster than one frame still sends it', quick.length, 1)
 check('with everything it printed', tailLines(quick[0] ?? '', 1), ['once'])
 
 /** Asking for no progress must not change the result. */
-const silent = await runCommand('Write-Output "plain"', 'powershell', process.cwd())
+const silent = await runCommand(SAY('plain'), 'powershell', process.cwd())
 check('and progress is optional', silent.stdout.trim(), 'plain')
 
 console.log(`${NL}${count - failed}/${count} running-state checks correct`)

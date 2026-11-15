@@ -1,16 +1,23 @@
 # Wumpy
 
-A local-first AI overlay for Windows that takes over the Copilot shortcut.
+An AI assistant for Windows and Omarchy that can run commands on your machine,
+talk through your earbuds, and have a second model check its work.
 
-Wumpy lives in the system tray with no window of its own. Press `Win+C` and a
-panel slides in against the right edge of your screen, floating above whatever
-you are working in — including fullscreen browsers. Press `Esc` and it is gone.
+On **Windows** Wumpy lives in the system tray with no window of its own. Press
+`Win+Shift+D` (or the Copilot key) and a panel slides in against the edge of
+your screen, floating above whatever you are working in — including fullscreen
+browsers. Press `Esc` and it is gone.
+
+On **Omarchy** (Arch Linux + Hyprland) it is an ordinary app window that
+Hyprland tiles like any other, with the same tray icon. `Super+Shift+D` opens
+it, takes you to it if it is open on another workspace, and hides it again —
+see [On Omarchy](#on-omarchy).
 It talks to [Ollama](https://ollama.com) on `127.0.0.1`, so nothing you type
 leaves the machine.
 
 ```
 ┌──────────────────────────────────┐
-│ ● Wumpy   Win + C  [llama3.2:3b] │
+│ ● Wumpy   Win+Shift+D [llama3.2] │
 ├──────────────────────────────────┤
 │                                  │
 │          what's a WH_            │
@@ -40,13 +47,13 @@ seeing your screen) are deliberately **not** built yet — see [Roadmap](#roadma
 
 ```powershell
 npm install
-npm run hook:build        # builds the Win+C interception helper
+npm run hook:build        # builds the Win+Shift+D interception helper
 ollama pull llama3.2:3b   # Flash + Fast; other tiers use models you already have
 npm run dev
 ```
 
 The panel appears on launch. After that it hides in the tray and answers to
-`Win+C`.
+`Win+Shift+D`.
 
 To build an installer:
 
@@ -54,7 +61,98 @@ To build an installer:
 npm run package           # -> dist/Wumpy-0.1.0-setup.exe
 ```
 
-## How Win+C is taken
+## On Omarchy
+
+```bash
+npm install
+npm run install:linux     # builds, then installs to ~/.local/share/wumpy
+wumpy                     # or from the app launcher
+```
+
+`install:linux` puts a `wumpy` command in `~/.local/bin`, a launcher entry and
+an icon, and (once it has run packaged) an autostart entry so it is in the tray
+after login. Bind the shortcut in `~/.config/hypr/bindings.lua`:
+
+```lua
+o.bind("SUPER + SHIFT + D", "Wumpy", "wumpy --toggle")
+```
+
+`wumpy --toggle` shows or hides the window, `wumpy --voice` starts a spoken
+turn (below) and `wumpy --hidden` starts it in the tray.
+
+What is different from Windows, on purpose:
+
+- **A regular window, not an overlay.** Hyprland places and tiles it; it does
+  not float above other windows or vanish when you click elsewhere. The
+  overlay's controls — the dock button, the pin, `/dock`, `/pin`, `Ctrl+D`,
+  `Ctrl+P`, and `Esc` closing the panel — are left out rather than shown doing
+  nothing. Closing the window (`Super+W` or the ×) hides it to the tray; quit
+  from the tray menu.
+- **Bash, not PowerShell.** The model is told it is on Omarchy and given the
+  tools this machine has: `pacman`/`yay`, `hyprctl`, `systemctl`, `wpctl`,
+  `bluetoothctl`, the `omarchy-*` commands, `wtype`, `grim`, `notify-send`.
+  Anything that needs root goes through `pkexec`, which shows a password box —
+  `sudo` cannot ask for a password from inside the app. Every command still
+  waits for your approval unless you have said otherwise.
+- **Keys in the system keyring** (GNOME Keyring through libsecret), the way
+  Windows keeps them with DPAPI.
+
+## Talking to it from your earbuds
+
+`wumpy --voice` runs one spoken turn without opening the window: a chime, you
+talk, it answers out loud. Bind it to anything — Nothing X runs it from an
+earbud gesture (set a gesture to *Desktop assistant* under Controls; the command
+itself is under Settings → Assistant).
+
+- **Hearing** is NVIDIA's Parakeet and **speaking** is NVIDIA's Magpie, on the
+  same NVIDIA keys as chat (`/key nvidia <key>`), from the same rotation. With
+  no key, dictation falls back to local Whisper (`npm run speech:install`) and
+  answers to the system voice.
+- **It knows it is on your earbuds.** Every request in a voice turn says so,
+  and the model answers in a sentence or two of plain speech instead of tables
+  and lists; typed turns are told you are at the screen. Messages that came
+  through the buds carry a small *earbuds* mark in the transcript.
+- **Approvals are asked out loud.** When it wants to run a command it asks —
+  "Can I check how full the disk is? Say yes or no." — and only *yes* or *no*
+  answers it. Anything else, or silence, and it asks again; it cannot be
+  skipped by ignoring it. Clicking the card in the window answers it too.
+- **Saying "slash" types a command.** "Slash remember I like tea" is
+  `/remember I like tea`, not the word "slash" sent to the model.
+- Triggering it again mid-turn cancels the turn.
+
+Holding the spacebar in the window dictates into the box instead (`/voice on`
+first). If there is nothing to transcribe with, it now says so under the box
+rather than silently doing nothing.
+
+## Self-reflection
+
+`/reflect` turns on a second opinion for every task. The model works as usual —
+answers, runs commands, reads their output — and when it has finished, the task
+and everything done for it go to a **mentor**: the same model (or the one set
+with `/reflect model <id>`), sent on your *other* key when you have two, so the
+review spends the allowance the work did not. The mentor answers ACCEPT or
+REVISE with concrete notes. REVISE goes back to the worker automatically and it
+has another go; this repeats until the mentor accepts or the round limit is
+reached.
+
+| Command | Does |
+| --- | --- |
+| `/reflect` | toggle it |
+| `/reflect on` / `/reflect off` | turn it on or off |
+| `/reflect 5` | allow up to 5 reviews per task (1–8, default 3) |
+| `/reflect model <id>` | use a different model as the mentor; `/reflect model` alone resets it |
+
+Each review shows as a note in the transcript — *Mentor reviewing…*, then
+*Mentor accepted* or *Mentor asked for changes* with the notes — and a
+*reflect* chip sits in the status bar while it is on (click it to turn it off).
+A new message from you is a new task and starts the count again. Every review
+is one request, so it is off by default.
+
+## How the Windows shortcut is taken
+
+The shortcut is `Win+Shift+D` (and the dedicated Copilot key). It used to be
+`Win+C`, and the reasoning below — written for that key — is why the hook
+exists at all.
 
 Windows reserves `Win+C` for the shell. This is not a Copilot setting you can
 politely ask about — `RegisterHotKey`, which is the only thing Electron's
@@ -75,14 +173,14 @@ delivered. That needs no elevation and no registry changes.
 
 It runs as a 170 KB helper process (`src/hook`, C#) spawned by the app:
 
-- Watches for `C` while either Windows key is held, plus the dedicated Copilot
-  key (which reports itself as `Shift+Win+F23`).
+- Watches for `D` while either Windows key and Shift are held (`--shift`),
+  plus the dedicated Copilot key (which reports itself as `Shift+Win+F23`).
 - Returns `1` from the hook callback, so the shell never sees the key.
 - Injects a harmless `Ctrl` tap, because otherwise releasing `Win` having "seen
   no other key" pops the Start menu.
 - Exits when its stdin closes, so it can never outlive the app.
 
-`Win+C` is the only key bound out of the box. If the helper is missing or
+`Win+Shift+D` is the only key bound out of the box. If the helper is missing or
 refuses to start, Wumpy says so in the tray tooltip and the panel header, and
 you can still open the panel by clicking the tray icon — or add an accelerator
 of your own to `hotkeys` in settings. Verify the helper independently with:
@@ -816,7 +914,7 @@ and toggle changes apply immediately; hotkey changes apply on restart.
 | `autoSave` | `true` | Persist every chat as it happens |
 | `autoCompact` | `true` | Summarise older turns when context fills |
 | `showReasoning` | `false` | Expand the scratchpad by default |
-| `hotkeys` | `[]` | Extra accelerators; `Win+C` comes from the hook |
+| `hotkeys` | `[]` | Extra accelerators; `Win+Shift+D` comes from the hook |
 | `keepAlive` | `30m` | How long Ollama holds a model resident |
 | `warmOnStart` | `true` | Preload tier models at startup |
 | `smoothText` | `false` | Reveal character by character (costs CPU while generating) |
@@ -834,7 +932,7 @@ and toggle changes apply immediately; hotkey changes apply on restart.
 
 | Key | Action |
 | --- | --- |
-| `Win+C` | Toggle the panel (also: click the tray icon) |
+| `Win+Shift+D` / `Super+Shift+D` | Toggle the panel (also: click the tray icon) |
 | `Ctrl+1`–`Ctrl+4` | Jump to Flash / Fast / Thinker / Deep |
 | `Ctrl+D` | Toggle Quick / Developer mode |
 | `Ctrl+N` | New chat |
@@ -855,7 +953,7 @@ src/
 │  ├─ index.ts        lifecycle, IPC, model reconciliation
 │  ├─ panel.ts        the always-on-top overlay window
 │  ├─ hotkey.ts       accelerator registration with fallback
-│  ├─ lowlevelhook.ts drives the Win+C helper process
+│  ├─ lowlevelhook.ts drives the Win+Shift+D helper process
 │  ├─ ollama.ts       streaming client, abort, capability detection
 │  ├─ tray.ts         tray icon and menu
 │  ├─ chats.ts        saved conversations

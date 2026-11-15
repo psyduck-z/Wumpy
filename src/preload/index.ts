@@ -1,4 +1,5 @@
 import { contextBridge, ipcRenderer } from 'electron'
+import type { ReflectReview } from '@shared/reflect'
 import { IPC } from '@shared/types'
 import type { LinkCheck } from '@shared/links'
 import type { ProbeResult } from '@shared/probe'
@@ -43,6 +44,8 @@ function on<T>(channel: string, cb: (payload: T) => void): () => void {
 }
 
 const api = {
+  /** 'win32', 'linux' or 'darwin': the panel is an overlay on Windows, an app window on Linux. */
+  platform: process.platform as string,
   settings: {
     get: (): Promise<WumpySettings> => ipcRenderer.invoke(IPC.settingsGet),
     set: (patch: Partial<WumpySettings>): Promise<WumpySettings> =>
@@ -316,7 +319,16 @@ const api = {
      * Main flattens and caps whatever arrives - see IPC.listenLog.
      */
     log: (line: string): void => ipcRenderer.send(IPC.listenLog, line),
-    onStatus: (cb: (s: VoiceStatus) => void) => on<VoiceStatus>(IPC.voiceStatusChanged, cb)
+    onStatus: (cb: (s: VoiceStatus) => void) => on<VoiceStatus>(IPC.voiceStatusChanged, cb),
+    /** Text to speech: a WAV to play, or null to use the system voice. */
+    speak: (text: string): Promise<ArrayBuffer | null> => ipcRenderer.invoke(IPC.voiceSpeak, { text }),
+    /** A spoken turn was asked for (wumpy --voice, the tray). */
+    onTurn: (cb: () => void) => on<void>(IPC.voiceTurn, cb)
+  },
+  reflect: {
+    /** One mentor review of the task so far; null when none could be had. */
+    review: (transcript: string): Promise<ReflectReview | null> =>
+      ipcRenderer.invoke(IPC.reflectReview, { transcript })
   }
 }
 

@@ -20,7 +20,7 @@
  * on this and a redirect can point anywhere, not just at OneDrive.
  */
 import { spawn } from 'node:child_process'
-import { existsSync } from 'node:fs'
+import { existsSync, readFileSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
 
@@ -81,8 +81,39 @@ export function userFolders(): UserFolders {
  * correct on an ordinary machine, and a folder that cannot be resolved is
  * simply left out of the facts rather than stated wrongly.
  */
+/**
+ * Linux keeps the answer in a file rather than behind an API:
+ * ~/.config/user-dirs.dirs, written by xdg-user-dirs, with lines like
+ * XDG_DOCUMENTS_DIR="$HOME/Documents".
+ */
+function linuxFolders(): UserFolders {
+  const home = homedir()
+  const fallback = guess()
+  let text = ''
+  try {
+    text = readFileSync(join(home, '.config', 'user-dirs.dirs'), 'utf8')
+  } catch {
+    return fallback
+  }
+  const read = (key: string): string => {
+    const m = new RegExp(`^XDG_${key}_DIR="([^"]*)"`, 'm').exec(text)
+    const path = m ? m[1].replace(/^\$HOME/, home) : ''
+    return path && existsSync(path) ? path : ''
+  }
+  return {
+    documents: read('DOCUMENTS') || fallback.documents,
+    pictures: read('PICTURES') || fallback.pictures,
+    desktop: read('DESKTOP') || fallback.desktop,
+    downloads: read('DOWNLOAD') || fallback.downloads
+  }
+}
+
 export function resolveUserFolders(): Promise<UserFolders> {
   if (cached) return Promise.resolve(cached)
+  if (process.platform !== 'win32') {
+    cached = linuxFolders()
+    return Promise.resolve(cached)
+  }
 
   const script = LOOKUPS.map(([, name]) => `[Environment]::GetFolderPath("${name}")`).join('; ')
 
