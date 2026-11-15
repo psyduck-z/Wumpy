@@ -53,6 +53,9 @@ const sleep = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms
 /** The gap between thinking ticks: a steady pulse, not a rhythm to follow. */
 export const TICK_MS = 550
 
+/** How long nothing new must happen after an answer before it is read out. */
+export const QUIET_AFTER_MS = 600
+
 export function useVoiceTurn(deps: Deps): void {
   const depsRef = useRef(deps)
   depsRef.current = deps
@@ -484,7 +487,10 @@ export function useVoiceTurn(deps: Deps): void {
           continue
         }
         if (!quietSince) quietSince = Date.now()
-        if (Date.now() - quietSince > 1800) return talked
+        /* Long enough for a card the answer put up to register (a frame or
+           two), and no longer: it was 1.8s, measured as the single biggest
+           wait between the answer arriving and hearing it. */
+        if (Date.now() - quietSince > QUIET_AFTER_MS) return talked
         await sleep(150)
       }
       return talked

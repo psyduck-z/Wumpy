@@ -109,6 +109,9 @@ check('the page lets a spoken answer play', /media-src 'self' blob:/.test(html),
 check('and if the element refuses, Web Audio plays it', /if \(\(await playWebAudio\(wav\)\) \|\| cancelled\) return/.test(turn), true)
 check('the element is tried first, for the faster lists', /if \(\(await playElement\(wav, quick\)\) \|\| cancelled\) return/.test(turn), true)
 check('the answer stays on the bar after it is said', /stage: 'done', detail: text/.test(turn), true)
+/* 1.8s of quiet before reading the answer was the biggest wait measured
+   between the answer arriving and hearing it; a card registers in a frame. */
+check('the answer is read without a long pause first', /export const QUIET_AFTER_MS = 600\b/.test(turn), true)
 check('and when the turn ends, however it ends', /\.finally\(\(\) => \{\s+stopTicks\(\)/.test(turn), true)
 
 /* -------------------------------------------------------------- the log */
