@@ -140,7 +140,8 @@ nothing to `PATH`, so a bare `wumpy` is not found there.
   conversation: say something, it answers, say the next thing — no gesture
   and no chime in between, because the mic stays open until you finish, so
   the earbuds switch only once. Soft typing, in threes, means it is working
-  on what you said. A pause of a second and a half ends what you are saying;
+  on what you said. A pause of a second and a half ends what you are saying
+  — three seconds when you trail off mid-thought, on an "and" or an "um";
   carry on while it is still working it out and the rest is added rather
   than sent as half a question, and a moment where the mic drops out is not
   taken for a pause. Talk over an answer and it stops at once: ask something
