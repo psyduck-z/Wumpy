@@ -32,6 +32,43 @@ export const SPEECH_MODELS = {
   talk: process.env.WUMPY_NV_TTS_FUNCTION ?? '877104f7-e885-42b9-8de8-f6e4c6303969'
 }
 
+/**
+ * Recognisers to compare Parakeet with, on the same keys: "the speech to
+ * text model is kind of idiotic" - "how much RAM does this PC have" came
+ * back as "...does a specie have". `wumpy --hearing-check` runs each on the
+ * same sentences, and `wumpy --compare-hearing` on what is really said, so
+ * the choice is made on numbers. The ids are build.nvidia.com's, which can
+ * move; one that fails says so in the log and is left out.
+ *
+ * `boost` asks for BOOSTED_WORDS to be favoured, at that score: 20-100 for
+ * CTC models, 0.5-2 for TDT and RNNT ones, as NVIDIA advises.
+ */
+export interface Hearer {
+  name: string
+  functionId: string
+  language: string
+  boost?: number
+}
+export const HEARERS: Hearer[] = [
+  { name: 'parakeet-tdt-0.6b', functionId: SPEECH_MODELS.hear, language: 'en-US' },
+  { name: 'parakeet-tdt-0.6b+words', functionId: SPEECH_MODELS.hear, language: 'en-US', boost: 1.5 },
+  { name: 'parakeet-ctc-1.1b', functionId: '1598d209-5e27-4d3c-8079-4751568b1081', language: 'en-US' },
+  { name: 'parakeet-ctc-1.1b+words', functionId: '1598d209-5e27-4d3c-8079-4751568b1081', language: 'en-US', boost: 40 },
+  { name: 'parakeet-rnnt-1.1b', functionId: '71203149-d3b7-4460-8231-1be2543a1fca', language: 'en-US' },
+  { name: 'canary-1b', functionId: 'b0e8b4a5-217c-40b7-9b96-17d84e666317', language: 'en-US' },
+  { name: 'whisper-large-v3', functionId: 'b702f636-f60c-4a3d-a6f4-f3568c13bd7d', language: 'en' }
+]
+
+/**
+ * Words a computer assistant hears that a general recogniser gets wrong,
+ * in the cases NVIDIA asks for (it matches them as written).
+ */
+export const BOOSTED_WORDS = [
+  'RAM', 'PC', 'GPU', 'CPU', 'SSD', 'USB', 'Wi-Fi', 'Bluetooth', 'gigabytes', 'terabyte', 'terabytes',
+  'laptop', 'MacBook', 'ThinkPad', 'Lenovo', 'Windows', 'Linux', 'Arch', 'Omarchy', 'Hyprland', 'Waybar',
+  'Wumpy', 'Nothing', 'earbuds', 'Chrome', 'Spotify', 'Discord', 'Steam', 'downloads', 'folder', 'terminal'
+]
+
 /*
  * Ray, neutral: chosen by ear from `wumpy --voice-samples` - "I'll go with
  * neutral Ray" - the deepest and most even of Magpie's men. Jason, Leo and
@@ -283,7 +320,8 @@ export function pcmFromWav(wav: Uint8Array): { pcm: Buffer; sampleRate: number }
  */
 export async function recognize(
   wav: Uint8Array,
-  borrowed: BorrowedKey
+  borrowed: BorrowedKey,
+  hearer: Hearer = HEARERS[0]
 ): Promise<{ text: string; confidence: number; ms: number; audioSeconds: number }> {
   const audio = pcmFromWav(wav)
   if (!audio) throw new Error('recognition needs a 16-bit PCM WAV clip')
@@ -295,15 +333,22 @@ export async function recognize(
       config: {
         encoding: 'LINEAR_PCM',
         sample_rate_hertz: audio.sampleRate,
-        language_code: 'en-US',
+        language_code: hearer.language,
         max_alternatives: 1,
         enable_automatic_punctuation: true,
-        audio_channel_count: 1
+        audio_channel_count: 1,
+        ...(hearer.boost
+          ? {
+              speech_contexts: [
+                { phrases: [...new Set(BOOSTED_WORDS.flatMap((w) => [w, w.toLowerCase()]))], boost: hearer.boost }
+              ]
+            }
+          : {})
       },
       audio: audio.pcm
     },
     borrowed,
-    SPEECH_MODELS.hear,
+    hearer.functionId,
     30_000
   )
   const parts = (response.results ?? []).map((r) => r.alternatives?.[0]).filter(Boolean)

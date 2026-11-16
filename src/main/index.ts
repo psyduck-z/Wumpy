@@ -59,6 +59,7 @@ import { ContextStore } from './context'
 import { Speech } from './speech'
 import {
   DEFAULT_VOICE,
+  HEARERS,
   OLD_DEFAULT_VOICES,
   TTS_RATE,
   closeSpeech,
@@ -241,13 +242,41 @@ async function hear(audio: Uint8Array, extension: string): Promise<Transcript> {
     const borrowed = await cloud.speechKey('parakeet')
     if (borrowed) {
       try {
-        return await recognize(audio, borrowed)
+        const heard = await recognize(audio, borrowed)
+        if (compareHearing) void compareOn(audio, heard.text, heard.ms)
+        return heard
       } catch (err) {
         console.warn('[wumpy] Parakeet could not hear that, trying Whisper:', err)
       }
     }
   }
   return speech.transcribe(audio, extension)
+}
+
+/**
+ * `wumpy --compare-hearing`: until the next restart, everything said is also
+ * heard by the other recognisers, and what each made of it is logged beside
+ * Parakeet's - so the choice between them is made on this person's own
+ * voice, through these earbuds, rather than on anyone's benchmark. After the
+ * answer, not before it: the turn waits on Parakeet alone.
+ */
+let compareHearing = false
+
+async function compareOn(audio: Uint8Array, heard: string, ms: number): Promise<void> {
+  const lines = await Promise.all(
+    HEARERS.slice(1).map(async (h) => {
+      const k = await cloud.speechKey('parakeet')
+      if (!k) return `${h.name}: no key free`
+      try {
+        const r = await recognize(audio, k, h)
+        return `${h.name} ${r.ms}ms "${r.text}"`
+      } catch (err) {
+        return `${h.name}: failed (${String(err).slice(0, 100)})`
+      }
+    })
+  )
+  log(`[listen] compare: ${HEARERS[0].name} ${ms}ms "${heard}"`)
+  for (const line of lines) log(`[listen] compare: ${line}`)
 }
 
 /* --------------------------------------------------------- the assistant */
@@ -452,9 +481,11 @@ function channelFacts(handsFree: boolean): string[] {
     '  No filler, no "Great question", no repeating the question back.',
     '- Write everything the way it is said: "about twenty degrees", "forty percent", "half past',
     '  three" - no symbols, units or abbreviations. Round numbers unless the exact figure is the point.',
-    '- Their words came through speech recognition and can be a little off ("a clean bottle" for',
-    '  "a clear bottle"). Answer what they most likely meant. If it makes no sense at all, say you',
-    "  didn't catch that, in a few words.",
+    '- Their words came through speech recognition on earbuds and are often a little off,',
+    '  technical words most: "a specie" for "a PC", "thing pad" for "ThinkPad", "a clean bottle"',
+    '  for "a clear bottle". Read it by how it sounds and by what you were just talking about, as',
+    '  something said to a computer assistant, and answer that - without remarking on the',
+    "  mishearing. Only if no reading makes sense, say you didn't catch that, in a few words.",
     '- This is a back-and-forth conversation: they reply straight away by talking, and can talk',
     '  over you to stop you. So keep each answer short and let them steer - a quick question back',
     '  is fine when you need one. No closing offers ("Want me to...?", "Anything else?") unless',
@@ -2492,6 +2523,15 @@ app.on('second-instance', (_event, argv) => {
     void voiceSamples()
     return
   }
+  if (argv.includes('--hearing-check')) {
+    void hearingCheck()
+    return
+  }
+  if (argv.includes('--compare-hearing')) {
+    compareHearing = !compareHearing
+    console.log(`[wumpy] comparing recognisers on what is said: ${compareHearing ? 'on, until a restart' : 'off'}`)
+    return
+  }
   // A spoken turn: the earbuds gesture (through Nothing X) runs wumpy --voice.
   if (argv.includes('--voice')) {
     startVoiceTurn('wumpy --voice')
@@ -2532,7 +2572,7 @@ let launchChat: string | null =
 if (launchChat && !/^[\w-]{1,80}$/.test(launchChat)) launchChat = null
 
 /** Wumpy's own launch flags, which describe one start and are not carried over. */
-const OWN_FLAGS = /^--(?:hidden|voice|toggle|restart|speech-check|voice-samples|resume-chat=.*)$/
+const OWN_FLAGS = /^--(?:hidden|voice|toggle|restart|speech-check|voice-samples|hearing-check|compare-hearing|resume-chat=.*)$/
 
 async function restartWumpy(why: string, chatId: string | null): Promise<void> {
   if (restarting) return
@@ -2582,6 +2622,112 @@ function askRestart(why: string): void {
  * that has not subscribed yet is simply lost; so it waits for the load, and a
  * moment for the app to mount.
  */
+/**
+ * `wumpy --hearing-check`: each recogniser in HEARERS on the same sentences -
+ * the kind said to a computer assistant, "how much RAM does this PC have"
+ * among them - in two voices, made to sound like earbuds' mic (16kHz, some
+ * hiss). Logs how many words each got wrong, how long it took, and what it
+ * misheard. Synthetic speech is kinder than a real voice, so this ranks the
+ * recognisers and checks they answer; `--compare-hearing` is the real test.
+ */
+const CHECK_SENTENCES = [
+  'How much RAM does this PC have?',
+  'Does this PC have a GPU?',
+  'Compare this PC to my Lenovo ThinkPad.',
+  'How much storage is left on my SSD?',
+  'Restart Waybar and reload Hyprland.',
+  'Turn off Bluetooth for a minute.',
+  'What is using all my CPU right now?',
+  'Search it up and tell me how much a terabyte of RAM costs.'
+]
+
+function wordsOf(text: string): string[] {
+  return text.toLowerCase().replace(/-/g, ' ').replace(/[^a-z0-9' ]/g, ' ').split(/\s+/).filter(Boolean)
+}
+
+/** Words wrong: substituted, missing or extra (a word-level edit distance). */
+function wordErrors(said: string, heard: string): number {
+  const a = wordsOf(said)
+  const b = wordsOf(heard)
+  let row = Array.from({ length: b.length + 1 }, (_, j) => j)
+  for (let i = 1; i <= a.length; i++) {
+    const next = [i]
+    for (let j = 1; j <= b.length; j++)
+      next[j] = Math.min(row[j] + 1, next[j - 1] + 1, row[j - 1] + (a[i - 1] === b[j - 1] ? 0 : 1))
+    row = next
+  }
+  return row[b.length]
+}
+
+/** 16kHz speech with the hiss of a Bluetooth mic, about 20dB under the voice. */
+function earbudsLike(pcm: Buffer): Buffer {
+  const input = new Int16Array(pcm.buffer, pcm.byteOffset, pcm.length >> 1)
+  let energy = 0
+  for (const v of input) energy += v * v
+  const level = Math.sqrt(energy / Math.max(1, input.length)) / 10
+  let seed = 7
+  const out = new Int16Array(input.length)
+  for (let i = 0; i < input.length; i++) {
+    seed = (seed * 16807) % 2147483647
+    const smeared = (input[i] + input[Math.max(0, i - 1)]) / 2
+    out[i] = Math.max(-32768, Math.min(32767, Math.round(smeared + ((seed / 2147483647) * 2 - 1) * level * 1.7)))
+  }
+  return Buffer.from(out.buffer)
+}
+
+async function hearingCheck(): Promise<void> {
+  if (!cloudSpeech()) {
+    console.log('[wumpy] hearing check: hosted speech is off or has no key')
+    return
+  }
+  const clips: Array<{ said: string; wav: Buffer }> = []
+  for (const said of CHECK_SENTENCES)
+    for (const voice of [DEFAULT_VOICE, 'Magpie-Multilingual.EN-US.Aria']) {
+      const k = await cloud.speechKey('magpie')
+      if (!k) continue
+      try {
+        const made = pcmFromWav((await synthesize(said, k, voice)).wav)
+        if (made) clips.push({ said, wav: wavFrom(earbudsLike(downsample(made.pcm, made.sampleRate, 16000)), 16000) })
+      } catch (err) {
+        console.log(`[wumpy] hearing check: "${said}" could not be made (${String(err).slice(0, 100)})`)
+      }
+    }
+  const total = clips.reduce((n, c) => n + wordsOf(c.said).length, 0)
+  console.log(`[wumpy] hearing check: ${clips.length} clips, ${total} words, each recogniser in turn`)
+  for (const h of HEARERS) {
+    let errors = 0
+    let failed = ''
+    const times: number[] = []
+    const misheard: string[] = []
+    for (const clip of clips) {
+      const k = await cloud.speechKey('parakeet')
+      if (!k) {
+        failed = 'no key free'
+        break
+      }
+      try {
+        const r = await recognize(clip.wav, k, h)
+        times.push(r.ms)
+        const wrong = wordErrors(clip.said, r.text)
+        errors += wrong
+        if (wrong && misheard.length < 4) misheard.push(`"${r.text}"`)
+      } catch (err) {
+        failed = String(err).slice(0, 120)
+        break
+      }
+    }
+    if (failed) {
+      console.log(`[wumpy] hearing check: ${h.name}: failed (${failed})`)
+      continue
+    }
+    times.sort((x, y) => x - y)
+    console.log(
+      `[wumpy] hearing check: ${h.name}: ${((100 * errors) / total).toFixed(1)}% of words wrong, ` +
+        `${times[Math.floor(times.length / 2)]}ms typically${misheard.length ? `; misheard ${misheard.join(', ')}` : ''}`
+    )
+  }
+}
+
 /**
  * `wumpy --voice-samples`: each of Magpie's English-speaking men saying the
  * same few lines, at the speed answers are spoken, as WAV files in

@@ -441,7 +441,9 @@ check('and the answer first, since it is spoken while written', /Lead with the a
 /* Read aloud, "40%" and "20°C" are left to the voice to guess at, a misheard
    word is answered literally, and every question back costs a pinch. */
 check('in the ear, things written the way they are said', /Write everything the way it is said/.test(main), true)
-check('a misheard word answered as meant', /Answer what they most likely meant/.test(main), true)
+check('a misheard word answered as meant, read by how it sounds', /Read it by how it sounds and by what you were just talking about/.test(main) && /"a specie" for "a PC"/.test(main), true)
+check('every recogniser can be compared, on sentences and on real speech', /async function hearingCheck\(\)/.test(main) && /if \(compareHearing\) void compareOn\(audio, heard\.text, heard\.ms\)/.test(main), true)
+check('and the turn never waits on the comparison', /const heard = await recognize\(audio, borrowed\)\s+if \(compareHearing\) void compareOn/.test(main), true)
 check('talked over, it answers the new thing and leaves the old', /they talked over you',\s+'  on purpose: answer the new thing/.test(main), true)
 check('a conversation: short, and theirs to steer', /This is a back-and-forth conversation/.test(main) && /can talk',\s+'  over you to stop you/.test(main), true)
 
