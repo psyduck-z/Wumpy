@@ -52,6 +52,7 @@ import { runCommand, assessRisk, isReadOnly, riskLevel } from './shell'
 import { PriorityManager } from './priority'
 import { webSearch } from './search'
 import { cleanTitle, titleBrief, titleSource } from '@shared/titles'
+import { micState } from './btmic'
 import { launchPath } from '@shared/launchpath'
 import { folderFacts, resolveUserFolders } from './folders'
 import { ContextStore } from './context'
@@ -452,9 +453,11 @@ function channelFacts(handsFree: boolean): string[] {
     '  three" - no symbols, units or abbreviations. Round numbers unless the exact figure is the point.',
     '- Their words came through speech recognition and can be a little off ("a clean bottle" for',
     '  "a clear bottle"). Answer what they most likely meant. If it makes no sense at all, say you',
-    "  didn't catch that, in a few words. Only ask back when you truly must: replying means",
-    '  pinching again. For the same reason, no closing offers ("Want me to...?") unless it is',
-    '  clearly the next step.',
+    "  didn't catch that, in a few words.",
+    '- This is a back-and-forth conversation: they reply straight away by talking, and can talk',
+    '  over you to stop you. So keep each answer short and let them steer - a quick question back',
+    '  is fine when you need one. No closing offers ("Want me to...?", "Anything else?") unless',
+    '  it is clearly the next step.',
     '- Commands still work. When the answer depends on this computer, propose ONE command as',
     '  usual. Its # line is what they hear as the question ("Can I <# line>?") and they answer',
     '  yes or no out loud - so write it as a short plain action: "# Check how full the disk is".',
@@ -1329,6 +1332,7 @@ function registerIpc(): void {
   /* ------------------------------------------------------------------- voice */
 
   ipcMain.handle(IPC.voiceStatus, () => voiceStatus())
+  ipcMain.handle(IPC.voiceMicState, () => micState())
 
   // Starting the transcriber loads a model, so it is done when the panel asks
   // rather than at launch: someone who never dictates never pays for it. With

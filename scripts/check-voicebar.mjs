@@ -85,20 +85,22 @@ check('the bar is on the page', app.includes('<VoiceTurnBar />'), true)
 check('it shows the mic level while listening', /stage === 'listening' && \(\s+<span className="voice-turn-meter"/.test(bar), true)
 check('and has a Stop', bar.includes('onClick={stopVoice}'), true)
 check('and is styled', css.includes('.voice-turn {'), true)
-for (const stage of ['starting', 'listening', 'hearing', 'thinking', 'speaking', 'done', 'nothing', 'cancelled', 'error']) {
-  check(`the turn reaches "${stage}"`, turn.includes(`stage: '${stage}'`), true)
+for (const stage of ['starting', 'listening', 'hearing', 'thinking', 'speaking', 'done', 'cancelled', 'error']) {
+  check(`a conversation reaches "${stage}"`, turn.includes(`stage: '${stage}'`), true)
 }
-check('silence says whether the mic heard anything', /lastPeak < lastBar/.test(turn), true)
 check('a mic that will not open says so', /The microphone could not be opened/.test(turn), true)
+check('nor one that never comes on', /The microphone never came on/.test(turn), true)
 
 /* -------------------------------------------------------------- hearing */
 
 /* The sounds moved to earcons.ts; how loud they are is check-speakahead's. */
 const earcons = read('src/renderer/src/earcons.ts')
 check('it ticks while it works', /export function startTicks\(kind/.test(earcons) && /startTicks\(\)/.test(turn), true)
-check('from the moment it has the recording', /showVoice\(\{ stage: 'hearing', level: 0 \}\)[\s\S]{0,600}await chime\('heard'\)\s+startTicks\(\)/.test(turn), true)
+/* "Got it" was a chime, and one at a pause in the middle of a sentence
+   sounded like a false alarm: the typing says it now. */
+check('from the moment it has the words', /showVoice\(\{ stage: 'hearing', level: 0 \}\)[\s\S]{0,120}startTicks\(\)/.test(turn), true)
 check('and while the answer is coming', /runningCount\(\) > 0\) \{\s+quietSince = 0[\s\S]{0,400}\) startTicks\(\)/.test(turn), true)
-check('never while the mic is open', /micDead = false\s+stopTicks\(\)/.test(turn), true)
+check('and stops the moment someone talks', /function heardSpeech\(r: Recording\): void \{\s+if \(r !== ear \|\| cancelled\) return\s+stopTicks\(\)/.test(turn), true)
 check('nor over a chime', /async function chime[^{]*\{\s+stopTicks\(\)/.test(earcons), true)
 check('and stops once the answer is actually playing', /audio\.onplaying = \(\) => \{\s+started = true\s+stopTicks\(\)/.test(turn), true)
 
@@ -111,11 +113,10 @@ const html = read('src/renderer/index.html')
 check('the page lets a spoken answer play', /media-src 'self' blob:/.test(html), true)
 check('and if the element refuses, Web Audio plays it', /if \(\(await playWebAudio\(wav\)\) \|\| cancelled\) return/.test(turn), true)
 check('the element is tried first, for the faster lists', /if \(\(await playElement\(wav, quick\)\) \|\| cancelled\) return/.test(turn), true)
-check('the answer stays on the bar after it is said', /stage: 'done', detail: text/.test(turn), true)
 /* 1.8s of quiet before reading the answer was the biggest wait measured
    between the answer arriving and hearing it; a card registers in a frame. */
 check('the answer is read without a long pause first', /export const QUIET_AFTER_MS = 600\b/.test(turn), true)
-check('and when the turn ends, however it ends', /\.finally\(\(\) => \{\s+stopTicks\(\)/.test(turn), true)
+check('and when it ends, however it ends, everything stops', /\.then\(async \(\) => \{\s+stopTicks\(\)\s+speaker\?\.stop\(\)/.test(turn), true)
 
 /* ------------------------------------------------------------- the mic */
 
@@ -130,31 +131,49 @@ const dictation = read('src/renderer/src/hooks/useDictation.ts')
 /* Then: "If I'm using Wumpy with the buds, the buds are the microphone.
    Don't overcomplicate it with extra commands." So there is no choosing:
    the system's default mic, which is the earbuds' when they are connected. */
-check('no microphone is chosen: the system default', /deviceId/.test(turn) || /deviceId/.test(dictation), false)
+check('no microphone is chosen: the system default', /audio: \{[^}]*deviceId/.test(turn) || /deviceId/.test(dictation), false)
 check('no /microphone command', /name: 'microphone'/.test(read('src/renderer/src/commands.ts')), false)
-check('the log names the mic that opened', /note\(`microphone: \$\{recording\.device\}`\)/.test(turn), true)
-check('a dead mic is exact zeros, a live one any sound', /level > 1e-5/.test(recorderSrc), true)
+check('the log names the mic that opened', /note\(`microphone: \$\{track\?\.label/.test(turn), true)
+/* "It said it's listening, but then it doesn't pick up my microphone. And
+   after like 5 seconds, then it picks up": the hiss of earbuds still
+   switching was taken for sound. On Linux, PipeWire is asked as well. */
+{
+  const B = await load('src/shared/btmic.ts', 'btmic')
+  const before = '5513\tbluez_input.2C:BE:EE:12:34:56\tPipeWire\tfloat32le 1ch 48000Hz\tRUNNING\n8139\tbluez_output.2C_BE_EE_12_34_56.1\tPipeWire\ts16le 2ch 48000Hz\tRUNNING'
+  const during = `${before}\n9001\tbluez_input.2C_BE_EE_12_34_56.0\tPipeWire\ts16le 1ch 16000Hz\tSUSPENDED`
+  const after = `${before}\n9001\tbluez_input.2C_BE_EE_12_34_56.0\tPipeWire\ts16le 1ch 16000Hz\tRUNNING`
+  check('the stand-in running is not the earbuds’ mic', B.earbudsMic('bluez_input.2C:BE:EE:12:34:56', before), 'switching')
+  check('nor their mic before it runs', B.earbudsMic('bluez_input.2C:BE:EE:12:34:56', during), 'switching')
+  check('their mic running is', B.earbudsMic('bluez_input.2C:BE:EE:12:34:56', after), 'running')
+  check('without a stand-in, the default itself', B.earbudsMic('bluez_input.2C_BE_EE_12_34_56.0', after.split('\n').slice(2).join('\n')), 'running')
+  check('another pair’s mic is not these', B.earbudsMic('bluez_input.AA:BB:CC:DD:EE:FF', after), 'switching')
+  check('the recorder waits on it', /gate: \(\) => working/.test(turn) && /hearing\.frame\(level, now, opts\.gate \? opts\.gate\(\) : true\)/.test(recorderSrc), true)
+  check('two running answers in a row before it counts', /working = runs >= 2/.test(turn), true)
+  check('and not Bluetooth, asked once', /if \(state === 'none'\) \{\s+working = true\s+return/.test(turn), true)
+  check('only on Linux', /if \(process\.platform !== 'linux'\) return 'none'/.test(read('src/main/btmic.ts')), true)
+}
 /* "I can't hear the chime that signals me to speak": played after the mic
    opened, through an output kept open while the earbuds switched to
    headset mode, it went into a stream that broke with the switch. */
-check('the pinch dot first, in the earbuds’ ordinary mode', /await chime\('opening'\)\s+if \(cancelled\) return null[\s\S]{0,700}recording = await record\(/.test(turn), true)
+check('the dot first, in the earbuds’ ordinary mode', /await chime\('opening'\)\s+if \(cancelled\) return false[\s\S]{0,400}mic = await navigator\.mediaDevices\.getUserMedia\(/.test(turn), true)
 /* Then: "in between... can you add like some dots, like a regular
    mechanical keyboard, tick, tick, tick" - for the wait while the earbuds
    switch, which had been silent on purpose. */
 check('ticking while the earbuds switch, if the mic is not on at once', /const waiting = setTimeout\(\(\) => startTicks\('waiting'\), NO_SWITCH_MS\)/.test(turn), true)
 check('stopped the moment it is', /clearTimeout\(waiting\)\s+stopTicks\(\)/.test(turn), true)
 /* Then: "add a chime to tell me when [it] is ready for me to speak." */
-check('"talk now" once the mic delivers sound', /recording\.live, sleep\(LIVE_WAIT_MS\)[\s\S]{0,1800}note\(`microphone live after \$\{liveMs\}ms`\)[\s\S]{0,600}await chime\('listen'\)/.test(turn), true)
-check('from an output opened after the switch, not through it', /if \(liveMs < 0 \|\| liveMs >= NO_SWITCH_MS\) releaseOutput\(\)/.test(turn) && /note\(`microphone live after \$\{liveMs\}ms`\)[\s\S]{0,600}wakeOutput\(\)\s+await chime\('listen'\)/.test(turn), true)
+check('"talk now" once the mic delivers sound', /recording\.live, sleep\(LIVE_WAIT_MS\)[\s\S]{0,1800}note\(`microphone live after \$\{liveMs\}ms`\)[\s\S]{0,400}await chime\('listen'\)/.test(turn), true)
+check('from an output opened after the switch, not through it', /if \(liveMs < 0 \|\| liveMs >= NO_SWITCH_MS\) releaseOutput\(\)/.test(turn) && /playOn\(handsFree\)\s+wakeOutput\(\)\s+await chime\('listen'\)/.test(turn), true)
 /* Live at 164ms, "talk now" at 1090ms: 450 of them waking an output that
    had never gone to sleep. Kept open when nothing switched. */
 check('kept, with no wake wait, when no earbuds switched', /export const NO_SWITCH_MS = 400\b/.test(turn), true)
 check('under the half second WirePlumber waits before switching earbuds', Number(/export const NO_SWITCH_MS = (\d+)/.exec(turn)?.[1]) < 500, true)
-check('and speech counts only after it', /await chime\('listen'\)\s+await sleep\(READY_TAIL_MS\)[\s\S]{0,150}armed = true\s+recording\.arm\(\)/.test(turn), true)
-check('only one chime before the mic is on', (turn.slice(turn.indexOf('async function listen('), turn.indexOf('recording = await record(')).match(/await chime\(/g) ?? []).length, 1)
-check('and sound stays on once it closes', /stopListening = null[\s\S]{0,300}wakeOutput\(\)/.test(turn), true)
-check('the room is not the silence of a mic switching on', /if \(level > 1e-4\) room =/.test(recorderSrc), true)
-check('the chime is not heard as speech', /if \(!armed\) return/.test(turn) && /armed: false/.test(turn), true)
+check('and speech counts only after it', /await chime\('listen'\)\s+await sleep\(READY_TAIL_MS\)\s+if \(cancelled\) return false\s+recording\.arm\(\)/.test(turn), true)
+check('only one chime before the mic is on', (turn.slice(turn.indexOf('async function open('), turn.indexOf('mic = await navigator')).match(/await chime\(/g) ?? []).length, 1)
+check('the first ear waits for "talk now"', /const recording = await newEar\(false\)/.test(turn), true)
+check('carrying on while it is heard is the same question', /if \(!ear\?\.spoke\(\)\) break\s+stopTicks\(\)\s+note\('they carried on talking: waiting for the rest'\)/.test(turn), true)
+check('a click does not start an utterance', /export const CONVERSATION_ONSET = \{ frames: 3, window: 4 \}/.test(turn) && /onset: CONVERSATION_ONSET/.test(turn), true)
+check('and over a sound, it takes longer and louder', /ear\?\.strict\(ticking\(\) \|\| \(speaker\?\.busy\(\) \?\? false\) \|\| stopSound !== null\)/.test(turn), true)
 /* "Nothing worth sending" twice while talking: this MacBook's mic hears a
    room at 0.00005 and a voice at 0.009, under a fixed bar of 0.02. */
 {
@@ -164,8 +183,9 @@ check('the chime is not heard as speech', /if \(!armed\) return/.test(turn) && /
   check('a quiet laptop mic: speech is well above its room', R.speechThreshold(0.00005) < 0.009, true)
   check('but never down at the noise itself', R.speechThreshold(0.00005), R.MIN_SPEECH_LEVEL)
   check('no room heard yet: the old bar', R.speechThreshold(Infinity), 0.02)
-  check('the voice turn and dictation use it', /if \(rms >= speech\) spoke = true/.test(turn) && /if \(raw > speech\) spokeRef/.test(read('src/renderer/src/hooks/useListening.ts')), true)
-  check('and the recorder gates on it', /if \(armed && level > speech\)/.test(recorderSrc), true)
+  check('talking over it takes more than a click', R.STRICT_ONSET.frames * 40 >= 250 && R.STRICT_LOUDER >= 2, true)
+  check('dictation uses the bar', /if \(raw > speech\) spokeRef/.test(read('src/renderer/src/hooks/useListening.ts')), true)
+  check('and the recorder gates on it', /recent\.push\(level > speech \* \(this\.strict \? STRICT_LOUDER : 1\)\)/.test(recorderSrc), true)
   const quiet = Float32Array.from({ length: 100 }, (_, i) => 0.009 * Math.sin(i))
   const peak = (a) => Math.max(...a.map(Math.abs))
   check('a quiet clip is brought up for the transcriber', +peak(W.louder(quiet.slice())).toFixed(2), 0.28)
@@ -173,11 +193,104 @@ check('the chime is not heard as speech', /if \(!armed\) return/.test(turn) && /
   const loud = Float32Array.from({ length: 100 }, (_, i) => 0.7 * Math.sin(i))
   check('a normal one is left alone', peak(W.louder(loud.slice())), peak(loud))
 }
-check('a mic that never wakes says so', /The microphone gave no sound at all/.test(turn), true)
+
+/* --------------------------------------------- the mic, frame by frame */
+
+/* What the recorder hears, played the levels of real mics: 40ms a frame,
+   as the recorder looks. */
+{
+  const R = await load('src/renderer/src/recorder.ts', 'hearing')
+  const run = (hearing, frames, t0 = 0) => {
+    let t = t0
+    const seen = { live: -1, onset: -1, endedAt: -1, longestQuiet: 0 }
+    for (const [level, working = true] of frames) {
+      t += 40
+      const r = hearing.frame(level, t, working)
+      if (r.live && seen.live < 0) seen.live = t
+      if (r.onset && seen.onset < 0) seen.onset = t
+      if (hearing.spoke) seen.longestQuiet = Math.max(seen.longestQuiet, t - hearing.spokeAt)
+    }
+    return { ...seen, t }
+  }
+  const hold = (level, ms, working = true) => Array.from({ length: Math.round(ms / 40) }, () => [level, working])
+  const hiss = (ms) => Array.from({ length: Math.round(ms / 40) }, (_, i) => [0.00005 + (i % 5) * 0.00002, false])
+
+  /* "It said it's listening, but then it doesn't pick up my microphone. And
+     after like 5 seconds, then it picks up." */
+  {
+    const h = new R.Hearing(0)
+    const seen = run(h, [...hiss(5000), ...hold(0.0005, 400)])
+    check('earbuds still switching are not live, however they hiss', seen.live > 5000, true)
+    check('and once PipeWire has their mic running, they are', seen.live, 5040)
+    check('their hiss is not the room', h.room, 0.0005)
+  }
+  {
+    const h = new R.Hearing(0)
+    check('with nothing to ask, exact zeros are not live', run(h, hold(0, 2000)).live, -1)
+    check('and a quiet room is', run(h, hold(0.0003, 200), 2000).live, 2040)
+  }
+  /* "When I'm just speaking halfway through... it actually cuts me off." */
+  const talker = () => {
+    const h = new R.Hearing(0, { frames: 3, window: 4 })
+    run(h, hold(0.0005, 1000))
+    return h
+  }
+  {
+    const h = talker()
+    const seen = run(h, [...hold(0.05, 2000), ...hold(0, 2000, false), ...hold(0.05, 1000)], 1000)
+    check(`a two-second dropout mid-sentence is not a pause (${seen.longestQuiet}ms)`, seen.longestQuiet < 1500, true)
+    const after = run(h, hold(0.0005, 1600), seen.t)
+    check('the pause after it still ends it', after.t - h.spokeAt > 1500, true)
+  }
+  {
+    const h = talker()
+    const seen = run(h, [...hold(0.05, 3000), ...hold(0, 9000, false)], 1000)
+    check('a mic gone for good still ends it, a few seconds on', seen.longestQuiet > 1500 && h.dropMs <= R.DROPOUT_CREDIT_MS + 40, true)
+  }
+  {
+    const h = talker()
+    /* Words with soft ends: loud, then two fifths of the bar, for 300ms. */
+    const words = Array.from({ length: 6 }, () => [...hold(0.05, 400), ...hold(0.002, 320)]).flat()
+    const seen = run(h, words, 1000)
+    check(`the soft ends of words keep it going (${seen.longestQuiet}ms quiet at most)`, seen.longestQuiet <= 80, true)
+    const fan = run(h, hold(0.004, 2400), seen.t)
+    check('but a noise just under the bar does not hold it forever', fan.t - h.spokeAt > 1500, true)
+  }
+  {
+    const h = talker()
+    const seen = run(h, [...hold(0.06, 2500), ...hold(0.0005, 600), ...hold(0.06, 300)], 1000)
+    check('the room does not creep up through a long sentence', h.bar, R.speechThreshold(0.0005))
+    check('so the next words still count', seen.longestQuiet < 700, true)
+  }
+  {
+    const h = talker()
+    check('a click is not someone talking', run(h, [[0.2], [0.0005], [0.0005], [0.0005], [0.15], [0.0005]], 1000).onset, -1)
+    check('a word is, within 160ms', run(h, hold(0.03, 160), 1240).onset - 1240 <= 160, true)
+  }
+  {
+    const h = talker()
+    h.setStrict(true)
+    const echo = run(h, hold(0.008, 3000), 1000)
+    check('an answer leaking into the mic is not someone talking over it', echo.onset, -1)
+    check('someone talking over it is, in about a third of a second', run(h, hold(0.06, 400), echo.t).onset - echo.t <= 320, true)
+  }
+  {
+    const h = new R.Hearing(0)
+    run(h, hold(0.0005, 400))
+    check('dictation still starts on the first loud frame', run(h, [[0.03]], 400).onset, 440)
+  }
+  {
+    const h = new R.Hearing(0, { frames: 3, window: 4 }, false)
+    run(h, hold(0.0005, 400))
+    check('nothing counts before it is armed - not the "talk now" chime', run(h, hold(0.1, 400), 400).onset, -1)
+    h.arm(800)
+    check('and speech does after', run(h, hold(0.05, 200), 800).onset > 800, true)
+  }
+}
 
 /* -------------------------------------------------------------- the log */
 
-for (const line of ['started', 'microphone: ', 'listened ', 'heard "', 'speaking ', 'stopped', 'failed: ']) {
+for (const line of ['started', 'microphone: ', 'heard ', 'heard "', 'speaking ', 'ended', 'failed: ', 'talked over it']) {
   check(`the log says "${line.trim()}"`, turn.includes(line), true)
 }
 

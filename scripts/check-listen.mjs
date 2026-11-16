@@ -298,7 +298,7 @@ for (const forbidden of ['transcriptText', 'piece.text', 'part.text']) {
  * to take on faith for an hour. Dictation has had one from the beginning;
  * this ran for hours with none, and `onLevel` was simply never passed.
  */
-check('the recorder reports the raw level too', /onLevel\?\.\(Math\.min\(1, Math\.sqrt\(level \* 8\)\), level, speech\)/.test(recorder), true)
+check('the recorder reports the raw level too', /onLevel\?\.\(Math\.min\(1, Math\.sqrt\(level \* 8\)\), level, hearing\.bar\)/.test(recorder), true)
 check('and the session asks for it', /onLevel: \(shown, raw, speech\)/.test(hook), true)
 /* Quantised before it reaches state: the level arrives on every animation
    frame, and a meeting is an hour of them. */

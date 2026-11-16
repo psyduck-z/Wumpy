@@ -1,5 +1,6 @@
 import { nextBatch } from '@shared/speakahead'
 import { output } from './earcons'
+import { Stretcher } from './stretch'
 
 /**
  * Speaks sentences as Magpie makes them.
@@ -40,6 +41,15 @@ const RATE = 22050
 
 /** Sound held back before a stretch starts, to ride out a late piece. */
 export const CUSHION_S = 0.2
+
+/** How fast answers are said, from the speakRate setting; see stretch.ts. */
+let speed = 1
+export function setSpeed(next: number): void {
+  speed = Number.isFinite(next) && next >= 0.7 && next <= 1.6 ? next : 1
+}
+export function currentSpeed(): number {
+  return speed
+}
 
 export class Speaker {
   /** The turn's output (see earcons.ts), shared so it is already awake. */
@@ -156,10 +166,13 @@ export class Speaker {
     let released = false
     let got = 0
     let first = -1
+    /* One per batch: its pieces run on from each other, and the last is
+       let out at the end (see stretch.ts). */
+    const stretch = new Stretcher(speed)
     receivers.set(id, (pcm) => {
       if (first < 0) first = Date.now() - asked
       got++
-      if (released) this.play(pcm)
+      if (released) this.play(pcm, stretch)
       else held.push(pcm)
     })
     const request = window.wumpy.voice.speakStream(id, text).catch(() => null)
@@ -167,7 +180,7 @@ export class Speaker {
       try {
         await after
         released = true
-        for (const pcm of held.splice(0)) this.play(pcm)
+        for (const pcm of held.splice(0)) this.play(pcm, stretch)
         const result = await request
         if (result && got < result.pieces) {
           /* The pieces are sent before the answer and arrive first; this
@@ -175,6 +188,7 @@ export class Speaker {
           const deadline = Date.now() + 1500
           while (got < result.pieces && Date.now() < deadline && !this.stopped) await sleep(20)
         }
+        if (got) this.schedule(stretch.flush())
         if (result && ++this.requests <= 3)
           this.hooks.note(
             `said ${text.length} characters: first sound ${first}ms after asking` +
@@ -187,8 +201,16 @@ export class Speaker {
     })()
   }
 
-  private play(pcm: ArrayBuffer): void {
+  private play(pcm: ArrayBuffer, stretch: Stretcher): void {
     if (this.stopped || pcm.byteLength < 2) return
+    const samples = new Int16Array(pcm, 0, pcm.byteLength >> 1)
+    const floats = new Float32Array(samples.length)
+    for (let i = 0; i < samples.length; i++) floats[i] = samples[i] / 32768
+    this.schedule(stretch.push(floats))
+  }
+
+  private schedule(samples: Float32Array): void {
+    if (this.stopped || samples.length === 0) return
     /* The turn's output, which is closed while the mic is open and opened
        again after, so it is asked for each time rather than kept. */
     const current = output()
@@ -200,10 +222,8 @@ export class Speaker {
       this.at = 0
     }
     const context = current
-    const samples = new Int16Array(pcm, 0, pcm.byteLength >> 1)
     const buffer = context.createBuffer(1, samples.length, RATE)
-    const out = buffer.getChannelData(0)
-    for (let i = 0; i < samples.length; i++) out[i] = samples[i] / 32768
+    buffer.getChannelData(0).set(samples)
     const source = context.createBufferSource()
     source.buffer = buffer
     source.connect(this.bus!)
@@ -229,6 +249,7 @@ export class Speaker {
     this.hooks.onSound()
     await new Promise<void>((resolve) => {
       const utterance = new SpeechSynthesisUtterance(text)
+      utterance.rate = speed
       utterance.onend = () => resolve()
       utterance.onerror = () => resolve()
       speechSynthesis.speak(utterance)

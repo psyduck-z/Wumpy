@@ -57,7 +57,9 @@ export function louder(samples: Float32Array): Float32Array {
  */
 export async function clipForSpeech(
   blob: Blob,
-  extension: string
+  extension: string,
+  /** Leave out what came before this, in ms: a conversation's wait for someone to start. */
+  fromMs = 0
 ): Promise<{ audio: ArrayBuffer; extension: string }> {
   const raw = await blob.arrayBuffer()
   try {
@@ -75,7 +77,9 @@ export async function clipForSpeech(
     source.connect(offline.destination)
     source.start()
     const rendered = await offline.startRendering()
-    return { audio: encodeWav(louder(rendered.getChannelData(0)), rate), extension: 'wav' }
+    const all = rendered.getChannelData(0)
+    const from = Math.min(all.length, Math.max(0, Math.floor((fromMs / 1000) * rate)))
+    return { audio: encodeWav(louder(from ? all.slice(from) : all), rate), extension: 'wav' }
   } catch {
     return { audio: raw, extension }
   }

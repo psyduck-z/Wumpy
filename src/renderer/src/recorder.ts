@@ -129,6 +129,29 @@ export interface RecorderOptions extends RecorderEvents {
    * beside the microphone, must not count as the person starting to talk.
    */
   armed?: boolean
+  /**
+   * How much of the last few frames must be speech before speech has
+   * started: `frames` of the last `window`, 40ms each. The default, one of
+   * one, is the first loud frame - right for dictation, where a missed
+   * syllable costs more than a false start. A conversation, whose mic stays
+   * open while chimes, typing and answers play into the earbuds beside it,
+   * asks for more, so that a click or a cough is not someone talking.
+   */
+  onset?: { frames: number; window: number }
+  /** Called once, the moment speech has started. */
+  onSpeech?(): void
+  /**
+   * Count maxMs from the first speech rather than from the start, for a
+   * recording that may wait a long while before anyone talks.
+   */
+  maxFromSpeech?: boolean
+  /**
+   * Whether the microphone is really working, from outside the audio: on
+   * Linux, whether PipeWire has the earbuds' own mic running (see
+   * micState in main). False while they are still switching to headset
+   * mode, and if they drop out of it. Absent is always true.
+   */
+  gate?: () => boolean
 }
 
 export interface Recording {
@@ -147,7 +170,49 @@ export interface Recording {
   arm(): void
   /** Resolves with the audio once it has ended, or null if nothing was said. */
   done: Promise<{ blob: Blob; extension: string; ms: number } | null>
+  /** Speech has started in it. */
+  spoke(): boolean
+  /** Milliseconds from its start to the first speech; -1 before there is any. */
+  onsetMs(): number
+  /**
+   * Harder to start: while something plays into the earbuds next to the
+   * mic, speech must be louder (STRICT_LOUDER times the bar) and last
+   * longer (STRICT_ONSET) before it counts as someone talking over it.
+   */
+  strict(on: boolean): void
+  /** The pause that ends it, changed while it runs. */
+  setPause(ms: number): void
+  /** For the log: the room, the bar, the loudest, and how long the mic dropped out. */
+  stats(): { room: number; bar: number; peak: number; strictPeak: number; dropMs: number }
 }
+
+/** While something is playing: twice as loud as the bar... */
+export const STRICT_LOUDER = 2
+/** ...for seven frames of nine, about 300ms - longer than a key click or the tail of a chime. */
+export const STRICT_ONSET = { frames: 7, window: 9 }
+
+/**
+ * Once speech has started, a frame a third as loud as the bar still counts
+ * as talking if it comes within HOLD_WITHIN_MS of a loud one. The ends of words - a soft
+ * "s", a trailing "th" - sit under the bar, and without this each one
+ * started the clock on the pause that ends the recording. A room is a
+ * tenth of the bar, so it is never held this way, and a steady noise
+ * nearer the bar only for HOLD_WITHIN_MS (checked in check-voicebar).
+ */
+export const HOLD_BELOW = 0.35
+export const HOLD_WITHIN_MS = 400
+
+/**
+ * A microphone that drops out - nothing at all from it, or PipeWire saying
+ * the earbuds' mic stopped - is not the person pausing. Up to this much of
+ * a recording's dropouts does not count towards the pause that ends it:
+ * "when I'm just speaking halfway through and I hear a small chime... it's
+ * a false alarm. And then it actually cuts me off."
+ */
+export const DROPOUT_CREDIT_MS = 4000
+
+/** Below this RMS is digital silence: no microphone, however quiet, gives it. */
+export const DEAD_LEVEL = 1e-6
 
 /**
  * The quietest level still counted as speech.
@@ -180,6 +245,128 @@ export const SPEECH_ABOVE_ROOM = 10
 export function speechThreshold(room: number): number {
   if (!Number.isFinite(room) || room <= 0) return SPEECH_LEVEL
   return Math.min(SPEECH_LEVEL, Math.max(MIN_SPEECH_LEVEL, room * SPEECH_ABOVE_ROOM))
+}
+
+/**
+ * What a recording hears, frame by frame: whether the mic is live, when
+ * speech starts, and when the person last spoke - the pause that ends a
+ * recording is measured from that.
+ *
+ * Pure, and apart from the recorder, so scripts/check-voicebar.mjs can play
+ * it the levels of a real mic: earbuds switching on, a dropout in the
+ * middle of a sentence, a click, an answer leaking into the mic.
+ */
+export class Hearing {
+  live = false
+  /** Speech has started. */
+  spoke = false
+  /** When it started, from the start, in ms; -1 before. */
+  onsetAt = -1
+  /** When the person was last heard, on the frame clock. */
+  spokeAt: number
+  /** ...and last heard above the bar, which is what a soft end is held from. */
+  private loudAt = -Infinity
+  room = Infinity
+  bar = SPEECH_LEVEL
+  peak = 0
+  strictPeak = 0
+  dropMs = 0
+  armed: boolean
+  strict = false
+  private readonly recent: boolean[] = []
+  private lastFrameAt: number
+
+  constructor(
+    private readonly startedAt: number,
+    private readonly onset: { frames: number; window: number } = { frames: 1, window: 1 },
+    armed = true
+  ) {
+    this.spokeAt = startedAt
+    this.lastFrameAt = startedAt
+    this.armed = armed
+  }
+
+  arm(now: number): void {
+    if (this.armed) return
+    this.armed = true
+    this.spokeAt = now
+  }
+
+  setStrict(on: boolean): void {
+    if (this.strict === on) return
+    this.strict = on
+    this.recent.length = 0
+  }
+
+  /**
+   * One look at the mic: its RMS, the time, and whether it is working by
+   * any account from outside the sound (see RecorderOptions.gate). Says
+   * what changed: it went live, speech started, or it is still talking.
+   */
+  frame(level: number, now: number, working = true): { live: boolean; onset: boolean; talking: boolean } {
+    const frameMs = Math.min(200, now - this.lastFrameAt)
+    this.lastFrameAt = now
+    const result = { live: false, onset: false, talking: false }
+    /* Any sound at all, even a quiet room, is a live microphone; exact
+       zeros are one that is not delivering yet. On Linux the earbuds' mic
+       must also be running by PipeWire's account: while they switch, a
+       Bluetooth mic delivers a faint hiss that is not exact zeros, and it
+       was taken for a live one - "talk now", into a mic that came on five
+       seconds later. */
+    if (!this.live && working && level > 1e-5) {
+      this.live = true
+      result.live = true
+    }
+    const dropped = this.live && (!working || level < DEAD_LEVEL)
+
+    /* The room: the quietest it gets, rising again over a couple of seconds
+       so a noisier room is caught up with. Only from quiet frames of a
+       working mic - not the near-silence of a Bluetooth mic still
+       switching on, which is no room at all, and not speech, which made it
+       creep up towards the voice over a long sentence until quieter words
+       fell under the bar. */
+    /* Not from the soft end of a word either (see HOLD_BELOW), or each one
+       nudged the bar up until the next one fell under it. */
+    const soft =
+      this.spoke && now - this.loudAt < HOLD_WITHIN_MS && level > this.bar * HOLD_BELOW && level <= this.bar
+    if (this.live && !dropped && !soft && level > 1e-4 && level < this.bar)
+      this.room = level < this.room ? level : this.room + (level - this.room) * 0.02
+    const speech = speechThreshold(this.room)
+    this.bar = speech
+    if (!this.armed) return result
+
+    if (level > this.peak) this.peak = level
+    if (this.strict && level > this.strictPeak) this.strictPeak = level
+    if (!this.spoke) {
+      const rule = this.strict ? STRICT_ONSET : this.onset
+      this.recent.push(level > speech * (this.strict ? STRICT_LOUDER : 1))
+      while (this.recent.length > rule.window) this.recent.shift()
+      if (this.recent.filter(Boolean).length >= rule.frames) {
+        this.spoke = true
+        this.spokeAt = now
+        this.loudAt = now
+        this.onsetAt = now - this.startedAt
+        result.onset = true
+        result.talking = true
+      }
+    } else if (level > speech) {
+      this.spokeAt = now
+      this.loudAt = now
+      result.talking = true
+    } else if (now - this.loudAt < HOLD_WITHIN_MS && level > speech * HOLD_BELOW) {
+      /* Held from the last loud frame, not from the last held one: a
+         steady noise just under the bar is held for HOLD_WITHIN_MS and no
+         longer, so it cannot keep a recording open. */
+      this.spokeAt = now
+      result.talking = true
+    } else if (dropped && this.dropMs < DROPOUT_CREDIT_MS) {
+      /* The mic went quiet under the person, not the person: the pause
+         clock waits for it to come back. */
+      this.spokeAt += frameMs
+      this.dropMs += frameMs
+    }
+    return result
+  }
 }
 
 /** Formats the recorder can produce, best first. */
@@ -277,22 +464,18 @@ export async function record(opts: RecorderOptions = {}): Promise<Recording> {
   const samples = new Float32Array(analyser.fftSize)
 
   const startedAt = performance.now()
-  let spokeAt = startedAt
-  let heardSpeech = false
-  let room = Infinity
+  const hearing = new Hearing(startedAt, opts.onset, opts.armed !== false)
   let heardInSegment = false
   let frame: Frame | null = null
   let stopped = false
   let rotating = false
   let reason: 'silence' | 'asked' | 'limit' = 'asked'
-  let armed = opts.armed !== false
   let markLive: (ms: number) => void = () => {}
-  let isLive = false
   const live = new Promise<number>((resolve) => {
     markLive = resolve
   })
 
-  const silenceMs = opts.silenceMs === undefined ? 1400 : opts.silenceMs
+  let silenceMs = opts.silenceMs === undefined ? 1400 : opts.silenceMs
   const maxMs = opts.maxMs ?? 60_000
   const segmentPauseMs = opts.segmentPauseMs ?? 650
   const minSegmentMs = opts.minSegmentMs ?? 1200
@@ -348,6 +531,11 @@ export async function record(opts: RecorderOptions = {}): Promise<Recording> {
     let sum = 0
     for (const s of samples) sum += s * s
     const level = Math.sqrt(sum / samples.length)
+    const now = performance.now()
+    const heard = hearing.frame(level, now, opts.gate ? opts.gate() : true)
+    if (heard.live) markLive(Math.round(now - startedAt))
+    if (heard.talking) heardInSegment = true
+    if (heard.onset) opts.onSpeech?.()
     /*
      * Curved, not just scaled, so the meter has something to show.
      *
@@ -364,26 +552,7 @@ export async function record(opts: RecorderOptions = {}): Promise<Recording> {
      * and the difference between a mumble and a clear sentence is
      * visible rather than theoretical.
      */
-    /* The room: the quietest it gets, rising again over a couple of seconds
-       so a noisier room is caught up with. Not the near-silence of a
-       Bluetooth mic still switching on, which is no room at all and set
-       the bar so low that its hiss counted as talking. */
-    if (level > 1e-4) room = level < room ? level : room + (level - room) * 0.02
-    const speech = speechThreshold(room)
-    opts.onLevel?.(Math.min(1, Math.sqrt(level * 8)), level, speech)
-
-    const now = performance.now()
-    /* Any sound at all, even a quiet room, is a live microphone; exact
-       zeros are one that is not delivering yet. */
-    if (!isLive && level > 1e-5) {
-      isLive = true
-      markLive(Math.round(now - startedAt))
-    }
-    if (armed && level > speech) {
-      spokeAt = now
-      heardSpeech = true
-      heardInSegment = true
-    }
+    opts.onLevel?.(Math.min(1, Math.sqrt(level * 8)), level, hearing.bar)
 
     // Close the current piece when it is worth transcribing on its own, so
     // the work is spread across the dictation instead of landing all at once
@@ -393,7 +562,7 @@ export async function record(opts: RecorderOptions = {}): Promise<Recording> {
       shouldRotate({
         heardSpeechInSegment: heardInSegment,
         segmentMs: now - segmentStart,
-        sinceSpeechMs: now - spokeAt,
+        sinceSpeechMs: now - hearing.spokeAt,
         pauseMs: segmentPauseMs,
         minMs: minSegmentMs,
         maxMs: maxSegmentMs
@@ -402,13 +571,14 @@ export async function record(opts: RecorderOptions = {}): Promise<Recording> {
       rotate()
     }
 
-    if (now - startedAt > maxMs) {
+    const from = opts.maxFromSpeech ? (hearing.spoke ? startedAt + hearing.onsetAt : now) : startedAt
+    if (now - from > maxMs) {
       finish('limit')
       return
     }
     // Only after something has actually been said, so leaning in to think for a
     // moment before starting does not end the recording before it began.
-    if (silenceMs !== null && heardSpeech && now - spokeAt > silenceMs) {
+    if (silenceMs !== null && hearing.spoke && now - hearing.spokeAt > silenceMs) {
       finish('silence')
       return
     }
@@ -429,7 +599,7 @@ export async function record(opts: RecorderOptions = {}): Promise<Recording> {
 
         // Nothing audible in the whole recording: hand back nothing rather
         // than a second of room tone for Whisper to hallucinate over.
-        if (!heardSpeech) {
+        if (!hearing.spoke) {
           resolve(null)
           return
         }
@@ -462,10 +632,19 @@ export async function record(opts: RecorderOptions = {}): Promise<Recording> {
     done,
     live,
     device: stream.getAudioTracks()[0]?.label || 'the system default',
-    arm: () => {
-      if (armed) return
-      armed = true
-      spokeAt = performance.now()
-    }
+    arm: () => hearing.arm(performance.now()),
+    spoke: () => hearing.spoke,
+    onsetMs: () => hearing.onsetAt,
+    strict: (on: boolean) => hearing.setStrict(on),
+    setPause: (ms: number) => {
+      silenceMs = ms
+    },
+    stats: () => ({
+      room: Number.isFinite(hearing.room) ? hearing.room : 0,
+      bar: hearing.bar,
+      peak: hearing.peak,
+      strictPeak: hearing.strictPeak,
+      dropMs: Math.round(hearing.dropMs)
+    })
   }
 }

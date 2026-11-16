@@ -56,7 +56,7 @@ check('long answers stop at a sentence', spoken.length <= 200 && spoken.endsWith
   const main = readFileSync('src/main/index.ts', 'utf8')
   const on = turn.indexOf('setHandsFree(true)')
   const off = turn.indexOf('setHandsFree(false)')
-  check('a voice turn is hands-free from its start', on > 0 && on < turn.indexOf('void turn()'), true)
+  check('a conversation is hands-free from its start', on > 0 && on < turn.indexOf('void conversation()'), true)
   check('until it ends, however it ends', off > turn.indexOf('.finally('), true)
   check('every request says which', /handsFree: handsFree\(\)/.test(chat), true)
   check('and the message is marked', /spoken: true/.test(chat), true)

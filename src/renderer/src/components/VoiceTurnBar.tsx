@@ -6,9 +6,9 @@ const STAGE: Record<Exclude<VoiceStage, 'idle'>, string> = {
   hearing: 'Hearing',
   thinking: 'Thinking',
   speaking: 'Speaking',
-  done: 'Done',
+  done: 'Finished',
   nothing: 'Heard nothing',
-  cancelled: 'Stopped',
+  cancelled: 'Ending',
   error: 'Voice problem'
 }
 
@@ -48,7 +48,7 @@ export function VoiceTurnBar(): React.JSX.Element | null {
       </span>
       {!FINISHED.has(v.stage) && (
         <button type="button" className="voice-turn-stop" onClick={stopVoice}>
-          Stop
+          End
         </button>
       )}
     </div>

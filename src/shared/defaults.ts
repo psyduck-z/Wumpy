@@ -68,6 +68,7 @@ export const DEFAULT_SETTINGS: WumpySettings = {
   voiceAutoStop: true,
   voiceCloud: true,
   speakVoice: 'Magpie-Multilingual.EN-US.Jason',
+  speakRate: 1.15,
   pauseMusic: true,
   reflect: false,
   reflectRounds: 3,

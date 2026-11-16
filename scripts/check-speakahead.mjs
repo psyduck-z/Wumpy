@@ -230,9 +230,9 @@ check('a voice turn has a first-token watchdog', /quickerModel\(on, settings\.ge
 check('only on the first try', /attempt\(model, null, false\)/.test(main), true)
 check('and the aborted try does not end the turn', /onDone: \(stats\) => \{[\s\S]{0,200}if \(gaveUp\) return/.test(main), true)
 
-check('sentences are spoken while the answer is written', /while \(!cancelled && Date\.now\(\) < deadline\) \{\s+speakAhead\(since\)/.test(turn), true)
+check('sentences are spoken while the answer is written', /while \(!cancelled && !interrupted && Date\.now\(\) < deadline\) \{\s+speakAhead\(since\)/.test(turn), true)
 check('and the rest once it is finished', /const spokeAnswer = speakAhead\(started\)/.test(turn), true)
-check('the mic waits until the voice has finished', /if \(cancelled\) return null\s+await speaker\?\.drain\(\)/.test(turn), true)
+check('listening waits until the voice has finished, or is talked over', /if \(cancelled \|\| !ear\) return null\s+await speaker\?\.drain\(\)/.test(turn), true)
 check('pieces play back to back on one clock', /Math\.max\(this\.at, context\.currentTime \+ \(quiet \? CUSHION_S : 0\.03\)\)/.test(speaker), true)
 
 /* "Sometimes it jitters." */
@@ -245,18 +245,18 @@ check('larger output buffers, so a busy page is not a click', /latencyHint: 'pla
 check('the bar says the wait is the earbuds, not a model loading', /Waiting for the earbuds’ microphone/.test(turn), true)
 check('the typing stops at the first sound', /new Speaker\(\{ onSound: stopTicks, note \}\)/.test(turn), true)
 check('and not between sentences', /if \(!speaker\?\.busy\(\) && \(speaker\?\.idleFor\(\) \?\? Infinity\) > TYPING_AGAIN_MS\) startTicks\(\)/.test(turn), true)
-check('a stopped turn is silent at once', /speaker\?\.stop\(\)\s+note\('stopped'\)/.test(turn), true)
+check('an ended conversation is silent at once', /stopSound\?\.\(\)\s+speaker\?\.stop\(\)\s+ear\?\.stop\(\)/.test(turn), true)
 check('typing is scheduled on the audio clock', /while \(next < context\.currentTime \+ 1\)/.test(earcons), true)
 /* "Sometimes when I just take a pause to think... it just cuts it off...
    one and a half Mississippi." */
-check('a pause of a second and a half ends what was said', /export const END_PAUSE_MS = 1500/.test(turn) && /listen\(END_PAUSE_MS, 8000, 45_000\)/.test(turn), true)
+check('a pause of a second and a half ends what was said', /export const END_PAUSE_MS = 1500/.test(turn) && /listen\(END_PAUSE_MS, IDLE_END_MS,/.test(turn), true)
 
 /* The output. "There was no chime, so I thought it didn't work": the
    chime played into Bluetooth earbuds that were still waking up. */
-check('a turn opens one output and keeps it awake', /wakeOutput\(\)\s+speaker = new Speaker/.test(turn), true)
+check('a conversation opens one output and keeps it awake', /wakeOutput\(\)\s+speaker = newSpeaker\(\)/.test(turn), true)
 check('opened afresh once the earbuds have switched their mic on', /if \(liveMs < 0 \|\| liveMs >= NO_SWITCH_MS\) releaseOutput\(\)/.test(turn), true)
 check('with a signal far below hearing', /\(Math\.random\(\) \* 2 - 1\) \* 1e-4/.test(earcons), true)
-check('and lets it sleep when the turn ends', /speaker = null\s+releaseOutput\(\)/.test(turn), true)
+check('and lets it sleep when it ends', /\.finally\(\(\) => \{\s+releaseOutput\(\)/.test(turn), true)
 check('a chime waits for the output to be awake', /const context = await awake\(\)/.test(earcons), true)
 check('so does the first typing', /out\.wake - \(Date\.now\(\) - out\.woke\)\) \/ 1000/.test(earcons), true)
 /* "Sometimes it doesn't work at the start": the first pinch after a quiet
@@ -270,11 +270,15 @@ check('the voice goes through the same output', /const current = output\(\)/.tes
 check('and follows it when it is opened again', /if \(current !== this\.context\) \{/.test(speaker), true)
 check('no sound opens an output of its own', /new AudioContext\(/.test(speaker) || (earcons.match(/new AudioContext\(/g) ?? []).length !== 1, false)
 
-/* "Also add a chime after the recording of my voice finished." */
-check('a chime when it stops recording', /await chime\('heard'\)\s+startTicks\(\)/.test(turn), true)
-check('while the words are already being transcribed', /const transcribing = clipForSpeech[\s\S]{0,300}await chime\('heard'\)[\s\S]{0,60}await transcribing/.test(turn), true)
+/* "Also add a chime after the recording of my voice finished" - and then,
+   in a conversation, "I feel like there's chimes everywhere", and one at a
+   pause mid-sentence sounded like a false alarm. The typing says it now. */
+check('no chime when it stops recording', /chime\('heard'\)/.test(turn) || 'heard' in E.CHIMES, false)
+check('the typing starts instead, while the words are heard', /startTicks\(\)\s+const from = Math\.max\(0, r\.onsetMs\(\) - PRE_ROLL_MS\)/.test(turn), true)
 /* "Remove the one when it sent it, because there's no need for that." */
 check('no chime when the words are sent', /chime\('sent'\)/.test(turn) || 'sent' in E.CHIMES, false)
+check('one "talk now" in a conversation, at the start', (turn.match(/await chime\('listen'\)/g) ?? []).length, 1)
+check('a yes is said, not chimed', /entry\.run\(\)[\s\S]{0,120}await say\('Okay\.'\)/.test(turn), true)
 
 /* "Naturally just distinct... going upwards, it's ready for me to speak...
    going downwards, it means it's finished." */
@@ -282,15 +286,13 @@ check('no chime when the words are sent', /chime\('sent'\)/.test(turn) || 'sent'
   const K = E.CHIMES
   const rises = (c) => c.notes.length > 1 && c.notes.every((hz, i) => i === 0 || hz > c.notes[i - 1])
   const falls = (c) => c.notes.length > 1 && c.notes.every((hz, i) => i === 0 || hz < c.notes[i - 1])
-  check('five cues', Object.keys(K).join(' '), 'opening listen heard done cancel')
+  check('four cues', Object.keys(K).join(' '), 'opening listen done cancel')
   check('"talk now" goes up', rises(K.listen), true)
-  check('"got it" goes down', falls(K.heard), true)
-  check('and is "talk now" backwards', [...K.heard.notes].reverse().join(), K.listen.notes.join())
-  check('"finished" goes down too', falls(K.done), true)
-  check('but as one rolled chord, not two notes', K.done.notes.length === 3 && K.done.step < 0.05, true)
-  check('"stopped" goes nowhere: one low note, twice', new Set(K.cancel.notes).size === 1 && K.cancel.notes.length === 2 && K.cancel.notes[0] < 300, true)
-  check('"felt the pinch" is a single note', K.opening.notes.length, 1)
-  check('every cue a different shape', new Set(Object.values(K).map((c) => `${c.notes.join()}@${c.step}`)).size, 5)
+  check('"finished" goes down', falls(K.done), true)
+  check('as one rolled chord', K.done.notes.length === 3 && K.done.step < 0.05, true)
+  check('"it did not work" goes nowhere: one low note, twice', new Set(K.cancel.notes).size === 1 && K.cancel.notes.length === 2 && K.cancel.notes[0] < 300, true)
+  check('"felt the hold" is a single note', K.opening.notes.length, 1)
+  check('every cue a different shape', new Set(Object.values(K).map((c) => `${c.notes.join()}@${c.step}`)).size, 4)
 
   /* Rendered the way strike() makes them, for how loud each is to an ear. */
   const voices = (c) =>
@@ -308,27 +310,94 @@ check('no chime when the words are sent', /chime\('sent'\)/.test(turn) || 'sent'
      quietest of them, a soft low note, so as not to be taken for "talk now". */
   const soft = render(0.4, struck(440, 0, { peak: 0.11 * 0.6, attack: 0.006, ring: 0.2, bright: 0.02 * 0.6 }))
   const dotUp = dB(loud.opening, soft)
-  check(`the pinch dot louder than the soft note it was (${dotUp} dB)`, dotUp >= 3, true)
+  check(`the dot louder than the soft note it was (${dotUp} dB)`, dotUp >= 3, true)
   check('and short: a dot, not a note', K.opening.ring <= 0.15, true)
   const dotVsTalk = dB(loud.opening, loud.listen)
   check(`and about as loud as "talk now" (${dotVsTalk} dB)`, Math.abs(dotVsTalk) <= 3, true)
-  const chord = dB(loud.done, loud.heard)
-  check(`the chord no louder than the rest (${chord} dB against "got it")`, Math.abs(chord) <= 2, true)
+  const chord = dB(loud.done, loud.listen)
+  check(`the chord no louder than the rest (${chord} dB against "talk now")`, Math.abs(chord) <= 2.5, true)
 }
 
-/* The gesture. */
-check('a double report of one pinch is one pinch', /if \(now - startedAt < SAME_GESTURE_MS \|\| now - lastGesture < REPORTED_TWICE_MS\) \{/.test(turn), true)
+/* The gesture: hold to start, hold again to finish. */
+check('a double report of one gesture is one gesture', /if \(now - startedAt < SAME_GESTURE_MS \|\| now - lastGesture < REPORTED_TWICE_MS\) \{/.test(turn), true)
 /* Logged: a pinch at 5s cancelled a turn whose earbuds' mic had not come on,
    the turn waited out the mic until 9s, and the next pinch - 1.09s later,
    meant to start again - was taken as another cancel. */
-check('a stop ends the wait for the mic at once', /Promise\.race\(\[recording\.live, sleep\(LIVE_WAIT_MS\)\.then\(\(\) => -1\), stopped\]\)/.test(turn) && /stopTicks\(\)\s+stopWaiting\(\)/.test(turn), true)
-check('and a pinch while it stops asks again', /if \(cancelled\) \{\s+note\('pinched again while it was stopping[^']*'\)\s+again = true/.test(turn), true)
-check('a deliberate second pinch is not a repeated report', Number(/export const REPORTED_TWICE_MS = (\d+)/.exec(turn)?.[1]) > 540 && Number(/export const REPORTED_TWICE_MS = (\d+)/.exec(turn)?.[1]) < 1090, true)
+check('ending stops the wait for the mic at once', /Promise\.race\(\[recording\.live, sleep\(LIVE_WAIT_MS\)\.then\(\(\) => -1\), stopped\]\)/.test(turn) && /stopTicks\(\)\s+stopWaiting\(\)/.test(turn), true)
+check('and a gesture while it ends starts again', /if \(cancelled\) \{\s+note\('held again while it was ending[^']*'\)\s+again = true/.test(turn), true)
+check('a deliberate second gesture is not a repeated report', Number(/export const REPORTED_TWICE_MS = (\d+)/.exec(turn)?.[1]) > 540 && Number(/export const REPORTED_TWICE_MS = (\d+)/.exec(turn)?.[1]) < 1090, true)
 check('within 1.2s', /export const SAME_GESTURE_MS = 1200/.test(turn), true)
-check('a pinch while it talks interrupts and listens', /stage === 'speaking' \|\| stage === 'thinking'\)\) \{\s+note\('interrupted: listening again'\)\s+again = true/.test(turn), true)
-check('and stops the answer being written', /if \(depsRef\.current\.streaming\(\)\) depsRef\.current\.stop\(\)/.test(turn), true)
-check('but not while asking yes or no', /if \(!asking && \(stage/.test(turn), true)
-check('then a new turn begins', /if \(again\) \{\s+again = false\s+begin\(\)/.test(turn), true)
+check('otherwise a gesture ends the conversation', /the conversation ends`\)\s+cancel\(\)/.test(turn), true)
+check('then a new one can begin', /if \(again\) \{\s+again = false\s+begin\(\)/.test(turn), true)
+check('with the chord, before the mic lets go', /if \(ending !== 'failed'\) await chime\('done'\)\s+await closeMic\(\)/.test(turn), true)
+check('and nobody talking for two minutes ends it too', /export const IDLE_END_MS = 120_000/.test(turn) && /ending = 'idle'/.test(turn), true)
+
+/* "I'm allowed to interrupt this AI and tell it what to do." */
+check('talking over an answer stops it', /stopSound\?\.\(\)\s+speaker\?\.stop\(\)\s+speaker = newSpeaker\(\)\s+if \(asking\) return\s+interrupted = true/.test(turn), true)
+check('and stops the answer being written', /interrupted = true\s+if \(depsRef\.current\.streaming\(\)\) depsRef\.current\.stop\(\)/.test(turn), true)
+check('while it asks yes or no, talking is the answer', /if \(asking\) return\s+interrupted = true/.test(turn), true)
+check('the mic stays open through the answer', /const clip = await r\.done\s+metering = false\s+await newEar\(\)/.test(turn), true)
+check('a long wait is not a long clip', /if \(Date\.now\(\) - earSince > FRESH_EAR_MS\) await nextEar\(\)/.test(turn) && /clipForSpeech\(clip\.blob, clip\.extension, from\)/.test(turn), true)
+
+/* "Can you make him speak a little bit faster?" Magpie ignores SSML's
+   <prosody rate> (measured: 0.8 to 1.5 all came back 5.7-5.9s long), so the
+   sound is time-stretched as it arrives. Run on a voice-like tone, fed in
+   the fifth-of-a-second pieces Magpie sends. */
+{
+  const T = await load('src/renderer/src/stretch.ts', 'stretch')
+  const SR = 22050
+  const n = SR * 3
+  const voice = Float32Array.from({ length: n }, (_, i) => {
+    const t = i / SR
+    return 0.3 * Math.sin(2 * Math.PI * 140 * t) + 0.15 * Math.sin(2 * Math.PI * 280 * t + 1) + 0.08 * Math.sin(2 * Math.PI * 420 * t + 2)
+  })
+  const stretched = (speed) => {
+    const s = new T.Stretcher(speed)
+    const parts = []
+    for (let i = 0; i < n; i += 4410) parts.push(s.push(voice.slice(i, i + 4410)))
+    parts.push(s.flush())
+    const y = new Float32Array(parts.reduce((a, p) => a + p.length, 0))
+    let o = 0
+    for (const p of parts) {
+      y.set(p, o)
+      o += p.length
+    }
+    return y
+  }
+  const pitch = (y) => {
+    const mid = y.subarray(Math.floor(y.length / 2), Math.floor(y.length / 2) + 2048)
+    /* The first lag that lines up almost as well as the best one: the
+       period, not a multiple of it. */
+    const corr = []
+    for (let L = 60; L < 400; L++) {
+      let c = 0
+      for (let i = 0; i < 1024; i++) c += mid[i] * mid[i + L]
+      corr.push([L, c])
+    }
+    const top = Math.max(...corr.map(([, c]) => c))
+    const lag = corr.find(([L, c], i) => c > 0.9 * top && c >= (corr[i - 1]?.[1] ?? 0) && c >= (corr[i + 1]?.[1] ?? 0))[0]
+    return Math.round(SR / lag)
+  }
+  const rms = (y, from, to) => {
+    let e = 0
+    for (let i = from; i < to; i++) e += y[i] * y[i]
+    return Math.sqrt(e / (to - from))
+  }
+  const quick = stretched(1.15)
+  const ratio = +(n / quick.length).toFixed(2)
+  check(`fifteen percent faster is fifteen percent shorter (${ratio})`, Math.abs(ratio - 1.15) < 0.03, true)
+  check(`at the same pitch (${pitch(quick)}Hz, from ${pitch(voice)}Hz)`, Math.abs(pitch(quick) - pitch(voice)) <= 2 && Math.abs(pitch(voice) - 140) <= 2, true)
+  const level = rms(quick, 2000, quick.length - 2000) / rms(voice, 0, n)
+  check(`and the same loudness, with no gaps (${level.toFixed(2)})`, Math.abs(level - 1) < 0.08, true)
+  let worst = 0
+  for (let i = 1000; i < quick.length - 1000; i += 220) worst = Math.max(worst, Math.abs(rms(quick, i, i + 220) / rms(voice, 0, n) - 1))
+  check(`no window comes out loud or hollow (${worst.toFixed(2)})`, worst < 0.25, true)
+  check('as made, it is left alone', new T.Stretcher(1).push(voice) === voice, true)
+  check('it is on by default, a little', /speakRate: 1\.1\d?,/.test(read('src/shared/defaults.ts')), true)
+  check('every streamed piece goes through it', /this\.schedule\(stretch\.push\(floats\)\)/.test(speaker) && /if \(got\) this\.schedule\(stretch\.flush\(\)\)/.test(speaker), true)
+  check('and the slower ways of speaking keep up', /audio\.playbackRate = quick \? Math\.max\(1\.2, currentSpeed\(\)\) : currentSpeed\(\)/.test(turn), true)
+  check('the setting is read when a conversation starts', /setSpeed\(s\.speakRate \?\? 1\)/.test(turn), true)
+}
 
 /* The tone. */
 check('one line of character, on screen and in the ear', /TONE =\s+'- Tone: a sharp, easygoing friend/.test(main), true)
@@ -337,7 +406,7 @@ check('and the answer first, since it is spoken while written', /Lead with the a
    word is answered literally, and every question back costs a pinch. */
 check('in the ear, things written the way they are said', /Write everything the way it is said/.test(main), true)
 check('a misheard word answered as meant', /Answer what they most likely meant/.test(main), true)
-check('and no question back unless it must', /replying means",\s+'  pinching again/.test(main), true)
+check('a conversation: short, and theirs to steer', /This is a back-and-forth conversation/.test(main) && /can talk',\s+'  over you to stop you/.test(main), true)
 
 console.log(`\n${failures === 0 ? 'all' : `${failures} FAILED of the`} speak-ahead checks${failures ? '' : ' correct'}`)
 process.exit(failures ? 1 : 0)

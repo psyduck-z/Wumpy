@@ -44,6 +44,27 @@ const COLD_AFTER_MS = 30_000
 let out: { context: AudioContext; keep: AudioBufferSourceNode; woke: number; wake: number } | null = null
 /** When the last output was let go; 0, never, counts as cold. */
 let closedAt = 0
+/** The output device, by id; null is the system's default. See playOn. */
+let sink: string | null = null
+
+/**
+ * Sends every sound to this output device from now on (null: the default).
+ *
+ * For a conversation on Windows, where earbuds in headset mode can be an
+ * output of their own ("Headset ... Hands-Free"), apart from the
+ * "Headphones" one music plays on - and with the earbuds' mic held open
+ * for a whole conversation, the default would be the one that has gone
+ * quiet. An open output on another device is closed, to be opened again
+ * on this one.
+ */
+export function playOn(id: string | null): void {
+  if (id === sink) return
+  sink = id
+  if (out) {
+    releaseOutput()
+    wakeOutput()
+  }
+}
 
 /** Opens the turn's output and keeps it awake. Called when a turn starts. */
 export function wakeOutput(): void {
@@ -51,7 +72,7 @@ export function wakeOutput(): void {
   try {
     /* 'playback': larger buffers, so a busy moment on the page is not a
        click in the ear. Nothing here needs the last few milliseconds. */
-    const context = new AudioContext({ latencyHint: 'playback' })
+    const context = new AudioContext({ latencyHint: 'playback', ...(sink ? { sinkId: sink } : {}) } as AudioContextOptions)
     const buffer = context.createBuffer(1, context.sampleRate, context.sampleRate)
     const data = buffer.getChannelData(0)
     for (let i = 0; i < data.length; i++) data[i] = (Math.random() * 2 - 1) * 1e-4
@@ -117,16 +138,19 @@ async function awake(): Promise<AudioContext | null> {
  * upwards, then it knows that it's ready for me to speak... if the tone is
  * going downwards, it means it's finished." So the shape is the meaning:
  *
- *   opening  one short dot                 got your pinch, the mic is coming on
+ *   opening  one short dot                 got your hold, the mic is coming on
  *   listen   doo-DOO, up a fifth           the mic is on: talk now
- *   heard    DOO-doo, the same fifth down  got it, stopped listening
- *   done     a chord, rolled downwards     finished, with nothing to say
- *   cancel   one low note, twice           stopped, or nothing was heard
+ *   done     a chord, rolled downwards     the conversation is over
+ *   cancel   one low note, twice           the mic never came on
  *
- * "Heard" mirrors "listen" exactly, the way a mic turns on and off. "Done"
- * also goes down, being an ending, but as one rolled chord rather than two
- * notes, so the end of a turn is not mistaken for the end of listening.
  * "Cancel" goes nowhere - the same low note, "uh-uh".
+ *
+ * Then a conversation instead of a turn per pinch, and "I feel like there's
+ * chimes everywhere": the mic stays open, so there is one "talk now" at the
+ * start and none after; "got it" (the same fifth going down) is gone, since
+ * the typing that starts when you stop says it - and a "got it" that came
+ * in the middle of a sentence, at a pause, was taken for a false alarm and
+ * cut people off.
  *
  * Then: "the initial time to tell me that it received the gesture... has to
  * be a little louder, and make it just a single dot", and for all of them,
@@ -141,7 +165,6 @@ async function awake(): Promise<AudioContext | null> {
 export const CHIMES = {
   opening: { notes: [659.25], step: 0.13, level: 1.6, ring: 0.15 },
   listen: { notes: [587.33, 880], step: 0.13, level: 1, ring: 0.3 },
-  heard: { notes: [880, 587.33], step: 0.13, level: 1, ring: 0.3 },
   done: { notes: [880, 739.99, 587.33], step: 0.035, level: 0.7, ring: 0.3 },
   cancel: { notes: [261.63, 261.63], step: 0.16, level: 1.1, ring: 0.22 }
 } as const

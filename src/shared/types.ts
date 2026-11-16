@@ -616,6 +616,12 @@ export interface WumpySettings {
   /** Magpie's voice for spoken answers, e.g. Magpie-Multilingual.EN-US.Aria. */
   speakVoice: string
   /**
+   * How fast answers are spoken: 1 as made, 1.15 fifteen percent quicker,
+   * at the same pitch (see renderer/stretch.ts). "Can you make him speak a
+   * little bit faster? ...I'm able to listen faster."
+   */
+  speakRate: number
+  /**
    * Pause whatever music is playing while Wumpy listens or talks - a voice
    * turn, or holding the spacebar - and resume it after. See main/music.ts.
    */
@@ -875,6 +881,7 @@ export const IPC = {
   voiceSpeak: 'voice:speak',
   /** Text to speech as it is made: pieces arrive on voiceAudio, then this resolves. */
   voiceSpeakStream: 'voice:speak-stream',
+  voiceMicState: 'voice:mic-state',
   /** One piece of streamed speech: { id, pcm } with 16-bit mono PCM. */
   voiceAudio: 'voice:audio',
   /** Main tells the panel to run a spoken turn (wumpy --voice). */

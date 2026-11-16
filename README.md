@@ -83,8 +83,8 @@ after login. Bind the shortcut in `~/.config/hypr/bindings.lua`:
 o.bind("SUPER + SHIFT + D", "Wumpy", "wumpy --toggle")
 ```
 
-`wumpy --toggle` shows or hides the window, `wumpy --voice` starts a spoken
-turn (below), `wumpy --hidden` starts it in the tray and `wumpy --restart`
+`wumpy --toggle` shows or hides the window, `wumpy --voice` starts or ends a spoken
+conversation (below), `wumpy --hidden` starts it in the tray and `wumpy --restart`
 restarts it on the chat it was on. `wumpy --speech-check` writes how long
 NVIDIA's voice takes to speak and to hear, from this machine and network,
 to the log, without playing anything — worth running on a hotspot.
@@ -108,9 +108,9 @@ What is different from Windows, on purpose:
 
 ## Talking to it from your earbuds
 
-`wumpy --voice` runs one spoken turn without opening the window: a chime, you
-talk, it answers out loud. Bind it to anything — Nothing X runs it from an
-earbud gesture (set a gesture to *Desktop assistant* under Controls; the command
+`wumpy --voice` starts a spoken conversation without opening the window, and
+running it again ends it. Bind it to anything — Nothing X runs it from an
+earbud gesture (set **Hold** to *Desktop assistant* under Controls; the command
 itself is under App settings → Assistant, and left empty it runs Wumpy from
 where its installer put it, on Windows too). On Windows it is
 `"%LOCALAPPDATA%\Programs\Wumpy\Wumpy.exe" --voice`: the installer adds
@@ -123,18 +123,24 @@ nothing to `PATH`, so a bare `wumpy` is not found there.
   add every key from a different account. With
   no key, dictation falls back to local Whisper (`npm run speech:install`) and
   answers to the system voice.
-- **The gesture, again.** Pinch once to ask; one short dot says it felt
-  the pinch, and two notes, up, say the mic is on: talk then. Bluetooth
-  earbuds can take a few seconds to switch their mic on, and it ticks, one
-  key at a time, while they do. A pause of a second and a half ends what you
-  said, and the same two notes going down say it has your words. While it works you hear soft
-  typing, in threes, until the answer starts. A rolled chord, downwards,
-  means it finished with nothing to say; one low note twice means it
-  stopped or heard nothing. Up is "your turn", down is "finished". To ask
-  something else, pinch again — and pinching while it is still talking stops
-  it and listens, the way you would talk over someone. Pinching while it
-  listens, or while it asks yes or no, cancels. A pinch the earbuds report
-  twice in quick succession counts once.
+- **Hold to start, hold again to finish.** One short dot says it felt the
+  hold. Bluetooth earbuds take a moment to switch their mic on — on some
+  machines several seconds — and it ticks, one key at a time, while they do.
+  Two notes going up then mean the mic really is on: talk. From there it is a
+  conversation: say something, it answers, say the next thing — no gesture
+  and no chime in between, because the mic stays open until you finish, so
+  the earbuds switch only once. Soft typing, in threes, means it is working
+  on what you said. A pause of a second and a half ends what you are saying;
+  carry on while it is still working it out and the rest is added rather
+  than sent as half a question, and a moment where the mic drops out is not
+  taken for a pause. Talk over an answer to stop it and say something else.
+  A rolled chord, downwards, says the conversation is over — after a hold, or
+  after two minutes with nobody talking. One low note twice means the mic
+  never came on. A hold the earbuds report twice in quick succession counts
+  once.
+- **Jason talks fifteen percent faster than Magpie makes him**, at the same
+  pitch: Magpie ignores SSML's speaking rate, so the sound is time-stretched
+  as it arrives (`speakRate` in settings.json; 1 is as made).
 - **It speaks while it writes.** Each sentence is said as soon as it is
   finished, while the model is still writing the next, and Magpie's sound is
   played as it is made rather than once the whole answer is ready. The
@@ -142,7 +148,7 @@ nothing to `PATH`, so a bare `wumpy` is not found there.
 - **A stalled model does not leave you in silence.** If the model has said
   nothing after five seconds, the question goes to the quickest model the
   background ranking has seen answer, and the window notes which one did.
-- **It knows it is on your earbuds.** Every request in a voice turn says so,
+- **It knows it is on your earbuds.** Every request in a conversation says so,
   and the model answers in a sentence or two of plain speech instead of tables
   and lists; typed turns are told you are at the screen. Messages that came
   through the buds carry a small *earbuds* mark in the transcript.
