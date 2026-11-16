@@ -94,6 +94,11 @@ export function shouldRotate(now: {
 export interface RecorderOptions extends RecorderEvents {
   /** End after this long without speech. Null never ends by itself. */
   silenceMs?: number | null
+  /**
+   * The room as the last recording on this mic measured it, to start from:
+   * see Hearing.seed.
+   */
+  room?: number
   /** A hard ceiling, so a stuck recording cannot fill the disk. */
   maxMs?: number
   /**
@@ -312,6 +317,22 @@ export class Hearing {
     this.armed = armed
   }
 
+  /**
+   * Starts from a room already measured on the same mic, a moment ago.
+   *
+   * A conversation begins each recording as the last one ends, which is as
+   * the answer starts - and earbuds playing an answer can send their mic
+   * as near silence, too quiet to measure a room from. So it stayed
+   * unmeasured, the bar at SPEECH_LEVEL, and talking over a short answer
+   * took 0.040 where every later one took 0.006: the first answers of the
+   * first real conversation logged exactly that.
+   */
+  seed(room: number): void {
+    if (!(room > 0) || !Number.isFinite(room)) return
+    this.room = room
+    this.bar = speechThreshold(room)
+  }
+
   arm(now: number): void {
     if (this.armed) return
     this.armed = true
@@ -496,6 +517,7 @@ export async function record(opts: RecorderOptions = {}): Promise<Recording> {
 
   const startedAt = performance.now()
   const hearing = new Hearing(startedAt, opts.onset, opts.armed !== false)
+  if (opts.room) hearing.seed(opts.room)
   let heardInSegment = false
   let frame: Frame | null = null
   let stopped = false

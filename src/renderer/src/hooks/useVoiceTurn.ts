@@ -469,9 +469,12 @@ export function useVoiceTurn(deps: Deps): void {
      */
     async function newEar(armed = true): Promise<Recording> {
       let self: Recording | null = null
+      /* The room the last one measured, on this same mic (see Hearing.seed). */
+      const room = ear ? ear.stats().room : 0
       const r = await record({
         stream: mic!,
         armed,
+        room,
         silenceMs: END_PAUSE_MS,
         maxMs: 45_000,
         maxFromSpeech: true,

@@ -307,6 +307,36 @@ check('and over a sound, it takes longer and louder', /ear\?\.strict\(ticking\(\
     check('an answer leaking into the mic is not someone talking over it', echo.onset, -1)
     check('someone talking over it is, in about a third of a second', run(h, hold(0.06, 400), echo.t).onset - echo.t <= 320, true)
   }
+  /* The first real conversation: talking over the first two answers took
+     0.040, every later one 0.006. Each recording begins as an answer
+     starts, and the earbuds sent their mic as near silence while it
+     played - no room to measure, so the bar stayed where it starts. */
+  {
+    const fresh = new R.Hearing(0, { frames: 3, window: 4 })
+    fresh.setStrict(true)
+    run(fresh, hold(0.00005, 1200))
+    check('a recording that never hears a room starts high', R.strictBar(fresh.bar), 0.04)
+    const seeded = new R.Hearing(0, { frames: 3, window: 4 })
+    seeded.seed(0.0002)
+    seeded.setStrict(true)
+    run(seeded, hold(0.00005, 1200))
+    check('one that starts from the last one’s room does not', R.strictBar(seeded.bar), R.STRICT_FLOOR)
+    check('so a short answer is as easy to talk over as a long one', run(seeded, hold(0.03, 400), 1200).onset > 0, true)
+    check('and an answer leaking in is still not someone talking', (() => {
+      const h = new R.Hearing(0, { frames: 3, window: 4 })
+      h.seed(0.0002)
+      h.setStrict(true)
+      return run(h, hold(0.004, 3000)).onset
+    })(), -1)
+    const noisier = new R.Hearing(0, { frames: 3, window: 4 })
+    noisier.seed(0.0002)
+    run(noisier, hold(0.001, 4000))
+    check('a noisier room is still caught up with, most of the way in four seconds', noisier.room > 0.0008, true)
+    const nothing = new R.Hearing(0)
+    nothing.seed(0)
+    check('no room measured is no room to start from', nothing.bar, R.SPEECH_LEVEL)
+    check('the conversation hands each recording the last one’s room', /const room = ear \? ear\.stats\(\)\.room : 0[\s\S]{0,120}room,/.test(turn), true)
+  }
   {
     const h = new R.Hearing(0)
     run(h, hold(0.0005, 400))
