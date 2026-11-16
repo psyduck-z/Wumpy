@@ -410,7 +410,7 @@ export function useVoiceTurn(deps: Deps): void {
 
     /*
      * PipeWire's word on the earbuds' mic, asked every 150ms while it comes
-     * on and every 400ms after, for dropouts. Twice running in a row before
+     * on and every second after, for dropouts. Twice running in a row before
      * it counts, since the source can be RUNNING a moment before sound
      * flows. Where the default mic is not Bluetooth, asked once.
      */
@@ -449,7 +449,9 @@ export function useVoiceTurn(deps: Deps): void {
           const was: boolean = working
           working = runs >= 2
           if (ear && was !== working) note(working ? 'the earbuds’ mic is back' : 'the earbuds’ mic dropped out')
-          await sleep(working ? 400 : 150)
+          /* Quickly while it comes on; then once a second, for dropouts -
+             digital silence is caught by the recorder itself at once. */
+          await sleep(working ? 1000 : 150)
         }
       })()
       return () => {

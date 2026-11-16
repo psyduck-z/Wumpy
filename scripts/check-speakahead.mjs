@@ -441,6 +441,7 @@ check('and the answer first, since it is spoken while written', /Lead with the a
    word is answered literally, and every question back costs a pinch. */
 check('in the ear, things written the way they are said', /Write everything the way it is said/.test(main), true)
 check('a misheard word answered as meant', /Answer what they most likely meant/.test(main), true)
+check('talked over, it answers the new thing and leaves the old', /they talked over you',\s+'  on purpose: answer the new thing/.test(main), true)
 check('a conversation: short, and theirs to steer', /This is a back-and-forth conversation/.test(main) && /can talk',\s+'  over you to stop you/.test(main), true)
 
 console.log(`\n${failures === 0 ? 'all' : `${failures} FAILED of the`} speak-ahead checks${failures ? '' : ' correct'}`)

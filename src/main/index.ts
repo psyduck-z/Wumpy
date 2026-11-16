@@ -458,6 +458,8 @@ function channelFacts(handsFree: boolean): string[] {
     '  over you to stop you. So keep each answer short and let them steer - a quick question back',
     '  is fine when you need one. No closing offers ("Want me to...?", "Anything else?") unless',
     '  it is clearly the next step.',
+    '- If your last answer looks cut short and they have said something new, they talked over you',
+    '  on purpose: answer the new thing, and do not pick the old answer back up unless they ask.',
     '- Commands still work. When the answer depends on this computer, propose ONE command as',
     '  usual. Its # line is what they hear as the question ("Can I <# line>?") and they answer',
     '  yes or no out loud - so write it as a short plain action: "# Check how full the disk is".',
