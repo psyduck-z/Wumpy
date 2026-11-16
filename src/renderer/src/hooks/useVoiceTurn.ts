@@ -120,6 +120,17 @@ export const FRESH_EAR_MS = 20_000
 export const PRE_ROLL_MS = 500
 
 /**
+ * Hearing starts at the first half second of quiet, not at the end of the
+ * pause: what has been said so far goes to be transcribed while the rest
+ * of END_PAUSE_MS is waited out, and if nothing more is said - the usual
+ * case - the words are ready about a second sooner. Said more after all, and
+ * that guess is dropped for one of the whole thing. "I don't like the delay."
+ */
+export const GUESS_AFTER_MS = 450
+/** A guess still not back this long after the pause is over is given up for one of the whole clip. */
+export const GUESS_WAIT_MS = 1500
+
+/**
  * What starts speech in a conversation: three loud frames of four, about
  * 120ms. A single frame was enough for a turn that had just said "talk
  * now", but this mic is open all the time, and a tap on the earbud or a
@@ -539,6 +550,21 @@ export function useVoiceTurn(deps: Deps): void {
       return true
     }
 
+    type Words = { heard: string; text: string }
+
+    /** A clip, transcribed: as heard, and as tidied for sending. Empty for no words or a failure. */
+    async function hearClip(blob: Blob, extension: string, onsetMs: number): Promise<Words> {
+      try {
+        const ready = await clipForSpeech(blob, extension, Math.max(0, onsetMs - PRE_ROLL_MS))
+        const result = await window.wumpy.voice.transcribe(ready.audio, ready.extension, [])
+        const heard = (result.heard || result.text || '').trim()
+        return { heard, text: (result.text || heard).trim() }
+      } catch (err) {
+        note(`it could not be heard: ${String(err)}`)
+        return { heard: '', text: '' }
+      }
+    }
+
     /*
      * The next thing said: waits up to `waitMs` for someone to start, then
      * until a pause of `pauseMs` ends it, and hears it. Null for silence,
@@ -572,7 +598,24 @@ export function useVoiceTurn(deps: Deps): void {
       let textAll = ''
       for (;;) {
         const r = ear
-        const clip = await r.done
+        /* Waiting out the pause, with a guess at the words from its first
+           half second (see GUESS_AFTER_MS). */
+        let guess: { at: number; words: Promise<Words | null> } | null = null
+        const ending = r.done.then((clip) => ({ clip }))
+        let clip: Awaited<typeof r.done>
+        for (;;) {
+          const ended = await Promise.race([ending, sleep(60).then(() => null)])
+          if (ended) {
+            clip = ended.clip
+            break
+          }
+          if (r.quietMs() >= GUESS_AFTER_MS && guess?.at !== r.spokeAt()) {
+            const at = r.spokeAt()
+            const onset = r.onsetMs()
+            guess = { at, words: r.snapshot().then((got) => (got ? hearClip(got.blob, got.extension, onset) : null)) }
+          }
+        }
+        const endedAt = Date.now()
         metering = false
         await newEar()
         if (cancelled) return null
@@ -586,15 +629,19 @@ export function useVoiceTurn(deps: Deps): void {
           showVoice({ stage: 'hearing', level: 0 })
           /* The typing is "got it": no chime for it. */
           startTicks()
-          const from = Math.max(0, r.onsetMs() - PRE_ROLL_MS)
-          const ready = await clipForSpeech(clip.blob, clip.extension, from)
-          const result = await window.wumpy.voice.transcribe(ready.audio, ready.extension, [])
-          const heard = (result.heard || result.text || '').trim()
-          note(heard ? `heard "${heard.slice(0, 120)}"` : 'the transcriber returned no words')
-          if (heard) {
-            heardAll = heardAll ? `${heardAll} ${heard}` : heard
-            const text = (result.text || heard).trim()
-            textAll = textAll ? `${textAll} ${text}` : text
+          /* The guess is good if nothing was said after it was taken, and
+             it heard words; otherwise the whole clip is heard now. */
+          const guessed =
+            guess && guess.at === r.spokeAt() ? await Promise.race([guess.words, sleep(GUESS_WAIT_MS).then(() => null)]) : null
+          const words = guessed?.heard ? guessed : await hearClip(clip.blob, clip.extension, r.onsetMs())
+          note(
+            words.heard
+              ? `heard "${words.heard.slice(0, 120)}" ${Date.now() - endedAt}ms after the pause${guessed?.heard ? ', from the guess' : ''}`
+              : 'the transcriber returned no words'
+          )
+          if (words.heard) {
+            heardAll = heardAll ? `${heardAll} ${words.heard}` : words.heard
+            textAll = textAll ? `${textAll} ${words.text}` : words.text
           }
         }
         if (cancelled) return null

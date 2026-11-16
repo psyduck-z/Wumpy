@@ -42,3 +42,9 @@ jobs:
           path: dist/*-setup.exe
       - name: Checks, on Windows
         run: npm run typecheck
+      # The recorder in Windows' own Chromium, on a fake mic playing a made-up
+      # sentence (see the script). A runner has no sound card, which this may
+      # need, so a failure here is reported, not fatal.
+      - name: The recorder, live on Windows
+        continue-on-error: true
+        run: node scripts/check-recorder-live.mjs

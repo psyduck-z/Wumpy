@@ -174,6 +174,16 @@ export interface Recording {
   spoke(): boolean
   /** Milliseconds from its start to the first speech; -1 before there is any. */
   onsetMs(): number
+  /** How long since the person was last heard, once they have been; 0 before. */
+  quietMs(): number
+  /** When they were last heard, on the page's clock: unchanged means nothing new was said. */
+  spokeAt(): number
+  /**
+   * Everything recorded so far, as a file that decodes on its own, without
+   * stopping: for hearing what has been said while the pause that ends it
+   * is still being waited out. Null if it has ended.
+   */
+  snapshot(): Promise<{ blob: Blob; extension: string } | null>
   /**
    * Harder to start: while something plays into the earbuds next to the
    * mic, speech must be louder (STRICT_LOUDER times the bar) and last
@@ -445,12 +455,15 @@ export async function record(opts: RecorderOptions = {}): Promise<Recording> {
   let segmentIndex = 0
   let segmentStart = performance.now()
 
+  /* Waiting on the recorder to hand over what it has, for snapshot(). */
+  const flushed: Array<() => void> = []
   const collect = (r: MediaRecorder): void => {
     r.ondataavailable = (e) => {
       if (e.data.size > 0) {
         chunks.push(e.data)
         all.push(e.data)
       }
+      for (const waiter of flushed.splice(0)) waiter()
     }
   }
   collect(recorder)
@@ -635,6 +648,18 @@ export async function record(opts: RecorderOptions = {}): Promise<Recording> {
     arm: () => hearing.arm(performance.now()),
     spoke: () => hearing.spoke,
     onsetMs: () => hearing.onsetAt,
+    quietMs: () => (hearing.spoke ? performance.now() - hearing.spokeAt : 0),
+    spokeAt: () => hearing.spokeAt,
+    snapshot: () =>
+      new Promise<{ blob: Blob; extension: string } | null>((resolve) => {
+        if (stopped || recorder.state !== 'recording') return resolve(null)
+        const timer = setTimeout(() => resolve(null), 600)
+        flushed.push(() => {
+          clearTimeout(timer)
+          resolve({ blob: new Blob(all, { type: format.mime }), extension: format.extension })
+        })
+        recorder.requestData()
+      }),
     strict: (on: boolean) => hearing.setStrict(on),
     setPause: (ms: number) => {
       silenceMs = ms

@@ -281,7 +281,7 @@ check('and follows it when it is opened again', /if \(current !== this\.context\
    in a conversation, "I feel like there's chimes everywhere", and one at a
    pause mid-sentence sounded like a false alarm. The typing says it now. */
 check('no chime when it stops recording', /chime\('heard'\)/.test(turn) || 'heard' in E.CHIMES, false)
-check('the typing starts instead, while the words are heard', /startTicks\(\)\s+const from = Math\.max\(0, r\.onsetMs\(\) - PRE_ROLL_MS\)/.test(turn), true)
+check('the typing starts instead, while the words are heard', /\/\* The typing is "got it": no chime for it\. \*\/\s+startTicks\(\)/.test(turn), true)
 /* "Remove the one when it sent it, because there's no need for that." */
 check('no chime when the words are sent', /chime\('sent'\)/.test(turn) || 'sent' in E.CHIMES, false)
 check('one "talk now" in a conversation, at the start', (turn.match(/await chime\('listen'\)/g) ?? []).length, 1)
@@ -343,8 +343,21 @@ check('and nobody talking for two minutes ends it too', /export const IDLE_END_M
 check('talking over an answer stops it', /stopSound\?\.\(\)\s+speaker\?\.stop\(\)\s+speaker = newSpeaker\(\)\s+if \(asking\) return\s+interrupted = true/.test(turn), true)
 check('and stops the answer being written', /interrupted = true\s+if \(depsRef\.current\.streaming\(\)\) depsRef\.current\.stop\(\)/.test(turn), true)
 check('while it asks yes or no, talking is the answer', /if \(asking\) return\s+interrupted = true/.test(turn), true)
-check('the mic stays open through the answer', /const clip = await r\.done\s+metering = false\s+await newEar\(\)/.test(turn), true)
-check('a long wait is not a long clip', /if \(Date\.now\(\) - earSince > FRESH_EAR_MS\) await nextEar\(\)/.test(turn) && /clipForSpeech\(clip\.blob, clip\.extension, from\)/.test(turn), true)
+check('the mic stays open through the answer', /const endedAt = Date\.now\(\)\s+metering = false\s+await newEar\(\)/.test(turn), true)
+check('a long wait is not a long clip', /if \(Date\.now\(\) - earSince > FRESH_EAR_MS\) await nextEar\(\)/.test(turn) && /clipForSpeech\(blob, extension, Math\.max\(0, onsetMs - PRE_ROLL_MS\)\)/.test(turn), true)
+
+/* "I don't like the delay." The words are heard from the first half second
+   of the pause, while the rest of it is waited out. */
+{
+  const recorderSrc = read('src/renderer/src/recorder.ts')
+  const guessAt = Number(/export const GUESS_AFTER_MS = (\d+)/.exec(turn)?.[1])
+  check(`hearing starts well before the pause is over (${guessAt}ms of ${1500})`, guessAt > 300 && guessAt <= 750, true)
+  check('from what has been recorded so far, without stopping', /recorder\.requestData\(\)/.test(recorderSrc) && /new Blob\(all, \{ type: format\.mime \}\)/.test(recorderSrc), true)
+  check('used only if nothing was said after it', /guess && guess\.at === r\.spokeAt\(\) \? await Promise\.race\(\[guess\.words, sleep\(GUESS_WAIT_MS\)\.then\(\(\) => null\)\]\) : null/.test(turn), true)
+  check('and only if it heard words; otherwise the whole clip is heard', /const words = guessed\?\.heard \? guessed : await hearClip\(clip\.blob, clip\.extension, r\.onsetMs\(\)\)/.test(turn), true)
+  check('a new guess after each pause, not one per frame', /if \(r\.quietMs\(\) >= GUESS_AFTER_MS && guess\?\.at !== r\.spokeAt\(\)\)/.test(turn), true)
+  check('the log says how long after the pause the words were ready', /ms after the pause\$\{guessed\?\.heard \? ', from the guess' : ''\}/.test(turn), true)
+}
 
 /* "Can you make him speak a little bit faster?" Magpie ignores SSML's
    <prosody rate> (measured: 0.8 to 1.5 all came back 5.7-5.9s long), so the
