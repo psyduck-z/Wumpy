@@ -97,6 +97,7 @@ import { checkLink, DEFAULT_ENGINE, isSearchEngine } from '@shared/links'
 import { POLISH_PROMPT, polishAcceptable, tidyTranscript } from '@shared/dictation'
 import { captureConsole, log, logPath } from './log'
 import { captureScreen } from './screen'
+import { Stretcher } from '@shared/stretch'
 
 /**
  * Before anything else, so that whatever happens during startup is readable.
@@ -2487,6 +2488,10 @@ app.on('second-instance', (_event, argv) => {
     void speechCheck()
     return
   }
+  if (argv.includes('--voice-samples')) {
+    void voiceSamples()
+    return
+  }
   // A spoken turn: the earbuds gesture (through Nothing X) runs wumpy --voice.
   if (argv.includes('--voice')) {
     startVoiceTurn('wumpy --voice')
@@ -2527,7 +2532,7 @@ let launchChat: string | null =
 if (launchChat && !/^[\w-]{1,80}$/.test(launchChat)) launchChat = null
 
 /** Wumpy's own launch flags, which describe one start and are not carried over. */
-const OWN_FLAGS = /^--(?:hidden|voice|toggle|restart|speech-check|resume-chat=.*)$/
+const OWN_FLAGS = /^--(?:hidden|voice|toggle|restart|speech-check|voice-samples|resume-chat=.*)$/
 
 async function restartWumpy(why: string, chatId: string | null): Promise<void> {
   if (restarting) return
@@ -2577,6 +2582,62 @@ function askRestart(why: string): void {
  * that has not subscribed yet is simply lost; so it waits for the load, and a
  * moment for the app to mount.
  */
+/**
+ * `wumpy --voice-samples`: each of Magpie's English-speaking men saying the
+ * same few lines, at the speed answers are spoken, as WAV files in
+ * Downloads/Wumpy voices - "tell me the selection of male voices... I want
+ * to choose some others". A voice is easier to choose by ear than by name.
+ * The list is asked of the service, like the speech check's.
+ */
+const MEN = /\.EN-US\.(?:Jason|Leo|Ray|Diego|Pascal)(?:\.|$)/
+
+async function voiceSamples(): Promise<void> {
+  const k = cloudSpeech() ? await cloud.speechKey('magpie') : null
+  if (!k) {
+    console.log('[wumpy] voice samples: hosted speech is off or has no key free')
+    return
+  }
+  let voices: string[]
+  try {
+    voices = (await listVoices(k)).filter((v) => MEN.test(v))
+  } catch (err) {
+    console.log(`[wumpy] voice samples: voices could not be listed (${String(err)})`)
+    return
+  }
+  const dir = join(app.getPath('downloads'), 'Wumpy voices')
+  mkdirSync(dir, { recursive: true })
+  const speed = settings.get('speakRate') || 1
+  let made = 0
+  for (const voice of voices) {
+    const short = voice.replace(/^Magpie-Multilingual\.EN-US\./, '')
+    const text =
+      `Hi, I'm ${short.split('.')[0]}. Your disk is about two thirds full, so there's plenty of room for now. ` +
+      'Want me to clear out the old downloads?'
+    const borrowed = await cloud.speechKey('magpie')
+    if (!borrowed) {
+      console.log(`[wumpy] voice samples: ${short}: no key free`)
+      continue
+    }
+    try {
+      const clip = pcmFromWav((await synthesize(text, borrowed, voice)).wav)
+      if (!clip) throw new Error('no sound')
+      const samples = new Int16Array(clip.pcm.buffer, clip.pcm.byteOffset, clip.pcm.length >> 1)
+      const floats = Float32Array.from(samples, (v) => v / 32768)
+      const stretch = new Stretcher(speed)
+      const parts = [stretch.push(floats), stretch.flush()]
+      const out = Buffer.alloc(parts.reduce((n, p) => n + p.length, 0) * 2)
+      let at = 0
+      for (const part of parts)
+        for (const v of part) out.writeInt16LE(Math.max(-32768, Math.min(32767, Math.round(v * 32768))), (at++) * 2)
+      writeFileSync(join(dir, `${short.replace(/\./g, ' ')}.wav`), wavFrom(out, clip.sampleRate))
+      made++
+    } catch (err) {
+      console.log(`[wumpy] voice samples: ${short}: failed (${String(err)})`)
+    }
+  }
+  console.log(`[wumpy] voice samples: ${made} of ${voices.length} in ${dir}`)
+}
+
 /**
  * `wumpy --speech-check`: how long Magpie takes from this machine, on this
  * network, written to the log. Nothing is played and no microphone opens -

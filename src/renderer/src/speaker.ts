@@ -1,6 +1,6 @@
 import { nextBatch } from '@shared/speakahead'
 import { output } from './earcons'
-import { Stretcher } from './stretch'
+import { Stretcher } from '@shared/stretch'
 
 /**
  * Speaks sentences as Magpie makes them.

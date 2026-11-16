@@ -95,6 +95,9 @@ conversation (below), `wumpy --hidden` starts it in the tray and `wumpy --restar
 restarts it on the chat it was on. `wumpy --speech-check` writes how long
 NVIDIA's voice takes to speak and to hear, from this machine and network,
 to the log, without playing anything — worth running on a hotspot.
+`wumpy --voice-samples` saves each of Magpie's men saying the same lines, at
+the speed answers are spoken, to Downloads/Wumpy voices, to choose a voice by
+ear.
 
 What is different from Windows, on purpose:
 

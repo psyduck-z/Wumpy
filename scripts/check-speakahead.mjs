@@ -379,7 +379,7 @@ check('a long wait is not a long clip', /if \(Date\.now\(\) - earSince > FRESH_E
    sound is time-stretched as it arrives. Run on a voice-like tone, fed in
    the fifth-of-a-second pieces Magpie sends. */
 {
-  const T = await load('src/renderer/src/stretch.ts', 'stretch')
+  const T = await load('src/shared/stretch.ts', 'stretch')
   const SR = 22050
   const n = SR * 3
   const voice = Float32Array.from({ length: n }, (_, i) => {
