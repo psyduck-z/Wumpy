@@ -9,7 +9,7 @@ import {
   sayModel,
   spokenList
 } from '@shared/spokenpick'
-import { STRICT_LOUDER, record, type Recording } from '../recorder'
+import { record, strictBar, type Recording } from '../recorder'
 import { clipForSpeech } from '../wav'
 import { newestPending, pendingCount, runningCount } from '../pending'
 import { setHandsFree, takeTold } from '../handsfree'
@@ -214,6 +214,10 @@ export function useVoiceTurn(deps: Deps): void {
      */
     let working = true
     let stopWatching: () => void = () => {}
+    /** Sound is going to the earbuds, by PipeWire's account (see watchMic). */
+    let earbudsOut = true
+    /** The ticks that fill the wait for the mic are wanted now. */
+    let waitingTicks = false
     /** The last wait for speech ran out with nobody talking. */
     let idled = false
     /** They talked over the answer: it stops, and what they say comes next. */
@@ -394,8 +398,16 @@ export function useVoiceTurn(deps: Deps): void {
       void (async () => {
         let runs = 0
         while (on) {
-          const state = await window.wumpy.voice.micState().catch(() => 'none' as const)
+          const asked = await window.wumpy.voice.micState().catch(() => ({ mic: 'none' as const, earbudsOut: null }))
+          const state = asked.mic
           if (!on) return
+          /* The ticks only while sound goes to the earbuds: not from the
+             laptop's speakers while the earbuds switch. */
+          const out = asked.earbudsOut !== false
+          if (out !== earbudsOut) {
+            earbudsOut = out
+            if (waitingTicks) out ? startTicks('waiting') : stopTicks()
+          }
           if (state === 'none') {
             working = true
             return
@@ -419,6 +431,7 @@ export function useVoiceTurn(deps: Deps): void {
       return () => {
         on = false
         working = true
+        earbudsOut = true
       }
     }
 
@@ -477,7 +490,7 @@ export function useVoiceTurn(deps: Deps): void {
       const stats = r.stats()
       note(
         `talked over it: it stops and listens (before that the mic heard up to ${stats.strictPeak.toFixed(3)} ` +
-          `while it spoke; talking over it takes ${(stats.bar * STRICT_LOUDER).toFixed(3)})`
+          `while it spoke; talking over it takes ${strictBar(stats.bar).toFixed(3)})`
       )
       stopSound?.()
       speaker?.stop()
@@ -528,12 +541,16 @@ export function useVoiceTurn(deps: Deps): void {
         () => showVoice({ detail: 'Waiting for the earbuds’ microphone - Bluetooth is slow to switch it on…' }),
         1500
       )
-      const waiting = setTimeout(() => startTicks('waiting'), NO_SWITCH_MS)
+      const waiting = setTimeout(() => {
+        waitingTicks = true
+        if (earbudsOut) startTicks('waiting')
+      }, NO_SWITCH_MS)
       const stopped = new Promise<number>((resolve) => (stopWaiting = () => resolve(-2)))
       const liveMs = await Promise.race([recording.live, sleep(LIVE_WAIT_MS).then(() => -1), stopped])
       stopWaiting = () => {}
       clearTimeout(slow)
       clearTimeout(waiting)
+      waitingTicks = false
       stopTicks()
       /* The earbuds switched under the output (or never came on): its
          stream may have broken with the switch, so "talk now" gets a fresh
@@ -894,7 +911,7 @@ export function useVoiceTurn(deps: Deps): void {
       }
       const stats = ear?.stats()
       if (!cancelled && !interrupted && stats && stats.strictPeak > 0)
-        note(`while it spoke the mic heard up to ${stats.strictPeak.toFixed(3)}; talking over it takes ${(stats.bar * STRICT_LOUDER).toFixed(3)}`)
+        note(`while it spoke the mic heard up to ${stats.strictPeak.toFixed(3)}; talking over it takes ${strictBar(stats.bar).toFixed(3)}`)
     }
 
     async function conversation(): Promise<void> {

@@ -94,7 +94,7 @@ let heardCount = 0
   voice: {
     start: async () => ({ kind: 'ready' }),
     log: (line) => say(line),
-    micState: async () => 'none',
+    micState: async () => ({ mic: 'none', earbudsOut: null }),
     transcribe: async (audio) => {
       await new Promise((r) => setTimeout(r, 350))
       const seconds = (audio.byteLength - 44) / 32000

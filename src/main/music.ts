@@ -25,6 +25,7 @@
  * arrives while the pause is still being sent waits for it.
  */
 import { execFile } from 'node:child_process'
+import { backToMusicMode } from './btmic'
 
 let holds = 0
 /** The players this paused, to resume and nothing else. */
@@ -179,16 +180,29 @@ export function holdMusic(): Promise<void> {
   holds++
   if (holds > 1) return chain
   return queue(async () => {
-    paused = await pauseAll()
+    /* Added to, not replaced: players a release left paused (see below)
+       are still this hold's to resume. */
+    const now = await pauseAll()
+    paused = [...new Set([...paused, ...now])]
   })
 }
 
-/** Resume what the first hold paused, once the last hold lets go. */
-export function releaseMusic(): Promise<void> {
+/**
+ * Resume what the first hold paused, once the last hold lets go - after
+ * the earbuds are back in their music mode (see backToMusicMode): "when I
+ * stopped, suddenly the music sounded blurry, no spatial sound, and a
+ * little bit of audio leaked from the MacBook before it recovered." If
+ * something holds the music again meanwhile, it stays paused, for that
+ * hold to resume.
+ */
+export function releaseMusic(waitForEarbuds = true): Promise<void> {
   if (holds === 0) return chain
   holds--
   if (holds > 0) return chain
   return queue(async () => {
+    if (!paused.length) return
+    if (waitForEarbuds) console.log(`[wumpy] music: ${await backToMusicMode()}, then resumed`)
+    if (holds > 0) return
     const ids = paused
     paused = []
     await resumeAll(ids)
@@ -199,5 +213,5 @@ export function releaseMusic(): Promise<void> {
 export function releaseAllMusic(): Promise<void> {
   if (holds === 0) return chain
   holds = 1
-  return releaseMusic()
+  return releaseMusic(false)
 }

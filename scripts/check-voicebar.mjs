@@ -149,6 +149,30 @@ check('the log names the mic that opened', /note\(`microphone: \$\{track\?\.labe
   check('another pair’s mic is not these', B.earbudsMic('bluez_input.AA:BB:CC:DD:EE:FF', after), 'absent')
   check('their mic never listed: going by sound after a while', /if \(!seen && Date\.now\(\) - since > UNLISTED_MS\) \{[\s\S]{0,200}working = true/.test(turn), true)
   check('longer than any switch, shorter than the wait for one', /export const UNLISTED_MS = 7000/.test(turn) && /export const LIVE_WAIT_MS = 9000/.test(turn), true)
+  /* On Omarchy the earbuds' own mic is internal, and pactl never lists it:
+     PipeWire is asked by name. */
+  const node = (state) => JSON.stringify([{ id: 103, type: 'PipeWire:Interface:Node', info: { state, props: { 'node.name': 'bluez_input.2C_BE_EE_12_34_56.0' } } }])
+  check('their mic, from PipeWire: not there yet', B.nodeState('', 'bluez_input.2C_BE_EE_12_34_56.0'), 'absent')
+  check('there, not running', B.nodeState(node('idle'), 'bluez_input.2C_BE_EE_12_34_56.0'), 'switching')
+  check('running', B.nodeState(node('running'), 'bluez_input.2C_BE_EE_12_34_56.0'), 'running')
+  check('another node of another name is not it', B.nodeState(node('running'), 'bluez_input.AA_BB_CC_DD_EE_FF.0'), 'absent')
+  check('the stand-in names the real mic', B.realMicName('bluez_input.2C:BE:EE:12:34:56', 'bluez_input.2C_BE_EE_12_34_56.0'), 'bluez_input.2C_BE_EE_12_34_56.0')
+  check('or it is worked out from the address', B.realMicName('bluez_input.2C:BE:EE:12:34:56'), 'bluez_input.2C_BE_EE_12_34_56.0')
+  check('a real mic as the default is itself', B.realMicName('bluez_input.2C_BE_EE_12_34_56.0'), 'bluez_input.2C_BE_EE_12_34_56.0')
+  check('asked by pw-dump, pactl only without it', /const dump = await run\('pw-dump', \[defaultSource\.real\]\)\s+if \(dump !== null\) return nodeState/.test(read('src/main/btmic.ts')), true)
+  /* "When I stopped, suddenly the music sounded blurry, no spatial sound,
+     and a little bit of audio leaked from the MacBook before it recovered." */
+  const nodeOf = (name, profile, state = 'running') => ({ id: 1, type: 'PipeWire:Interface:Node', info: { state, props: { 'node.name': name, ...(profile ? { 'api.bluez5.profile': profile } : {}) } } })
+  const standIn = nodeOf('bluez_input.2C:BE:EE:12:34:56', '', 'suspended')
+  const speakers = nodeOf('alsa_output.pci-0000_01_00.3.HiFi__Speaker__sink', '')
+  check('in headset mode, music waits', B.musicMode(JSON.stringify([standIn, nodeOf('bluez_input.2C_BE_EE_12_34_56.0', 'headset-head-unit'), nodeOf('bluez_output.2C_BE_EE_12_34_56.1', 'headset-head-unit')])), 'headset')
+  check('while their output is gone, it waits', B.musicMode(JSON.stringify([standIn, speakers])), 'switching')
+  check('back in music mode, it plays', B.musicMode(JSON.stringify([standIn, speakers, nodeOf('bluez_output.2C_BE_EE_12_34_56.1', 'a2dp-sink')])), 'ready')
+  check('with no earbuds, nothing to wait for', B.musicMode(JSON.stringify([speakers])), 'ready')
+  const music = read('src/main/music.ts')
+  check('the music is resumed only after that', /if \(waitForEarbuds\) console\.log\(`\[wumpy\] music: \$\{await backToMusicMode\(\)\}, then resumed`\)\s+if \(holds > 0\) return/.test(music), true)
+  check('a hold meanwhile keeps it paused, for that hold', /paused = \[\.\.\.new Set\(\[\.\.\.paused, \.\.\.now\]\)\]/.test(music), true)
+  check('but quitting does not wait', /return releaseMusic\(false\)/.test(music), true)
   check('the recorder waits on it', /gate: \(\) => working/.test(turn) && /hearing\.frame\(level, now, opts\.gate \? opts\.gate\(\) : true\)/.test(recorderSrc), true)
   check('two running answers in a row before it counts', /working = runs >= 2/.test(turn), true)
   check('and not Bluetooth, asked once', /if \(state === 'none'\) \{\s+working = true\s+return/.test(turn), true)
@@ -161,8 +185,9 @@ check('the dot first, in the earbuds’ ordinary mode', /await chime\('opening'\
 /* Then: "in between... can you add like some dots, like a regular
    mechanical keyboard, tick, tick, tick" - for the wait while the earbuds
    switch, which had been silent on purpose. */
-check('ticking while the earbuds switch, if the mic is not on at once', /const waiting = setTimeout\(\(\) => startTicks\('waiting'\), NO_SWITCH_MS\)/.test(turn), true)
-check('stopped the moment it is', /clearTimeout\(waiting\)\s+stopTicks\(\)/.test(turn), true)
+check('ticking while the earbuds switch, if the mic is not on at once', /const waiting = setTimeout\(\(\) => \{\s+waitingTicks = true\s+if \(earbudsOut\) startTicks\('waiting'\)\s+\}, NO_SWITCH_MS\)/.test(turn), true)
+check('stopped the moment it is', /clearTimeout\(waiting\)\s+waitingTicks = false\s+stopTicks\(\)/.test(turn), true)
+check('and never from the laptop’s speakers while the earbuds’ output is gone', /if \(waitingTicks\) out \? startTicks\('waiting'\) : stopTicks\(\)/.test(turn) && /earbudsOut: sink \? sink\.startsWith\('bluez_output\.'\) : null/.test(read('src/main/btmic.ts')), true)
 /* Then: "add a chime to tell me when [it] is ready for me to speak." */
 check('"talk now" once the mic delivers sound', /recording\.live, sleep\(LIVE_WAIT_MS\)[\s\S]{0,1800}note\(`microphone live after \$\{liveMs\}ms`\)[\s\S]{0,400}await chime\('listen'\)/.test(turn), true)
 check('from an output opened after the switch, not through it', /if \(liveMs < 0 \|\| liveMs >= NO_SWITCH_MS\) releaseOutput\(\)/.test(turn) && /playOn\(handsFree\)\s+wakeOutput\(\)\s+await chime\('listen'\)/.test(turn), true)
@@ -187,7 +212,9 @@ check('and over a sound, it takes longer and louder', /ear\?\.strict\(ticking\(\
   check('no room heard yet: the old bar', R.speechThreshold(Infinity), 0.02)
   check('talking over it takes more than a click', R.STRICT_ONSET.frames * 40 >= 250 && R.STRICT_LOUDER >= 2, true)
   check('dictation uses the bar', /if \(raw > speech\) spokeRef/.test(read('src/renderer/src/hooks/useListening.ts')), true)
-  check('and the recorder gates on it', /recent\.push\(level > speech \* \(this\.strict \? STRICT_LOUDER : 1\)\)/.test(recorderSrc), true)
+  check('and the recorder gates on it', /recent\.push\(level > \(this\.strict \? strictBar\(speech\) : speech\)\)/.test(recorderSrc), true)
+  check('talking over an answer takes three times what one leaked in at', R.strictBar(0.002) >= 0.006, true)
+  check('and a voice still does it easily', R.strictBar(0.02) <= 0.05, true)
   const quiet = Float32Array.from({ length: 100 }, (_, i) => 0.009 * Math.sin(i))
   const peak = (a) => Math.max(...a.map(Math.abs))
   check('a quiet clip is brought up for the transcriber', +peak(W.louder(quiet.slice())).toFixed(2), 0.28)
@@ -273,6 +300,9 @@ check('and over a sound, it takes longer and louder', /ear\?\.strict\(ticking\(\
     const h = talker()
     h.setStrict(true)
     const echo = run(h, hold(0.008, 3000), 1000)
+    const quiet = talker()
+    quiet.setStrict(true)
+    check('in a quiet room, an answer at the level logged is not talking over it', run(quiet, hold(0.002, 3000), 1000).onset, -1)
     check('an answer leaking into the mic is not someone talking over it', echo.onset, -1)
     check('someone talking over it is, in about a third of a second', run(h, hold(0.06, 400), echo.t).onset - echo.t <= 320, true)
   }

@@ -200,8 +200,20 @@ export interface Recording {
   stats(): { room: number; bar: number; peak: number; strictPeak: number; dropMs: number }
 }
 
-/** While something is playing: twice as loud as the bar... */
+/** While something is playing: twice as loud as the bar, and never under STRICT_FLOOR... */
 export const STRICT_LOUDER = 2
+/**
+ * Logged on the earbuds in a quiet room: the answer reached their mic at up
+ * to 0.002 while the bar for talking over it was 0.004 - twice, a margin a
+ * louder volume would eat. Talking itself peaked at 0.38 there, so a floor
+ * three times the answer's level still takes a voice at once.
+ */
+export const STRICT_FLOOR = 0.006
+
+/** The level that counts as talking over something playing. */
+export function strictBar(bar: number): number {
+  return Math.max(bar * STRICT_LOUDER, STRICT_FLOOR)
+}
 /** ...for seven frames of nine, about 300ms - longer than a key click or the tail of a chime. */
 export const STRICT_ONSET = { frames: 7, window: 9 }
 
@@ -352,10 +364,10 @@ export class Hearing {
     if (level > this.peak) this.peak = level
     /* The loudest that did not count as talking over it: what an answer
        leaking into the mic comes to, for the log. */
-    if (this.strict && !this.spoke && level <= speech * STRICT_LOUDER && level > this.strictPeak) this.strictPeak = level
+    if (this.strict && !this.spoke && level <= strictBar(speech) && level > this.strictPeak) this.strictPeak = level
     if (!this.spoke) {
       const rule = this.strict ? STRICT_ONSET : this.onset
-      this.recent.push(level > speech * (this.strict ? STRICT_LOUDER : 1))
+      this.recent.push(level > (this.strict ? strictBar(speech) : speech))
       while (this.recent.length > rule.window) this.recent.shift()
       if (this.recent.filter(Boolean).length >= rule.frames) {
         this.spoke = true
