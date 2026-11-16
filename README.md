@@ -116,17 +116,18 @@ where its installer put it, on Windows too). On Windows it is
 `"%LOCALAPPDATA%\Programs\Wumpy\Wumpy.exe" --voice`: the installer adds
 nothing to `PATH`, so a bare `wumpy` is not found there.
 
-- **Hearing** is NVIDIA's Parakeet and **speaking** is NVIDIA's Magpie, on the
+- **Hearing** is NVIDIA's Parakeet and **speaking** is NVIDIA's Magpie, in
+  its male voice Jason (`wumpy --speech-check` lists the others), on the
   same NVIDIA keys as chat (`/key nvidia <key1> <key2>`), from the same
   rotation. Each key is treated as its own account with its own rate limit, so
   add every key from a different account. With
   no key, dictation falls back to local Whisper (`npm run speech:install`) and
   answers to the system voice.
-- **The gesture, again.** Pinch once to ask; a soft low note says it felt
-  the pinch, and two notes, up, say the mic is on: talk then. (Bluetooth
-  earbuds can take a few seconds to switch their mic on, which is the gap
-  between the two.) A pause of a second ends what you said, and the same two
-  notes going down say it has your words. While it works you hear soft
+- **The gesture, again.** Pinch once to ask; one short dot says it felt
+  the pinch, and two notes, up, say the mic is on: talk then. Bluetooth
+  earbuds can take a few seconds to switch their mic on, and it ticks, one
+  key at a time, while they do. A pause of a second and a half ends what you
+  said, and the same two notes going down say it has your words. While it works you hear soft
   typing, in threes, until the answer starts. A rolled chord, downwards,
   means it finished with nothing to say; one low note twice means it
   stopped or heard nothing. Up is "your turn", down is "finished". To ask
