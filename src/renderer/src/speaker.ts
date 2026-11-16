@@ -67,6 +67,8 @@ export class Speaker {
   private requests = 0
   /** Settles once every batch asked for so far has all its sound scheduled. */
   private tail: Promise<void> = Promise.resolve()
+  /** Each batch with all its sound scheduled: how many sentences, and when they end. */
+  private readonly finished: Array<{ count: number; endsAt: number }> = []
   /** Wakes the pump when new sentences arrive while it waits on the tail. */
   private kick: () => void = () => {}
 
@@ -80,6 +82,16 @@ export class Speaker {
     this.waiting.push(...sentences)
     this.kick()
     if (!this.pump) this.pump = this.run().finally(() => (this.pump = null))
+  }
+
+  /**
+   * How many of the sentences handed over have been heard to the end - by
+   * batch, so a batch cut short counts as not heard. For carrying on after
+   * a cough or an "mm-hm" is taken for talking over it.
+   */
+  heard(): number {
+    const now = this.context && this.context.state !== 'closed' ? this.context.currentTime : Infinity
+    return this.finished.filter((f) => f.endsAt <= now + 0.05).reduce((n, f) => n + f.count, 0)
   }
 
   /** Something is queued, being made, or still playing. */
@@ -142,7 +154,7 @@ export class Speaker {
            sound comes as soon as it can; more when there is time. */
         const batch = nextBatch(this.waiting, running.length === 0 && this.ahead() < 0.4)
         this.waiting.splice(0, batch.length)
-        const job = this.job(batch.join(' '), this.tail)
+        const job = this.job(batch.join(' '), this.tail, batch.length)
         this.tail = job
         running.push(job)
       }
@@ -159,7 +171,7 @@ export class Speaker {
   }
 
   /** Asks for one batch now; plays it once everything before it has been. */
-  private job(text: string, after: Promise<void>): Promise<void> {
+  private job(text: string, after: Promise<void>, count = 1): Promise<void> {
     const id = `say-${++nextId}`
     const asked = Date.now()
     const held: ArrayBuffer[] = []
@@ -189,6 +201,8 @@ export class Speaker {
           while (got < result.pieces && Date.now() < deadline && !this.stopped) await sleep(20)
         }
         if (got) this.schedule(stretch.flush())
+        /* These sentences end where the sound scheduled so far ends. */
+        if (this.context) this.finished.push({ count, endsAt: this.at })
         if (result && ++this.requests <= 3)
           this.hooks.note(
             `said ${text.length} characters: first sound ${first}ms after asking` +

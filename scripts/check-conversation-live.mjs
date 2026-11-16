@@ -50,6 +50,10 @@ room(1.6)
 talk(2.0)
 room(5.0)
 talk(1.6)
+/* A cough in the middle of the second answer: talked over, but not a
+   question, so the answer carries on. */
+room(3.8)
+talk(0.35)
 room(30)
 const samples = new Float32Array(parts.reduce((n, p) => n + p.length, 0))
 let o = 0
@@ -97,8 +101,11 @@ let heardCount = 0
     micState: async () => ({ mic: 'none', earbudsOut: null }),
     transcribe: async (audio) => {
       await new Promise((r) => setTimeout(r, 350))
-      const seconds = (audio.byteLength - 44) / 32000
-      const text = seconds > 0.5 ? 'question ' + ++heardCount : ''
+      /* As long as the voice in it: a question, or a cough heard as "Mm-hmm." */
+      const pcm = new Int16Array(audio, 44)
+      let voiced = 0
+      for (const v of pcm) if (Math.abs(v) > 1000) voiced++
+      const text = voiced / 16000 > 0.6 ? 'question ' + ++heardCount : 'Mm-hmm.'
       return { text, heard: text, polished: false, polishRefused: false, confidence: 1, ms: 350 }
     },
     speak: async () => null,
@@ -137,7 +144,7 @@ const deps = {
     say('SENT ' + text)
     messages.push({ id: 'u' + messages.length, role: 'user', content: text, createdAt: Date.now() })
     const answer = { id: 'a' + messages.length, role: 'assistant', content: '', createdAt: Date.now() }
-    const words = 'Sure. The answer to that is a long one, so here it is, said slowly enough to talk over. And there is more after that, too.'.split(' ')
+    const words = 'Sure. The answer to that is a long one, so here it is, said slowly enough to talk over. And there is more after that, too. Then a last part, which goes on a little longer still, so that it is still being written.'.split(' ')
     let i = 0
     writing = setInterval(() => {
       if (i === 0) messages.push(answer)
@@ -166,12 +173,12 @@ createRoot(document.getElementById('root')).render(<App />)
 /* The gestures: a hold to start, a repeat report of it, and a hold to end. */
 setTimeout(() => { say('GESTURE start'); turn() }, 500)
 setTimeout(() => { say('GESTURE repeated report'); turn() }, 900)
-setTimeout(() => { say('GESTURE end'); turn() }, 21000)
+setTimeout(() => { say('GESTURE end'); turn() }, 27000)
 setInterval(() => {
   const v = voiceView()
   if (v.stage === 'done') { say('STAGE done'); setTimeout(() => say('FINISHED'), 300) }
 }, 250)
-setTimeout(() => say('FINISHED timeout'), 32000)
+setTimeout(() => say('FINISHED timeout'), 38000)
 `
 )
 await build({
@@ -202,7 +209,7 @@ app.whenReady().then(async () => {
     if (e.message.includes(' FINISHED')) app.quit()
   })
   await w.loadFile(${JSON.stringify(join(dir, 'page.html'))})
-  setTimeout(() => app.quit(), 40000)
+  setTimeout(() => app.quit(), 45000)
 })`
 )
 
@@ -248,7 +255,10 @@ check('the mic comes on, then "talk now"', before(live, talkNow), true)
 check('the first question is heard, and sent', heard.length >= 1 && sent[0]?.what === 'SENT question 1', true)
 check(`  ready ${heard[0] ? /(\d+)ms after the pause/.exec(heard[0].what)?.[1] : '?'}ms after the pause, from the early guess`, Boolean(heard[0] && /from the guess/.test(heard[0].what)), true)
 check('talking over the answer stops it', Boolean(over) && before(sent[0], over), true)
-check('and stops it being written', before(over, stoppedWriting), true)
+check('and once the question is heard, the old answer stops being written', before(over, stoppedWriting) && before(stoppedWriting, sent[1]), true)
+const carried = first(/voice turn: "Mm-hmm\." was not a question: carrying on with the answer/)
+check('a cough over the second answer: it carries on', Boolean(carried) && before(sent[1], carried), true)
+check('without stopping it being written, or sending anything', all(/^STOPPED WRITING/).length === 1 && sent.length === 2, true)
 check('the second question is heard, with no gesture in between', sent[1]?.what === 'SENT question 2', true)
 check('it is answered too', all(/voice turn: speaking the answer/).length >= 2, true)
 check('a hold ends it', Boolean(ended) && before(sent[1], ended), true)

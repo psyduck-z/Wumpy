@@ -18,6 +18,7 @@ import { setVoiceStopper, showVoice } from '../voiceview'
 import { chime, playOn, releaseOutput, startTicks, stopTicks, ticking, wakeOutput } from '../earcons'
 import { Speaker, currentSpeed, setSpeed } from '../speaker'
 import { readyToSay, sentences } from '@shared/speakahead'
+import { interruption } from '@shared/interrupt'
 
 /**
  * A spoken conversation, run from the hidden panel: `wumpy --voice` (holding
@@ -222,6 +223,17 @@ export function useVoiceTurn(deps: Deps): void {
     let idled = false
     /** They talked over the answer: it stops, and what they say comes next. */
     let interrupted = false
+    /**
+     * The answer that was talked over, to carry on with if what was said
+     * turns out not to be a question (see shared/interrupt.ts): since when,
+     * its choice mark, and how many of its sentences had been heard.
+     */
+    let cut: { since: number; mark: number; heard: number } | null = null
+    /** The answer being followed now, for `cut`. */
+    let answerSince = 0
+    let answerMark = 0
+    /** Sentences of it skipped when it was carried on: the speaker counts from there. */
+    let spokenBase = 0
     /** How the conversation ended, for the bar and the closing sound. */
     let ending: 'gesture' | 'idle' | 'failed' = 'gesture'
 
@@ -474,11 +486,13 @@ export function useVoiceTurn(deps: Deps): void {
     }
 
     /*
-     * Someone started talking. Over an answer, that is someone with
-     * something to say: it stops talking - and stops writing, or the new
-     * question would wait for the old answer - and what they say comes next.
-     * While it asks yes or no, or which one, it is the answer: the question
-     * stops being read, and nothing else is cut short.
+     * Someone started talking. Over an answer, that is most likely someone
+     * with something to say: it stops talking at once and listens. The
+     * answer goes on being written until what they said is heard: a
+     * question stops it then (see the conversation loop), and a cough or an
+     * "mm-hm" lets it carry on from where it was cut. While it asks yes or
+     * no, or which one, talking is the answer: the question stops being
+     * read, and nothing else is cut short.
      */
     function heardSpeech(r: Recording): void {
       if (r !== ear || cancelled) return
@@ -486,18 +500,19 @@ export function useVoiceTurn(deps: Deps): void {
       metering = true
       showVoice({ stage: 'listening', level: 0 })
       const talking = (speaker?.busy() ?? false) || stopSound !== null
-      if (!talking && !(busy && !asking && depsRef.current.streaming())) return
+      if (!talking && !(busy && !asking && answerSince && depsRef.current.streaming())) return
       const stats = r.stats()
       note(
         `talked over it: it stops and listens (before that the mic heard up to ${stats.strictPeak.toFixed(3)} ` +
           `while it spoke; talking over it takes ${strictBar(stats.bar).toFixed(3)})`
       )
+      const heard = spokenBase + (speaker?.heard() ?? 0)
       stopSound?.()
       speaker?.stop()
       speaker = newSpeaker()
       if (asking) return
       interrupted = true
-      if (depsRef.current.streaming()) depsRef.current.stop()
+      if (!cut && answerSince) cut = { since: answerSince, mark: answerMark, heard }
     }
 
     /*
@@ -885,14 +900,49 @@ export function useVoiceTurn(deps: Deps): void {
     /** Sends what was said, and stays with it until it has all been answered. */
     async function answer(heard: { text: string; heard: string }): Promise<void> {
       showVoice({ stage: 'thinking', heard: heard.heard, detail: '' })
+      /* An answer still being written to what came before - talked over,
+         and this is the next question - stops here, or this would wait. */
+      if (depsRef.current.streaming()) depsRef.current.stop()
       /* By time, not by position: a chat opened by this turn replaces the
          transcript, and its old answers are not this turn's to read. */
       const started = Date.now()
       const mark = choiceMark()
+      answerSince = started
+      answerMark = mark
       const slash = spokenSlash(heard.heard)
       /* No chime for "sent": "there's no need for that." The typing that
          started at "got it" runs on, unbroken, until the answer starts. */
       depsRef.current.send(slash ?? heard.text)
+      await follow(started, mark)
+    }
+
+    /** This turn's answers so far, in order. */
+    function answersSince(since: number): ChatMessage[] {
+      return depsRef.current
+        .messages()
+        .filter((m) => m.createdAt >= since && m.role === 'assistant' && !m.local && !m.error)
+    }
+
+    /**
+     * Stays with an answer until it has all been said: from the start, or -
+     * carrying on after a cough was taken for talking over it - from the
+     * first sentence not heard to the end.
+     */
+    async function follow(started: number, mark: number, skip = 0): Promise<void> {
+      spokenBase = skip
+      if (skip) {
+        const writing = depsRef.current.streaming()
+        const answers = answersSince(started)
+        let left = skip
+        answers.forEach((m, i) => {
+          const ready = readyToSay(m.content, !(writing && i === answers.length - 1)).length
+          const n = Math.min(left, ready)
+          fed.set(m.id, n)
+          left -= n
+        })
+      } else {
+        for (const m of answersSince(started)) fed.delete(m.id)
+      }
       const talked = await settle(mark, started)
       if (cancelled || interrupted) return
       /* Whatever is left of the answers, now that they are finished. */
@@ -938,6 +988,25 @@ export function useVoiceTurn(deps: Deps): void {
             note(`nothing said for ${IDLE_END_MS / 60_000} minutes: the conversation ends`)
             ending = 'idle'
             return
+          }
+          /* Talked over an answer: what was it? */
+          if (cut) {
+            const was = cut
+            cut = null
+            const kind = heard ? interruption(heard.heard) : 'nothing'
+            if (kind === 'nothing') {
+              note(`${heard ? `"${heard.heard}"` : 'that'} was not a question: carrying on with the answer`)
+              interrupted = false
+              await follow(was.since, was.mark, was.heard)
+              continue
+            }
+            if (depsRef.current.streaming()) depsRef.current.stop()
+            if (kind === 'stop') {
+              note(`told to ${heard?.heard.toLowerCase().replace(/[^a-z' ]/g, '').trim()}: it stops, and listens`)
+              stopTicks()
+              showVoice({ stage: 'listening', level: 0, detail: 'Talk any time. Hold again to finish.' })
+              continue
+            }
           }
           if (!heard) {
             showVoice({ stage: 'listening', level: 0, detail: 'Talk any time. Hold again to finish.' })
@@ -987,6 +1056,9 @@ export function useVoiceTurn(deps: Deps): void {
       busy = true
       cancelled = false
       interrupted = false
+      cut = null
+      answerSince = 0
+      spokenBase = 0
       ending = 'gesture'
       startedAt = Date.now()
       fed.clear()

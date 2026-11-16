@@ -341,7 +341,10 @@ check('and nobody talking for two minutes ends it too', /export const IDLE_END_M
 
 /* "I'm allowed to interrupt this AI and tell it what to do." */
 check('talking over an answer stops it', /stopSound\?\.\(\)\s+speaker\?\.stop\(\)\s+speaker = newSpeaker\(\)\s+if \(asking\) return\s+interrupted = true/.test(turn), true)
-check('and stops the answer being written', /interrupted = true\s+if \(depsRef\.current\.streaming\(\)\) depsRef\.current\.stop\(\)/.test(turn), true)
+check('the answer goes on being written until what was said is heard', /interrupted = true\s+if \(!cut && answerSince\) cut = \{ since: answerSince, mark: answerMark, heard \}/.test(turn), true)
+check('a question then stops it', /if \(depsRef\.current\.streaming\(\)\) depsRef\.current\.stop\(\)\s+if \(kind === 'stop'\)/.test(turn) && /async function answer[\s\S]{0,400}if \(depsRef\.current\.streaming\(\)\) depsRef\.current\.stop\(\)/.test(turn), true)
+check('a cough or an "mm-hm" carries on from the first sentence not heard', /if \(kind === 'nothing'\) \{[\s\S]{0,200}await follow\(was\.since, was\.mark, was\.heard\)/.test(turn) && /const heard = spokenBase \+ \(speaker\?\.heard\(\) \?\? 0\)/.test(turn), true)
+check('counted by what was heard to the end, not what was sent to be said', /return this\.finished\.filter\(\(f\) => f\.endsAt <= now \+ 0\.05\)/.test(speaker), true)
 check('while it asks yes or no, talking is the answer', /if \(asking\) return\s+interrupted = true/.test(turn), true)
 check('the mic stays open through the answer', /const endedAt = Date\.now\(\)[\s\S]{0,160}metering = false\s+await newEar\(\)/.test(turn), true)
 check('a long wait is not a long clip', /if \(Date\.now\(\) - earSince > FRESH_EAR_MS\) await nextEar\(\)/.test(turn) && /clipForSpeech\(blob, extension, Math\.max\(0, onsetMs - PRE_ROLL_MS\)\)/.test(turn), true)

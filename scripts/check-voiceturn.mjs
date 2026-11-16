@@ -12,6 +12,10 @@ const out = join(process.cwd(), '.voiceturn-check.mjs')
 await build({ entryPoints: ['src/shared/spoken.ts'], bundle: true, platform: 'node', format: 'esm', outfile: out, logLevel: 'error' })
 const S = await import(pathToFileURL(out).href)
 rmSync(out, { force: true })
+const outI = join(process.cwd(), '.voiceturn-interrupt.mjs')
+await build({ entryPoints: ['src/shared/interrupt.ts'], bundle: true, platform: 'node', format: 'esm', outfile: outI, logLevel: 'error' })
+const I = await import(pathToFileURL(outI).href)
+rmSync(outI, { force: true })
 
 let failed = 0
 let count = 0
@@ -28,6 +32,15 @@ for (const said of ['No', 'no.', 'Nope', 'Cancel', "Don't", 'no thanks', 'Stop']
   check(`"${said}" refuses`, S.yesNo(said), 'no')
 for (const said of ['', 'maybe', 'what does it do', 'yes but first check the folder', 'yes no', 'hmm', 'the weather'])
   check(`"${said}" is ignored`, S.yesNo(said), null)
+
+/* Talked over an answer: a cough or an "mm-hm" carries on, "stop" stops
+   and sends nothing, anything else is the next question. */
+for (const said of ['', 'Mm-hmm.', 'Hmm.', 'Uh-huh', 'Mhm', 'um', 'Oh.', 'mm mm'])
+  check(`"${said}" over an answer: it carries on`, I.interruption(said), 'nothing')
+for (const said of ['Stop.', 'Wait', 'Okay, stop.', 'Never mind', 'stop talking', 'Hold on.', 'Stop please', "That's enough"])
+  check(`"${said}" over an answer: it stops`, I.interruption(said), 'stop')
+for (const said of ['Stop the music', 'Wait, what about tomorrow?', 'Actually make it three', 'Hmm, what about Paris?', 'okay', 'yes'])
+  check(`"${said}" over an answer: the next question`, I.interruption(said), 'words')
 
 check('slash makes a command', S.spokenSlash('Slash remember I like tea.'), '/remember I like tea')
 check('with punctuation after it', S.spokenSlash('Slash. Remember, I like tea'), '/remember I like tea')
