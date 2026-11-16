@@ -12,6 +12,8 @@ name: windows
 on:
   push:
     branches: [main]
+    # Words about the app are not the app: no ten-minute build for them.
+    paths-ignore: ["**.md"]
   workflow_dispatch:
 
 jobs:

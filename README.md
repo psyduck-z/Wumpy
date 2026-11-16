@@ -61,6 +61,12 @@ To build an installer:
 npm run package           # -> dist/Wumpy-0.1.0-setup.exe
 ```
 
+Or from any computer: every push to `main` builds it on GitHub's Windows
+machines (`.github/workflows/windows.yml`), runs the checks there too, and
+keeps the installer with the run — `gh run download -n wumpy-windows`. That
+one bundles .NET into the Win+Shift+D helper, so it needs nothing else
+installed.
+
 ## On Omarchy
 
 ```bash
@@ -105,7 +111,10 @@ What is different from Windows, on purpose:
 `wumpy --voice` runs one spoken turn without opening the window: a chime, you
 talk, it answers out loud. Bind it to anything — Nothing X runs it from an
 earbud gesture (set a gesture to *Desktop assistant* under Controls; the command
-itself is under Settings → Assistant).
+itself is under App settings → Assistant, and left empty it runs Wumpy from
+where its installer put it, on Windows too). On Windows it is
+`"%LOCALAPPDATA%\Programs\Wumpy\Wumpy.exe" --voice`: the installer adds
+nothing to `PATH`, so a bare `wumpy` is not found there.
 
 - **Hearing** is NVIDIA's Parakeet and **speaking** is NVIDIA's Magpie, on the
   same NVIDIA keys as chat (`/key nvidia <key1> <key2>`), from the same
