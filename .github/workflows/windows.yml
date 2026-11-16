@@ -1,0 +1,42 @@
+# Builds the Windows installer on a real Windows machine, on every push to
+# main. electron-builder can't make an NSIS installer on Linux without Wine,
+# so this is how an installer comes out of an Omarchy laptop. The installer
+# is kept as the run's artifact (`gh run download` fetches it).
+#
+# The checks run here too, after the installer, so their results on Windows
+# are on record - the path checks only run where there is real PowerShell -
+# without holding the installer back.
+name: windows
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  installer:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "10.0.x"
+      - run: npm ci
+      # Self-contained here, unlike `npm run hook:build`: the installer is
+      # for any Windows PC, and one without the .NET 10 runtime would
+      # otherwise have no Win+Shift+D and say nothing about why.
+      - name: Win+Shift+D helper
+        run: dotnet publish src/hook/WumpyHook.csproj -c Release -o resources/hook -p:SelfContained=true -p:IncludeNativeLibrariesForSelfExtract=true -p:EnableCompressionInSingleFile=true
+      - run: npx electron-vite build
+      - run: npx electron-builder --win --x64 --publish never
+      - uses: actions/upload-artifact@v4
+        with:
+          name: wumpy-windows
+          path: dist/*-setup.exe
+      - name: Checks, on Windows
+        continue-on-error: true
+        run: npm run typecheck
