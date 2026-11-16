@@ -133,7 +133,9 @@ nothing to `PATH`, so a bare `wumpy` is not found there.
   on what you said. A pause of a second and a half ends what you are saying;
   carry on while it is still working it out and the rest is added rather
   than sent as half a question, and a moment where the mic drops out is not
-  taken for a pause. Talk over an answer to stop it and say something else.
+  taken for a pause. Talk over an answer and it stops at once: ask something
+  else and that is answered instead, say "stop" or "wait" and it just stops,
+  and a cough or an "mm-hm" does not count — it carries on where it was.
   A rolled chord, downwards, says the conversation is over — after a hold, or
   after two minutes with nobody talking. One low note twice means the mic
   never came on. A hold the earbuds report twice in quick succession counts
