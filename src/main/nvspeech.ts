@@ -33,13 +33,15 @@ export const SPEECH_MODELS = {
 }
 
 /*
- * A male voice: "can you set the voice to a male?" Jason, Leo and Ray are
- * Magpie's American English men (Diego and Pascal speak English with a
- * Spanish and a French accent); listed by `wumpy --speech-check`, which asks
- * the service rather than trusting this.
+ * Ray, neutral: chosen by ear from `wumpy --voice-samples` - "I'll go with
+ * neutral Ray" - the deepest and most even of Magpie's men. Jason, Leo and
+ * Ray are its American English men, each with moods (Diego and Pascal speak
+ * English with a Spanish and a French accent); `wumpy --speech-check` lists
+ * them all, asking the service rather than trusting this.
  */
-export const DEFAULT_VOICE = 'Magpie-Multilingual.EN-US.Jason'
-export const OLD_DEFAULT_VOICE = 'Magpie-Multilingual.EN-US.Aria'
+export const DEFAULT_VOICE = 'Magpie-Multilingual.EN-US.Ray.Neutral'
+/** The defaults before it, Aria then Jason: a settings file naming one was never a choice. */
+export const OLD_DEFAULT_VOICES = ['Magpie-Multilingual.EN-US.Aria', 'Magpie-Multilingual.EN-US.Jason']
 const TTS_RATE = 22050
 
 /** One key, borrowed from the rotation for one call. */

@@ -13,7 +13,7 @@
 export type Interruption = 'nothing' | 'stop' | 'words'
 
 const FILLER = /^(?:m+|h?m+-?h?m+|mhm+|uh-?huh|uh+|um+|ah+|oh+|huh|er+|hm+)$/
-const STOP = /^(?:(?:okay|ok|alright|all right)\s+)?(?:stop|wait|hold on|hang on|shush|quiet|be quiet|shut up|enough|never ?mind|cancel|pause|stop talking|that's enough|that's fine)(?:\s+(?:please|now|there|it|jason|wumpy))*$/
+const STOP = /^(?:(?:okay|ok|alright|all right)\s+)?(?:stop|wait|hold on|hang on|shush|quiet|be quiet|shut up|enough|never ?mind|cancel|pause|stop talking|that's enough|that's fine)(?:\s+(?:please|now|there|it|ray|jason|wumpy))*$/
 
 export function interruption(heard: string): Interruption {
   const words = heard

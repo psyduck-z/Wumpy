@@ -59,7 +59,7 @@ import { ContextStore } from './context'
 import { Speech } from './speech'
 import {
   DEFAULT_VOICE,
-  OLD_DEFAULT_VOICE,
+  OLD_DEFAULT_VOICES,
   TTS_RATE,
   closeSpeech,
   coldSpeech,
@@ -287,12 +287,12 @@ function moveOffGoogle(): void {
   }
 }
 
-/** Aria, the old default, to the male voice - once. See movedToMaleVoice. */
-function moveToMaleVoice(): void {
-  if (settings.get('movedToMaleVoice')) return
+/** An old default voice to Ray, neutral - once. See movedToRayNeutral. */
+function moveToRayNeutral(): void {
+  if (settings.get('movedToRayNeutral')) return
   const was = settings.get('speakVoice')
-  const onOld = !was || was === OLD_DEFAULT_VOICE
-  settings.patch({ movedToMaleVoice: true, ...(onOld ? { speakVoice: DEFAULT_VOICE } : {}) })
+  const onOld = !was || OLD_DEFAULT_VOICES.includes(was)
+  settings.patch({ movedToRayNeutral: true, ...(onOld ? { speakVoice: DEFAULT_VOICE } : {}) })
   if (onOld) console.log(`[wumpy] voice: ${DEFAULT_VOICE}, from ${was || 'the default'}`)
 }
 
@@ -2288,7 +2288,7 @@ void app.whenReady().then(async () => {
   /* Before anything reads the model: the panel, the tray and the status all
      ask for it during this same boot. */
   moveOffGoogle()
-  moveToMaleVoice()
+  moveToRayNeutral()
   chats = new ChatStore()
   inputHistory = new InputHistory()
   keys = new KeyStore()

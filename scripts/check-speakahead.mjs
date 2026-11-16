@@ -220,8 +220,9 @@ check('only a service that has gone cold', /cold\.hear \? one\('hearing'/.test(m
 check('cold being a minute without an answer', /export const WARM_FOR_MS = 60_000/.test(nv) && /answered\(Client\)\s+resolve\(response\)/.test(nv), true)
 check('a dropped connection is cold again', /clients\.delete\(Client\)\s+answeredAt\.delete\(Client\)/.test(nv), true)
 /* "Can you set the voice to a male?" Every settings file named Aria. */
-check('a male voice by default', /export const DEFAULT_VOICE = 'Magpie-Multilingual\.EN-US\.(Jason|Leo|Ray)'/.test(nv) && /speakVoice: 'Magpie-Multilingual\.EN-US\.(Jason|Leo|Ray)'/.test(read('src/shared/defaults.ts')), true)
-check('and a saved Aria moved to it, once', /if \(settings\.get\('movedToMaleVoice'\)\) return/.test(main) && /moveOffGoogle\(\)\s+moveToMaleVoice\(\)/.test(main), true)
+check('a male voice by default: Ray, neutral, as chosen', /export const DEFAULT_VOICE = 'Magpie-Multilingual\.EN-US\.Ray\.Neutral'/.test(nv) && /speakVoice: 'Magpie-Multilingual\.EN-US\.Ray\.Neutral'/.test(read('src/shared/defaults.ts')), true)
+check('and whoever is still on an old default is moved to it, once', /OLD_DEFAULT_VOICES = \['Magpie-Multilingual\.EN-US\.Aria', 'Magpie-Multilingual\.EN-US\.Jason'\]/.test(nv), true)
+check('and a saved Aria or Jason moved to it, once', /if \(settings\.get\('movedToRayNeutral'\)\) return/.test(main) && /moveOffGoogle\(\)\s+moveToRayNeutral\(\)/.test(main), true)
 check('wumpy --speech-check lists the voices on offer', /listVoices\(k\)/.test(main), true)
 check('wumpy --speech-check measures what priming saves', /hearIt\('hearing it, primed'\)/.test(main), true)
 check('the pieces go to the panel as they come', /e\.sender\.send\(IPC\.voiceAudio/.test(main), true)
