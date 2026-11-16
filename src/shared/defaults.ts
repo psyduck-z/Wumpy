@@ -67,7 +67,7 @@ export const DEFAULT_SETTINGS: WumpySettings = {
   voicePolish: false,
   voiceAutoStop: true,
   voiceCloud: true,
-  speakVoice: 'Magpie-Multilingual.EN-US.Aria',
+  speakVoice: 'Magpie-Multilingual.EN-US.Jason',
   pauseMusic: true,
   reflect: false,
   reflectRounds: 3,
@@ -80,6 +80,7 @@ export const DEFAULT_SETTINGS: WumpySettings = {
   /* False so an existing settings file is migrated once; a fresh install
      starts on DEFAULT_MODEL anyway and the migration finds nothing to do. */
   movedOffGoogle: false,
+  movedToMaleVoice: false,
 
   // Opening a page is allowed to be proposed; whether it happens without a click
   // depends on the approval mode, the same way a command does.

@@ -181,14 +181,23 @@ check('in threes, then a rest', T.cycle > 3 * T.gap * 1.6, true)
 check('soft: nothing clacky above 2kHz', T.lowpass <= 2000, true)
 
 const oldNote = render(0.45, [{ hz: () => 660, gain: ramp([[0, 0.0001], [0.015, 0.12], [0.11, 0.0001]]) }])
-const peak = E.CHIME_PEAK
-const newNote = render(0.45, [
-  { hz: () => 587.33, gain: ramp([[0, 0.0001], [0.006, peak], [0.2, 0.0001]]) },
-  { hz: () => 587.33 * 2, gain: ramp([[0, 0.0001], [0.006, peak * 0.15], [0.12, 0.0001]]) },
-  { hz: () => 587.33 * 4, gain: ramp([[0, 0.0001], [0.006, 0.02], [0.05, 0.0001]]) }
-])
-const chimeUp = dB(newNote, oldNote)
-check(`each chime note a titchy bit louder (${chimeUp} dB)`, chimeUp >= 0.5 && chimeUp <= 3, true)
+/* A chime note as strike() makes it: a fundamental, its octave and a quick
+   bright fourth harmonic, each with its own ring. */
+const struck = (hz, at, { peak, attack, ring, bright }) => [
+  { hz: () => hz, gain: ramp([[at, 0.0001], [at + attack, peak], [at + ring, 0.0001]]) },
+  { hz: () => hz * 2, gain: ramp([[at, 0.0001], [at + attack, peak * 0.15], [at + ring * 0.6, 0.0001]]) },
+  { hz: () => hz * 4, gain: ramp([[at, 0.0001], [at + attack, bright], [at + 0.05, 0.0001]]) }
+]
+/* "A titchy bit louder", the first time: 0.11 at the peak, 6ms in, 0.2s of ring. */
+const titchy = render(0.45, struck(587.33, 0, { peak: 0.11, attack: 0.006, ring: 0.2, bright: 0.02 }))
+const titchyUp = dB(titchy, oldNote)
+check(`each chime note was a titchy bit louder (${titchyUp} dB)`, titchyUp >= 0.5 && titchyUp <= 3, true)
+/* Then "smoother and more audible": louder again, longer, softer in. */
+const L = E.CHIMES.listen
+const now = render(0.45, struck(587.33, 0, { peak: E.CHIME_PEAK * L.level, attack: E.CHIME_ATTACK, ring: L.ring, bright: ((0.02 * E.CHIME_PEAK) / 0.11) * L.level }))
+const audible = dB(now, titchy)
+check(`and now more audible again (${audible} dB on that)`, audible >= 2 && audible <= 5, true)
+check('and smoother: no note comes in faster than 10ms', E.CHIME_ATTACK >= 0.01, true)
 
 /* --------------------------------------------------------------- wiring */
 
@@ -210,6 +219,10 @@ check('and each service is primed while the person talks', /function startVoiceT
 check('only a service that has gone cold', /cold\.hear \? one\('hearing'/.test(main) && /cold\.talk \? one\('talking'/.test(main), true)
 check('cold being a minute without an answer', /export const WARM_FOR_MS = 60_000/.test(nv) && /answered\(Client\)\s+resolve\(response\)/.test(nv), true)
 check('a dropped connection is cold again', /clients\.delete\(Client\)\s+answeredAt\.delete\(Client\)/.test(nv), true)
+/* "Can you set the voice to a male?" Every settings file named Aria. */
+check('a male voice by default', /export const DEFAULT_VOICE = 'Magpie-Multilingual\.EN-US\.(Jason|Leo|Ray)'/.test(nv) && /speakVoice: 'Magpie-Multilingual\.EN-US\.(Jason|Leo|Ray)'/.test(read('src/shared/defaults.ts')), true)
+check('and a saved Aria moved to it, once', /if \(settings\.get\('movedToMaleVoice'\)\) return/.test(main) && /moveOffGoogle\(\)\s+moveToMaleVoice\(\)/.test(main), true)
+check('wumpy --speech-check lists the voices on offer', /listVoices\(k\)/.test(main), true)
 check('wumpy --speech-check measures what priming saves', /hearIt\('hearing it, primed'\)/.test(main), true)
 check('the pieces go to the panel as they come', /e\.sender\.send\(IPC\.voiceAudio/.test(main), true)
 check('wumpy --speech-check measures it from here', /argv\.includes\('--speech-check'\)/.test(main), true)
@@ -234,16 +247,25 @@ check('the typing stops at the first sound', /new Speaker\(\{ onSound: stopTicks
 check('and not between sentences', /if \(!speaker\?\.busy\(\) && \(speaker\?\.idleFor\(\) \?\? Infinity\) > TYPING_AGAIN_MS\) startTicks\(\)/.test(turn), true)
 check('a stopped turn is silent at once', /speaker\?\.stop\(\)\s+note\('stopped'\)/.test(turn), true)
 check('typing is scheduled on the audio clock', /while \(next < context\.currentTime \+ 1\)/.test(earcons), true)
-check('a pause of a second ends what was said', /export const END_PAUSE_MS = 1000/.test(turn) && /listen\(END_PAUSE_MS, 8000, 45_000\)/.test(turn), true)
+/* "Sometimes when I just take a pause to think... it just cuts it off...
+   one and a half Mississippi." */
+check('a pause of a second and a half ends what was said', /export const END_PAUSE_MS = 1500/.test(turn) && /listen\(END_PAUSE_MS, 8000, 45_000\)/.test(turn), true)
 
 /* The output. "There was no chime, so I thought it didn't work": the
    chime played into Bluetooth earbuds that were still waking up. */
 check('a turn opens one output and keeps it awake', /wakeOutput\(\)\s+speaker = new Speaker/.test(turn), true)
-check('except while the earbuds switch their mic on', /await chime\('opening'\)\s+releaseOutput\(\)/.test(turn), true)
+check('opened afresh once the earbuds have switched their mic on', /if \(liveMs < 0 \|\| liveMs >= NO_SWITCH_MS\) releaseOutput\(\)/.test(turn), true)
 check('with a signal far below hearing', /\(Math\.random\(\) \* 2 - 1\) \* 1e-4/.test(earcons), true)
 check('and lets it sleep when the turn ends', /speaker = null\s+releaseOutput\(\)/.test(turn), true)
 check('a chime waits for the output to be awake', /const context = await awake\(\)/.test(earcons), true)
-check('so does the first typing', /WAKE_MS - \(Date\.now\(\) - out\.woke\)\) \/ 1000/.test(earcons), true)
+check('so does the first typing', /out\.wake - \(Date\.now\(\) - out\.woke\)\) \/ 1000/.test(earcons), true)
+/* "Sometimes it doesn't work at the start": the first pinch after a quiet
+   spell finds earbuds that have let their audio link go. */
+check('longer to wake after a quiet spell', E.WAKE_COLD_MS > E.WAKE_MS && /const cold = Date\.now\(\) - closedAt > COLD_AFTER_MS/.test(earcons), true)
+/* "Tick, tick, tick, tick" while the mic comes on: not the typing in threes
+   that means thinking. */
+check('the mic wait is one clicky key at a time', E.WAITING.every < E.TYPING.cycle && E.WAITING.lowpass > E.TYPING.lowpass * 2, true)
+check('and softer than the typing', E.WAITING.click < E.TYPING.click, true)
 check('the voice goes through the same output', /const current = output\(\)/.test(speaker), true)
 check('and follows it when it is opened again', /if \(current !== this\.context\) \{/.test(speaker), true)
 check('no sound opens an output of its own', /new AudioContext\(/.test(speaker) || (earcons.match(/new AudioContext\(/g) ?? []).length !== 1, false)
@@ -272,15 +294,24 @@ check('no chime when the words are sent', /chime\('sent'\)/.test(turn) || 'sent'
 
   /* Rendered the way strike() makes them, for how loud each is to an ear. */
   const voices = (c) =>
-    c.notes.flatMap((hz, i) => {
-      const at = i * c.step
-      const part = (f, peak, ring) => ({ hz: () => f, gain: ramp([[at, 0.0001], [at + 0.006, peak], [at + ring, 0.0001]]) })
-      const p = E.CHIME_PEAK * c.level
-      return [part(hz, p, 0.2), part(hz * 2, p * 0.15, 0.12), part(hz * 4, 0.02 * c.level, 0.05)]
-    })
+    c.notes.flatMap((hz, i) =>
+      struck(hz, i * c.step, {
+        peak: E.CHIME_PEAK * c.level,
+        attack: E.CHIME_ATTACK,
+        ring: c.ring,
+        bright: ((0.02 * E.CHIME_PEAK) / 0.11) * c.level
+      })
+    )
   const loud = Object.fromEntries(Object.entries(K).map(([name, c]) => [name, render(0.4, voices(c))]))
-  const quietest = Object.keys(K).filter((n) => n !== 'opening').map((n) => dB(loud[n], loud.opening))
-  check(`"felt the pinch" the quietest, so not taken for "talk now" (${Math.min(...quietest)} dB under the next)`, Math.min(...quietest) >= 2, true)
+  /* "The initial time to tell me that it received the gesture... has to be
+     a little louder, and make it just a single dot." It had been the
+     quietest of them, a soft low note, so as not to be taken for "talk now". */
+  const soft = render(0.4, struck(440, 0, { peak: 0.11 * 0.6, attack: 0.006, ring: 0.2, bright: 0.02 * 0.6 }))
+  const dotUp = dB(loud.opening, soft)
+  check(`the pinch dot louder than the soft note it was (${dotUp} dB)`, dotUp >= 3, true)
+  check('and short: a dot, not a note', K.opening.ring <= 0.15, true)
+  const dotVsTalk = dB(loud.opening, loud.listen)
+  check(`and about as loud as "talk now" (${dotVsTalk} dB)`, Math.abs(dotVsTalk) <= 3, true)
   const chord = dB(loud.done, loud.heard)
   check(`the chord no louder than the rest (${chord} dB against "got it")`, Math.abs(chord) <= 2, true)
 }

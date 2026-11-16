@@ -95,7 +95,7 @@ check('a mic that will not open says so', /The microphone could not be opened/.t
 
 /* The sounds moved to earcons.ts; how loud they are is check-speakahead's. */
 const earcons = read('src/renderer/src/earcons.ts')
-check('it ticks while it works', /export function startTicks\(\)/.test(earcons) && /startTicks/.test(turn), true)
+check('it ticks while it works', /export function startTicks\(kind/.test(earcons) && /startTicks\(\)/.test(turn), true)
 check('from the moment it has the recording', /showVoice\(\{ stage: 'hearing', level: 0 \}\)[\s\S]{0,600}await chime\('heard'\)\s+startTicks\(\)/.test(turn), true)
 check('and while the answer is coming', /runningCount\(\) > 0\) \{\s+quietSince = 0[\s\S]{0,400}\) startTicks\(\)/.test(turn), true)
 check('never while the mic is open', /micDead = false\s+stopTicks\(\)/.test(turn), true)
@@ -137,14 +137,18 @@ check('a dead mic is exact zeros, a live one any sound', /level > 1e-5/.test(rec
 /* "I can't hear the chime that signals me to speak": played after the mic
    opened, through an output kept open while the earbuds switched to
    headset mode, it went into a stream that broke with the switch. */
-check('a soft note first, in the earbuds’ ordinary mode', /await chime\('opening'\)\s+releaseOutput\(\)[\s\S]{0,600}recording = await record\(/.test(turn), true)
-check('nothing plays while they switch', /releaseOutput\(\)\s+if \(cancelled\) return null\s+await sleep\(120\)/.test(turn), true)
+check('the pinch dot first, in the earbuds’ ordinary mode', /await chime\('opening'\)\s+if \(cancelled\) return null[\s\S]{0,700}recording = await record\(/.test(turn), true)
+/* Then: "in between... can you add like some dots, like a regular
+   mechanical keyboard, tick, tick, tick" - for the wait while the earbuds
+   switch, which had been silent on purpose. */
+check('ticking while the earbuds switch, if the mic is not on at once', /const waiting = setTimeout\(\(\) => startTicks\('waiting'\), NO_SWITCH_MS\)/.test(turn), true)
+check('stopped the moment it is', /clearTimeout\(waiting\)\s+stopTicks\(\)/.test(turn), true)
 /* Then: "add a chime to tell me when [it] is ready for me to speak." */
-check('"talk now" once the mic delivers sound', /recording\.live, sleep\(LIVE_WAIT_MS\)[\s\S]{0,700}note\(`microphone live after \$\{liveMs\}ms`\)[\s\S]{0,1200}await chime\('listen'\)/.test(turn), true)
-check('from an output opened after the switch, not through it', /note\(`microphone live after \$\{liveMs\}ms`\)[\s\S]{0,1200}wakeOutput\(liveMs < NO_SWITCH_MS\)\s+await chime\('listen'\)/.test(turn), true)
-/* Live at 164ms, "talk now" at 1090ms: 450 of them waiting for an output
-   that had never gone to sleep. */
-check('with no wake wait when no earbuds switched', /export const NO_SWITCH_MS = 400\b/.test(turn) && /woke: stillAwake \? Date\.now\(\) - WAKE_MS : Date\.now\(\)/.test(earcons), true)
+check('"talk now" once the mic delivers sound', /recording\.live, sleep\(LIVE_WAIT_MS\)[\s\S]{0,1800}note\(`microphone live after \$\{liveMs\}ms`\)[\s\S]{0,600}await chime\('listen'\)/.test(turn), true)
+check('from an output opened after the switch, not through it', /if \(liveMs < 0 \|\| liveMs >= NO_SWITCH_MS\) releaseOutput\(\)/.test(turn) && /note\(`microphone live after \$\{liveMs\}ms`\)[\s\S]{0,600}wakeOutput\(\)\s+await chime\('listen'\)/.test(turn), true)
+/* Live at 164ms, "talk now" at 1090ms: 450 of them waking an output that
+   had never gone to sleep. Kept open when nothing switched. */
+check('kept, with no wake wait, when no earbuds switched', /export const NO_SWITCH_MS = 400\b/.test(turn), true)
 check('under the half second WirePlumber waits before switching earbuds', Number(/export const NO_SWITCH_MS = (\d+)/.exec(turn)?.[1]) < 500, true)
 check('and speech counts only after it', /await chime\('listen'\)\s+await sleep\(READY_TAIL_MS\)[\s\S]{0,150}armed = true\s+recording\.arm\(\)/.test(turn), true)
 check('only one chime before the mic is on', (turn.slice(turn.indexOf('async function listen('), turn.indexOf('recording = await record(')).match(/await chime\(/g) ?? []).length, 1)

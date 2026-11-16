@@ -52,14 +52,17 @@ import { runCommand, assessRisk, isReadOnly, riskLevel } from './shell'
 import { PriorityManager } from './priority'
 import { webSearch } from './search'
 import { cleanTitle, titleBrief, titleSource } from '@shared/titles'
+import { launchPath } from '@shared/launchpath'
 import { folderFacts, resolveUserFolders } from './folders'
 import { ContextStore } from './context'
 import { Speech } from './speech'
 import {
   DEFAULT_VOICE,
+  OLD_DEFAULT_VOICE,
   TTS_RATE,
   closeSpeech,
   coldSpeech,
+  listVoices,
   pcmFromWav,
   primeHearing,
   primeTalking,
@@ -280,6 +283,15 @@ function moveOffGoogle(): void {
   if (wasGoogle) {
     console.log(`[wumpy] moved off ${chosen}: Google is no longer offered, now ${DEFAULT_MODEL}`)
   }
+}
+
+/** Aria, the old default, to the male voice - once. See movedToMaleVoice. */
+function moveToMaleVoice(): void {
+  if (settings.get('movedToMaleVoice')) return
+  const was = settings.get('speakVoice')
+  const onOld = !was || was === OLD_DEFAULT_VOICE
+  settings.patch({ movedToMaleVoice: true, ...(onOld ? { speakVoice: DEFAULT_VOICE } : {}) })
+  if (onOld) console.log(`[wumpy] voice: ${DEFAULT_VOICE}, from ${was || 'the default'}`)
 }
 
 function resolveModel(): string | null {
@@ -2249,7 +2261,7 @@ function linuxAutostart(enabled: boolean): void {
       return
     }
     mkdirSync(dirname(file), { recursive: true })
-    const exec = process.env.APPIMAGE ?? process.execPath
+    const exec = process.env.APPIMAGE ?? launchPath(process.execPath, existsSync)
     writeFileSync(
       file,
       ['[Desktop Entry]', 'Type=Application', 'Name=Wumpy', `Exec="${exec}" --hidden`, 'Icon=wumpy', ''].join('\n')
@@ -2269,6 +2281,7 @@ void app.whenReady().then(async () => {
   /* Before anything reads the model: the panel, the tray and the status all
      ask for it during this same boot. */
   moveOffGoogle()
+  moveToMaleVoice()
   chats = new ChatStore()
   inputHistory = new InputHistory()
   keys = new KeyStore()
@@ -2520,7 +2533,7 @@ async function restartWumpy(why: string, chatId: string | null): Promise<void> {
   if (!panel?.onScreen) args.push('--hidden')
   if (chatId && /^[\w-]{1,80}$/.test(chatId)) args.push(`--resume-chat=${chatId}`)
   await releaseAllMusic().catch(() => undefined)
-  app.relaunch({ args })
+  app.relaunch({ args, execPath: launchPath(process.execPath, existsSync) })
   app.quit()
 }
 
@@ -2575,6 +2588,17 @@ async function speechCheck(): Promise<void> {
   const voice = settings.get('speakVoice') || DEFAULT_VOICE
   closeSpeech()
   console.log(`[wumpy] speech check: connected in ${await warmSpeech()}ms`)
+  {
+    const k = await cloud.speechKey('magpie')
+    if (k) {
+      try {
+        const all = await listVoices(k)
+        console.log(`[wumpy] speech check: voice ${voice}; English ones: ${all.filter((v) => /\.EN-/.test(v)).join(', ') || 'none listed'}`)
+      } catch (err) {
+        console.log(`[wumpy] speech check: voices could not be listed (${String(err)})`)
+      }
+    }
+  }
   const timed = async (label: string, run: (k: NonNullable<Awaited<ReturnType<typeof cloud.speechKey>>>) => Promise<string>): Promise<void> => {
     const borrowed = await cloud.speechKey('magpie')
     if (!borrowed) {

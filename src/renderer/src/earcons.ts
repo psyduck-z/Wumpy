@@ -31,14 +31,22 @@ const sleep = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms
  */
 export const WAKE_MS = 450
 
-let out: { context: AudioContext; keep: AudioBufferSourceNode; woke: number } | null = null
-
-/**
- * Opens the turn's output and keeps it awake. Called when a turn starts.
- * `stillAwake` when the device was playing a moment ago and nothing has
- * switched it since, so the first sound need not wait WAKE_MS for it.
+/*
+ * Longer, after a quiet spell: "sometimes it doesn't work at the start...
+ * the initial time to tell me that it received the gesture." The first pinch
+ * after a while finds earbuds that have let their audio link go entirely,
+ * not just paused it, and a short first chime can be over before they are
+ * back. A turn soon after another finds them awake and waits WAKE_MS.
  */
-export function wakeOutput(stillAwake = false): void {
+export const WAKE_COLD_MS = 700
+const COLD_AFTER_MS = 30_000
+
+let out: { context: AudioContext; keep: AudioBufferSourceNode; woke: number; wake: number } | null = null
+/** When the last output was let go; 0, never, counts as cold. */
+let closedAt = 0
+
+/** Opens the turn's output and keeps it awake. Called when a turn starts. */
+export function wakeOutput(): void {
   if (out) return
   try {
     /* 'playback': larger buffers, so a busy moment on the page is not a
@@ -52,7 +60,8 @@ export function wakeOutput(stillAwake = false): void {
     keep.loop = true
     keep.connect(context.destination)
     keep.start()
-    out = { context, keep, woke: stillAwake ? Date.now() - WAKE_MS : Date.now() }
+    const cold = Date.now() - closedAt > COLD_AFTER_MS
+    out = { context, keep, woke: Date.now(), wake: cold ? WAKE_COLD_MS : WAKE_MS }
   } catch {
     /* no sound device: every sound below is skipped */
   }
@@ -69,6 +78,7 @@ export function releaseOutput(): void {
   }
   void out.context.close()
   out = null
+  closedAt = Date.now()
 }
 
 /** The turn's output, opened now if no turn opened one. */
@@ -81,7 +91,7 @@ export function output(): AudioContext | null {
 async function awake(): Promise<AudioContext | null> {
   const context = output()
   if (!out) return null
-  const wait = WAKE_MS - (Date.now() - out.woke)
+  const wait = out.wake - (Date.now() - out.woke)
   if (wait > 0) await sleep(wait)
   return out?.context === context ? context : null
 }
@@ -107,7 +117,7 @@ async function awake(): Promise<AudioContext | null> {
  * upwards, then it knows that it's ready for me to speak... if the tone is
  * going downwards, it means it's finished." So the shape is the meaning:
  *
- *   opening  bup, one soft low note        got your pinch, the mic is coming on
+ *   opening  one short dot                 got your pinch, the mic is coming on
  *   listen   doo-DOO, up a fifth           the mic is on: talk now
  *   heard    DOO-doo, the same fifth down  got it, stopped listening
  *   done     a chord, rolled downwards     finished, with nothing to say
@@ -116,49 +126,60 @@ async function awake(): Promise<AudioContext | null> {
  * "Heard" mirrors "listen" exactly, the way a mic turns on and off. "Done"
  * also goes down, being an ending, but as one rolled chord rather than two
  * notes, so the end of a turn is not mistaken for the end of listening.
- * "Cancel" goes nowhere - the same low note, "uh-uh". "Opening" is a single
- * note, and the quietest: it only says the pinch was felt, and must not be
- * taken for "talk now".
+ * "Cancel" goes nowhere - the same low note, "uh-uh".
+ *
+ * Then: "the initial time to tell me that it received the gesture... has to
+ * be a little louder, and make it just a single dot", and for all of them,
+ * "smoother and more audible, because these are the ones that give me
+ * audible feedback to know what's happening." So the pinch is one short,
+ * bright dot as loud as the rest (it had been the quietest, a soft low
+ * note, so as not to be taken for "talk now" - but a single short dot is not
+ * mistaken for two rising notes, and quiet it was missed). And every chime
+ * is louder by a little under 3 dB, rings longer, and comes in over 10ms
+ * rather than 6, which rounds off the click at the front of each note.
  */
 export const CHIMES = {
-  opening: { notes: [440], step: 0.13, level: 0.6 },
-  listen: { notes: [587.33, 880], step: 0.13, level: 1 },
-  heard: { notes: [880, 587.33], step: 0.13, level: 1 },
-  done: { notes: [880, 739.99, 587.33], step: 0.035, level: 0.7 },
-  cancel: { notes: [261.63, 261.63], step: 0.16, level: 1 }
+  opening: { notes: [659.25], step: 0.13, level: 1.6, ring: 0.15 },
+  listen: { notes: [587.33, 880], step: 0.13, level: 1, ring: 0.3 },
+  heard: { notes: [880, 587.33], step: 0.13, level: 1, ring: 0.3 },
+  done: { notes: [880, 739.99, 587.33], step: 0.035, level: 0.7, ring: 0.3 },
+  cancel: { notes: [261.63, 261.63], step: 0.16, level: 1.1, ring: 0.22 }
 } as const
 
 export type ChimeKind = keyof typeof CHIMES
 
-export const CHIME_PEAK = 0.11
+export const CHIME_PEAK = 0.15
+/** How long a note takes to come in: long enough not to click. */
+export const CHIME_ATTACK = 0.01
 
-function strike(context: AudioContext, bus: AudioNode, hz: number, at: number, level: number): void {
-  const partial = (freq: number, peak: number, ring: number): void => {
+function strike(context: AudioContext, bus: AudioNode, hz: number, at: number, level: number, ring: number): void {
+  const partial = (freq: number, peak: number, length: number): void => {
     const osc = context.createOscillator()
     const gain = context.createGain()
     osc.type = 'sine'
     osc.frequency.value = freq
     gain.gain.setValueAtTime(0.0001, at)
-    gain.gain.exponentialRampToValueAtTime(peak, at + 0.006)
-    gain.gain.exponentialRampToValueAtTime(0.0001, at + ring)
+    gain.gain.exponentialRampToValueAtTime(peak, at + CHIME_ATTACK)
+    gain.gain.exponentialRampToValueAtTime(0.0001, at + length)
     osc.connect(gain).connect(bus)
     osc.start(at)
-    osc.stop(at + ring + 0.02)
+    osc.stop(at + length + 0.02)
   }
-  partial(hz, CHIME_PEAK * level, 0.2)
-  partial(hz * 2, CHIME_PEAK * level * 0.15, 0.12)
-  partial(hz * 4, 0.02 * level, 0.05)
+  partial(hz, CHIME_PEAK * level, ring)
+  partial(hz * 2, CHIME_PEAK * level * 0.15, ring * 0.6)
+  /* The "d" of "doo": kept in proportion as the notes got louder. */
+  partial(hz * 4, ((0.02 * CHIME_PEAK) / 0.11) * level, 0.05)
 }
 
 export async function chime(kind: ChimeKind): Promise<void> {
   stopTicks()
-  const { notes, step, level } = CHIMES[kind]
+  const { notes, step, level, ring } = CHIMES[kind]
   try {
     const context = await awake()
     if (!context) return
     const bus = context.createGain()
     bus.connect(context.destination)
-    notes.forEach((hz, i) => strike(context, bus, hz, context.currentTime + 0.01 + i * step, level))
+    notes.forEach((hz, i) => strike(context, bus, hz, context.currentTime + 0.01 + i * step, level, ring))
     /* Back as soon as the last note is struck and mostly rung: the mic
        opens after this, and the tail is quieter than any voice. */
     await sleep((notes.length - 1) * step * 1000 + 160)
@@ -200,10 +221,35 @@ export const TYPING = {
   lowpass: 1700
 }
 
+/*
+ * Ticking while the earbuds' mic comes on.
+ *
+ * "In between the time when it's loading the speech to text model, can you
+ * add like some dots... like a regular mechanical keyboard, like tick, tick,
+ * tick, tick." Nothing loads there: that wait is the earbuds switching into
+ * headset mode, which on the MacBook takes from one second to six. But it is
+ * a wait, and silent it sounded like nothing happening. So one key at a
+ * time, evenly, brighter and clickier than the soft typing in threes that
+ * means it is thinking - a different wait, a different sound - and quieter
+ * than the chimes on either side of it.
+ */
+export const WAITING = {
+  /** From one tick to the next. */
+  every: 0.26,
+  click: 0.2,
+  knock: 0.06,
+  /** A clicky switch: brighter than the creamy one's 1.7kHz. */
+  lowpass: 4200
+}
+
+type KeySound = { click: number; knock: number; lowpass: number; knockFrom: number; knockTo: number }
+const CREAMY: KeySound = { click: TYPING.click, knock: TYPING.knock, lowpass: TYPING.lowpass, knockFrom: 210, knockTo: 120 }
+const CLICKY: KeySound = { click: WAITING.click, knock: WAITING.knock, lowpass: WAITING.lowpass, knockFrom: 420, knockTo: 260 }
+
 let typing: { bus: GainNode; timer: ReturnType<typeof setInterval> } | null = null
 let noise: AudioBuffer | null = null
 
-function press(context: AudioContext, bus: AudioNode, at: number, weight: number): void {
+function press(context: AudioContext, bus: AudioNode, at: number, weight: number, key: KeySound): void {
   if (!noise || noise.sampleRate !== context.sampleRate) {
     noise = context.createBuffer(1, Math.round(context.sampleRate * 0.05), context.sampleRate)
     const data = noise.getChannelData(0)
@@ -213,11 +259,11 @@ function press(context: AudioContext, bus: AudioNode, at: number, weight: number
   src.buffer = noise
   const filter = context.createBiquadFilter()
   filter.type = 'lowpass'
-  filter.frequency.value = TYPING.lowpass * (0.88 + Math.random() * 0.24)
+  filter.frequency.value = key.lowpass * (0.88 + Math.random() * 0.24)
   filter.Q.value = 0.8
   const click = context.createGain()
   click.gain.setValueAtTime(0.0001, at)
-  click.gain.exponentialRampToValueAtTime(TYPING.click * weight, at + 0.002)
+  click.gain.exponentialRampToValueAtTime(key.click * weight, at + 0.002)
   click.gain.exponentialRampToValueAtTime(0.0001, at + 0.035)
   src.connect(filter).connect(click).connect(bus)
   src.start(at)
@@ -226,30 +272,36 @@ function press(context: AudioContext, bus: AudioNode, at: number, weight: number
   const knock = context.createOscillator()
   const body = context.createGain()
   knock.type = 'sine'
-  knock.frequency.setValueAtTime(210 * (0.94 + Math.random() * 0.12), at)
-  knock.frequency.exponentialRampToValueAtTime(120, at + 0.04)
+  knock.frequency.setValueAtTime(key.knockFrom * (0.94 + Math.random() * 0.12), at)
+  knock.frequency.exponentialRampToValueAtTime(key.knockTo, at + 0.04)
   body.gain.setValueAtTime(0.0001, at)
-  body.gain.exponentialRampToValueAtTime(TYPING.knock * weight, at + 0.003)
+  body.gain.exponentialRampToValueAtTime(key.knock * weight, at + 0.003)
   body.gain.exponentialRampToValueAtTime(0.0001, at + 0.05)
   knock.connect(body).connect(bus)
   knock.start(at)
   knock.stop(at + 0.06)
 }
 
-export function startTicks(): void {
+/** Soft typing in threes while it thinks; one clicky key at a time while the mic comes on. */
+export function startTicks(kind: 'thinking' | 'waiting' = 'thinking'): void {
   if (typing || !out) return
   try {
     const context = out.context
     const bus = context.createGain()
     bus.connect(context.destination)
     /* Not before the output is awake, or the first group is lost. */
-    const wake = Math.max(0, WAKE_MS - (Date.now() - out.woke)) / 1000
+    const wake = Math.max(0, out.wake - (Date.now() - out.woke)) / 1000
     let next = context.currentTime + 0.02 + wake
     const fill = (): void => {
       while (next < context.currentTime + 1) {
+        if (kind === 'waiting') {
+          press(context, bus, next + (Math.random() - 0.5) * 0.01, 0.94 + Math.random() * 0.12, CLICKY)
+          next += WAITING.every
+          continue
+        }
         for (let i = 0; i < 3; i++) {
           const jitter = (Math.random() - 0.5) * 0.024
-          press(context, bus, next + i * TYPING.gap + jitter, [1, 0.85, 0.95][i] * (0.92 + Math.random() * 0.16))
+          press(context, bus, next + i * TYPING.gap + jitter, [1, 0.85, 0.95][i] * (0.92 + Math.random() * 0.16), CREAMY)
         }
         next += TYPING.cycle
       }

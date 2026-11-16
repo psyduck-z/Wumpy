@@ -73,15 +73,19 @@ export const LIVE_WAIT_MS = 9000
  */
 export const READY_TAIL_MS = 150
 
-/** A mic live sooner than this did not switch the earbuds (see listen()). */
+/** A mic live sooner than this did not switch the earbuds, and one later gets ticks (see listen()). */
 export const NO_SWITCH_MS = 400
 
 /**
  * How long a pause ends what you are saying. It was 1.3s, all of it spent
- * waiting after the last word before anything else could start; a second
- * is still longer than the gaps inside a sentence said at a normal pace.
+ * waiting after the last word before anything else could start, then a
+ * second - longer than the gaps inside a sentence said at a normal pace, but
+ * not than a pause to think: "sometimes when I just take a pause to think
+ * through my mind for like 1 second, it just cuts it off... extend the pause
+ * to... one and a half Mississippi." Half a second more of waiting at the
+ * end of every question, for not being cut off in the middle of one.
  */
-export const END_PAUSE_MS = 1000
+export const END_PAUSE_MS = 1500
 
 /**
  * A second gesture this soon after the first is the same one. The earbuds
@@ -307,32 +311,33 @@ export function useVoiceTurn(deps: Deps): void {
       showVoice({ stage: 'starting', level: 0, detail: prompt })
 
       /*
-       * A soft note, then silence, then the microphone, then "talk now".
+       * A dot, the microphone, ticking while it comes on, then "talk now".
        *
        * "I can't hear the chime that signals me to speak." It had been
        * moved to after the mic went live, so it would mean "I can hear you
        * now" - but opening the earbuds' mic switches them into headset
        * mode, and on this machine's Bluetooth that switch fails over and
-       * over ("Failure in Bluetooth audio transport", logged at the start
-       * of every turn that morning). Every failure came while sound was
-       * going to the earbuds as they switched - this turn's own output,
-       * kept open through the switch for the chime, which then played into
-       * a stream that had broken with it.
+       * over ("Failure in Bluetooth audio transport"), and the chime went
+       * through the turn's own output, kept open through the switch, into a
+       * stream that had broken with it.
        *
-       * So a soft note plays first, in the earbuds' ordinary mode, where a
-       * chime was heard every time: the pinch was felt. Then the output is
-       * closed, so nothing is playing while they switch, and the mic opens.
-       * That chime went back to meaning "talk now" with the next request:
-       * "add a chime to tell me when [it] is ready for me to speak" - on a
-       * slow switch the soft note came up to six seconds before the mic
-       * was on. So once the mic delivers sound, the switch is over and a
-       * fresh output opens into it for "doo-DOO", which is heard, unlike
-       * the old one, because nothing was open through the switch to break.
+       * So the dot that says the pinch was felt plays first, in the
+       * earbuds' ordinary mode, where a chime was heard every time, and
+       * then the mic opens. "Talk now" waits until the mic delivers sound -
+       * "add a chime to tell me when [it] is ready for me to speak" - and
+       * goes out through a fresh output, opened after the switch, so there
+       * is nothing left from before it to have broken.
+       *
+       * The output used to be closed for the switch, so that nothing at all
+       * played during it. Then: "in between... can you add like some dots,
+       * like a regular mechanical keyboard, tick, tick, tick" - the switch
+       * takes one to six seconds, and silent it sounded like nothing was
+       * happening. The ticks only start if the mic is not on by then, and
+       * whatever becomes of their stream in the switch, it is closed before
+       * "talk now" is played.
        */
       await chime('opening')
-      releaseOutput()
       if (cancelled) return null
-      await sleep(120)
       const opened = Date.now()
       let recording: Awaited<ReturnType<typeof record>>
       try {
@@ -375,10 +380,20 @@ export function useVoiceTurn(deps: Deps): void {
          a turn whose mic had not come on, the turn went on waiting for that
          mic until 9s, and the pinch after - meant to start again - found it
          still busy and cancelled it a second time. */
+      const waiting = setTimeout(() => startTicks('waiting'), NO_SWITCH_MS)
       const stopped = new Promise<number>((resolve) => (stopWaiting = () => resolve(-2)))
       const liveMs = await Promise.race([recording.live, sleep(LIVE_WAIT_MS).then(() => -1), stopped])
       stopWaiting = () => {}
       clearTimeout(slow)
+      clearTimeout(waiting)
+      stopTicks()
+      /* The earbuds switched under the output (or never came on): its stream
+         may have broken with the switch, so "talk now" gets a fresh one. A
+         mic live sooner than NO_SWITCH_MS switched nothing - earbuds take
+         longer than that, WirePlumber alone waits half a second before it
+         starts - so the output is the same device, awake, and kept: on the
+         MacBook's own mic, live at 164ms, that saved the 450ms of waking. */
+      if (liveMs < 0 || liveMs >= NO_SWITCH_MS) releaseOutput()
       if (cancelled) {
         recording.stop()
         await recording.done
@@ -398,15 +413,8 @@ export function useVoiceTurn(deps: Deps): void {
       /* Speech counts once the chime is over, so a chime that reaches the
          mic is not taken for the first word, and the pause that ends the
          turn is not started by it. The recording itself runs from the
-         moment the mic opened: nothing said over the chime is lost.
-
-         A mic live this soon switched nothing: earbuds take longer than
-         this to go into headset mode (WirePlumber alone waits half a second
-         before it starts). So the output closed a moment ago is the same
-         device, still awake, and "talk now" need not wait for it to wake -
-         measured on the MacBook's own mic, live at 164ms and "talk now" at
-         1090ms, 450 of them that wait. */
-      wakeOutput(liveMs < NO_SWITCH_MS)
+         moment the mic opened: nothing said over the chime is lost. */
+      wakeOutput()
       await chime('listen')
       await sleep(READY_TAIL_MS)
       if (cancelled) {

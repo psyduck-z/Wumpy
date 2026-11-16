@@ -32,7 +32,14 @@ export const SPEECH_MODELS = {
   talk: process.env.WUMPY_NV_TTS_FUNCTION ?? '877104f7-e885-42b9-8de8-f6e4c6303969'
 }
 
-export const DEFAULT_VOICE = 'Magpie-Multilingual.EN-US.Aria'
+/*
+ * A male voice: "can you set the voice to a male?" Jason, Leo and Ray are
+ * Magpie's American English men (Diego and Pascal speak English with a
+ * Spanish and a French accent); listed by `wumpy --speech-check`, which asks
+ * the service rather than trusting this.
+ */
+export const DEFAULT_VOICE = 'Magpie-Multilingual.EN-US.Jason'
+export const OLD_DEFAULT_VOICE = 'Magpie-Multilingual.EN-US.Aria'
 const TTS_RATE = 22050
 
 /** One key, borrowed from the rotation for one call. */
@@ -310,6 +317,32 @@ export async function recognize(
     ms: Date.now() - started,
     audioSeconds: audio.pcm.length / 2 / audio.sampleRate
   }
+}
+
+/**
+ * The voices Magpie offers, by full name ("Magpie-Multilingual.EN-US.Aria"),
+ * asked of the service rather than remembered, since NVIDIA adds and renames
+ * them. A model lists its voice once and its speakers as subvoices.
+ */
+export async function listVoices(borrowed: BorrowedKey): Promise<string[]> {
+  const response = await call<unknown, { model_config?: Array<{ parameters?: Record<string, string> }> }>(
+    load().tts,
+    'GetRivaSynthesisConfig',
+    {},
+    borrowed,
+    SPEECH_MODELS.talk,
+    15_000
+  )
+  const names = new Set<string>()
+  for (const config of response.model_config ?? []) {
+    const p = config.parameters ?? {}
+    const base = p.voice_name
+    if (!base) continue
+    const subs = (p.subvoices ?? '').split(',').map((v) => v.split(':')[0].trim()).filter(Boolean)
+    if (!subs.length) names.add(base)
+    for (const sub of subs) names.add(sub.startsWith(base) ? sub : `${base}.${sub}`)
+  }
+  return [...names].sort()
 }
 
 /** Magpie's voice for `text`, as a WAV file. */

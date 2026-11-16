@@ -662,6 +662,13 @@ export interface WumpySettings {
    * opposite of leaving the door open.
    */
   movedOffGoogle: boolean
+  /**
+   * The spoken voice moved from Aria to a male one, once: "can you set the
+   * voice to a male? ... I just don't like a female." Every settings file
+   * names Aria, the old default, so a new default alone would reach nobody.
+   * A flag rather than a check on every read, so a voice chosen later stays.
+   */
+  movedToMaleVoice: boolean
   /** Let the model propose opening a page in the real browser. */
   browserEnabled: boolean
   /**

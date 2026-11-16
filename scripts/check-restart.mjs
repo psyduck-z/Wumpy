@@ -88,7 +88,7 @@ const tray = read('src/main/tray.ts')
 const preload = read('src/preload/index.ts')
 const prompt = read('src/shared/assistant.ts')
 
-check('it relaunches, then quits in order', /app\.relaunch\(\{ args \}\)\s+app\.quit\(\)/.test(main), true)
+check('it relaunches, then quits in order', /app\.relaunch\(\{ args, execPath: launchPath\(process\.execPath, existsSync\) \}\)\s+app\.quit\(\)/.test(main), true)
 check('not app.exit, so the counts are flushed', /async function restartWumpy[\s\S]{0,900}app\.exit/.test(main), false)
 check('the music comes back first', /await releaseAllMusic\(\)[\s\S]{0,80}app\.relaunch/.test(main), true)
 check('hidden stays hidden', /if \(!panel\?\.onScreen\) args\.push\('--hidden'\)/.test(main), true)
@@ -108,6 +108,24 @@ check('the model knows it may propose it', prompt.includes('/restart,'), true)
 check('/startup changes the login setting', /case 'startup': \{[\s\S]{0,200}patch\(\{ launchAtLogin: next \}\)/.test(app), true)
 check('which writes the autostart entry', /if \(patch\.launchAtLogin !== undefined\) syncLaunchAtLogin\(patch\.launchAtLogin\)/.test(main), true)
 check('and starts hidden, in the tray', /Exec="\$\{exec\}" --hidden/.test(main), true)
+
+/* Each Linux install is a folder of its own, behind an `app` link switched in
+   one step - a pinch during an install had started a half-copied Wumpy (two
+   SIGTRAP crash reports). Restarts and the autostart entry go through the
+   link, or they would start whichever version was running, or a deleted one. */
+{
+  const L = await load('src/shared/launchpath.ts', 'launchpath')
+  const has = (paths) => (p) => paths.includes(p)
+  check('a versioned folder starts through the link', L.launchPath('/h/.local/share/wumpy/app-1794809814566/wumpy', has(['/h/.local/share/wumpy/app/wumpy'])), '/h/.local/share/wumpy/app/wumpy')
+  check('unless there is no link', L.launchPath('/h/.local/share/wumpy/app-1794809814566/wumpy', has([])), '/h/.local/share/wumpy/app-1794809814566/wumpy')
+  check('anything else is left alone', L.launchPath('C:\\Users\\me\\AppData\\Local\\Programs\\Wumpy\\Wumpy.exe', () => true), 'C:\\Users\\me\\AppData\\Local\\Programs\\Wumpy\\Wumpy.exe')
+  check('a restart starts the newest install', /app\.relaunch\(\{ args, execPath: launchPath\(process\.execPath, existsSync\) \}\)/.test(main), true)
+  check('and so does login', /APPIMAGE \?\? launchPath\(process\.execPath, existsSync\)/.test(main), true)
+  const installer = read('scripts/install-linux.mjs')
+  check('the install switches the link in one step', /symlinkSync\(fresh, link\)\s+renameSync\(link, appDir\)/.test(installer), true)
+  check('and never empties the folder a copy runs from', /rmSync\(appDir/.test(installer), false)
+  check('nor deletes one a running copy started from', /&& !inUse\.has\(path\)\) rmSync/.test(installer), true)
+}
 
 console.log(`\n${failures === 0 ? 'all' : `${failures} FAILED of the`} restart checks${failures ? '' : ' correct'}`)
 process.exit(failures ? 1 : 0)
