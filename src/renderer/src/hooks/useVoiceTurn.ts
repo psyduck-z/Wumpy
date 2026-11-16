@@ -11,7 +11,7 @@ import {
 } from '@shared/spokenpick'
 import { record, strictBar, type Recording } from '../recorder'
 import { clipForSpeech } from '../wav'
-import { newestPending, pendingCount, runningCount } from '../pending'
+import { newestPending, runningCount } from '../pending'
 import { setHandsFree, takeTold } from '../handsfree'
 import { choiceMark, newestChoice, stillWaiting, type AloudChoice, type AloudOption } from '../aloud'
 import { setVoiceStopper, showVoice } from '../voiceview'
@@ -164,6 +164,13 @@ export const SAME_GESTURE_MS = 1200
  */
 export const REPORTED_TWICE_MS = 800
 
+/**
+ * Asked yes or no this many times with nobody saying anything at all, an
+ * approval is left on the screen: in a conversation nobody has ended, it
+ * would otherwise be asked every eight seconds until someone came back.
+ */
+export const UNANSWERED_ASKS = 4
+
 /** After talking, how long quiet must last before the typing starts again. */
 const TYPING_AGAIN_MS = 1500
 
@@ -254,6 +261,8 @@ export function useVoiceTurn(deps: Deps): void {
     let asking = false
     /** How many sentences of each answer have been handed to the voice. */
     const fed = new Map<string, number>()
+    /** Approvals nobody answered (see approveNow): left on the screen, not asked again. */
+    const leftUnanswered = new WeakSet<object>()
 
     /** Plays a WAV in an audio element. False when it could not start. */
     function playElement(wav: ArrayBuffer, quick: boolean): Promise<boolean> {
@@ -551,6 +560,16 @@ export function useVoiceTurn(deps: Deps): void {
       }
       const track = mic.getAudioTracks()[0]
       note(`microphone: ${track?.label || 'the system default'}`)
+      /* The earbuds disconnected, or went back in their case: the mic is
+         gone, and a conversation left listening to it would wait two
+         minutes for nothing. */
+      track?.addEventListener('ended', () => {
+        if (!busy || cancelled || mic?.getAudioTracks()[0] !== track) return
+        note('the microphone went away: the conversation ends')
+        ending = 'failed'
+        cancel()
+        showVoice({ stage: 'error', level: 0, detail: 'The microphone went away - were the earbuds put back or disconnected?' })
+      })
       const recording = await newEar(false)
       const slow = setTimeout(
         () => showVoice({ detail: 'Waiting for the earbuds’ microphone - Bluetooth is slow to switch it on…' }),
@@ -715,13 +734,24 @@ export function useVoiceTurn(deps: Deps): void {
     }
     async function approveNow(): Promise<void> {
       let asked = false
+      let unanswered = 0
       for (;;) {
         const entry = newestPending()
-        if (!entry || cancelled) return
+        if (!entry || cancelled || leftUnanswered.has(entry)) return
+        /* Nobody answering at all: they have walked away. It stays on the
+           screen, unrun, rather than being asked every eight seconds for as
+           long as the conversation lasts. */
+        if (unanswered >= UNANSWERED_ASKS) {
+          leftUnanswered.add(entry)
+          note(`no answer to "${approvalQuestion(entry)}" after ${UNANSWERED_ASKS} asks: left on the screen`)
+          await say('I’ll leave that on the screen.')
+          return
+        }
         await say(asked ? 'Yes or no?' : `${approvalQuestion(entry)} Say yes or no.`)
         asked = true
         if (cancelled || newestPending() !== entry) continue
         const answer = await listen(900, 8000, 'Say yes or no.')
+        unanswered = idled ? unanswered + 1 : 0
         // Clicked in the panel while it was listening: that is an answer too.
         if (newestPending() !== entry) continue
         const said = answer ? yesNo(answer.heard) : null
@@ -866,7 +896,8 @@ export function useVoiceTurn(deps: Deps): void {
           quietSince = 0
           continue
         }
-        if (pendingCount() > 0) {
+        const waitingOn = newestPending()
+        if (waitingOn && !leftUnanswered.has(waitingOn)) {
           await approve()
           talked = true
           quietSince = 0

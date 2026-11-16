@@ -339,6 +339,12 @@ check('then a new one can begin', /if \(again\) \{\s+again = false\s+begin\(\)/.
 check('with the chord, before the mic lets go', /if \(ending !== 'failed'\) await chime\('done'\)\s+await closeMic\(\)/.test(turn), true)
 check('and nobody talking for two minutes ends it too', /export const IDLE_END_MS = 120_000/.test(turn) && /ending = 'idle'/.test(turn), true)
 
+/* A yes-or-no nobody answers - walked away mid-conversation - is left on
+   the screen after a few asks, not asked every eight seconds for good. */
+check('an approval nobody answers is left on the screen', /if \(unanswered >= UNANSWERED_ASKS\) \{\s+leftUnanswered\.add\(entry\)/.test(turn) && /export const UNANSWERED_ASKS = 4/.test(turn), true)
+check('counting only silence, not a wrong word', /unanswered = idled \? unanswered \+ 1 : 0/.test(turn), true)
+check('and the answer moves on past it', /const waitingOn = newestPending\(\)\s+if \(waitingOn && !leftUnanswered\.has\(waitingOn\)\) \{/.test(turn), true)
+
 /* "I'm allowed to interrupt this AI and tell it what to do." */
 check('talking over an answer stops it', /stopSound\?\.\(\)\s+speaker\?\.stop\(\)\s+speaker = newSpeaker\(\)\s+if \(asking\) return\s+interrupted = true/.test(turn), true)
 check('the answer goes on being written until what was said is heard', /interrupted = true\s+if \(!cut && answerSince\) cut = \{ since: answerSince, mark: answerMark, heard \}/.test(turn), true)

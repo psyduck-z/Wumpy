@@ -90,6 +90,7 @@ for (const stage of ['starting', 'listening', 'hearing', 'thinking', 'speaking',
 }
 check('a mic that will not open says so', /The microphone could not be opened/.test(turn), true)
 check('nor one that never comes on', /The microphone never came on/.test(turn), true)
+check('a mic that goes away mid-conversation ends it', /track\?\.addEventListener\('ended', \(\) => \{[\s\S]{0,200}ending = 'failed'\s+cancel\(\)/.test(turn), true)
 
 /* -------------------------------------------------------------- hearing */
 
