@@ -140,8 +140,12 @@ check('a dead mic is exact zeros, a live one any sound', /level > 1e-5/.test(rec
 check('a soft note first, in the earbuds’ ordinary mode', /await chime\('opening'\)\s+releaseOutput\(\)[\s\S]{0,600}recording = await record\(/.test(turn), true)
 check('nothing plays while they switch', /releaseOutput\(\)\s+if \(cancelled\) return null\s+await sleep\(120\)/.test(turn), true)
 /* Then: "add a chime to tell me when [it] is ready for me to speak." */
-check('"talk now" once the mic delivers sound', /recording\.live, sleep\(LIVE_WAIT_MS\)[\s\S]{0,700}note\(`microphone live after \$\{liveMs\}ms`\)[\s\S]{0,500}await chime\('listen'\)/.test(turn), true)
-check('from an output opened after the switch, not through it', /note\(`microphone live after \$\{liveMs\}ms`\)[\s\S]{0,500}wakeOutput\(\)\s+await chime\('listen'\)/.test(turn), true)
+check('"talk now" once the mic delivers sound', /recording\.live, sleep\(LIVE_WAIT_MS\)[\s\S]{0,700}note\(`microphone live after \$\{liveMs\}ms`\)[\s\S]{0,1200}await chime\('listen'\)/.test(turn), true)
+check('from an output opened after the switch, not through it', /note\(`microphone live after \$\{liveMs\}ms`\)[\s\S]{0,1200}wakeOutput\(liveMs < NO_SWITCH_MS\)\s+await chime\('listen'\)/.test(turn), true)
+/* Live at 164ms, "talk now" at 1090ms: 450 of them waiting for an output
+   that had never gone to sleep. */
+check('with no wake wait when no earbuds switched', /export const NO_SWITCH_MS = 400\b/.test(turn) && /woke: stillAwake \? Date\.now\(\) - WAKE_MS : Date\.now\(\)/.test(earcons), true)
+check('under the half second WirePlumber waits before switching earbuds', Number(/export const NO_SWITCH_MS = (\d+)/.exec(turn)?.[1]) < 500, true)
 check('and speech counts only after it', /await chime\('listen'\)\s+await sleep\(READY_TAIL_MS\)[\s\S]{0,150}armed = true\s+recording\.arm\(\)/.test(turn), true)
 check('only one chime before the mic is on', (turn.slice(turn.indexOf('async function listen('), turn.indexOf('recording = await record(')).match(/await chime\(/g) ?? []).length, 1)
 check('and sound stays on once it closes', /stopListening = null[\s\S]{0,300}wakeOutput\(\)/.test(turn), true)

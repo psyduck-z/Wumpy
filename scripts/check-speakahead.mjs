@@ -286,7 +286,13 @@ check('no chime when the words are sent', /chime\('sent'\)/.test(turn) || 'sent'
 }
 
 /* The gesture. */
-check('a double report of one pinch is one pinch', /if \(after < SAME_GESTURE_MS\) \{/.test(turn), true)
+check('a double report of one pinch is one pinch', /if \(now - startedAt < SAME_GESTURE_MS \|\| now - lastGesture < REPORTED_TWICE_MS\) \{/.test(turn), true)
+/* Logged: a pinch at 5s cancelled a turn whose earbuds' mic had not come on,
+   the turn waited out the mic until 9s, and the next pinch - 1.09s later,
+   meant to start again - was taken as another cancel. */
+check('a stop ends the wait for the mic at once', /Promise\.race\(\[recording\.live, sleep\(LIVE_WAIT_MS\)\.then\(\(\) => -1\), stopped\]\)/.test(turn) && /stopTicks\(\)\s+stopWaiting\(\)/.test(turn), true)
+check('and a pinch while it stops asks again', /if \(cancelled\) \{\s+note\('pinched again while it was stopping[^']*'\)\s+again = true/.test(turn), true)
+check('a deliberate second pinch is not a repeated report', Number(/export const REPORTED_TWICE_MS = (\d+)/.exec(turn)?.[1]) > 540 && Number(/export const REPORTED_TWICE_MS = (\d+)/.exec(turn)?.[1]) < 1090, true)
 check('within 1.2s', /export const SAME_GESTURE_MS = 1200/.test(turn), true)
 check('a pinch while it talks interrupts and listens', /stage === 'speaking' \|\| stage === 'thinking'\)\) \{\s+note\('interrupted: listening again'\)\s+again = true/.test(turn), true)
 check('and stops the answer being written', /if \(depsRef\.current\.streaming\(\)\) depsRef\.current\.stop\(\)/.test(turn), true)

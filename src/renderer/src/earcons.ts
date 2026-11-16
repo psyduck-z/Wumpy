@@ -33,8 +33,12 @@ export const WAKE_MS = 450
 
 let out: { context: AudioContext; keep: AudioBufferSourceNode; woke: number } | null = null
 
-/** Opens the turn's output and keeps it awake. Called when a turn starts. */
-export function wakeOutput(): void {
+/**
+ * Opens the turn's output and keeps it awake. Called when a turn starts.
+ * `stillAwake` when the device was playing a moment ago and nothing has
+ * switched it since, so the first sound need not wait WAKE_MS for it.
+ */
+export function wakeOutput(stillAwake = false): void {
   if (out) return
   try {
     /* 'playback': larger buffers, so a busy moment on the page is not a
@@ -48,7 +52,7 @@ export function wakeOutput(): void {
     keep.loop = true
     keep.connect(context.destination)
     keep.start()
-    out = { context, keep, woke: Date.now() }
+    out = { context, keep, woke: stillAwake ? Date.now() - WAKE_MS : Date.now() }
   } catch {
     /* no sound device: every sound below is skipped */
   }

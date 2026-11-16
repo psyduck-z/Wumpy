@@ -73,6 +73,9 @@ export const LIVE_WAIT_MS = 9000
  */
 export const READY_TAIL_MS = 150
 
+/** A mic live sooner than this did not switch the earbuds (see listen()). */
+export const NO_SWITCH_MS = 400
+
 /**
  * How long a pause ends what you are saying. It was 1.3s, all of it spent
  * waiting after the last word before anything else could start; a second
@@ -89,6 +92,14 @@ export const END_PAUSE_MS = 1000
  */
 export const SAME_GESTURE_MS = 1200
 
+/**
+ * The same, after a pinch that stopped a turn: a report repeated this soon
+ * is one pinch, and one after it is someone asking again. Shorter than
+ * SAME_GESTURE_MS because there is no question being cut off here - and
+ * logged, a deliberate second pinch came 1.09s after the one that stopped.
+ */
+export const REPORTED_TWICE_MS = 800
+
 /** After talking, how long quiet must last before the typing starts again. */
 const TYPING_AGAIN_MS = 1500
 
@@ -100,6 +111,8 @@ export function useVoiceTurn(deps: Deps): void {
     let busy = false
     let cancelled = false
     let stopListening: (() => void) | null = null
+    /** Ends the wait for a microphone to come on, when the turn is stopped. */
+    let stopWaiting: () => void = () => {}
     let stopSound: (() => void) | null = null
     /** The loudest the mic got in the last listen, to say WHY nothing was heard. */
     let lastPeak = 0
@@ -357,7 +370,14 @@ export function useVoiceTurn(deps: Deps): void {
         () => showVoice({ detail: 'Waiting for the earbuds’ microphone - Bluetooth is slow to switch it on…' }),
         1500
       )
-      const liveMs = await Promise.race([recording.live, sleep(LIVE_WAIT_MS).then(() => -1)])
+      /* A pinch while the earbuds are still switching ends the wait too. It
+         used to run its whole LIVE_WAIT_MS: logged, a pinch at 5s cancelled
+         a turn whose mic had not come on, the turn went on waiting for that
+         mic until 9s, and the pinch after - meant to start again - found it
+         still busy and cancelled it a second time. */
+      const stopped = new Promise<number>((resolve) => (stopWaiting = () => resolve(-2)))
+      const liveMs = await Promise.race([recording.live, sleep(LIVE_WAIT_MS).then(() => -1), stopped])
+      stopWaiting = () => {}
       clearTimeout(slow)
       if (cancelled) {
         recording.stop()
@@ -378,8 +398,15 @@ export function useVoiceTurn(deps: Deps): void {
       /* Speech counts once the chime is over, so a chime that reaches the
          mic is not taken for the first word, and the pause that ends the
          turn is not started by it. The recording itself runs from the
-         moment the mic opened: nothing said over the chime is lost. */
-      wakeOutput()
+         moment the mic opened: nothing said over the chime is lost.
+
+         A mic live this soon switched nothing: earbuds take longer than
+         this to go into headset mode (WirePlumber alone waits half a second
+         before it starts). So the output closed a moment ago is the same
+         device, still awake, and "talk now" need not wait for it to wake -
+         measured on the MacBook's own mic, live at 164ms and "talk now" at
+         1090ms, 450 of them that wait. */
+      wakeOutput(liveMs < NO_SWITCH_MS)
       await chime('listen')
       await sleep(READY_TAIL_MS)
       if (cancelled) {
@@ -389,6 +416,7 @@ export function useVoiceTurn(deps: Deps): void {
       }
       armed = true
       recording.arm()
+      note(`talk now: chimed and listening ${Date.now() - opened}ms after the mic was asked for`)
       showVoice({ stage: 'listening', level: 0, detail: prompt })
 
       const giveUp = setTimeout(() => {
@@ -675,6 +703,7 @@ export function useVoiceTurn(deps: Deps): void {
       if (!busy) return
       cancelled = true
       stopTicks()
+      stopWaiting()
       stopListening?.()
       stopSound?.()
       speaker?.stop()
@@ -721,14 +750,26 @@ export function useVoiceTurn(deps: Deps): void {
         })
     }
 
+    /** When the last gesture that counted came. */
+    let lastGesture = 0
     const off = window.wumpy.voice.onTurn(() => {
+      const now = Date.now()
       if (!busy) {
+        lastGesture = now
         begin()
         return
       }
-      const after = Date.now() - startedAt
-      if (after < SAME_GESTURE_MS) {
-        note(`a second gesture ${after}ms after the first, taken as the same one`)
+      const after = Math.min(now - startedAt, now - lastGesture)
+      if (now - startedAt < SAME_GESTURE_MS || now - lastGesture < REPORTED_TWICE_MS) {
+        note(`a second gesture ${after}ms after the last, taken as the same one`)
+        return
+      }
+      lastGesture = now
+      /* Already stopping, from the pinch before: this one is asking again,
+         so it listens again as soon as the stopped turn has wound down. */
+      if (cancelled) {
+        note('pinched again while it was stopping: listening again once it has')
+        again = true
         return
       }
       /*
