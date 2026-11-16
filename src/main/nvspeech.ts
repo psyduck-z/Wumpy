@@ -72,15 +72,26 @@ export const BOOSTED_WORDS = [
 ]
 
 /*
- * Ray, neutral: chosen by ear from `wumpy --voice-samples` - "I'll go with
- * neutral Ray" - the deepest and most even of Magpie's men. Jason, Leo and
- * Ray are its American English men, each with moods (Diego and Pascal speak
- * English with a Spanish and a French accent); `wumpy --speech-check` lists
- * them all, asking the service rather than trusting this.
+ * Jason, neutral: chosen by ear, twice. From `wumpy --voice-samples`, Ray,
+ * neutral - then, after a day of him, "I want to switch back to Jason
+ * neutral, because I think Ray's intonation is kind of weird". Jason, Leo
+ * and Ray are Magpie's American English men, each with moods (Diego and
+ * Pascal speak English with a Spanish and a French accent); `wumpy
+ * --speech-check` lists them all, asking the service rather than trusting
+ * this.
  */
-export const DEFAULT_VOICE = 'Magpie-Multilingual.EN-US.Ray.Neutral'
-/** The defaults before it, Aria then Jason: a settings file naming one was never a choice. */
-export const OLD_DEFAULT_VOICES = ['Magpie-Multilingual.EN-US.Aria', 'Magpie-Multilingual.EN-US.Jason']
+export const DEFAULT_VOICE = 'Magpie-Multilingual.EN-US.Jason.Neutral'
+/** The defaults before it, in order: a settings file naming one was never a choice. */
+export const OLD_DEFAULT_VOICES = [
+  'Magpie-Multilingual.EN-US.Aria',
+  'Magpie-Multilingual.EN-US.Jason',
+  'Magpie-Multilingual.EN-US.Ray.Neutral'
+]
+/** Answers' speed: "can you make Jason speak a little faster?" - again. */
+export const DEFAULT_RATE = 1.25
+export const OLD_DEFAULT_RATES = [1.15]
+/** What the move to the voice above is remembered by, so it happens once. */
+export const VOICE_CHOICE = 'jason-neutral-1.25'
 const TTS_RATE = 22050
 
 /** One key, borrowed from the rotation for one call. */

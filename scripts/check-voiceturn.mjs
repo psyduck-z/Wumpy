@@ -37,7 +37,7 @@ for (const said of ['', 'maybe', 'what does it do', 'yes but first check the fol
    and sends nothing, anything else is the next question. */
 for (const said of ['', 'Mm-hmm.', 'Hmm.', 'Uh-huh', 'Mhm', 'um', 'Oh.', 'mm mm'])
   check(`"${said}" over an answer: it carries on`, I.interruption(said), 'nothing')
-for (const said of ['Stop.', 'Wait', 'Okay, stop.', 'Never mind', 'stop talking', 'Hold on.', 'Stop please', "That's enough", 'Stop, Ray.'])
+for (const said of ['Stop.', 'Wait', 'Okay, stop.', 'Never mind', 'stop talking', 'Hold on.', 'Stop please', "That's enough", 'Stop, Ray.', 'Stop, Jason.'])
   check(`"${said}" over an answer: it stops`, I.interruption(said), 'stop')
 for (const said of ['Stop the music', 'Wait, what about tomorrow?', 'Actually make it three', 'Hmm, what about Paris?', 'okay', 'yes'])
   check(`"${said}" over an answer: the next question`, I.interruption(said), 'words')

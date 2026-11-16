@@ -80,6 +80,34 @@ check('an italic word inside a sentence still is', ready('That is _really_ big.'
   check('and what was said early is what the finished answer starts with', final.slice(0, live.length), live)
 }
 
+/* "The moment it starts writing, make the text-to-speech start": the
+   digits of pi came as one sentence of 600 characters, and nothing of a
+   sentence was said until it ended - 45 seconds. Written a word at a time,
+   as a model writes it. */
+{
+  const digits = 'three one four one five nine two six five three five eight nine seven nine three two three eight four six two six four three'.split(' ')
+  const answer = `Sure, the first twenty five digits of pi are ${digits.join(', ')}.`
+  const words = answer.split(' ')
+  let firstAt = -1
+  let steady = true
+  let said = []
+  for (let i = 1; i <= words.length; i++) {
+    const now = ready(words.slice(0, i).join(' '), false)
+    if (now.length && firstAt < 0) firstAt = words.slice(0, i).join(' ').length
+    if (JSON.stringify(now.slice(0, said.length)) !== JSON.stringify(said)) steady = false
+    said = now
+  }
+  const final = ready(answer, true)
+  check(`a long run-on sentence starts being said early (after ${firstAt} of ${answer.length} characters)`, firstAt > 0 && firstAt < 120, true)
+  check('and what was said stays said as the sentence goes on', steady, true)
+  check('the finished answer is the same pieces, and all of them', final.slice(0, said.length), said)
+  check('every word is said once', final.join(' ').replace(/\s+/g, ' '), answer)
+  const runOn = 'word '.repeat(80).trim()
+  check('with no commas at all, still in pieces', S.pieces(runOn).length > 1 && S.pieces(runOn).every((p) => p.length <= S.RUN_ON + 10), true)
+  check('an ordinary sentence is left whole', S.pieces('Sure, it has sixteen gigabytes of memory, which is plenty for this.'), ['Sure, it has sixteen gigabytes of memory, which is plenty for this.'])
+  check('a long one cut where a voice pauses anyway', S.pieces('The answer depends on what you mean by fast, since a laptop on battery, a laptop on power and a desktop all behave differently here.')[0], 'The answer depends on what you mean by fast, since a laptop on battery,')
+}
+
 /* --------------------------------------------------------- the batching */
 
 check('the first request is one sentence, for the first sound', S.nextBatch(['A.', 'B.', 'C.'], true), ['A.'])
@@ -220,9 +248,10 @@ check('only a service that has gone cold', /cold\.hear \? one\('hearing'/.test(m
 check('cold being a minute without an answer', /export const WARM_FOR_MS = 60_000/.test(nv) && /answered\(Client\)\s+resolve\(response\)/.test(nv), true)
 check('a dropped connection is cold again', /clients\.delete\(Client\)\s+answeredAt\.delete\(Client\)/.test(nv), true)
 /* "Can you set the voice to a male?" Every settings file named Aria. */
-check('a male voice by default: Ray, neutral, as chosen', /export const DEFAULT_VOICE = 'Magpie-Multilingual\.EN-US\.Ray\.Neutral'/.test(nv) && /speakVoice: 'Magpie-Multilingual\.EN-US\.Ray\.Neutral'/.test(read('src/shared/defaults.ts')), true)
-check('and whoever is still on an old default is moved to it, once', /OLD_DEFAULT_VOICES = \['Magpie-Multilingual\.EN-US\.Aria', 'Magpie-Multilingual\.EN-US\.Jason'\]/.test(nv), true)
-check('and a saved Aria or Jason moved to it, once', /if \(settings\.get\('movedToRayNeutral'\)\) return/.test(main) && /moveOffGoogle\(\)\s+moveToRayNeutral\(\)/.test(main), true)
+check('a male voice by default: Jason, neutral, as chosen', /export const DEFAULT_VOICE = 'Magpie-Multilingual\.EN-US\.Jason\.Neutral'/.test(nv) && /speakVoice: 'Magpie-Multilingual\.EN-US\.Jason\.Neutral'/.test(read('src/shared/defaults.ts')), true)
+check('and whoever is still on an old default is moved to it, once', /'Magpie-Multilingual\.EN-US\.Aria',\s+'Magpie-Multilingual\.EN-US\.Jason',\s+'Magpie-Multilingual\.EN-US\.Ray\.Neutral'/.test(nv), true)
+check('and a little faster again, from the old default speed', /DEFAULT_RATE = 1\.25/.test(nv) && /OLD_DEFAULT_RATES = \[1\.15\]/.test(nv) && /speakRate: 1\.25,/.test(read('src/shared/defaults.ts')), true)
+check('a saved old default, voice or speed, moved to the choice, once', /if \(settings\.get\('voiceChoice'\) === VOICE_CHOICE\) return/.test(main) && /moveOffGoogle\(\)\s+moveToChosenVoice\(\)/.test(main), true)
 check('wumpy --speech-check lists the voices on offer', /listVoices\(k\)/.test(main), true)
 check('wumpy --speech-check measures what priming saves', /hearIt\('hearing it, primed'\)/.test(main), true)
 check('the pieces go to the panel as they come', /e\.sender\.send\(IPC\.voiceAudio/.test(main), true)
@@ -428,8 +457,18 @@ check('a long wait is not a long clip', /if \(Date\.now\(\) - earSince > FRESH_E
   let worst = 0
   for (let i = 1000; i < quick.length - 1000; i += 220) worst = Math.max(worst, Math.abs(rms(quick, i, i + 220) / rms(voice, 0, n) - 1))
   check(`no window comes out loud or hollow (${worst.toFixed(2)})`, worst < 0.25, true)
+  {
+    /* The speed now chosen: "can you make Jason speak a little faster?" */
+    const quicker = stretched(1.25)
+    const r = +(n / quicker.length).toFixed(2)
+    check(`a quarter faster is a quarter shorter (${r})`, Math.abs(r - 1.25) < 0.03, true)
+    check(`still at the same pitch (${pitch(quicker)}Hz)`, Math.abs(pitch(quicker) - pitch(voice)) <= 2, true)
+    let worse = 0
+    for (let i = 1000; i < quicker.length - 1000; i += 220) worse = Math.max(worse, Math.abs(rms(quicker, i, i + 220) / rms(voice, 0, n) - 1))
+    check(`and still no window loud or hollow (${worse.toFixed(2)})`, worse < 0.25, true)
+  }
   check('as made, it is left alone', new T.Stretcher(1).push(voice) === voice, true)
-  check('it is on by default, a little', /speakRate: 1\.1\d?,/.test(read('src/shared/defaults.ts')), true)
+  check('it is on by default, a little', /speakRate: 1\.\d+,/.test(read('src/shared/defaults.ts')), true)
   check('every streamed piece goes through it', /this\.schedule\(stretch\.push\(floats\)\)/.test(speaker) && /if \(got\) this\.schedule\(stretch\.flush\(\)\)/.test(speaker), true)
   check('and the slower ways of speaking keep up', /audio\.playbackRate = quick \? Math\.max\(1\.2, currentSpeed\(\)\) : currentSpeed\(\)/.test(turn), true)
   check('the setting is read when a conversation starts', /setSpeed\(s\.speakRate \?\? 1\)/.test(turn), true)
@@ -440,7 +479,10 @@ check('one line of character, on screen and in the ear', /TONE =\s+'- Tone: a sh
 check('and the answer first, since it is spoken while written', /Lead with the answer itself/.test(main), true)
 /* Read aloud, "40%" and "20°C" are left to the voice to guess at, a misheard
    word is answered literally, and every question back costs a pinch. */
-check('in the ear, things written the way they are said', /Write everything the way it is said/.test(main), true)
+check('numbers as digits, which the voice reads right and are shorter to write', /Write numbers as digits/.test(main) && /never spelled out/.test(main), true)
+check('but units in words, which it does not', /"64 gigabytes", not "64 GB"/.test(main), true)
+check('and the voice\'s name is not part of the question', /Your voice is called Jason/.test(main), true)
+check('how numbers are read is checked against the voice', /NUMBER_SENTENCES = \[/.test(main), true)
 check('a misheard word answered as meant, read by how it sounds', /Read it by how it sounds and by what you were just talking about/.test(main) && /"a specie" for "a PC"/.test(main), true)
 check('every recogniser can be compared, on sentences and on real speech', /async function hearingCheck\(\)/.test(main) && /if \(compareHearing\) void compareOn\(audio, heard\.text, heard\.ms\)/.test(main), true)
 check('and the turn never waits on the comparison', /const heard = await recognize\(audio, borrowed\)\s+if \(compareHearing\) void compareOn/.test(main), true)

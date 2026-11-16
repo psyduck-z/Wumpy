@@ -127,7 +127,7 @@ where its installer put it, on Windows too). On Windows it is
 nothing to `PATH`, so a bare `wumpy` is not found there.
 
 - **Hearing** is NVIDIA's Parakeet and **speaking** is NVIDIA's Magpie, in
-  its male voice Ray, neutral (`wumpy --speech-check` lists the others,
+  its male voice Jason, neutral (`wumpy --speech-check` lists the others,
   `wumpy --voice-samples` lets you hear the men), on the
   same NVIDIA keys as chat (`/key nvidia <key1> <key2>`), from the same
   rotation. Each key is treated as its own account with its own rate limit, so
@@ -152,7 +152,7 @@ nothing to `PATH`, so a bare `wumpy` is not found there.
   after two minutes with nobody talking. One low note twice means the mic
   never came on. A hold the earbuds report twice in quick succession counts
   once.
-- **Ray talks fifteen percent faster than Magpie makes him**, at the same
+- **Jason talks a quarter faster than Magpie makes him**, at the same
   pitch: Magpie ignores SSML's speaking rate, so the sound is time-stretched
   as it arrives (`speakRate` in settings.json; 1 is as made).
 - **It speaks while it writes.** Each sentence is said as soon as it is

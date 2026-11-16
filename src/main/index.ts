@@ -58,9 +58,12 @@ import { folderFacts, resolveUserFolders } from './folders'
 import { ContextStore } from './context'
 import { Speech } from './speech'
 import {
+  DEFAULT_RATE,
   DEFAULT_VOICE,
   HEARERS,
+  OLD_DEFAULT_RATES,
   OLD_DEFAULT_VOICES,
+  VOICE_CHOICE,
   TTS_RATE,
   closeSpeech,
   coldSpeech,
@@ -316,13 +319,20 @@ function moveOffGoogle(): void {
   }
 }
 
-/** An old default voice to Ray, neutral - once. See movedToRayNeutral. */
-function moveToRayNeutral(): void {
-  if (settings.get('movedToRayNeutral')) return
+/** An old default voice and speed to the chosen ones - once. See voiceChoice. */
+function moveToChosenVoice(): void {
+  if (settings.get('voiceChoice') === VOICE_CHOICE) return
   const was = settings.get('speakVoice')
   const onOld = !was || OLD_DEFAULT_VOICES.includes(was)
-  settings.patch({ movedToRayNeutral: true, ...(onOld ? { speakVoice: DEFAULT_VOICE } : {}) })
+  const rate = settings.get('speakRate')
+  const onOldRate = !rate || OLD_DEFAULT_RATES.includes(rate)
+  settings.patch({
+    voiceChoice: VOICE_CHOICE,
+    ...(onOld ? { speakVoice: DEFAULT_VOICE } : {}),
+    ...(onOldRate ? { speakRate: DEFAULT_RATE } : {})
+  })
   if (onOld) console.log(`[wumpy] voice: ${DEFAULT_VOICE}, from ${was || 'the default'}`)
+  if (onOldRate) console.log(`[wumpy] voice speed: ${DEFAULT_RATE}, from ${rate || 'the default'}`)
 }
 
 function resolveModel(): string | null {
@@ -479,8 +489,12 @@ function channelFacts(handsFree: boolean): string[] {
     '- Lead with the answer itself: "Five." - not "The answer to two plus three is five." Your first',
     '  sentence is spoken while you are still writing the rest, so make it the one that matters.',
     '  No filler, no "Great question", no repeating the question back.',
-    '- Write everything the way it is said: "about twenty degrees", "forty percent", "half past',
-    '  three" - no symbols, units or abbreviations. Round numbers unless the exact figure is the point.',
+    '- Write numbers as digits - "3.14159", "64", "2026", "15%", "$1,200" - never spelled out:',
+    '  the voice reads digits correctly, and they are far shorter to write. Units and other',
+    '  abbreviations in words: "64 gigabytes", not "64 GB". Round numbers unless the exact figure is',
+    '  the point; when they ask for many digits or a long list, give it in one compact sentence.',
+    '- Your voice is called Jason, so they may call you that, or something speech recognition',
+    '  made of it: it is not part of the question.',
     '- Their words came through speech recognition on earbuds and are often a little off,',
     '  technical words most: "a specie" for "a PC", "thing pad" for "ThinkPad", "a clean bottle"',
     '  for "a clear bottle". Read it by how it sounds and by what you were just talking about, as',
@@ -2319,7 +2333,7 @@ void app.whenReady().then(async () => {
   /* Before anything reads the model: the panel, the tray and the status all
      ask for it during this same boot. */
   moveOffGoogle()
-  moveToRayNeutral()
+  moveToChosenVoice()
   chats = new ChatStore()
   inputHistory = new InputHistory()
   keys = new KeyStore()
@@ -2641,6 +2655,14 @@ const CHECK_SENTENCES = [
   'Search it up and tell me how much a terabyte of RAM costs.'
 ]
 
+const NUMBER_SENTENCES = [
+  'The first 25 digits of pi are 3.141592653589793238462643.',
+  'It has 64 GB of RAM and a 1 TB SSD.',
+  'That costs about $1,200, or 15% less than last year.',
+  'In 2026 the meeting is at 3:30 pm, for 45 minutes.',
+  'Version 5.2 is 2.5 times faster than 4.0.'
+]
+
 function wordsOf(text: string): string[] {
   return text.toLowerCase().replace(/-/g, ' ').replace(/[^a-z0-9' ]/g, ' ').split(/\s+/).filter(Boolean)
 }
@@ -2692,6 +2714,17 @@ async function hearingCheck(): Promise<void> {
         console.log(`[wumpy] hearing check: "${said}" could not be made (${String(err).slice(0, 100)})`)
       }
     }
+  /* How Magpie reads numbers written as digits, heard back by Parakeet:
+     "I've never seen it once write out a number... tell it to do that",
+     which only works if the voice says them right. */
+  for (const said of NUMBER_SENTENCES) {
+    const k = await cloud.speechKey('magpie')
+    const back = k ? await synthesize(said, k, settings.get('speakVoice') || DEFAULT_VOICE).catch(() => null) : null
+    const clip = back ? pcmFromWav(back.wav) : null
+    const h = clip ? await cloud.speechKey('parakeet') : null
+    const heard = clip && h ? await recognize(wavFrom(downsample(clip.pcm, clip.sampleRate, 16000), 16000), h).catch(() => null) : null
+    console.log(`[wumpy] hearing check: numbers: "${said}" is said as "${heard?.text ?? '?'}"`)
+  }
   const total = clips.reduce((n, c) => n + wordsOf(c.said).length, 0)
   console.log(`[wumpy] hearing check: ${clips.length} clips, ${total} words, each recogniser in turn`)
   for (const h of HEARERS) {

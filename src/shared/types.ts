@@ -669,13 +669,14 @@ export interface WumpySettings {
    */
   movedOffGoogle: boolean
   /**
-   * The spoken voice moved to Ray, neutral, once, from Aria or Jason, the
-   * defaults before it: "can you set the voice to a male?", then "I'll go
-   * with neutral Ray". Every settings file names the default it started on,
-   * so a new default alone would reach nobody. A flag rather than a check on
-   * every read, so a voice chosen later stays.
+   * The voice and speed a settings file was last moved to (VOICE_CHOICE):
+   * "can you set the voice to a male?", "I'll go with neutral Ray", "switch
+   * back to Jason neutral... speak a little faster". Every settings file
+   * names the default it started on, so a new default alone would reach
+   * nobody. Remembered rather than checked on every read, so a voice or
+   * speed chosen later by hand stays.
    */
-  movedToRayNeutral: boolean
+  voiceChoice: string
   /** Let the model propose opening a page in the real browser. */
   browserEnabled: boolean
   /**

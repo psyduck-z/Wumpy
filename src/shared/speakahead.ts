@@ -26,6 +26,49 @@ export function sentences(text: string): string[] {
 }
 
 /**
+ * A sentence too long to wait for, in pieces: "I asked... list out the
+ * first 25 digits of pi... once it starts writing... it won't stop. Like,
+ * it doesn't have much pauses. So the moment it starts writing, make the
+ * text-to-speech start." The digits came as one sentence of 600 characters,
+ * and nothing is said of a sentence until it ends - 45 seconds, there.
+ *
+ * Cut where a voice pauses anyway, at the first comma, semicolon, colon or
+ * dash at least PIECE_MIN characters in; and, with none of those, at the
+ * first space RUN_ON characters in. Decided from the start of the sentence
+ * onwards only, so a sentence still being written is cut exactly where the
+ * finished one will be, and what has been said stays said.
+ */
+export const PIECE_MIN = 60
+export const RUN_ON = 160
+
+export function pieces(sentence: string): string[] {
+  const out: string[] = []
+  let rest = sentence
+  for (;;) {
+    const clause = /[,;:\u2014\u2013]\s+/g
+    clause.lastIndex = PIECE_MIN
+    const at = clause.exec(rest)
+    const space = rest.length > RUN_ON ? rest.indexOf(' ', RUN_ON) : -1
+    /* Whichever comes first: a comma still waiting for the space after it
+       can only be at the very end, past any space already there, so the
+       choice never changes as the sentence goes on. */
+    const cuts = [at ? at.index + 1 : -1, space].filter((c) => c > 0)
+    if (!cuts.length) break
+    const cut = Math.min(...cuts)
+    out.push(rest.slice(0, cut).trim())
+    rest = rest.slice(cut).trim()
+    if (!rest) return out
+  }
+  out.push(rest)
+  return out
+}
+
+/** The answer's sentences, the long ones in pieces: what is handed to the voice. */
+export function spokenPieces(text: string): string[] {
+  return sentences(text).flatMap(pieces)
+}
+
+/**
  * The sentences of `markdown` that can be spoken now: every finished one
  * while it is still being written, and all of them once it is done. Within
  * the same length as a spoken answer is held to (see speakable), so the
@@ -40,8 +83,10 @@ export function readyToSay(markdown: string, done: boolean, limit = 600): string
     markdown = markdown.slice(0, markdown.lastIndexOf('```'))
     done = true
   }
-  if (done) return sentences(speakable(markdown, limit))
-  const all = sentences(speakable(markdown, Number.MAX_SAFE_INTEGER))
+  if (done) return spokenPieces(speakable(markdown, limit))
+  /* The last piece waits: the end of a sentence still being written, or a
+     finished one that may yet run on ("3." may be "3.50"). */
+  const all = spokenPieces(speakable(markdown, Number.MAX_SAFE_INTEGER))
   all.pop()
   const ready: string[] = []
   let length = 0
