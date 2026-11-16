@@ -264,7 +264,7 @@ let compareHearing = false
 
 async function compareOn(audio: Uint8Array, heard: string, ms: number): Promise<void> {
   const lines = await Promise.all(
-    HEARERS.slice(1).map(async (h) => {
+    HEARERS.filter((h) => h.compare).map(async (h) => {
       const k = await cloud.speechKey('parakeet')
       if (!k) return `${h.name}: no key free`
       try {

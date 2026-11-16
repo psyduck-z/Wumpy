@@ -1171,6 +1171,9 @@ export function useVoiceTurn(deps: Deps): void {
              and a sound in the middle of that switch can be lost. */
           if (ending !== 'failed') await chime('done')
           await closeMic()
+          /* A gesture's end said so already (see cancel); after two quiet
+             minutes or a failure, it is said here, once the mic is let go. */
+          if (!cancelled) note('ended')
           if (ending !== 'failed')
             showVoice({
               stage: 'done',
