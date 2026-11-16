@@ -1,0 +1,14 @@
+# Linux line endings in every checkout, Windows too. Git on Windows turns
+# LF into CRLF by default, and the checks read source files and match
+# across line breaks - "1 cloud checks FAILED" on GitHub's Windows machine
+# was `\n` meeting `\r\n`, not anything wrong with the app. PowerShell,
+# Node and every editor here read LF fine.
+* text=auto eol=lf
+
+# cmd.exe is the one reader that wants CRLF.
+*.cmd text eol=crlf
+*.bat text eol=crlf
+
+*.png binary
+*.ico binary
+*.exe binary

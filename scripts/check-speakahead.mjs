@@ -204,6 +204,13 @@ check('a failed channel is replaced', /dropClient\(Client, err\.code\)/.test(nv)
 check('speech streams as it is made', /SynthesizeOnline\(metadata/.test(nv), true)
 check('and falls back to one piece where it cannot', /onlineRefused = true/.test(nv), true)
 check('connections open when the gesture comes', /function startVoiceTurn[\s\S]{0,700}warmSpeech\(\)/.test(main), true)
+/* The first request on a connection was 1.8-2.0s to hear 5.7s of speech;
+   primed while the person talked, 0.9-1.3s. */
+check('and each service is primed while the person talks', /function startVoiceTurn[\s\S]{0,900}void primeSpeech\(\)/.test(main), true)
+check('only a service that has gone cold', /cold\.hear \? one\('hearing'/.test(main) && /cold\.talk \? one\('talking'/.test(main), true)
+check('cold being a minute without an answer', /export const WARM_FOR_MS = 60_000/.test(nv) && /answered\(Client\)\s+resolve\(response\)/.test(nv), true)
+check('a dropped connection is cold again', /clients\.delete\(Client\)\s+answeredAt\.delete\(Client\)/.test(nv), true)
+check('wumpy --speech-check measures what priming saves', /hearIt\('hearing it, primed'\)/.test(main), true)
 check('the pieces go to the panel as they come', /e\.sender\.send\(IPC\.voiceAudio/.test(main), true)
 check('wumpy --speech-check measures it from here', /argv\.includes\('--speech-check'\)/.test(main), true)
 check('a voice turn has a first-token watchdog', /quickerModel\(on, settings\.get\('latencies'\)/.test(main), true)
@@ -289,6 +296,11 @@ check('then a new turn begins', /if \(again\) \{\s+again = false\s+begin\(\)/.te
 /* The tone. */
 check('one line of character, on screen and in the ear', /TONE =\s+'- Tone: a sharp, easygoing friend/.test(main), true)
 check('and the answer first, since it is spoken while written', /Lead with the answer itself/.test(main), true)
+/* Read aloud, "40%" and "20°C" are left to the voice to guess at, a misheard
+   word is answered literally, and every question back costs a pinch. */
+check('in the ear, things written the way they are said', /Write everything the way it is said/.test(main), true)
+check('a misheard word answered as meant', /Answer what they most likely meant/.test(main), true)
+check('and no question back unless it must', /replying means",\s+'  pinching again/.test(main), true)
 
 console.log(`\n${failures === 0 ? 'all' : `${failures} FAILED of the`} speak-ahead checks${failures ? '' : ' correct'}`)
 process.exit(failures ? 1 : 0)

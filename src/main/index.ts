@@ -59,10 +59,15 @@ import {
   DEFAULT_VOICE,
   TTS_RATE,
   closeSpeech,
+  coldSpeech,
+  pcmFromWav,
+  primeHearing,
+  primeTalking,
   recognize,
   synthesize,
   synthesizeStream,
-  warmSpeech
+  warmSpeech,
+  wavFrom
 } from './nvspeech'
 import { VOICE_FIRST_TOKEN_MS, quickerModel } from '@shared/voicequick'
 import { holdMusic, releaseAllMusic, releaseMusic } from './music'
@@ -431,6 +436,13 @@ function channelFacts(handsFree: boolean): string[] {
     '- Lead with the answer itself: "Five." - not "The answer to two plus three is five." Your first',
     '  sentence is spoken while you are still writing the rest, so make it the one that matters.',
     '  No filler, no "Great question", no repeating the question back.',
+    '- Write everything the way it is said: "about twenty degrees", "forty percent", "half past',
+    '  three" - no symbols, units or abbreviations. Round numbers unless the exact figure is the point.',
+    '- Their words came through speech recognition and can be a little off ("a clean bottle" for',
+    '  "a clear bottle"). Answer what they most likely meant. If it makes no sense at all, say you',
+    "  didn't catch that, in a few words. Only ask back when you truly must: replying means",
+    '  pinching again. For the same reason, no closing offers ("Want me to...?") unless it is',
+    '  clearly the next step.',
     '- Commands still work. When the answer depends on this computer, propose ONE command as',
     '  usual. Its # line is what they hear as the question ("Can I <# line>?") and they answer',
     '  yes or no out loud - so write it as a short plain action: "# Check how full the disk is".',
@@ -2588,6 +2600,85 @@ async function speechCheck(): Promise<void> {
     const r = await synthesizeStream(long, k, voice, () => {})
     return `first sound ${r.firstMs}ms, all ${r.ms}ms, ${r.pieces} pieces${r.streamed ? '' : ' (not streamed)'}`
   })
+  /* And hearing, the other half of the wait: the long sentence as Magpie
+     said it, back through Parakeet at the rate the panel sends - how long a
+     transcript takes once the last word is in, and whether it came back
+     right. Twice, since the first request on a channel can be the slow one. */
+  const said = await (async () => {
+    const k = await cloud.speechKey('magpie')
+    return k ? synthesize(long, k, voice).catch(() => null) : null
+  })()
+  const clip = said ? pcmFromWav(said.wav) : null
+  if (!clip) {
+    console.log('[wumpy] speech check: hearing: no sentence to hear')
+    return
+  }
+  const wav = wavFrom(downsample(clip.pcm, clip.sampleRate, 16000), 16000)
+  const hearIt = async (label: string): Promise<void> => {
+    const k = await cloud.speechKey('parakeet')
+    if (!k) {
+      console.log(`[wumpy] speech check: ${label}: no key free`)
+      return
+    }
+    const started = Date.now()
+    try {
+      const r = await recognize(wav, k)
+      const right = r.text.toLowerCase().replace(/[^a-z ]/g, '') === long.toLowerCase().replace(/[^a-z ]/g, '')
+      console.log(
+        `[wumpy] speech check: ${label}: ${r.ms}ms for ${r.audioSeconds.toFixed(1)}s of speech, ` +
+          `${right ? 'word for word' : `as "${r.text}"`}`
+      )
+    } catch (err) {
+      console.log(`[wumpy] speech check: ${label}: failed after ${Date.now() - started}ms (${String(err)})`)
+    }
+  }
+  /* On a fresh connection, then on another fresh one primed the way a voice
+     turn primes it (see coldSpeech) - the difference is what priming saves. */
+  closeSpeech()
+  await warmSpeech()
+  await hearIt('hearing it, on a fresh connection')
+  closeSpeech()
+  await warmSpeech()
+  console.log(`[wumpy] speech check: priming: ${await primeSpeech()}`)
+  await hearIt('hearing it, primed')
+}
+
+/*
+ * The slow first request on a connection (see coldSpeech in nvspeech), spent
+ * while the person is still talking: a voice turn's transcript and its first
+ * spoken word each wait on one otherwise. A service that answered within the
+ * last minute is warm and left alone, so this costs a request only when it
+ * saves one's worth of waiting.
+ */
+async function primeSpeech(): Promise<string> {
+  const cold = coldSpeech()
+  const one = async (what: string, run: (k: NonNullable<Awaited<ReturnType<typeof cloud.speechKey>>>) => Promise<number>): Promise<string> => {
+    const k = await cloud.speechKey(what === 'hearing' ? 'parakeet' : 'magpie')
+    if (!k) return `${what}: no key free`
+    try {
+      return `${what} in ${await run(k)}ms`
+    } catch (err) {
+      return `${what} failed (${String(err)})`
+    }
+  }
+  const jobs = [
+    cold.hear ? one('hearing', primeHearing) : null,
+    cold.talk ? one('talking', (k) => primeTalking(k, settings.get('speakVoice') || DEFAULT_VOICE)) : null
+  ].filter((j): j is Promise<string> => j !== null)
+  return jobs.length ? (await Promise.all(jobs)).join(', ') : 'both warm already'
+}
+
+/** 16-bit mono PCM at another rate, by straight-line interpolation: plenty for a recogniser. */
+function downsample(pcm: Buffer, from: number, to: number): Buffer {
+  const input = new Int16Array(pcm.buffer, pcm.byteOffset, pcm.length >> 1)
+  const out = new Int16Array(Math.floor((input.length * to) / from))
+  for (let i = 0; i < out.length; i++) {
+    const at = (i * from) / to
+    const j = Math.floor(at)
+    const next = input[Math.min(j + 1, input.length - 1)]
+    out[i] = Math.round(input[j] + (next - input[j]) * (at - j))
+  }
+  return Buffer.from(out.buffer)
 }
 
 function startVoiceTurn(why: string): void {
@@ -2600,6 +2691,7 @@ function startVoiceTurn(why: string): void {
     void warmSpeech().then((ms) => {
       if (ms >= 0) console.log(`[wumpy] speech connections ready in ${ms}ms`)
     })
+    void primeSpeech().then((how) => console.log(`[wumpy] speech primed: ${how}`))
   }
   if (contents.isLoading()) {
     contents.once('did-finish-load', () => setTimeout(() => panel.send(IPC.voiceTurn, null), 900))

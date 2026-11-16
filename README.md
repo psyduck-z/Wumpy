@@ -80,8 +80,8 @@ o.bind("SUPER + SHIFT + D", "Wumpy", "wumpy --toggle")
 `wumpy --toggle` shows or hides the window, `wumpy --voice` starts a spoken
 turn (below), `wumpy --hidden` starts it in the tray and `wumpy --restart`
 restarts it on the chat it was on. `wumpy --speech-check` writes how long
-NVIDIA's voice takes from this machine and network to the log, without
-playing anything — worth running on a hotspot.
+NVIDIA's voice takes to speak and to hear, from this machine and network,
+to the log, without playing anything — worth running on a hotspot.
 
 What is different from Windows, on purpose:
 

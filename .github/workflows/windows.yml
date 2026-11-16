@@ -3,9 +3,10 @@
 # so this is how an installer comes out of an Omarchy laptop. The installer
 # is kept as the run's artifact (`gh run download` fetches it).
 #
-# The checks run here too, after the installer, so their results on Windows
-# are on record - the path checks only run where there is real PowerShell -
-# without holding the installer back.
+# The checks run here too, after the installer is saved, so their results
+# on Windows are on record - the path checks only run where there is real
+# PowerShell - without holding the installer back. A failure turns the run
+# red rather than hiding behind a passing step.
 name: windows
 
 on:
@@ -38,5 +39,4 @@ jobs:
           name: wumpy-windows
           path: dist/*-setup.exe
       - name: Checks, on Windows
-        continue-on-error: true
         run: npm run typecheck

@@ -114,6 +114,58 @@ function dropClient(Client: grpc.ServiceClientConstructor, code: number | undefi
   if (code !== grpc.status.UNAVAILABLE && code !== grpc.status.INTERNAL && code !== grpc.status.UNKNOWN) return
   clients.get(Client)?.close()
   clients.delete(Client)
+  answeredAt.delete(Client)
+}
+
+/*
+ * THE FIRST REQUEST ON A CONNECTION IS SLOW.
+ *
+ * Measured with `wumpy --speech-check` on fresh channels, already connected:
+ * 1.0-2.1s to hear 5.9s of speech the first time and 0.6s the next, and
+ * 1.5-1.7s for "Five." against 0.4s to the first sound after. Not the
+ * handshake, which had finished - NVIDIA's side, setting up the first call on
+ * a connection. In a voice turn the first request is the transcript of what
+ * was just said, and a phone's hotspot drops idle connections between turns,
+ * so this was waited out on nearly every turn, and again before the first
+ * word of the answer.
+ *
+ * So a turn primes each service while the person is still talking, with the
+ * smallest real request there is - a fifth of a second of silence to hear,
+ * one word to say - unless the service answered within WARM_FOR_MS and its
+ * connection is warm anyway.
+ */
+export const WARM_FOR_MS = 60_000
+const answeredAt = new Map<grpc.ServiceClientConstructor, number>()
+
+function answered(Client: grpc.ServiceClientConstructor): void {
+  answeredAt.set(Client, Date.now())
+}
+
+/** Which services would keep the person waiting on a cold connection. */
+export function coldSpeech(): { hear: boolean; talk: boolean } {
+  let services: Loaded
+  try {
+    services = load()
+  } catch {
+    return { hear: false, talk: false }
+  }
+  const cold = (Client: grpc.ServiceClientConstructor): boolean =>
+    !clients.has(Client) || Date.now() - (answeredAt.get(Client) ?? 0) > WARM_FOR_MS
+  return { hear: cold(services.asr), talk: cold(services.tts) }
+}
+
+/** A fifth of a second of silence, heard: the slow first request, spent early. */
+export async function primeHearing(borrowed: BorrowedKey): Promise<number> {
+  const started = Date.now()
+  await recognize(wavFrom(Buffer.alloc(6400), 16000), borrowed)
+  return Date.now() - started
+}
+
+/** One word, said and thrown away: the same, for the voice. */
+export async function primeTalking(borrowed: BorrowedKey, voice = DEFAULT_VOICE): Promise<number> {
+  const started = Date.now()
+  await synthesizeStream('Okay.', borrowed, voice, () => {})
+  return Date.now() - started
 }
 
 /**
@@ -143,6 +195,7 @@ export function warmSpeech(): Promise<number> {
 export function closeSpeech(): void {
   for (const client of clients.values()) client.close()
   clients.clear()
+  answeredAt.clear()
 }
 
 function call<Req, Res>(
@@ -168,7 +221,10 @@ function call<Req, Res>(
         if (err) {
           dropClient(Client, err.code)
           reject(new Error(`NVIDIA ${method}: ${err.details || err.message}`))
-        } else resolve(response)
+        } else {
+          answered(Client)
+          resolve(response)
+        }
       }
     )
   })
@@ -343,6 +399,7 @@ export async function synthesizeStream(
 
   if (streamed.ok) {
     borrowed.done(200)
+    answered(Client)
     if (pieces === 0) throw new Error('NVIDIA SynthesizeOnline returned no audio')
     return { pieces, firstMs, ms: Date.now() - started, streamed: true }
   }
