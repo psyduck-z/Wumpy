@@ -171,6 +171,9 @@ export const REPORTED_TWICE_MS = 800
  */
 export const UNANSWERED_ASKS = 4
 
+/** Talking at least this long that comes back as no words is said to have been missed. */
+export const MISSED_SENTENCE_MS = 900
+
 /** After talking, how long quiet must last before the typing starts again. */
 const TYPING_AGAIN_MS = 1500
 
@@ -619,9 +622,9 @@ export function useVoiceTurn(deps: Deps): void {
       return true
     }
 
-    type Words = { heard: string; text: string }
+    type Words = { heard: string; text: string; failed?: boolean }
 
-    /** A clip, transcribed: as heard, and as tidied for sending. Empty for no words or a failure. */
+    /** A clip, transcribed: as heard, and as tidied for sending. Empty for no words; `failed` when hearing it broke. */
     async function hearClip(blob: Blob, extension: string, onsetMs: number): Promise<Words> {
       try {
         const ready = await clipForSpeech(blob, extension, Math.max(0, onsetMs - PRE_ROLL_MS))
@@ -630,9 +633,16 @@ export function useVoiceTurn(deps: Deps): void {
         return { heard, text: (result.text || heard).trim() }
       } catch (err) {
         note(`it could not be heard: ${String(err)}`)
-        return { heard: '', text: '' }
+        return { heard: '', text: '', failed: true }
       }
     }
+
+    /**
+     * The last thing said that came back as no words: how long the talking
+     * was, and whether hearing it failed outright. In a conversation, saying
+     * nothing back to a whole sentence sounds like it is still thinking.
+     */
+    let unheard: { talkedMs: number; failed: boolean } | null = null
 
     /*
      * The next thing said: waits up to `waitMs` for someone to start, then
@@ -646,6 +656,7 @@ export function useVoiceTurn(deps: Deps): void {
      */
     async function listen(pauseMs: number, waitMs: number, prompt = ''): Promise<{ text: string; heard: string } | null> {
       idled = false
+      unheard = null
       if (cancelled || !ear) return null
       await speaker?.drain()
       if (cancelled || !ear) return null
@@ -713,6 +724,8 @@ export function useVoiceTurn(deps: Deps): void {
           if (words.heard) {
             heardAll = heardAll ? `${heardAll} ${words.heard}` : words.heard
             textAll = textAll ? `${textAll} ${words.text}` : words.text
+          } else {
+            unheard = { talkedMs: Math.max(0, talkedMs), failed: Boolean(words.failed) }
           }
         }
         if (cancelled) return null
@@ -721,6 +734,7 @@ export function useVoiceTurn(deps: Deps): void {
         note('they carried on talking: waiting for the rest')
       }
       if (!heardAll) stopTicks()
+      if (heardAll) unheard = null
       return heardAll ? { text: textAll, heard: heardAll } : null
     }
     /** Asks about whatever is waiting, until it is answered yes or no. */
@@ -984,9 +998,17 @@ export function useVoiceTurn(deps: Deps): void {
       const told = talked || spokeAnswer
         ? undefined
         : [...since].reverse().find((m) => m.role === 'assistant' && m.local && m.content.trim())
+      /* The model failed: said so, rather than leaving a silence that
+         sounds like it is still thinking. */
+      const failed = talked || spokeAnswer || told
+        ? undefined
+        : [...since].reverse().find((m) => m.role === 'assistant' && m.error)
       if (spokeAnswer) await speaker?.drain()
       else if (told) await say(speakable(told.content, 300))
-      else {
+      else if (failed) {
+        noteLine(`the answer failed: ${String(failed.error).slice(0, 160)}`)
+        await say('Sorry, I couldn’t get an answer just then. Try asking again?')
+      } else {
         stopTicks()
         noteLine(talked ? 'nothing more to say' : 'no answer came back to read out')
       }
@@ -1040,6 +1062,14 @@ export function useVoiceTurn(deps: Deps): void {
             }
           }
           if (!heard) {
+            /* A sentence's worth of talking with no words back, or hearing
+               that broke: said so, briefly. A cough or a word's worth of
+               noise is left alone. */
+            const missed = unheard as { talkedMs: number; failed: boolean } | null
+            if (missed && (missed.failed || missed.talkedMs >= MISSED_SENTENCE_MS)) {
+              note(missed.failed ? 'hearing it failed: said so' : 'a whole sentence came back as no words: said so')
+              await say(missed.failed ? 'Sorry, I couldn’t hear that just now. Say it again?' : 'Sorry, I didn’t catch that.')
+            }
             showVoice({ stage: 'listening', level: 0, detail: 'Talk any time. Hold again to finish.' })
             continue
           }

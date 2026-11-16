@@ -339,6 +339,12 @@ check('then a new one can begin', /if \(again\) \{\s+again = false\s+begin\(\)/.
 check('with the chord, before the mic lets go', /if \(ending !== 'failed'\) await chime\('done'\)\s+await closeMic\(\)/.test(turn), true)
 check('and nobody talking for two minutes ends it too', /export const IDLE_END_MS = 120_000/.test(turn) && /ending = 'idle'/.test(turn), true)
 
+/* Silence in a conversation sounds like thinking: a failure is said. */
+check('a sentence heard as no words is said to be missed', /missed\.failed \|\| missed\.talkedMs >= MISSED_SENTENCE_MS/.test(turn) && /'Sorry, I didn’t catch that\.'/.test(turn), true)
+check('but a cough is left alone', /export const MISSED_SENTENCE_MS = 900/.test(turn), true)
+check('hearing that broke is said too', /return \{ heard: '', text: '', failed: true \}/.test(turn) && /Sorry, I couldn’t hear that just now/.test(turn), true)
+check('and an answer that failed', /\.find\(\(m\) => m\.role === 'assistant' && m\.error\)/.test(turn) && /Sorry, I couldn’t get an answer just then/.test(turn), true)
+
 /* A yes-or-no nobody answers - walked away mid-conversation - is left on
    the screen after a few asks, not asked every eight seconds for good. */
 check('an approval nobody answers is left on the screen', /if \(unanswered >= UNANSWERED_ASKS\) \{\s+leftUnanswered\.add\(entry\)/.test(turn) && /export const UNANSWERED_ASKS = 4/.test(turn), true)

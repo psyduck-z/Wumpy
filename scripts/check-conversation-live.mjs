@@ -32,7 +32,7 @@ const noise = () => {
 }
 const parts = []
 const room = (s) => parts.push(Float32Array.from({ length: Math.round(s * SR) }, () => noise() * 0.0026))
-const talk = (s) =>
+const talk = (s, loud = 0.25) =>
   parts.push(
     Float32Array.from({ length: Math.round(s * SR) }, (_, i) => {
       const t = i / SR
@@ -40,7 +40,7 @@ const talk = (s) =>
       const f = 120 * (1 + 0.06 * Math.sin(2 * Math.PI * 0.7 * t))
       let v = 0
       for (let k = 1; k < 16; k++) v += (0.6 / k) * Math.sin(2 * Math.PI * k * f * t + k) * (k >= 4 && k <= 7 ? 1.6 : 1)
-      return 0.25 * envelope * v + noise() * 0.0026
+      return loud * envelope * v + noise() * 0.0026
     })
   )
 /* From when the mic opens: room while "talk now" plays, the first
@@ -54,6 +54,9 @@ talk(1.6)
    question, so the answer carries on. */
 room(3.8)
 talk(0.35)
+/* Later, a sentence the transcriber makes nothing of: it says so. */
+room(19.6)
+talk(1.4, 0.1)
 room(30)
 const samples = new Float32Array(parts.reduce((n, p) => n + p.length, 0))
 let o = 0
@@ -102,10 +105,14 @@ let heardCount = 0
     transcribe: async (audio) => {
       await new Promise((r) => setTimeout(r, 350))
       /* As long as the voice in it: a question, or a cough heard as "Mm-hmm." */
+      /* By how much voice is in it: a question, or a cough heard as
+         "Mm-hmm." - and anything after half a minute, the mumble at the
+         end, as no words at all. */
       const pcm = new Int16Array(audio, 44)
       let voiced = 0
       for (const v of pcm) if (Math.abs(v) > 1000) voiced++
-      const text = voiced / 16000 > 0.6 ? 'question ' + ++heardCount : 'Mm-hmm.'
+      const seconds = voiced / 16000
+      const text = performance.now() - t0 > 30000 ? '' : seconds > 0.6 ? 'question ' + ++heardCount : 'Mm-hmm.'
       return { text, heard: text, polished: false, polishRefused: false, confidence: 1, ms: 350 }
     },
     speak: async () => null,
@@ -173,12 +180,12 @@ createRoot(document.getElementById('root')).render(<App />)
 /* The gestures: a hold to start, a repeat report of it, and a hold to end. */
 setTimeout(() => { say('GESTURE start'); turn() }, 500)
 setTimeout(() => { say('GESTURE repeated report'); turn() }, 900)
-setTimeout(() => { say('GESTURE end'); turn() }, 27000)
+setTimeout(() => { say('GESTURE end'); turn() }, 42000)
 setInterval(() => {
   const v = voiceView()
   if (v.stage === 'done') { say('STAGE done'); setTimeout(() => say('FINISHED'), 300) }
 }, 250)
-setTimeout(() => say('FINISHED timeout'), 38000)
+setTimeout(() => say('FINISHED timeout'), 52000)
 `
 )
 await build({
@@ -209,7 +216,7 @@ app.whenReady().then(async () => {
     if (e.message.includes(' FINISHED')) app.quit()
   })
   await w.loadFile(${JSON.stringify(join(dir, 'page.html'))})
-  setTimeout(() => app.quit(), 45000)
+  setTimeout(() => app.quit(), 58000)
 })`
 )
 
@@ -260,6 +267,7 @@ const carried = first(/voice turn: "Mm-hmm\." was not a question: carrying on wi
 check('a cough over the second answer: it carries on', Boolean(carried) && before(sent[1], carried), true)
 check('without stopping it being written, or sending anything', all(/^STOPPED WRITING/).length === 1 && sent.length === 2, true)
 check('the second question is heard, with no gesture in between', sent[1]?.what === 'SENT question 2', true)
+check('a sentence that comes back as no words: it says so', Boolean(first(/voice turn: a whole sentence came back as no words: said so/)), true)
 check('it is answered too', all(/voice turn: speaking the answer/).length >= 2, true)
 check('a hold ends it', Boolean(ended) && before(sent[1], ended), true)
 check('with the bar saying it is finished', before(ended, done), true)
