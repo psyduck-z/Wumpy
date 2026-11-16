@@ -90,6 +90,13 @@ export const LIVE_WAIT_MS = 9000
  */
 export const READY_TAIL_MS = 150
 
+/**
+ * On Linux, how long the earbuds' own mic may stay unlisted by PipeWire
+ * before its word is not waited for (see watchMic). Longer than any switch
+ * logged (5.9s), shorter than LIVE_WAIT_MS.
+ */
+export const UNLISTED_MS = 7000
+
 /** A mic live sooner than this did not switch the earbuds, and one later gets ticks (see open()). */
 export const NO_SWITCH_MS = 400
 
@@ -382,12 +389,23 @@ export function useVoiceTurn(deps: Deps): void {
     function watchMic(): () => void {
       let on = true
       working = false
+      const since = Date.now()
+      let seen = false
       void (async () => {
         let runs = 0
         while (on) {
           const state = await window.wumpy.voice.micState().catch(() => 'none' as const)
           if (!on) return
           if (state === 'none') {
+            working = true
+            return
+          }
+          /* Never listed at all, long after any switch should have shown it:
+             this system names it some other way. Going by the sound alone,
+             as before, beats a "talk now" that never comes. */
+          if (state !== 'absent') seen = true
+          if (!seen && Date.now() - since > UNLISTED_MS) {
+            note('PipeWire never listed the earbuds’ own mic; going by the sound alone')
             working = true
             return
           }

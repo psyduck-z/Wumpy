@@ -331,7 +331,7 @@ const api = {
     onAudio: (cb: (piece: { id: string; pcm: ArrayBuffer }) => void) =>
       on<{ id: string; pcm: ArrayBuffer }>(IPC.voiceAudio, cb),
     /** Whether the earbuds' own mic is running yet (Linux; 'none' elsewhere). See main/btmic.ts. */
-    micState: (): Promise<'none' | 'switching' | 'running'> => ipcRenderer.invoke(IPC.voiceMicState),
+    micState: (): Promise<'none' | 'absent' | 'switching' | 'running'> => ipcRenderer.invoke(IPC.voiceMicState),
     /** A spoken turn was asked for (wumpy --voice, the tray). */
     onTurn: (cb: () => void) => on<void>(IPC.voiceTurn, cb)
   },

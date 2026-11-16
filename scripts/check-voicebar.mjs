@@ -142,11 +142,13 @@ check('the log names the mic that opened', /note\(`microphone: \$\{track\?\.labe
   const before = '5513\tbluez_input.2C:BE:EE:12:34:56\tPipeWire\tfloat32le 1ch 48000Hz\tRUNNING\n8139\tbluez_output.2C_BE_EE_12_34_56.1\tPipeWire\ts16le 2ch 48000Hz\tRUNNING'
   const during = `${before}\n9001\tbluez_input.2C_BE_EE_12_34_56.0\tPipeWire\ts16le 1ch 16000Hz\tSUSPENDED`
   const after = `${before}\n9001\tbluez_input.2C_BE_EE_12_34_56.0\tPipeWire\ts16le 1ch 16000Hz\tRUNNING`
-  check('the stand-in running is not the earbuds’ mic', B.earbudsMic('bluez_input.2C:BE:EE:12:34:56', before), 'switching')
+  check('the stand-in running is not the earbuds’ mic', B.earbudsMic('bluez_input.2C:BE:EE:12:34:56', before), 'absent')
   check('nor their mic before it runs', B.earbudsMic('bluez_input.2C:BE:EE:12:34:56', during), 'switching')
   check('their mic running is', B.earbudsMic('bluez_input.2C:BE:EE:12:34:56', after), 'running')
   check('without a stand-in, the default itself', B.earbudsMic('bluez_input.2C_BE_EE_12_34_56.0', after.split('\n').slice(2).join('\n')), 'running')
-  check('another pair’s mic is not these', B.earbudsMic('bluez_input.AA:BB:CC:DD:EE:FF', after), 'switching')
+  check('another pair’s mic is not these', B.earbudsMic('bluez_input.AA:BB:CC:DD:EE:FF', after), 'absent')
+  check('their mic never listed: going by sound after a while', /if \(!seen && Date\.now\(\) - since > UNLISTED_MS\) \{[\s\S]{0,200}working = true/.test(turn), true)
+  check('longer than any switch, shorter than the wait for one', /export const UNLISTED_MS = 7000/.test(turn) && /export const LIVE_WAIT_MS = 9000/.test(turn), true)
   check('the recorder waits on it', /gate: \(\) => working/.test(turn) && /hearing\.frame\(level, now, opts\.gate \? opts\.gate\(\) : true\)/.test(recorderSrc), true)
   check('two running answers in a row before it counts', /working = runs >= 2/.test(turn), true)
   check('and not Bluetooth, asked once', /if \(state === 'none'\) \{\s+working = true\s+return/.test(turn), true)
