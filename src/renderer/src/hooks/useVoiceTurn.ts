@@ -458,7 +458,7 @@ export function useVoiceTurn(deps: Deps): void {
       if (!talking && !(busy && !asking && depsRef.current.streaming())) return
       const stats = r.stats()
       note(
-        `talked over it: it stops and listens (the mic peaked at ${stats.strictPeak.toFixed(3)} ` +
+        `talked over it: it stops and listens (before that the mic heard up to ${stats.strictPeak.toFixed(3)} ` +
           `while it spoke; talking over it takes ${(stats.bar * STRICT_LOUDER).toFixed(3)})`
       )
       stopSound?.()
@@ -616,12 +616,14 @@ export function useVoiceTurn(deps: Deps): void {
           }
         }
         const endedAt = Date.now()
+        /* Talking, not counting the wait before it or the pause after. */
+        const talkedMs = clip ? clip.ms - r.onsetMs() - r.quietMs() : 0
         metering = false
         await newEar()
         if (cancelled) return null
         const stats = r.stats()
         note(
-          `heard ${clip ? `${(clip.ms / 1000 - r.onsetMs() / 1000).toFixed(1)}s of talking` : 'nothing worth sending'}, ` +
+          `heard ${clip ? `${(Math.max(0, talkedMs) / 1000).toFixed(1)}s of talking` : 'nothing worth sending'}, ` +
             `loudest ${stats.peak.toFixed(3)} (speech counts from ${stats.bar.toFixed(3)})` +
             `${stats.dropMs ? `; the mic dropped out for ${stats.dropMs}ms of it` : ''}`
         )
@@ -873,8 +875,8 @@ export function useVoiceTurn(deps: Deps): void {
         noteLine(talked ? 'nothing more to say' : 'no answer came back to read out')
       }
       const stats = ear?.stats()
-      if (stats && stats.strictPeak > 0)
-        note(`while it spoke the mic peaked at ${stats.strictPeak.toFixed(3)}; talking over it takes ${(stats.bar * STRICT_LOUDER).toFixed(3)}`)
+      if (!cancelled && !interrupted && stats && stats.strictPeak > 0)
+        note(`while it spoke the mic heard up to ${stats.strictPeak.toFixed(3)}; talking over it takes ${(stats.bar * STRICT_LOUDER).toFixed(3)}`)
     }
 
     async function conversation(): Promise<void> {

@@ -48,3 +48,9 @@ jobs:
       - name: The recorder, live on Windows
         continue-on-error: true
         run: node scripts/check-recorder-live.mjs
+      # A whole conversation - hold, a question, talking over the answer, a
+      # second question, hold to end - in Windows' Chromium, with the main
+      # process, transcriber, model and voice stood in for.
+      - name: A conversation, live on Windows
+        continue-on-error: true
+        run: node scripts/check-conversation-live.mjs --show

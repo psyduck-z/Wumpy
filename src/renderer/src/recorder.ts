@@ -192,7 +192,11 @@ export interface Recording {
   strict(on: boolean): void
   /** The pause that ends it, changed while it runs. */
   setPause(ms: number): void
-  /** For the log: the room, the bar, the loudest, and how long the mic dropped out. */
+  /**
+   * For the log: the room, the bar, the loudest, the loudest while something
+   * played that was not taken for talking (an answer leaking into the mic),
+   * and how long the mic dropped out.
+   */
   stats(): { room: number; bar: number; peak: number; strictPeak: number; dropMs: number }
 }
 
@@ -346,7 +350,9 @@ export class Hearing {
     if (!this.armed) return result
 
     if (level > this.peak) this.peak = level
-    if (this.strict && level > this.strictPeak) this.strictPeak = level
+    /* The loudest that did not count as talking over it: what an answer
+       leaking into the mic comes to, for the log. */
+    if (this.strict && !this.spoke && level <= speech * STRICT_LOUDER && level > this.strictPeak) this.strictPeak = level
     if (!this.spoke) {
       const rule = this.strict ? STRICT_ONSET : this.onset
       this.recent.push(level > speech * (this.strict ? STRICT_LOUDER : 1))

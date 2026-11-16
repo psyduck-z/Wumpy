@@ -343,7 +343,7 @@ check('and nobody talking for two minutes ends it too', /export const IDLE_END_M
 check('talking over an answer stops it', /stopSound\?\.\(\)\s+speaker\?\.stop\(\)\s+speaker = newSpeaker\(\)\s+if \(asking\) return\s+interrupted = true/.test(turn), true)
 check('and stops the answer being written', /interrupted = true\s+if \(depsRef\.current\.streaming\(\)\) depsRef\.current\.stop\(\)/.test(turn), true)
 check('while it asks yes or no, talking is the answer', /if \(asking\) return\s+interrupted = true/.test(turn), true)
-check('the mic stays open through the answer', /const endedAt = Date\.now\(\)\s+metering = false\s+await newEar\(\)/.test(turn), true)
+check('the mic stays open through the answer', /const endedAt = Date\.now\(\)[\s\S]{0,160}metering = false\s+await newEar\(\)/.test(turn), true)
 check('a long wait is not a long clip', /if \(Date\.now\(\) - earSince > FRESH_EAR_MS\) await nextEar\(\)/.test(turn) && /clipForSpeech\(blob, extension, Math\.max\(0, onsetMs - PRE_ROLL_MS\)\)/.test(turn), true)
 
 /* "I don't like the delay." The words are heard from the first half second

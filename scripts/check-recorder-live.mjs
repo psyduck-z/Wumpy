@@ -146,13 +146,15 @@ if (r.error) {
   console.log(`FAIL the recorder ran: ${r.error}`)
   process.exit(1)
 }
-/* The file plays from when the mic opens: talking 1.0-3.0s, a pause to
-   3.8s, talking to 5.0s, a dead mic to 5.6s, talking to 6.4s, then quiet. */
-check(`talking is heard starting, near 1s (${r.onsetS}s)`, r.onsetS > 0.9 && r.onsetS < 1.6, true)
-check(`neither the pause nor the dead mic ends it (${r.clipS}s recorded)`, r.clipS > 7.4, true)
-check(`the end comes about 1.5s after the last word (${r.clipS}s)`, r.clipS < 8.9, true)
-check('a guess was taken in the pause in the middle, and dropped', r.guesses.length >= 2 && r.guesses[0] < 4.5, true)
-check(`the last guess, taken in the final pause, is what gets used (${r.guesses.at(-1)}s of audio)`, r.lastGuessUsed && r.guesses.at(-1) > 6.6, true)
+/* The file plays from when the mic opens - on Windows a little before the
+   recording starts - so times are taken from the first word: talking for
+   5.4s (with a 0.8s pause and 0.6s of dead mic in it), then quiet. */
+const span = +(r.clipS - r.onsetS).toFixed(2)
+check(`talking is heard starting (${r.onsetS}s in)`, r.onsetS > 0.2 && r.onsetS < 1.6, true)
+check(`neither the pause nor the dead mic ends it (${span}s from the first word)`, span > 6.6, true)
+check(`the end comes about 1.5s after the last word (${span}s from the first word)`, span < 7.9, true)
+check('a guess was taken in the pause in the middle, and dropped', r.guesses.length >= 2 && r.guesses[0] < r.onsetS + 3.4, true)
+check(`the last guess, taken in the final pause, is what gets used (${r.guesses.at(-1)}s of audio)`, r.lastGuessUsed && r.guesses.at(-1) > r.onsetS + 5.4, true)
 check(`the dead mic was not counted as a pause (${r.dropMs}ms credited)`, r.dropMs > 100, true)
 console.log(`\n${failures === 0 ? 'all' : `${failures} FAILED of the`} live recorder checks${failures ? '' : ' correct'}`)
 process.exit(failures ? 1 : 0)
