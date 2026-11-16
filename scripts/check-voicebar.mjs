@@ -321,6 +321,40 @@ check('and over a sound, it takes longer and louder', /ear\?\.strict\(ticking\(\
   }
 }
 
+/* --------------------------------------------- Windows: where answers go */
+
+/* With the earbuds' mic open for a whole conversation, older Windows plays
+   nothing through their "Headphones" output: the answers go to their
+   "Hands-Free" one. The names are as Windows gives them, the earbuds' own
+   "(3)" inside the brackets included. */
+{
+  const T = await load('src/renderer/src/hooks/useVoiceTurn.ts', 'voiceturn')
+  const real = Object.getOwnPropertyDescriptor(globalThis, 'navigator')
+  const devices = (list) => {
+    Object.defineProperty(globalThis, 'navigator', { value: { mediaDevices: { enumerateDevices: async () => list } }, configurable: true, writable: true })
+  }
+  const track = (label, groupId) => ({ label, getSettings: () => ({ groupId }) })
+  const out = (deviceId, label, groupId) => ({ kind: 'audiooutput', deviceId, label, groupId })
+  const older = [
+    out('default', 'Default - Headphones (Nothing Ear (3) Stereo)', 'g1'),
+    out('communications', 'Communications - Headset Earphone (Nothing Ear (3) Hands-Free AG Audio)', 'g1'),
+    out('hp', 'Headphones (Nothing Ear (3) Stereo)', 'g1'),
+    out('hf', 'Headset Earphone (Nothing Ear (3) Hands-Free AG Audio)', 'g1'),
+    out('spk', 'Speakers (Realtek(R) Audio)', 'g2')
+  ]
+  devices(older)
+  check('older Windows: the earbuds’ hands-free output', await T.handsFreeOutput(track('Default - Headset Microphone (Nothing Ear (3) Hands-Free AG Audio)', 'g1')), 'hf')
+  check('by name when the groups do not say', await T.handsFreeOutput(track('Headset Microphone (Nothing Ear (3) Hands-Free AG Audio)', 'other')), 'hf')
+  devices([out('default', 'Default - Headphones (Nothing Ear (3))', 'g1'), out('hp', 'Headphones (Nothing Ear (3))', 'g1')])
+  check('Windows 11, one output for the earbuds: the default', await T.handsFreeOutput(track('Headset (Nothing Ear (3))', 'g1')), null)
+  devices(older)
+  check('a laptop mic: the default', await T.handsFreeOutput(track('Microphone Array (Realtek(R) Audio)', 'g2')), null)
+  check('Linux: the default', await T.handsFreeOutput(track('Default', '')), null)
+  devices([out('hf2', 'Headset Earphone (Other Buds Hands-Free AG Audio)', 'g9')])
+  check('another pair’s hands-free output is not these', await T.handsFreeOutput(track('Headset Microphone (Nothing Ear (3) Hands-Free AG Audio)', 'g1')), null)
+  if (real) Object.defineProperty(globalThis, 'navigator', real)
+}
+
 /* -------------------------------------------------------------- the log */
 
 for (const line of ['started', 'microphone: ', 'heard ', 'heard "', 'speaking ', 'ended', 'failed: ', 'talked over it']) {
