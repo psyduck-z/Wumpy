@@ -174,10 +174,11 @@ nothing to `PATH`, so a bare `wumpy` is not found there.
   yourself still just does it. The model can never run `/key` or `/approve`.
 - **Music pauses while it listens and talks**, on both Omarchy (any MPRIS
   player: Spotify, browsers, mpv) and Windows (the media session behind the
-  volume flyout), and only what was playing is resumed afterwards. Holding the
-  spacebar to dictate does the same. Calls are left alone. `/music off` turns
-  it off.
-- Triggering it again mid-turn cancels the turn.
+  volume flyout), and only what was playing is resumed afterwards — once the
+  earbuds are back in their music mode, not while they are still in headset
+  mode (mono, no spatial sound) or switching back (when for a moment there is
+  no earbud output and it would play from the laptop). Holding the spacebar to
+  dictate does the same. Calls are left alone. `/music off` turns it off.
 
 Holding the spacebar in the window dictates into the box instead (`/voice on`
 first). If there is nothing to transcribe with, it now says so under the box
