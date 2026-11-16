@@ -232,7 +232,7 @@ check('a pause of a second ends what was said', /export const END_PAUSE_MS = 100
 /* The output. "There was no chime, so I thought it didn't work": the
    chime played into Bluetooth earbuds that were still waking up. */
 check('a turn opens one output and keeps it awake', /wakeOutput\(\)\s+speaker = new Speaker/.test(turn), true)
-check('except while the mic is open', /await chime\('listen'\)\s+releaseOutput\(\)/.test(turn), true)
+check('except while the earbuds switch their mic on', /await chime\('opening'\)\s+releaseOutput\(\)/.test(turn), true)
 check('with a signal far below hearing', /\(Math\.random\(\) \* 2 - 1\) \* 1e-4/.test(earcons), true)
 check('and lets it sleep when the turn ends', /speaker = null\s+releaseOutput\(\)/.test(turn), true)
 check('a chime waits for the output to be awake', /const context = await awake\(\)/.test(earcons), true)
@@ -241,12 +241,42 @@ check('the voice goes through the same output', /const current = output\(\)/.tes
 check('and follows it when it is opened again', /if \(current !== this\.context\) \{/.test(speaker), true)
 check('no sound opens an output of its own', /new AudioContext\(/.test(speaker) || (earcons.match(/new AudioContext\(/g) ?? []).length !== 1, false)
 
-/* "Also add a chime after the recording of my voice finished and when it
-   sends the message." */
+/* "Also add a chime after the recording of my voice finished." */
 check('a chime when it stops recording', /await chime\('heard'\)\s+startTicks\(\)/.test(turn), true)
 check('while the words are already being transcribed', /const transcribing = clipForSpeech[\s\S]{0,300}await chime\('heard'\)[\s\S]{0,60}await transcribing/.test(turn), true)
-check('and one when they are sent', /depsRef\.current\.send\(slash \?\? heard\.text\)[\s\S]{0,200}await chime\('sent'\)/.test(turn), true)
-check('five cues, each its own shape', /listen: \{[\s\S]*heard: \{[\s\S]*sent: \{[\s\S]*done: \{[\s\S]*cancel: \{/.test(earcons), true)
+/* "Remove the one when it sent it, because there's no need for that." */
+check('no chime when the words are sent', /chime\('sent'\)/.test(turn) || 'sent' in E.CHIMES, false)
+
+/* "Naturally just distinct... going upwards, it's ready for me to speak...
+   going downwards, it means it's finished." */
+{
+  const K = E.CHIMES
+  const rises = (c) => c.notes.length > 1 && c.notes.every((hz, i) => i === 0 || hz > c.notes[i - 1])
+  const falls = (c) => c.notes.length > 1 && c.notes.every((hz, i) => i === 0 || hz < c.notes[i - 1])
+  check('five cues', Object.keys(K).join(' '), 'opening listen heard done cancel')
+  check('"talk now" goes up', rises(K.listen), true)
+  check('"got it" goes down', falls(K.heard), true)
+  check('and is "talk now" backwards', [...K.heard.notes].reverse().join(), K.listen.notes.join())
+  check('"finished" goes down too', falls(K.done), true)
+  check('but as one rolled chord, not two notes', K.done.notes.length === 3 && K.done.step < 0.05, true)
+  check('"stopped" goes nowhere: one low note, twice', new Set(K.cancel.notes).size === 1 && K.cancel.notes.length === 2 && K.cancel.notes[0] < 300, true)
+  check('"felt the pinch" is a single note', K.opening.notes.length, 1)
+  check('every cue a different shape', new Set(Object.values(K).map((c) => `${c.notes.join()}@${c.step}`)).size, 5)
+
+  /* Rendered the way strike() makes them, for how loud each is to an ear. */
+  const voices = (c) =>
+    c.notes.flatMap((hz, i) => {
+      const at = i * c.step
+      const part = (f, peak, ring) => ({ hz: () => f, gain: ramp([[at, 0.0001], [at + 0.006, peak], [at + ring, 0.0001]]) })
+      const p = E.CHIME_PEAK * c.level
+      return [part(hz, p, 0.2), part(hz * 2, p * 0.15, 0.12), part(hz * 4, 0.02 * c.level, 0.05)]
+    })
+  const loud = Object.fromEntries(Object.entries(K).map(([name, c]) => [name, render(0.4, voices(c))]))
+  const quietest = Object.keys(K).filter((n) => n !== 'opening').map((n) => dB(loud[n], loud.opening))
+  check(`"felt the pinch" the quietest, so not taken for "talk now" (${Math.min(...quietest)} dB under the next)`, Math.min(...quietest) >= 2, true)
+  const chord = dB(loud.done, loud.heard)
+  check(`the chord no louder than the rest (${chord} dB against "got it")`, Math.abs(chord) <= 2, true)
+}
 
 /* The gesture. */
 check('a double report of one pinch is one pinch', /if \(after < SAME_GESTURE_MS\) \{/.test(turn), true)

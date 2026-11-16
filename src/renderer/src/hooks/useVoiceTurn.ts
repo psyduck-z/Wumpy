@@ -67,6 +67,13 @@ export const QUIET_AFTER_MS = 600
 export const LIVE_WAIT_MS = 9000
 
 /**
+ * After the "talk now" chime, before speech counts: the chime returns once
+ * its last note is struck, but Bluetooth plays it a little later than that,
+ * and its tail should not be taken for the first word.
+ */
+export const READY_TAIL_MS = 150
+
+/**
  * How long a pause ends what you are saying. It was 1.3s, all of it spent
  * waiting after the last word before anything else could start; a second
  * is still longer than the gaps inside a sentence said at a normal pace.
@@ -287,25 +294,29 @@ export function useVoiceTurn(deps: Deps): void {
       showVoice({ stage: 'starting', level: 0, detail: prompt })
 
       /*
-       * The chime, then silence, then the microphone.
+       * A soft note, then silence, then the microphone, then "talk now".
        *
        * "I can't hear the chime that signals me to speak." It had been
        * moved to after the mic went live, so it would mean "I can hear you
        * now" - but opening the earbuds' mic switches them into headset
        * mode, and on this machine's Bluetooth that switch fails over and
        * over ("Failure in Bluetooth audio transport", logged at the start
-       * of every turn that morning), so a chime played after it was played
-       * into a link that was breaking. And every failure came while sound
-       * was going to the earbuds as they switched - this turn's own output,
-       * kept awake for the chime.
+       * of every turn that morning). Every failure came while sound was
+       * going to the earbuds as they switched - this turn's own output,
+       * kept open through the switch for the chime, which then played into
+       * a stream that had broken with it.
        *
-       * So the chime plays first, in the earbuds' ordinary mode, where it
-       * was heard every time; then the output is closed, so nothing is
-       * playing while they switch; then the mic opens, and listening starts
-       * the moment it delivers sound (a few hundred milliseconds - about
-       * how long anyone takes to start talking after a beep).
+       * So a soft note plays first, in the earbuds' ordinary mode, where a
+       * chime was heard every time: the pinch was felt. Then the output is
+       * closed, so nothing is playing while they switch, and the mic opens.
+       * That chime went back to meaning "talk now" with the next request:
+       * "add a chime to tell me when [it] is ready for me to speak" - on a
+       * slow switch the soft note came up to six seconds before the mic
+       * was on. So once the mic delivers sound, the switch is over and a
+       * fresh output opens into it for "doo-DOO", which is heard, unlike
+       * the old one, because nothing was open through the switch to break.
        */
-      await chime('listen')
+      await chime('opening')
       releaseOutput()
       if (cancelled) return null
       await sleep(120)
@@ -364,6 +375,18 @@ export function useVoiceTurn(deps: Deps): void {
         return null
       }
       note(`microphone live after ${liveMs}ms`)
+      /* Speech counts once the chime is over, so a chime that reaches the
+         mic is not taken for the first word, and the pause that ends the
+         turn is not started by it. The recording itself runs from the
+         moment the mic opened: nothing said over the chime is lost. */
+      wakeOutput()
+      await chime('listen')
+      await sleep(READY_TAIL_MS)
+      if (cancelled) {
+        recording.stop()
+        await recording.done
+        return null
+      }
       armed = true
       recording.arm()
       showVoice({ stage: 'listening', level: 0, detail: prompt })
@@ -374,8 +397,9 @@ export function useVoiceTurn(deps: Deps): void {
       const clip = await recording.done
       clearTimeout(giveUp)
       stopListening = null
-      /* The mic is closed and the earbuds go back to their ordinary mode:
-         sound again, for "got it" and the answer. */
+      /* The mic is closed and the earbuds go back to their ordinary mode.
+         The output opened for "talk now" is still awake for "got it" and
+         the answer; this only opens one if that chime had no device. */
       wakeOutput()
       lastPeak = peak
       lastBar = bar
@@ -619,11 +643,9 @@ export function useVoiceTurn(deps: Deps): void {
       const started = Date.now()
       const mark = choiceMark()
       const slash = spokenSlash(heard.heard)
+      /* No chime for "sent": "there's no need for that." The typing that
+         started at "got it" runs on, unbroken, until the answer starts. */
       depsRef.current.send(slash ?? heard.text)
-      /* And "sent": the words have gone to the AI, and the typing that
-         follows is it working on them. */
-      await chime('sent')
-      await sleep(150)
       const talked = await settle(mark, started)
       if (cancelled) return
       /* Whatever is left of the answers, now that they are finished. */

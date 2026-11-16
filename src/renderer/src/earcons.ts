@@ -93,21 +93,35 @@ async function awake(): Promise<AudioContext | null> {
  * a longer ring. About 1.5 dB above the old notes, mostly from ringing
  * longer rather than from a harder hit.
  *
- * Then: "also add a chime after the recording of my voice finished and
- * when it sends the message." So a turn is five cues, each its own shape:
+ * Then: "also add a chime after the recording of my voice finished", and
+ * "add a chime to tell me when [it] is ready for me to speak", since the
+ * first chime has to play before the earbuds switch to headset mode, which
+ * can take seconds (see listen() in useVoiceTurn). One for "sent" came and
+ * went: "remove the one when it sent it, because there's no need for that."
  *
- *   listen   doo-DOO, up a fifth      I can hear you, talk now
- *   heard    doo, one note             got it, you can stop talking
- *   sent     bi-bip, high and quick    your words have gone to the AI
- *   done     DOO-doo, down a fifth     finished, with nothing to say
- *   cancel   two low notes             stopped, or nothing was heard
+ * And each one "naturally just distinct... if it's like doo doo going
+ * upwards, then it knows that it's ready for me to speak... if the tone is
+ * going downwards, it means it's finished." So the shape is the meaning:
+ *
+ *   opening  bup, one soft low note        got your pinch, the mic is coming on
+ *   listen   doo-DOO, up a fifth           the mic is on: talk now
+ *   heard    DOO-doo, the same fifth down  got it, stopped listening
+ *   done     a chord, rolled downwards     finished, with nothing to say
+ *   cancel   one low note, twice           stopped, or nothing was heard
+ *
+ * "Heard" mirrors "listen" exactly, the way a mic turns on and off. "Done"
+ * also goes down, being an ending, but as one rolled chord rather than two
+ * notes, so the end of a turn is not mistaken for the end of listening.
+ * "Cancel" goes nowhere - the same low note, "uh-uh". "Opening" is a single
+ * note, and the quietest: it only says the pinch was felt, and must not be
+ * taken for "talk now".
  */
-const CHIMES = {
+export const CHIMES = {
+  opening: { notes: [440], step: 0.13, level: 0.6 },
   listen: { notes: [587.33, 880], step: 0.13, level: 1 },
-  heard: { notes: [880], step: 0.13, level: 0.9 },
-  sent: { notes: [1174.66, 1479.98], step: 0.07, level: 0.7 },
-  done: { notes: [880, 587.33], step: 0.13, level: 1 },
-  cancel: { notes: [293.66, 220], step: 0.13, level: 1 }
+  heard: { notes: [880, 587.33], step: 0.13, level: 1 },
+  done: { notes: [880, 739.99, 587.33], step: 0.035, level: 0.7 },
+  cancel: { notes: [261.63, 261.63], step: 0.16, level: 1 }
 } as const
 
 export type ChimeKind = keyof typeof CHIMES

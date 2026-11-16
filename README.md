@@ -113,11 +113,14 @@ itself is under Settings → Assistant).
   add every key from a different account. With
   no key, dictation falls back to local Whisper (`npm run speech:install`) and
   answers to the system voice.
-- **The gesture, again.** Pinch once to ask; it chimes (two notes, up) when
-  it can hear you, and a pause of a second ends what you said. One note
-  says it has your words, a quick high "bi-bip" that they have gone to the
-  AI, and while it works you hear soft typing, in threes, until the answer
-  starts. To ask
+- **The gesture, again.** Pinch once to ask; a soft low note says it felt
+  the pinch, and two notes, up, say the mic is on: talk then. (Bluetooth
+  earbuds can take a few seconds to switch their mic on, which is the gap
+  between the two.) A pause of a second ends what you said, and the same two
+  notes going down say it has your words. While it works you hear soft
+  typing, in threes, until the answer starts. A rolled chord, downwards,
+  means it finished with nothing to say; one low note twice means it
+  stopped or heard nothing. Up is "your turn", down is "finished". To ask
   something else, pinch again — and pinching while it is still talking stops
   it and listens, the way you would talk over someone. Pinching while it
   listens, or while it asks yes or no, cancels. A pinch the earbuds report

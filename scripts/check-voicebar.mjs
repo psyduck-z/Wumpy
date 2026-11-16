@@ -135,14 +135,17 @@ check('no /microphone command', /name: 'microphone'/.test(read('src/renderer/src
 check('the log names the mic that opened', /note\(`microphone: \$\{recording\.device\}`\)/.test(turn), true)
 check('a dead mic is exact zeros, a live one any sound', /level > 1e-5/.test(recorderSrc), true)
 /* "I can't hear the chime that signals me to speak": played after the mic
-   opened, it went into earbuds switching to headset mode, which failed on
-   every turn that morning. */
-check('the chime plays first, in the earbuds’ ordinary mode', /await chime\('listen'\)\s+releaseOutput\(\)[\s\S]{0,600}recording = await record\(/.test(turn), true)
+   opened, through an output kept open while the earbuds switched to
+   headset mode, it went into a stream that broke with the switch. */
+check('a soft note first, in the earbuds’ ordinary mode', /await chime\('opening'\)\s+releaseOutput\(\)[\s\S]{0,600}recording = await record\(/.test(turn), true)
 check('nothing plays while they switch', /releaseOutput\(\)\s+if \(cancelled\) return null\s+await sleep\(120\)/.test(turn), true)
-check('listening starts when the mic delivers sound', /recording\.live, sleep\(LIVE_WAIT_MS\)[\s\S]{0,700}armed = true\s+recording\.arm\(\)/.test(turn), true)
-check('and sound comes back once it closes', /stopListening = null[\s\S]{0,200}wakeOutput\(\)/.test(turn), true)
+/* Then: "add a chime to tell me when [it] is ready for me to speak." */
+check('"talk now" once the mic delivers sound', /recording\.live, sleep\(LIVE_WAIT_MS\)[\s\S]{0,700}note\(`microphone live after \$\{liveMs\}ms`\)[\s\S]{0,500}await chime\('listen'\)/.test(turn), true)
+check('from an output opened after the switch, not through it', /note\(`microphone live after \$\{liveMs\}ms`\)[\s\S]{0,500}wakeOutput\(\)\s+await chime\('listen'\)/.test(turn), true)
+check('and speech counts only after it', /await chime\('listen'\)\s+await sleep\(READY_TAIL_MS\)[\s\S]{0,150}armed = true\s+recording\.arm\(\)/.test(turn), true)
+check('only one chime before the mic is on', (turn.slice(turn.indexOf('async function listen('), turn.indexOf('recording = await record(')).match(/await chime\(/g) ?? []).length, 1)
+check('and sound stays on once it closes', /stopListening = null[\s\S]{0,300}wakeOutput\(\)/.test(turn), true)
 check('the room is not the silence of a mic switching on', /if \(level > 1e-4\) room =/.test(recorderSrc), true)
-check('a chime never plays into an open mic again', /note\(`microphone live after \$\{liveMs\}ms`\)\s+await chime/.test(turn), false)
 check('the chime is not heard as speech', /if \(!armed\) return/.test(turn) && /armed: false/.test(turn), true)
 /* "Nothing worth sending" twice while talking: this MacBook's mic hears a
    room at 0.00005 and a voice at 0.009, under a fixed bar of 0.02. */
