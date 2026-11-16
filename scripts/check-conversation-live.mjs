@@ -292,10 +292,10 @@ const finder = (events) => [(re) => events.find((e) => re.test(e.what)), (re) =>
     /* A question, quiet while the answer and "Can I...? Say yes or no." are
        said, a short "yes", and quiet. */
     plan: [['room', 1.6], ['talk', 1.5], ['room', 8.0], ['talk', 0.5], ['room', 30]],
-    transcribe: `(seconds) => seconds > 0.6 ? 'how full is my disk' : 'Yes.'`,
+    transcribe: `(seconds) => seconds > 0.6 ? 'how full is my disk?' : 'Yes.'`,
     /* The model proposes a command; once it has run, it says what came back. */
     model: `(text) => {
-      if (text !== 'how full is my disk') return write('Done.')
+      if (text.replace(/[?]$/, '') !== 'how full is my disk') return write('Done.')
       write('Let me check.', () => {
         const off = registerPending('disk', {
           command: '# Check how full the disk is\\ndf -h',
@@ -316,6 +316,28 @@ const finder = (events) => [(re) => events.find((e) => re.test(e.what)), (re) =>
   check('"yes" runs it', Boolean(ran) && before(asked, ran) && !first(/^COMMAND SKIPPED/), true)
   check('and what came back is said', all(/voice turn: speaking the answer/).length >= 2 && before(ran, all(/voice turn: speaking the answer/).at(-1)), true)
   check('with nothing sent but the question', all(/^SENT /).length, 1)
+  check('it ended on time', Boolean(first(/ FINISHED$|^FINISHED$/)) && !first(/FINISHED timeout/), true)
+}
+
+/* ------------------------------ three: a pause to think, mid-question */
+
+{
+  const events = await converse({
+    /* Half a question, two seconds to think - longer than the usual pause -
+       and the rest of it. */
+    plan: [['room', 1.6], ['talk', 1.6], ['room', 2.1], ['talk', 1.6], ['room', 30]],
+    /* The first half alone trails off, as the transcriber writes it; the
+       whole of it is a question. */
+    transcribe: `(seconds) => seconds > 1.6 ? 'Can you tell me how it works, and what it is for?' : seconds > 0.3 ? 'Can you tell me how it works, and' : ''`,
+    model: `() => write('It is for this.')`,
+    endAt: 16000
+  })
+  const [first, all] = finder(events)
+  console.log('\nA pause to think, mid-question:')
+  check('nothing went wrong on the page', all(/^ERROR|voice turn: failed/).map((e) => e.what), [])
+  check('half a question sounds unfinished', Boolean(first(/voice turn: it sounds unfinished/)), true)
+  check('so it waits for the rest, and sends the whole question once', all(/^SENT /).map((e) => e.what), ['SENT Can you tell me how it works, and what it is for?'])
+  check('half of it is never answered', !first(/^SENT Can you tell me how it works, and$/), true)
   check('it ended on time', Boolean(first(/ FINISHED$|^FINISHED$/)) && !first(/FINISHED timeout/), true)
 }
 

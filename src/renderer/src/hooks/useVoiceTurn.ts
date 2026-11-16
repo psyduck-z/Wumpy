@@ -18,7 +18,7 @@ import { setVoiceStopper, showVoice } from '../voiceview'
 import { chime, playOn, releaseOutput, startTicks, stopTicks, ticking, wakeOutput } from '../earcons'
 import { Speaker, currentSpeed, setSpeed } from '../speaker'
 import { readyToSay, sentences } from '@shared/speakahead'
-import { interruption } from '@shared/interrupt'
+import { interruption, unfinished } from '@shared/interrupt'
 
 /**
  * A spoken conversation, run from the hidden panel: `wumpy --voice` (holding
@@ -137,6 +137,12 @@ export const PRE_ROLL_MS = 500
 export const GUESS_AFTER_MS = 450
 /** A guess still not back this long after the pause is over is given up for one of the whole clip. */
 export const GUESS_WAIT_MS = 1500
+/**
+ * The pause that ends what is said, when the guess at it sounds like the
+ * middle of a thought (see `unfinished`): long enough to finish the thought,
+ * once, without everything waiting this long.
+ */
+export const UNFINISHED_PAUSE_MS = 3000
 
 /**
  * What starts speech in a conversation: three loud frames of four, about
@@ -698,6 +704,17 @@ export function useVoiceTurn(deps: Deps): void {
             const at = r.spokeAt()
             const onset = r.onsetMs()
             guess = { at, words: r.snapshot().then((got) => (got ? hearClip(got.blob, got.extension, onset) : null)) }
+            /* Trailing off mid-thought: a longer pause, this once. Back to
+               the usual one if they carry on and it sounds finished then. */
+            const heardSoFar = heardAll
+            void guess.words.then((w) => {
+              if (r !== ear || r.spokeAt() !== at || !w?.heard) return
+              const mid = unfinished(heardSoFar ? `${heardSoFar} ${w.heard}` : w.heard)
+              if (mid && pauseMs < UNFINISHED_PAUSE_MS) {
+                r.setPause(UNFINISHED_PAUSE_MS)
+                note(`it sounds unfinished ("...${w.heard.slice(-30)}"): waiting ${UNFINISHED_PAUSE_MS / 1000}s for the rest`)
+              } else r.setPause(pauseMs)
+            })
           }
         }
         const endedAt = Date.now()

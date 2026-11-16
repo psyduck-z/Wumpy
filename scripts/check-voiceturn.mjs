@@ -42,6 +42,41 @@ for (const said of ['Stop.', 'Wait', 'Okay, stop.', 'Never mind', 'stop talking'
 for (const said of ['Stop the music', 'Wait, what about tomorrow?', 'Actually make it three', 'Hmm, what about Paris?', 'okay', 'yes'])
   check(`"${said}" over an answer: the next question`, I.interruption(said), 'words')
 
+/* A pause to think is not the end: "...how it kind of like" was answered
+   half asked. Finished sentences, the way the transcriber writes them, are
+   not waited on any longer. */
+for (const said of [
+  "Give me a 2nd. Can you describe to me what neuroscience is, how it affects our mental life, um, and how it kind of like ",
+  'What is the weather like in,',
+  'Open my downloads and.',
+  'Can you check if the',
+  'Tell me about um.',
+  'So what I want is...',
+  'I need you to look at the'
+])
+  check(`"${said.trim()}" is mid-thought`, I.unfinished(said), true)
+for (const said of [
+  "What's one plus one?",
+  'Okay then, what\'s four plus two?',
+  'Yeah, why not?',
+  'Hold on a sec. Hold on a 2nd. I mentioned, but let\'s talk about topography, define topography.',
+  'Can you turn it on?',
+  'Turn the music on.',
+  'I think so.',
+  'Yes',
+  'no',
+  'Leo',
+  'Yes please',
+  'Stop!',
+  ''
+])
+  check(`"${said}" is finished`, I.unfinished(said), false)
+{
+  const hook = (await import('node:fs')).readFileSync('src/renderer/src/hooks/useVoiceTurn.ts', 'utf8')
+  check('the conversation waits longer on a thought trailing off', /unfinished\(heardSoFar[\s\S]{0,200}r\.setPause\(UNFINISHED_PAUSE_MS\)/.test(hook), true)
+  check('and only on the recording it guessed at, still unchanged', /r !== ear \|\| r\.spokeAt\(\) !== at/.test(hook), true)
+}
+
 check('slash makes a command', S.spokenSlash('Slash remember I like tea.'), '/remember I like tea')
 check('with punctuation after it', S.spokenSlash('Slash. Remember, I like tea'), '/remember I like tea')
 check('a written slash too', S.spokenSlash('/clear'), '/clear')
