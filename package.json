@@ -21,6 +21,7 @@
     "bench": "node scripts/bench-models.mjs",
     "bench:context": "node scripts/bench-context.mjs",
     "bench:ab": "node scripts/bench-ab.mjs",
+    "check:live": "node scripts/check-recorder-live.mjs && node scripts/check-conversation-live.mjs",
     "check:blocks": "node scripts/check-blocks.mjs",
     "check:titles": "node scripts/check-titles.mjs",
     "check:approval": "node scripts/check-approval.mjs",

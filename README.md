@@ -67,6 +67,13 @@ keeps the installer with the run — `gh run download -n wumpy-windows`. That
 one bundles .NET into the Win+Shift+D helper, so it needs nothing else
 installed.
 
+`npm run check:live` runs the voice for real in Electron, on a fake
+microphone playing a made-up voice, with no sound played: the recorder on a
+sentence with a pause and a dead-mic gap in it, then two whole conversations
+(talking over an answer, a cough over one, a mumble, a command approved out
+loud) with the transcriber, model and voice stood in for. The Windows
+workflow runs it too, in Windows' own Chromium.
+
 ## On Omarchy
 
 ```bash
