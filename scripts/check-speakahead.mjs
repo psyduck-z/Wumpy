@@ -268,7 +268,14 @@ check('the mic wait is one clicky key at a time', E.WAITING.every < E.TYPING.cyc
 check('and softer than the typing', E.WAITING.click < E.TYPING.click, true)
 check('the voice goes through the same output', /const current = output\(\)/.test(speaker), true)
 check('and follows it when it is opened again', /if \(current !== this\.context\) \{/.test(speaker), true)
-check('no sound opens an output of its own', /new AudioContext\(/.test(speaker) || (earcons.match(/new AudioContext\(/g) ?? []).length !== 1, false)
+{
+  /* Every output is opened in one place, openContext, called by wakeOutput alone. */
+  const body = earcons.slice(earcons.indexOf('function openContext('), earcons.indexOf('export function wakeOutput('))
+  const all = (earcons.match(/new AudioContext\(/g) ?? []).length
+  const inside = (body.match(/new AudioContext\(/g) ?? []).length
+  check('no sound opens an output of its own', /new AudioContext\(/.test(speaker) || all !== inside || (earcons.match(/openContext\(\)/g) ?? []).length !== 2, false)
+  check('a chosen output that will not open falls back to the default', /catch \{\s+sink = null\s+\}\s+\}\s+return new AudioContext\(\{ latencyHint: 'playback' \}\)/.test(earcons), true)
+}
 
 /* "Also add a chime after the recording of my voice finished" - and then,
    in a conversation, "I feel like there's chimes everywhere", and one at a

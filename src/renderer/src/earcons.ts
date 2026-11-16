@@ -66,13 +66,25 @@ export function playOn(id: string | null): void {
   }
 }
 
+/** An output on the chosen device - or, if that one will not open, on the default. */
+function openContext(): AudioContext {
+  if (sink) {
+    try {
+      return new AudioContext({ latencyHint: 'playback', sinkId: sink } as AudioContextOptions)
+    } catch {
+      sink = null
+    }
+  }
+  return new AudioContext({ latencyHint: 'playback' })
+}
+
 /** Opens the turn's output and keeps it awake. Called when a turn starts. */
 export function wakeOutput(): void {
   if (out) return
   try {
     /* 'playback': larger buffers, so a busy moment on the page is not a
        click in the ear. Nothing here needs the last few milliseconds. */
-    const context = new AudioContext({ latencyHint: 'playback', ...(sink ? { sinkId: sink } : {}) } as AudioContextOptions)
+    const context = openContext()
     const buffer = context.createBuffer(1, context.sampleRate, context.sampleRate)
     const data = buffer.getChannelData(0)
     for (let i = 0; i < data.length; i++) data[i] = (Math.random() * 2 - 1) * 1e-4
