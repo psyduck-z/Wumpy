@@ -1,3 +1,4 @@
+import { keepSaves } from '../saves'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { actionFacts } from '../ledger'
 import type { Attachment, ChatMessage, LocalAsk, NoteTopic } from '@shared/types'
@@ -156,6 +157,9 @@ export function useChat(): ChatState {
 
   /** Request currently streaming; also the key we match incoming deltas against. */
   const activeRequest = useRef<string | null>(null)
+  /* The answer as written, tags and all, for keepSaves once it is done. */
+  const written = useRef<{ id: string; text: string }>({ id: '', text: '' })
+  const noteRef = useRef<(content: string, error?: boolean) => void>(() => {})
   /** Assistant message being filled by that request. */
   const activeMessage = useRef<string | null>(null)
   /** Facts about the app that the model cannot see for itself. */
@@ -195,6 +199,8 @@ export function useChat(): ChatState {
   useEffect(() => {
     const offDelta = window.wumpy.chat.onDelta((d) => {
       if (d.requestId !== activeRequest.current) return
+      if (written.current.id !== d.requestId) written.current = { id: d.requestId, text: '' }
+      if (d.content) written.current.text += d.content
       patchActive((m) => ({
         ...m,
         content: d.content ? m.content + d.content : m.content,
@@ -206,6 +212,11 @@ export function useChat(): ChatState {
 
     const offDone = window.wumpy.chat.onDone((d) => {
       if (d.requestId !== activeRequest.current) return
+      /* What the answer asked to be kept: a line for their notes, a skill.
+         Saved once, here, when it is finished - never from a chat reopened
+         later - and each one said, so nothing is kept behind their back. */
+      if (written.current.id === d.requestId) void keepSaves(written.current.text, noteRef.current)
+      written.current = { id: '', text: '' }
       /* Marked before the message stops being the active one. An answer that
          hit the cap has to say so: everything else about the end of a turn
          looks identical whether it finished or merely stopped. */
@@ -413,6 +424,7 @@ export function useChat(): ChatState {
       ]
     })
   }, [])
+  noteRef.current = note
 
   /**
    * A note that is going to be rewritten, and the id to rewrite it by.

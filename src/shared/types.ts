@@ -980,6 +980,8 @@ export const IPC = {
   modelsProbe: 'models:probe',
   contextGet: 'context:get',
   contextSet: 'context:set',
+  /** Makes, replaces or removes a skill (see @shared/skills). */
+  skillSave: 'skill:save',
   keyStatus: 'key:status',
   keySet: 'key:set',
   keyAdd: 'key:add',

@@ -109,7 +109,7 @@ check(
   J.entry('command', 'x'.repeat(400)).what.length,
   J.MAX_DETAIL + 1 /* the ellipsis */
 )
-check('every kind has a word for its column', Object.keys(J.WORD).length, 12)
+check('every kind has a word for its column', Object.keys(J.WORD).length, 13)
 for (const [kind, word] of Object.entries(J.WORD)) {
   if (!word || !J.isEventKind(kind)) check(`${kind} has a usable column word`, word, '...')
 }

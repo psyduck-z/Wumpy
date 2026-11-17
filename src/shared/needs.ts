@@ -159,6 +159,11 @@ const WRITE_WORDS =
  * keeping something, and the few phrasings that are only ever used to state
  * a standing preference.
  */
+/** Whether this is something to keep - "remember that...", "from now on", "I prefer". */
+export function asksToKeep(text: string): boolean {
+  return REMEMBER_WORDS.test(text)
+}
+
 const REMEMBER_WORDS =
   /\b(remember|remembers|remembered|remembering|forget|forgets|forgot|memorise|memorize|keep in mind|bear in mind|from now on|going forward|in future|in the future|next time|every time|permanently|persist|preference|preferences|my name is|call me|i prefer|i'd prefer|i always|i never|note that|make a note|keep a note|take note)\b/i
 

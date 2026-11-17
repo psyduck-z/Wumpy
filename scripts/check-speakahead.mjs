@@ -531,7 +531,7 @@ check('a "Thank you." out of a cough is asked of Parakeet first', /mayBeInvented
 }
 /* The game memory: in the instructions on both channels, hidden on screen. */
 check('a game keeps its secret in <keep>, on screen and in the ear', /const KEEP = \[/.test(main) && /TONE, \.\.\.KEEP\]/.test(main) && /made of it: it is not part of the question\.',\s+\.\.\.KEEP,/.test(main), true)
-check('and checks a guess against it letter by letter', /Check every guess against the letters written there, one by one/.test(main), true)
+check('and checks a guess against it letter by letter', /Check a guess against',\s+'  the numbered letters, never from memory/.test(main) && /"1 P, 2 L, 3 A, 4 N, 5 E, 6 T"/.test(main), true)
 check('letters heard as words, in a letter game', /"you" for U, "see" for C/.test(main), true)
 {
   const msg = read('src/renderer/src/components/Message.tsx')

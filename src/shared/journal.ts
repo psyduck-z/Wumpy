@@ -54,6 +54,8 @@ export type EventKind =
   | 'rank'
   /** A key added, replaced or dropped. Positions and counts, never a key. */
   | 'key'
+  /** A skill made, replaced or removed, by name. */
+  | 'skill'
   /** A shell command actually ran. */
   | 'command'
   /** A file was written. */
@@ -267,6 +269,7 @@ export const WORD: Record<EventKind, string> = {
      sweep STARTS and finished in place when it ends. See sweepOpen. */
   rank: 'ranking',
   key: 'key',
+  skill: 'skill',
   command: 'ran',
   write: 'wrote',
   open: 'opened',

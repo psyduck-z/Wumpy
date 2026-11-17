@@ -97,6 +97,11 @@ export class ContextStore {
     const one = (line ?? '').trim()
     if (!one) return { ok: false, why: 'Nothing to add.', chars: this.read().length }
     const existing = this.read()
+    /* Said twice - "remember I like tea" in two chats - is kept once. */
+    const same = (t: string): string => t.toLowerCase().replace(/^[-*\s]+/, '').replace(/[^a-z0-9]+/g, ' ').trim()
+    if (existing.split(String.fromCharCode(10)).some((l) => same(l) === same(one))) {
+      return { ok: true, why: '', chars: existing.length }
+    }
     const merged = existing ? `${existing}${String.fromCharCode(10)}- ${one}` : `- ${one}`
     const result = this.write(merged)
     return { ...result, chars: merged.length }

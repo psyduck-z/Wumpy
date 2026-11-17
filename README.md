@@ -532,6 +532,38 @@ into a single chip you can expand, and carries it forward as a system message.
 model rather than the active tier — it is a simple job, and summarising on a 14B
 model would take minutes while you wait to send.
 
+**It remembers what you ask it to, across chats.** "Remember that I prefer
+celsius" and the model saves it to your notes. A line in the chat says what
+was saved, and the tag it used is never shown or read aloud. The notes are
+one plain file (`context.md` in Wumpy's settings folder), read into every
+chat, and kept to about a dozen facts because they go with every message.
+`/remember <thing>` adds a line yourself; `/remember clear` empties it.
+
+**Skills: instructions for particular things.** A skill is a markdown file
+in the `skills` folder next to the notes: how you like summaries, the rules
+of a game, your homework routine. Every turn carries one line per skill;
+the whole of one is sent once a word that brings it up is said in the chat,
+and stays for the rest of it. Ask for one in words, "make a skill for
+hangman: ...", and the model writes the file. Asking for the same name
+replaces it, and asking to remove it deletes the file. A skill written by
+hand looks like this:
+
+```markdown
+---
+name: hangman
+description: Playing hangman out loud
+triggers: hangman, guess the word
+---
+Pick a word of 5 to 8 letters. Show the board as blanks and letters.
+```
+
+**Games keep their secrets.** A model forgets everything between turns
+except the conversation, so a hangman word it never wrote down was gone by
+the next guess. It now keeps a note to itself in its answer, a `<keep>` tag
+that is never shown or said, with the word spelled out and the guesses so
+far, and checks each guess against it. `wumpy --memory-check` tries all
+three on the model in use.
+
 ## What the model is told
 
 A local model has no clock, no view of the app around it and no idea which chat

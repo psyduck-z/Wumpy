@@ -236,6 +236,16 @@ const api = {
     ): Promise<{ ok: boolean; why: string; text: string; truncated: boolean }> =>
       ipcRenderer.invoke(IPC.contextSet, { text, append })
   },
+  /** Skills: files the user owns, made or changed by a <skill> tag (see @shared/skills). */
+  skills: {
+    save: (skill: {
+      name: string
+      description?: string
+      triggers?: string[]
+      body: string
+    }): Promise<{ ok: boolean; why: string; name: string; did: 'saved' | 'replaced' | 'removed' }> =>
+      ipcRenderer.invoke(IPC.skillSave, skill)
+  },
   keys: {
     /**
      * Which providers have a key. Deliberately no getter for a key itself -

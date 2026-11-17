@@ -161,9 +161,9 @@ const MACHINE = [
      whole "A STATEMENT IS NOT A QUESTION" paragraph - so this is the claim
      and not the explanation. What it may not be is the old wording, which
      said Wumpy keeps nothing between chats and so denied `/remember`. */
-  'You save nothing yourself, so never promise to remember something',
-  'tomorrow — `/remember <thing>` is theirs and does. A stated preference is',
-  'not a machine question: acknowledge it and use it for this chat.'
+  'Nothing is saved unless your reply carries <remember>one fact</remember>,',
+  'which Wumpy writes to their notes; without one, never say you saved it.',
+  'A stated preference is not a machine question: acknowledge it and use it.'
 ].join(LF)
 
 const WRITING = [

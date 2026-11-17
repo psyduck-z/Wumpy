@@ -56,6 +56,7 @@ import { micState } from './btmic'
 import { launchPath } from '@shared/launchpath'
 import { folderFacts, resolveUserFolders } from './folders'
 import { ContextStore } from './context'
+import { SkillStore } from './skills'
 import { Speech } from './speech'
 import {
   DEFAULT_RATE,
@@ -107,6 +108,8 @@ import { captureScreen } from './screen'
 import { Stretcher } from '@shared/stretch'
 import { mayBeInvented } from '@shared/heard'
 import { speakable } from '@shared/spoken'
+import { savesIn, withoutKept } from '@shared/kept'
+import { asksToKeep } from '@shared/needs'
 
 /**
  * Before anything else, so that whatever happens during startup is readable.
@@ -176,6 +179,7 @@ let inputHistory: InputHistory
 let cloud: CloudClient
 let keys: KeyStore
 let notes: ContextStore
+let skills: SkillStore
 let usage: UsageStore
 let pools: PoolStore
 let ranker: Ranker
@@ -509,9 +513,10 @@ const KEEP = [
   "- Games: whatever they must not see yet - a hangman word, a number to guess, a riddle's answer -",
   '  goes in <keep>...</keep> at the very start of your reply. It is never shown or read aloud, and',
   '  you will see it again next turn; without it, you will have forgotten what you chose. Rewrite it',
-  '  whole every turn - for hangman: the word, the word spelled out letter by letter, the letters',
-  '  guessed and the misses. Check every guess against the letters written there, one by one,',
-  '  never from memory, and keep the board you show in step with it.'
+  '  whole in EVERY reply of the game - for hangman: the word, its letters numbered by place',
+  '  ("1 P, 2 L, 3 A, 4 N, 5 E, 6 T"), the letters guessed, the misses. Check a guess against',
+  '  the numbered letters, never from memory, and build the board from them every time: a letter',
+  '  guessed shows at each place it has, every other place is a blank.'
 ]
 
 function channelFacts(handsFree: boolean): string[] {
@@ -556,7 +561,12 @@ function channelFacts(handsFree: boolean): string[] {
   ]
 }
 
-function factsFor(chatTitle: string | null, actions: string[] = [], handsFree = false): string {
+function factsFor(
+  chatTitle: string | null,
+  actions: string[] = [],
+  handsFree = false,
+  said: readonly string[] = []
+): string {
   const now = new Date()
   return [
     'Facts about right now. If the user asks about any of these, just state the answer.',
@@ -579,6 +589,17 @@ function factsFor(chatTitle: string | null, actions: string[] = [], handsFree = 
     ...channelFacts(handsFree),
     // One file the user owns, carried from chat to chat. See context.ts.
     ...notes.forPrompt(),
+    /* "Remember that I prefer celsius" was answered "Got it - celsius it
+       is" and nothing was kept: the rule is in the instructions, far above.
+       Said here, beside the message it is about, when it is about this. */
+    ...(asksToKeep(said[said.length - 1] ?? '')
+      ? [
+          '- If they just asked you to remember something, or said how they want things from now on, put it',
+          '  in <remember>one short fact about them</remember> in your reply, or it is not kept for later chats.'
+        ]
+      : []),
+    // Their skills: one line each, and the whole of any that came up. See skills.ts.
+    ...(skills?.forPrompt(said) ?? []),
     // Silent unless something is running out. See quotaFacts.
     ...quotaFacts(),
     // Written by the code that performed them, not recalled by the model.
@@ -2117,6 +2138,15 @@ ${command}`
     truncated: notes.truncated()
   }))
 
+  ipcMain.handle(
+    IPC.skillSave,
+    (_e, req: { name: string; description?: string; triggers?: string[]; body: string }) => {
+      const result = skills.save(req)
+      if (result.ok) journal.add('skill', `${result.name}: ${result.did}`)
+      return result
+    }
+  )
+
   ipcMain.handle(IPC.contextSet, (_e, req: { text: string; append?: boolean }) => {
     const result = req?.append ? notes.add(req.text ?? '') : notes.write(req?.text ?? '')
     return { ok: result.ok, why: result.why, text: notes.read(), truncated: notes.truncated() }
@@ -2379,6 +2409,7 @@ void app.whenReady().then(async () => {
   inputHistory = new InputHistory()
   keys = new KeyStore()
   notes = new ContextStore()
+  skills = new SkillStore()
   pools = new PoolStore()
   cloud = new CloudClient(keys, pools, { up: (p) => localUp.has(p), refresh: checkLocal })
   usage = new UsageStore()
@@ -2582,6 +2613,10 @@ app.on('second-instance', (_event, argv) => {
     void hearingCheck()
     return
   }
+  if (argv.includes('--memory-check')) {
+    void memoryCheck()
+    return
+  }
   if (argv.includes('--compare-hearing')) {
     compareHearing = !compareHearing
     console.log(`[wumpy] comparing recognisers on what is said: ${compareHearing ? 'on, until a restart' : 'off'}`)
@@ -2627,7 +2662,7 @@ let launchChat: string | null =
 if (launchChat && !/^[\w-]{1,80}$/.test(launchChat)) launchChat = null
 
 /** Wumpy's own launch flags, which describe one start and are not carried over. */
-const OWN_FLAGS = /^--(?:hidden|voice|toggle|restart|speech-check|voice-samples|hearing-check|compare-hearing|resume-chat=.*)$/
+const OWN_FLAGS = /^--(?:hidden|voice|toggle|restart|speech-check|voice-samples|hearing-check|memory-check|compare-hearing|resume-chat=.*)$/
 
 async function restartWumpy(why: string, chatId: string | null): Promise<void> {
   if (restarting) return
@@ -2750,6 +2785,99 @@ function earbudsLike(pcm: Buffer): Buffer {
     out[i] = Math.max(-32768, Math.min(32767, Math.round(smeared + ((seed / 2147483647) * 2 - 1) * level * 1.7)))
   }
   return Buffer.from(out.buffer)
+}
+
+/**
+ * `wumpy --memory-check`: whether the model really uses the tags it is told
+ * about, on the model in use and the real instructions - a fact to remember,
+ * a skill asked for, and a game of hangman whose word has to survive to the
+ * next guess. Only reads the replies: nothing is saved to the notes or the
+ * skills folder, which happens in the panel when a real answer finishes.
+ */
+async function modelSays(messages: ChatRequest['messages'], handsFree: boolean): Promise<string> {
+  const model = resolveModel()
+  if (!model) return '(no model can answer)'
+  const req: ChatRequest = {
+    requestId: `memory-check-${Date.now()}-${Math.random().toString(36).slice(2)}`,
+    messages,
+    context: { chatTitle: null, messageCount: messages.length, actions: [], handsFree }
+  }
+  const sending = withContext(req)
+  const assistant = currentAssistant()
+  const systemPrompt = systemPromptFor(assistant, assistant.tools, sending)
+  let text = ''
+  await cloud.chat(
+    req.requestId,
+    model,
+    sending,
+    { thinking: assistant.thinking, options: assistant.options, maxTurnMs: 120_000, systemPrompt },
+    {
+      onDelta: (d) => {
+        if (d.content) text += d.content
+      },
+      onDone: () => {},
+      onError: (message) => {
+        text += ` (failed: ${message.slice(0, 120)})`
+      }
+    }
+  )
+  return text
+}
+
+async function memoryCheck(): Promise<void> {
+  const one = (t: string): string => JSON.stringify(t.replace(/\s+/g, ' ').slice(0, 400))
+  const say = (label: string, reply: string): void => {
+    const saves = savesIn(reply)
+    console.log(
+      `[wumpy] memory check: ${label}: shown ${one(withoutKept(reply))}; ` +
+        `remembers ${JSON.stringify(saves.remember)}; skills ${JSON.stringify(saves.skills.map((s) => `${s.name}: ${s.body.slice(0, 80)}`))}`
+    )
+  }
+  console.log(`[wumpy] memory check: on ${resolveModel() ?? 'no model'}`)
+  say('"remember that I prefer celsius"', await modelSays([{ role: 'user', content: 'remember that I prefer celsius for temperatures' }], false))
+  say(
+    'a skill asked for',
+    await modelSays(
+      [
+        {
+          role: 'user',
+          content:
+            'make a skill for hangman: when we play, you pick a word of 5 to 8 letters, show the board as blanks, and tell me how many wrong guesses I have left out of 6'
+        }
+      ],
+      false
+    )
+  )
+  /* Hangman by voice: the word has to be the same one at every guess. */
+  const history: ChatRequest['messages'] = []
+  const turn = async (said: string): Promise<string> => {
+    history.push({ role: 'user', content: said })
+    const reply = await modelSays(history.slice(), true)
+    history.push({ role: 'assistant', content: reply })
+    return reply
+  }
+  const start = await turn("let's play hangman, you pick the word")
+  const kept = /<keep>([\s\S]*?)<\/keep>/i.exec(start)?.[1] ?? ''
+  const word = (/\bword\s*[:=-]\s*"?([A-Za-z]{3,})/i.exec(kept)?.[1] ?? /\b([A-Z]{4,})\b/.exec(kept)?.[1] ?? '').toUpperCase()
+  console.log(`[wumpy] memory check: hangman: kept ${one(kept)}; said ${one(withoutKept(start))}`)
+  const guessed: string[] = []
+  for (const letter of ['E', 'O', 'A']) {
+    guessed.push(letter)
+    const reply = await turn(`is there an ${letter === 'O' ? 'oh' : letter}?`)
+    const shown = withoutKept(reply)
+    /* The board it shows, against the one the word and the guesses make. */
+    const board = /((?:[A-Z_] ){2,}[A-Z_])/.exec(shown)?.[1] ?? ''
+    const due = word ? [...word].map((c) => (guessed.includes(c) ? c : '_')).join(' ') : ''
+    const yes = /^\W*(yes|yep|yeah|there (?:is|are)|good guess|nice|correct|you got)/i.test(shown)
+    const no = /^\W*(no|nope|sorry|there(?:'s| is) no|not)/i.test(shown)
+    const truth = word ? word.includes(letter) : null
+    const verdict = truth === null || yes === no ? 'unclear' : yes === truth ? 'right' : 'WRONG'
+    console.log(
+      `[wumpy] memory check: hangman: ${letter} in ${word || '?'}: ${verdict}; ` +
+        `board ${board === due ? 'right' : `WRONG ("${board}", should be "${due}")`}; ` +
+        `kept ${one(/<keep>([\s\S]*?)<\/keep>/i.exec(reply)?.[1] ?? '(none)')}; said ${one(shown)}`
+    )
+  }
 }
 
 async function hearingCheck(): Promise<void> {
@@ -3096,7 +3224,8 @@ function withContext(req: ChatRequest): Array<Pick<ChatMessage, 'role' | 'conten
   const facts = factsFor(
     req.context.chatTitle,
     req.context.actions ?? [],
-    req.context.handsFree === true
+    req.context.handsFree === true,
+    req.messages.filter((m) => m.role === 'user').map((m) => (typeof m.content === 'string' ? m.content : ''))
   )
 
   /*
