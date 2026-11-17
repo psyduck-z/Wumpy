@@ -65,6 +65,8 @@ import {
   HEARERS,
   HEARING,
   type Hearer,
+  TALKERS,
+  type Talker,
   OLD_DEFAULT_RATES,
   OLD_DEFAULT_VOICES,
   VOICE_CHOICE,
@@ -106,6 +108,7 @@ import { POLISH_PROMPT, polishAcceptable, tidyTranscript } from '@shared/dictati
 import { captureConsole, log, logPath } from './log'
 import { captureScreen } from './screen'
 import { Stretcher } from '@shared/stretch'
+import { forMagpie } from '@shared/voicetext'
 import { mayBeInvented } from '@shared/heard'
 import { speakable } from '@shared/spoken'
 import { savesIn, withoutKept } from '@shared/kept'
@@ -2614,6 +2617,10 @@ app.on('second-instance', (_event, argv) => {
     void voiceSamples()
     return
   }
+  if (argv.includes('--compare-voices')) {
+    void compareVoices()
+    return
+  }
   if (argv.includes('--hearing-check')) {
     void hearingCheck()
     return
@@ -2667,7 +2674,7 @@ let launchChat: string | null =
 if (launchChat && !/^[\w-]{1,80}$/.test(launchChat)) launchChat = null
 
 /** Wumpy's own launch flags, which describe one start and are not carried over. */
-const OWN_FLAGS = /^--(?:hidden|voice|toggle|restart|speech-check|voice-samples|hearing-check|memory-check|compare-hearing|resume-chat=.*)$/
+const OWN_FLAGS = /^--(?:hidden|voice|toggle|restart|speech-check|voice-samples|compare-voices|hearing-check|memory-check|compare-hearing|resume-chat=.*)$/
 
 async function restartWumpy(why: string, chatId: string | null): Promise<void> {
   if (restarting) return
@@ -3029,21 +3036,160 @@ async function voiceSamples(): Promise<void> {
     try {
       const clip = pcmFromWav((await synthesize(text, borrowed, voice)).wav)
       if (!clip) throw new Error('no sound')
-      const samples = new Int16Array(clip.pcm.buffer, clip.pcm.byteOffset, clip.pcm.length >> 1)
-      const floats = Float32Array.from(samples, (v) => v / 32768)
-      const stretch = new Stretcher(speed)
-      const parts = [stretch.push(floats), stretch.flush()]
-      const out = Buffer.alloc(parts.reduce((n, p) => n + p.length, 0) * 2)
-      let at = 0
-      for (const part of parts)
-        for (const v of part) out.writeInt16LE(Math.max(-32768, Math.min(32767, Math.round(v * 32768))), (at++) * 2)
-      writeFileSync(join(dir, `${short.replace(/\./g, ' ')}.wav`), wavFrom(out, clip.sampleRate))
+      writeFileSync(join(dir, `${short.replace(/\./g, ' ')}.wav`), atSpeed(clip, speed))
       made++
     } catch (err) {
       console.log(`[wumpy] voice samples: ${short}: failed (${String(err)})`)
     }
   }
   console.log(`[wumpy] voice samples: ${made} of ${voices.length} in ${dir}`)
+}
+
+/** A clip as answers are heard: sped up by `speed` without raising the pitch, as a WAV file. */
+function atSpeed(clip: { pcm: Buffer; sampleRate: number }, speed: number): Buffer {
+  const samples = new Int16Array(clip.pcm.buffer, clip.pcm.byteOffset, clip.pcm.length >> 1)
+  const floats = Float32Array.from(samples, (v) => v / 32768)
+  const stretch = new Stretcher(speed)
+  const parts = [stretch.push(floats), stretch.flush()]
+  const out = Buffer.alloc(parts.reduce((n, p) => n + p.length, 0) * 2)
+  let at = 0
+  for (const part of parts)
+    for (const v of part) out.writeInt16LE(Math.max(-32768, Math.min(32767, Math.round(v * 32768))), (at++) * 2)
+  return wavFrom(out, clip.sampleRate)
+}
+
+/**
+ * `wumpy --compare-voices`: "what text to speech models does the free NVIDIA
+ * API key allow... and compare them to my current one". NVIDIA is asked
+ * which functions the keys can see; then each voice model in TALKERS, and
+ * any other the listing names, says the same lines. For each: whether the
+ * keys reach it at all, its English voices, how soon the first sound comes
+ * (streamed, as answers are), how long the whole line takes, and how many
+ * words Whisper gets wrong hearing it back - a voice that mumbles or
+ * misreads shows there. The lines are as answers are sent (see forMagpie),
+ * at answers' speed, in Downloads/Wumpy voices/Compared, to judge by ear.
+ */
+const COMPARE_LINES = [
+  "I'll leave it on the screen for you.",
+  "Is there an O? No, there isn't. That's two misses.",
+  "Your disk is about two thirds full, so there's plenty of room for now. Want me to clear out the old downloads?",
+  "It's 23 degrees and sunny, with rain after 4 pm.",
+  'The quickest fix is to restart the Bluetooth service, then pair the earbuds again from the settings, and if that still fails, I can walk you through it step by step.'
+]
+const TTS_NAME = /tts|speech|voice|magpie|chatterbox|fastpitch|talk/i
+
+async function compareVoices(): Promise<void> {
+  if (!cloudSpeech()) {
+    console.log('[wumpy] compare voices: hosted speech is off or has no key')
+    return
+  }
+  const talkers: Talker[] = [...TALKERS]
+  {
+    const k = await cloud.speechKey('magpie')
+    if (k) {
+      try {
+        const res = await fetch('https://api.nvcf.nvidia.com/v2/nvcf/functions', {
+          headers: { authorization: `Bearer ${k.key}`, accept: 'application/json' },
+          signal: AbortSignal.timeout(15_000)
+        })
+        k.done(res.status)
+        if (!res.ok) {
+          console.log(`[wumpy] compare voices: NVIDIA would not list the functions (${res.status})`)
+        } else {
+          const body = (await res.json()) as { functions?: Array<{ id?: string; name?: string; status?: string }> }
+          const all = body.functions ?? []
+          const voiced = all.filter((f) => f.id && f.name && TTS_NAME.test(f.name))
+          console.log(
+            `[wumpy] compare voices: the keys see ${all.length} functions; speech ones: ` +
+              (voiced.map((f) => `${f.name} (${f.status ?? '?'}) ${f.id}`).join(', ') || 'none')
+          )
+          for (const f of voiced)
+            if (/tts|talk|magpie|chatterbox|fastpitch/i.test(f.name!) && !talkers.some((t) => t.functionId === f.id))
+              talkers.push({ name: f.name!, functionId: f.id! })
+        }
+      } catch (err) {
+        k.done(0)
+        console.log(`[wumpy] compare voices: the functions could not be listed (${String(err).slice(0, 100)})`)
+      }
+    }
+  }
+  const dir = join(app.getPath('downloads'), 'Wumpy voices', 'Compared')
+  mkdirSync(dir, { recursive: true })
+  const speed = settings.get('speakRate') || 1
+  const current = settings.get('speakVoice') || DEFAULT_VOICE
+  for (const t of talkers) {
+    const k = await cloud.speechKey('magpie')
+    if (!k) {
+      console.log(`[wumpy] compare voices: ${t.name}: no key free`)
+      continue
+    }
+    let voices: string[]
+    try {
+      voices = await listVoices(k, t.functionId)
+    } catch (err) {
+      console.log(`[wumpy] compare voices: ${t.name}: not reachable with these keys (${String(err).slice(0, 140)})`)
+      continue
+    }
+    const english = voices.filter((v) => /\.en-?us\b/i.test(v))
+    const voice =
+      (voices.includes(current) ? current : null) ??
+      english.find((v) => /\bmale\b|jason|leo|ray/i.test(v)) ??
+      english[0] ??
+      voices[0]
+    console.log(
+      `[wumpy] compare voices: ${t.name}: ${voices.length} voices, ${english.length} American English` +
+        `${english.length ? ` (${english.slice(0, 24).join(', ')})` : ''}; trying ${voice ?? 'none'}`
+    )
+    if (!voice) continue
+    const firsts: number[] = []
+    const wholes: number[] = []
+    let words = 0
+    let wrong = 0
+    let failed = 0
+    for (const [n, line] of COMPARE_LINES.entries()) {
+      const ks = await cloud.speechKey('magpie')
+      const first = ks
+        ? await synthesizeStream(line, ks, voice, () => {}, t.functionId).then(
+            (r) => (r.streamed ? r.firstMs : -r.firstMs),
+            () => null
+          )
+        : null
+      if (first !== null) firsts.push(Math.abs(first))
+      const kw = await cloud.speechKey('magpie')
+      let made: { wav: Buffer; ms: number } | null = null
+      let why = ''
+      if (kw) made = await synthesize(line, kw, voice, false, t.functionId).catch((err) => ((why = String(err).slice(0, 120)), null))
+      const clip = made ? pcmFromWav(made.wav) : null
+      if (!made || !clip) {
+        failed++
+        console.log(`[wumpy] compare voices: ${t.name}: line ${n + 1} failed (${why || 'no key free'})`)
+        /* Magpie Zeroshot lists its voices to anyone and then says nothing,
+           a minute and a half a line: one silence is the answer. */
+        if (!wholes.length) break
+        continue
+      }
+      wholes.push(made.ms)
+      writeFileSync(join(dir, `${t.name} ${n + 1}.wav`), atSpeed(clip, speed))
+      const kh = await cloud.speechKey('parakeet')
+      const heard = kh ? await recognize(wavFrom(downsample(clip.pcm, clip.sampleRate, 16000), 16000), kh).catch(() => null) : null
+      /* Sent as "Is there an oh?", heard as "Is there an O?": both are right. */
+      const said = forMagpie(line)
+      const errors = heard ? Math.min(wordErrors(line, heard.text), wordErrors(said, heard.text)) : wordsOf(line).length
+      words += wordsOf(line).length
+      wrong += errors
+      console.log(
+        `[wumpy] compare voices: ${t.name}: line ${n + 1}: first sound ${first === null ? '?' : first < 0 ? `${-first}ms (not streamed)` : `${first}ms`}, ` +
+          `whole ${made.ms}ms for ${(clip.pcm.length / 2 / clip.sampleRate).toFixed(1)}s of speech; Whisper heard "${heard?.text ?? '?'}"` +
+          (errors ? ` (${errors} wrong)` : '')
+      )
+    }
+    const mid = (xs: number[]): string => (xs.length ? `${[...xs].sort((a, b) => a - b)[Math.floor(xs.length / 2)]}ms` : '?')
+    console.log(
+      `[wumpy] compare voices: ${t.name} (${voice}): first sound ${mid(firsts)} typically, whole line ${mid(wholes)}, ` +
+        `${words ? ((100 * wrong) / words).toFixed(1) : '?'}% of words heard wrong, ${failed} of ${COMPARE_LINES.length} lines failed`
+    )
+  }
+  console.log(`[wumpy] compare voices: done; the clips are in ${dir}`)
 }
 
 /**

@@ -492,6 +492,10 @@ check('and the turn never waits on the comparison', /if \(compareHearing\) void 
 check('a turn is heard by Whisper large-v3, on the NVIDIA keys', /export const HEARING: Hearer = HEARERS\.find\(\(h\) => h\.name === 'whisper-large-v3'\)!/.test(nv) && /hearer: Hearer = HEARING/.test(nv), true)
 check('and by Parakeet when Whisper fails, then the local one', /for \(const hearer of \[HEARING, FALLBACK_HEARING\]\)/.test(main) && /export const FALLBACK_HEARING: Hearer = HEARERS\[0\]/.test(nv) && /return speech\.transcribe\(audio, extension\)\s+\}/.test(main), true)
 check('Parakeet is still compared, now beside Whisper', /\{ name: 'parakeet-tdt-0\.6b', functionId: SPEECH_MODELS\.hear, language: 'en-US', compare: true \}/.test(nv) && /h\.compare && h !== by/.test(main), true)
+/* "What text to speech models does the free NVIDIA API key allow... and
+   compare them to my current one": every one the keys reach, side by side. */
+check('the voice models on the keys can be compared', /async function compareVoices\(\)/.test(main) && /compare-voices\|/.test(main) && /ddacc747-1269-4fab-bfd9-8f593dead106/.test(nv), true)
+check('and what one refuses is not held against the voice in use', /if \(onlineRefused && ours\)/.test(nv) && /UNIMPLEMENTED && ours\) onlineRefused = true/.test(nv), true)
 check('a "Thank you." out of a cough is asked of Parakeet first', /mayBeInvented\(heard\.text\) && !\(await parakeetHearsWords\(audio\)\)/.test(main), true)
 {
   const H = await load('src/shared/heard.ts', 'heard')

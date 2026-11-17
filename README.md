@@ -97,7 +97,10 @@ NVIDIA's voice takes to speak and to hear, from this machine and network,
 to the log, without playing anything — worth running on a hotspot.
 `wumpy --voice-samples` saves each of Magpie's men saying the same lines, at
 the speed answers are spoken, to Downloads/Wumpy voices, to choose a voice by
-ear.
+ear. `wumpy --compare-voices` does the same across every voice model the
+NVIDIA keys reach (Magpie and Resemble AI's Chatterbox, today), with how soon
+each starts speaking and how much Whisper hears wrong, to Downloads/Wumpy
+voices/Compared.
 
 What is different from Windows, on purpose:
 

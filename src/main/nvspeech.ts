@@ -115,6 +115,24 @@ export const OLD_DEFAULT_RATES = [1.15]
 export const VOICE_CHOICE = 'jason-neutral-1.25'
 const TTS_RATE = 22050
 
+/**
+ * Every voice model the keys might reach, for `wumpy --compare-voices`:
+ * "what text to speech models does the free NVIDIA API key allow... and
+ * compare them to my current one". Magpie Multilingual is the one in use.
+ * Chatterbox is Resemble AI's, hosted by NVIDIA under the id its Nemotron
+ * voice agent uses. Magpie Zeroshot and Flow clone a voice from a clip and
+ * are only for accounts NVIDIA has let in; the check also asks NVIDIA which
+ * functions the keys can see, and tries any voice model it names.
+ */
+export interface Talker {
+  name: string
+  functionId: string
+}
+export const TALKERS: Talker[] = [
+  { name: 'magpie-tts-multilingual', functionId: SPEECH_MODELS.talk },
+  { name: 'chatterbox-multilingual-tts', functionId: 'ddacc747-1269-4fab-bfd9-8f593dead106' }
+]
+
 /** One key, borrowed from the rotation for one call. */
 export interface BorrowedKey {
   key: string
@@ -405,13 +423,13 @@ export async function recognize(
  * asked of the service rather than remembered, since NVIDIA adds and renames
  * them. A model lists its voice once and its speakers as subvoices.
  */
-export async function listVoices(borrowed: BorrowedKey): Promise<string[]> {
+export async function listVoices(borrowed: BorrowedKey, functionId = SPEECH_MODELS.talk): Promise<string[]> {
   const response = await call<unknown, { model_config?: Array<{ parameters?: Record<string, string> }> }>(
     load().tts,
     'GetRivaSynthesisConfig',
     {},
     borrowed,
-    SPEECH_MODELS.talk,
+    functionId,
     15_000
   )
   const names = new Set<string>()
@@ -432,7 +450,9 @@ export async function synthesize(
   borrowed: BorrowedKey,
   voice = DEFAULT_VOICE,
   /** Exactly as given, without forMagpie - for `--hearing-check`, to hear what it fixes. */
-  asWritten = false
+  asWritten = false,
+  /** Another voice model on the same keys: see TALKERS. */
+  functionId = SPEECH_MODELS.talk
 ): Promise<{ wav: Buffer; ms: number }> {
   const started = Date.now()
   const response = await call<unknown, { audio?: Buffer }>(
@@ -446,7 +466,7 @@ export async function synthesize(
       voice_name: voice
     },
     borrowed,
-    SPEECH_MODELS.talk,
+    functionId,
     30_000
   )
   const pcm = response.audio ?? Buffer.alloc(0)
@@ -471,8 +491,11 @@ export async function synthesizeStream(
   text: string,
   borrowed: BorrowedKey,
   voice: string,
-  onAudio: (pcm: Buffer) => void
+  onAudio: (pcm: Buffer) => void,
+  /** Another voice model on the same keys, for `--compare-voices`; what it refuses is not remembered. */
+  functionId = SPEECH_MODELS.talk
 ): Promise<{ pieces: number; firstMs: number; ms: number; streamed: boolean }> {
+  const ours = functionId === SPEECH_MODELS.talk
   const started = Date.now()
   const request = {
     text: forMagpie(text),
@@ -483,13 +506,13 @@ export async function synthesizeStream(
   }
   const Client = load().tts
   const metadata = new grpc.Metadata()
-  metadata.set('function-id', SPEECH_MODELS.talk)
+  metadata.set('function-id', functionId)
   metadata.set('authorization', `Bearer ${borrowed.key}`)
 
   let pieces = 0
   let firstMs = -1
-  if (onlineRefused) {
-    const response = await call<unknown, { audio?: Buffer }>(Client, 'Synthesize', request, borrowed, SPEECH_MODELS.talk, 30_000)
+  if (onlineRefused && ours) {
+    const response = await call<unknown, { audio?: Buffer }>(Client, 'Synthesize', request, borrowed, functionId, 30_000)
     const pcm = response.audio ?? Buffer.alloc(0)
     if (pcm.length === 0) throw new Error('NVIDIA Synthesize returned no audio')
     onAudio(Buffer.from(pcm))
@@ -533,9 +556,9 @@ export async function synthesizeStream(
     borrowed.done(status)
     throw new Error(`NVIDIA SynthesizeOnline: ${streamed.why}`)
   }
-  if (streamed.code === grpc.status.UNIMPLEMENTED) onlineRefused = true
+  if (streamed.code === grpc.status.UNIMPLEMENTED && ours) onlineRefused = true
   dropClient(Client, streamed.code)
-  const response = await call<unknown, { audio?: Buffer }>(Client, 'Synthesize', request, borrowed, SPEECH_MODELS.talk, 30_000)
+  const response = await call<unknown, { audio?: Buffer }>(Client, 'Synthesize', request, borrowed, functionId, 30_000)
   const pcm = response.audio ?? Buffer.alloc(0)
   if (pcm.length === 0) throw new Error('NVIDIA Synthesize returned no audio')
   onAudio(Buffer.from(pcm))
