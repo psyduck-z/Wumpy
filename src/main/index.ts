@@ -60,7 +60,10 @@ import { Speech } from './speech'
 import {
   DEFAULT_RATE,
   DEFAULT_VOICE,
+  FALLBACK_HEARING,
   HEARERS,
+  HEARING,
+  type Hearer,
   OLD_DEFAULT_RATES,
   OLD_DEFAULT_VOICES,
   VOICE_CHOICE,
@@ -102,6 +105,7 @@ import { POLISH_PROMPT, polishAcceptable, tidyTranscript } from '@shared/dictati
 import { captureConsole, log, logPath } from './log'
 import { captureScreen } from './screen'
 import { Stretcher } from '@shared/stretch'
+import { mayBeInvented } from '@shared/heard'
 
 /**
  * Before anything else, so that whatever happens during startup is readable.
@@ -221,7 +225,7 @@ function cloudSpeech(): boolean {
  * the key they already have for chat is the one that hears them too.
  */
 function voiceStatus(): VoiceStatus {
-  if (cloudSpeech()) return { kind: 'ready', model: 'NVIDIA Parakeet', loadMs: 0 }
+  if (cloudSpeech()) return { kind: 'ready', model: 'Whisper large-v3 on NVIDIA', loadMs: 0 }
   const local = speech.status()
   if (local.kind !== 'absent') return local
   const why =
@@ -237,37 +241,54 @@ function voiceStatus(): VoiceStatus {
 }
 
 /**
- * One clip to text: Parakeet first when it can be used, Whisper otherwise
- * and whenever Parakeet fails, so a network blip costs accuracy, not the turn.
+ * One clip to text: Whisper large-v3 on NVIDIA (see HEARING), Parakeet when
+ * Whisper fails, and the local transcriber when neither can be reached - so
+ * a network blip costs accuracy, not the turn.
  */
 async function hear(audio: Uint8Array, extension: string): Promise<Transcript> {
   if (cloudSpeech() && extension === 'wav') {
-    const borrowed = await cloud.speechKey('parakeet')
-    if (borrowed) {
+    for (const hearer of [HEARING, FALLBACK_HEARING]) {
+      const borrowed = await cloud.speechKey('parakeet')
+      if (!borrowed) break
       try {
-        const heard = await recognize(audio, borrowed)
-        if (compareHearing) void compareOn(audio, heard.text, heard.ms)
+        const heard = await recognize(audio, borrowed, hearer)
+        if (hearer === HEARING && heard.text && mayBeInvented(heard.text) && !(await parakeetHearsWords(audio))) {
+          log(`[listen] Whisper heard "${heard.text}" where Parakeet heard nothing: taken as nothing`)
+          return { ...heard, text: '', confidence: 0 }
+        }
+        if (compareHearing) void compareOn(audio, hearer, heard.text, heard.ms)
         return heard
       } catch (err) {
-        console.warn('[wumpy] Parakeet could not hear that, trying Whisper:', err)
+        console.warn(`[wumpy] ${hearer.name} could not hear that${hearer === HEARING ? ', trying Parakeet' : ''}:`, err)
       }
     }
   }
   return speech.transcribe(audio, extension)
 }
 
+/** Whether Parakeet hears any words in the clip - yes, when it cannot be asked, so Whisper is believed. */
+async function parakeetHearsWords(audio: Uint8Array): Promise<boolean> {
+  const borrowed = await cloud.speechKey('parakeet')
+  if (!borrowed) return true
+  try {
+    return Boolean((await recognize(audio, borrowed, FALLBACK_HEARING)).text)
+  } catch {
+    return true
+  }
+}
+
 /**
  * `wumpy --compare-hearing`: until the next restart, everything said is also
  * heard by the other recognisers, and what each made of it is logged beside
- * Parakeet's - so the choice between them is made on this person's own
- * voice, through these earbuds, rather than on anyone's benchmark. After the
- * answer, not before it: the turn waits on Parakeet alone.
+ * the one that answered - so the choice between them is made on this
+ * person's own voice, through these earbuds, rather than on anyone's
+ * benchmark. After the answer, not before it: the turn waits on one alone.
  */
 let compareHearing = false
 
-async function compareOn(audio: Uint8Array, heard: string, ms: number): Promise<void> {
+async function compareOn(audio: Uint8Array, by: Hearer, heard: string, ms: number): Promise<void> {
   const lines = await Promise.all(
-    HEARERS.filter((h) => h.compare).map(async (h) => {
+    HEARERS.filter((h) => h.compare && h !== by).map(async (h) => {
       const k = await cloud.speechKey('parakeet')
       if (!k) return `${h.name}: no key free`
       try {
@@ -278,7 +299,7 @@ async function compareOn(audio: Uint8Array, heard: string, ms: number): Promise<
       }
     })
   )
-  log(`[listen] compare: ${HEARERS[0].name} ${ms}ms "${heard}"`)
+  log(`[listen] compare: ${by.name} ${ms}ms "${heard}"`)
   for (const line of lines) log(`[listen] compare: ${line}`)
 }
 
@@ -2725,6 +2746,30 @@ async function hearingCheck(): Promise<void> {
     const heard = clip && h ? await recognize(wavFrom(downsample(clip.pcm, clip.sampleRate, 16000), 16000), h).catch(() => null) : null
     console.log(`[wumpy] hearing check: numbers: "${said}" is said as "${heard?.text ?? '?'}"`)
   }
+  /* Whisper's habit (see mayBeInvented): what each recogniser makes of a
+     second of earbud hiss with a thump in it, and what a turn takes from it
+     - which must be nothing. Then a sentence, the whole way a turn hears. */
+  {
+    const noise = Buffer.alloc(32000)
+    let seed = 3
+    for (let i = 0; i < 16000; i++) {
+      seed = (seed * 16807) % 2147483647
+      const thump = i > 6000 && i < 9000 ? Math.sin(i / 9) * 6000 * Math.exp(-(i - 6000) / 500) : 0
+      noise.writeInt16LE(Math.round(((seed / 2147483647) * 2 - 1) * 300 + thump), i * 2)
+    }
+    const hiss = wavFrom(noise, 16000)
+    for (const h of [HEARING, FALLBACK_HEARING]) {
+      const k = await cloud.speechKey('parakeet')
+      const r = k ? await recognize(hiss, k, h).then((x) => `"${x.text}"`, (e) => `failed (${String(e).slice(0, 80)})`) : 'no key free'
+      console.log(`[wumpy] hearing check: noise: ${h.name} heard ${r}`)
+    }
+    const turn = await hear(hiss, 'wav').then((x) => `"${x.text}"`, (e) => `failed (${String(e).slice(0, 80)})`)
+    console.log(`[wumpy] hearing check: noise: a turn takes it as ${turn}`)
+    if (clips[0]) {
+      const r = await hear(clips[0].wav, 'wav').then((x) => `"${x.text}" in ${x.ms}ms`, (e) => `failed (${String(e).slice(0, 80)})`)
+      console.log(`[wumpy] hearing check: a turn hears "${clips[0].said}" as ${r}`)
+    }
+  }
   const total = clips.reduce((n, c) => n + wordsOf(c.said).length, 0)
   console.log(`[wumpy] hearing check: ${clips.length} clips, ${total} words, each recogniser in turn`)
   for (const h of HEARERS) {
@@ -2871,7 +2916,7 @@ async function speechCheck(): Promise<void> {
     return `first sound ${r.firstMs}ms, all ${r.ms}ms, ${r.pieces} pieces${r.streamed ? '' : ' (not streamed)'}`
   })
   /* And hearing, the other half of the wait: the long sentence as Magpie
-     said it, back through Parakeet at the rate the panel sends - how long a
+     said it, back through HEARING at the rate the panel sends - how long a
      transcript takes once the last word is in, and whether it came back
      right. Twice, since the first request on a channel can be the slow one. */
   const said = await (async () => {

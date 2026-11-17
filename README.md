@@ -126,7 +126,8 @@ where its installer put it, on Windows too). On Windows it is
 `"%LOCALAPPDATA%\Programs\Wumpy\Wumpy.exe" --voice`: the installer adds
 nothing to `PATH`, so a bare `wumpy` is not found there.
 
-- **Hearing** is NVIDIA's Parakeet and **speaking** is NVIDIA's Magpie, in
+- **Hearing** is Whisper large-v3 on NVIDIA, with Parakeet when Whisper
+  fails, and **speaking** is NVIDIA's Magpie, in
   its male voice Jason, neutral (`wumpy --speech-check` lists the others,
   `wumpy --voice-samples` lets you hear the men), on the
   same NVIDIA keys as chat (`/key nvidia <key1> <key2>`), from the same

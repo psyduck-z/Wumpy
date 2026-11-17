@@ -484,8 +484,24 @@ check('but units in words, which it does not', /"64 gigabytes", not "64 GB"/.tes
 check('and the voice\'s name is not part of the question', /Your voice is called Jason/.test(main), true)
 check('how numbers are read is checked against the voice', /NUMBER_SENTENCES = \[/.test(main), true)
 check('a misheard word answered as meant, read by how it sounds', /Read it by how it sounds and by what you were just talking about/.test(main) && /"a specie" for "a PC"/.test(main), true)
-check('every recogniser can be compared, on sentences and on real speech', /async function hearingCheck\(\)/.test(main) && /if \(compareHearing\) void compareOn\(audio, heard\.text, heard\.ms\)/.test(main), true)
-check('and the turn never waits on the comparison', /const heard = await recognize\(audio, borrowed\)\s+if \(compareHearing\) void compareOn/.test(main), true)
+check('every recogniser can be compared, on sentences and on real speech', /async function hearingCheck\(\)/.test(main) && /if \(compareHearing\) void compareOn\(audio, hearer, heard\.text, heard\.ms\)/.test(main), true)
+check('and the turn never waits on the comparison', /if \(compareHearing\) void compareOn\(audio, hearer, heard\.text, heard\.ms\)\s+return heard/.test(main), true)
+/* "I need more accuracy, higher accuracy" - and it has to keep up with
+   NVIDIA's 40 requests a minute a key. Whisper large-v3 makes a third fewer
+   mistakes than Parakeet on real speech, on the same keys. */
+check('a turn is heard by Whisper large-v3, on the NVIDIA keys', /export const HEARING: Hearer = HEARERS\.find\(\(h\) => h\.name === 'whisper-large-v3'\)!/.test(nv) && /hearer: Hearer = HEARING/.test(nv), true)
+check('and by Parakeet when Whisper fails, then the local one', /for \(const hearer of \[HEARING, FALLBACK_HEARING\]\)/.test(main) && /export const FALLBACK_HEARING: Hearer = HEARERS\[0\]/.test(nv) && /return speech\.transcribe\(audio, extension\)\s+\}/.test(main), true)
+check('Parakeet is still compared, now beside Whisper', /\{ name: 'parakeet-tdt-0\.6b', functionId: SPEECH_MODELS\.hear, language: 'en-US', compare: true \}/.test(nv) && /h\.compare && h !== by/.test(main), true)
+check('a "Thank you." out of a cough is asked of Parakeet first', /mayBeInvented\(heard\.text\) && !\(await parakeetHearsWords\(audio\)\)/.test(main), true)
+{
+  const H = await load('src/shared/heard.ts', 'heard')
+  for (const [said, invented] of [
+    ['Thank you.', true], ['Thanks for watching!', true], ['you', true], ['Bye-bye.', true],
+    ['Thank you so much for watching.', true], ['Subtitles by the Amara.org community', true], ['...', true],
+    ['Thank you, can you open Spotify?', false], ['How much RAM does this PC have?', false],
+    ['You know what, never mind.', false], ['Stop.', false], ['So what is the weather?', false]
+  ]) check(`"${said}" ${invented ? 'is checked first' : 'is taken as said'}`, H.mayBeInvented(said), invented)
+}
 check('talked over, it answers the new thing and leaves the old', /they talked over you',\s+'  on purpose: answer the new thing/.test(main), true)
 check('a conversation: short, and theirs to steer', /This is a back-and-forth conversation/.test(main) && /can talk',\s+'  over you to stop you/.test(main), true)
 
