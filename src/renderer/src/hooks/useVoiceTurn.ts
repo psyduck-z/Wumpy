@@ -145,6 +145,18 @@ export const GUESS_WAIT_MS = 1500
 export const UNFINISHED_PAUSE_MS = 3000
 
 /**
+ * Choosing out loud: the silence after the question that reads out the
+ * options not read yet, and how many at a time - "give it a slight pause,
+ * and then list out the rest of the models so that I know".
+ */
+export const MORE_AFTER_MS = 2500
+
+/** Shorter than this and quieter than this many times the speech bar: not words (see listen). */
+export const FAINT_MS = 300
+export const FAINT_TIMES = 4
+export const MORE_AT_ONCE = 5
+
+/**
  * What starts speech in a conversation: three loud frames of four, about
  * 120ms. A single frame was enough for a turn that had just said "talk
  * now", but this mic is open all the time, and a tap on the earbud or a
@@ -334,20 +346,25 @@ export function useVoiceTurn(deps: Deps): void {
 
     /**
      * Speaks, and returns once it has finished, so listening never hears it.
-     * Streamed, sentence by sentence (see speaker.ts). `quick` is for lists:
-     * a fifth faster at the same pitch, which only an audio element can do,
-     * so those are made in one piece and played the old way.
+     * Streamed, sentence by sentence (see speaker.ts).
+     *
+     * Lists too, now. `quick` made them in one piece, to be played a fifth
+     * faster by an audio element - and that was the "..." after every
+     * command: "slash model" was 4.7s of typing and nothing said while 219
+     * characters were made, "even though the AI is not even talking". The
+     * speaker plays at the speed setting at the same pitch, which at the
+     * default is as quick as `quick` was, and it starts in half a second.
+     * The one-piece way is left for when there is no speaker.
      */
     async function say(text: string, quick = false): Promise<void> {
       if (!text || cancelled || interrupted) return
       showVoice({ stage: 'speaking', level: 0, detail: text.length > 160 ? `${text.slice(0, 157)}…` : text })
-      if (!quick && speaker) {
+      if (speaker) {
         note(`speaking ${text.length} characters with Magpie, as it is made`)
         speaker.say(sentences(text))
         await speaker.drain()
         return
       }
-      await speaker?.drain()
       const wav = await window.wumpy.voice.speak(text).catch(() => null)
       if (cancelled) return
       note(`speaking ${text.length} characters with ${wav ? 'Magpie' : 'the system voice, since Magpie gave nothing'}`)
@@ -729,7 +746,12 @@ export function useVoiceTurn(deps: Deps): void {
             `loudest ${stats.peak.toFixed(3)} (speech counts from ${stats.bar.toFixed(3)})` +
             `${stats.dropMs ? `; the mic dropped out for ${stats.dropMs}ms of it` : ''}`
         )
-        if (clip) {
+        /* A blip barely over the room - a click, a breath - is not words,
+           and Whisper makes words of it: "Bye." from 0.1s peaking at 0.004,
+           with speech counting from 0.002 and their voice reaching 0.2. */
+        const faint = Boolean(clip) && talkedMs < FAINT_MS && stats.peak < stats.bar * FAINT_TIMES
+        if (faint) note(`too short and faint to be words (${Math.max(0, talkedMs)}ms, loudest ${stats.peak.toFixed(3)}): not sent`)
+        if (clip && !faint) {
           showVoice({ stage: 'hearing', level: 0 })
           /* The typing is "got it": no chime for it. */
           startTicks()
@@ -854,6 +876,13 @@ export function useVoiceTurn(deps: Deps): void {
       let numbered = (choice.numbered ?? all.map((o) => o.id))
         .map(byId)
         .filter((o): o is AloudOption => Boolean(o))
+      /* Every option can be picked by name, but only the first few are
+         read - "I can only select the models that are top 5, which is
+         really annoying" - when nobody knows what the others are called.
+         So a short silence after the question reads the rest, a few at a
+         time and numbered on from the first ones, until one is said. */
+      let unread = all.filter((o) => !numbered.includes(o))
+      let toldOthers = false
       let narrowed: AloudOption[] | null = null
       let prompt = choice.intro
         ? `${choice.intro} ${choice.question}`
@@ -863,8 +892,22 @@ export function useVoiceTurn(deps: Deps): void {
       while (open()) {
         await say(prompt, quick)
         if (!open()) break
-        const heard = await listen(1100, 8000)
+        const reading = unread.length > 0 && !narrowed
+        const heard = await listen(1100, reading ? MORE_AFTER_MS : 8000)
         if (!open()) break
+        if (!heard && reading && idled) {
+          const next = unread.slice(0, MORE_AT_ONCE)
+          unread = unread.slice(next.length)
+          const from = numbered.length
+          numbered = [...numbered, ...next]
+          prompt =
+            `${toldOthers ? '' : 'The others: '}` +
+            `${numberedSpeech(next.map((o) => sayModel(o.label)), MORE_AT_ONCE, from)}` +
+            `${unread.length ? '' : ' Which one?'}`
+          toldOthers = true
+          quick = true
+          continue
+        }
         const said = heard?.heard ?? ''
         /* The model's own "Shall I?" with Yes and No buttons: "no" is an
            answer to that, not a way out of it. */
@@ -898,6 +941,15 @@ export function useVoiceTurn(deps: Deps): void {
             fits.map((o) => sayModel(o.label))
           )} Which one?`
           quick = true
+          continue
+        }
+        /* Asked for by name, and not something that can be picked. */
+        const gone = said && choice.unavailable?.length
+          ? matchSpoken(said, choice.unavailable.map((u, i) => ({ id: String(i), names: u.names })))
+          : []
+        if (gone.length === 1) {
+          prompt = `${choice.unavailable![Number(gone[0])].why} Pick another, or say cancel.`
+          quick = false
           continue
         }
         misses++

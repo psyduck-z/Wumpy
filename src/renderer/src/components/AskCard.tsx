@@ -38,7 +38,13 @@ export function AskCard({
    * its own words, how many of the options that list numbers, what else
    * each option answers to, and whether it is a yes-or-no.
    */
-  aloud?: { say?: string; spoken?: number; aliases?: string[][]; confirm?: boolean }
+  aloud?: {
+    say?: string
+    spoken?: number
+    aliases?: string[][]
+    unavailable?: Array<{ names: string[]; why: string }>
+    confirm?: boolean
+  }
   /** When the question was asked: see AloudChoice.askedAt. */
   askedAt?: number
 }): React.JSX.Element {
@@ -68,11 +74,12 @@ export function AskCard({
       intro: aloud?.say,
       options: options.map((label, i) => ({ id: label, label, names: aloud?.aliases?.[i] })),
       numbered: aloud?.say ? options.slice(0, aloud.spoken ?? options.length) : undefined,
+      unavailable: aloud?.unavailable,
       confirm: aloud?.confirm,
       askedAt,
       choose: (id) => answerRef.current(id)
     })
-  }, [done, question, optionKey, key, aloud?.say, aloud?.spoken, aloud?.aliases, aloud?.confirm, askedAt])
+  }, [done, question, optionKey, key, aloud?.say, aloud?.spoken, aloud?.aliases, aloud?.unavailable, aloud?.confirm, askedAt])
 
   /**
    * The first option takes focus, so arrows work without a click first.

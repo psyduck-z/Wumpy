@@ -106,6 +106,7 @@ import { captureConsole, log, logPath } from './log'
 import { captureScreen } from './screen'
 import { Stretcher } from '@shared/stretch'
 import { mayBeInvented } from '@shared/heard'
+import { speakable } from '@shared/spoken'
 
 /**
  * Before anything else, so that whatever happens during startup is readable.
@@ -498,9 +499,24 @@ function quotaFacts(): string[] {
 const TONE =
   '- Tone: a sharp, easygoing friend - warm, quick, a light touch of humour when it fits, never chatty.'
 
+/*
+ * A memory for games, which a model does not have: "we were playing hangman
+ * and I told it to give me a word with vowels, but it kept on saying that no
+ * vowels". The word it chose was gone by the next turn, so every guess was
+ * checked against one it was making up. See @shared/kept.
+ */
+const KEEP = [
+  "- Games: whatever they must not see yet - a hangman word, a number to guess, a riddle's answer -",
+  '  goes in <keep>...</keep> at the very start of your reply. It is never shown or read aloud, and',
+  '  you will see it again next turn; without it, you will have forgotten what you chose. Rewrite it',
+  '  whole every turn - for hangman: the word, the word spelled out letter by letter, the letters',
+  '  guessed and the misses. Check every guess against the letters written there, one by one,',
+  '  never from memory, and keep the board you show in step with it.'
+]
+
 function channelFacts(handsFree: boolean): string[] {
   if (!handsFree)
-    return ['- The user is at the screen, reading your answers (not on their earbuds).', TONE]
+    return ['- The user is at the screen, reading your answers (not on their earbuds).', TONE, ...KEEP]
   return [
     '- RIGHT NOW THE USER IS ON THEIR EARBUDS, not looking at the screen. They spoke this, and',
     '  your answer will be read aloud to them. Only plain prose is read: code, tables and links',
@@ -516,6 +532,10 @@ function channelFacts(handsFree: boolean): string[] {
     '  the point; when they ask for many digits or a long list, give it in one compact sentence.',
     '- Your voice is called Jason, so they may call you that, or something speech recognition',
     '  made of it: it is not part of the question.',
+    ...KEEP,
+    '- In a letter game, a letter they say is often written as a word: "you" for U, "see" for C,',
+    '  "why" for Y, "oh" for O, "are" for R, "tea" for T, "bee" for B, "and E" for "an E". Write a',
+    '  letter as a capital on its own ("O"), and the board as blanks and letters: "_ _ O _".',
     '- Their words came through speech recognition on earbuds and are often a little off,',
     '  technical words most: "a specie" for "a PC", "thing pad" for "ThinkPad", "a clean bottle"',
     '  for "a clear bottle". Read it by how it sounds and by what you were just talking about, as',
@@ -2684,6 +2704,20 @@ const NUMBER_SENTENCES = [
   'Version 5.2 is 2.5 times faster than 4.0.'
 ]
 
+/*
+ * What Magpie was saying wrongly, as it was sent before (`before`) and as an
+ * answer is sent now (speakable, then forMagpie): "no OOOOOOOO" for a lone O
+ * - a hangman board lost its blanks and was just "O" - and "I L L" for I’ll.
+ */
+const SAYING_SENTENCES = [
+  { said: '_ _ O _', before: 'O' },
+  { said: 'No, O.', before: 'No, O.' },
+  { said: 'I’ll leave you later.', before: 'I’ll leave you later.' },
+  { said: 'I’ll leave it on the screen.', before: 'I’ll leave it on the screen.' },
+  { said: 'Two E’s and a U.', before: 'Two E’s and a U.' },
+  { said: 'Is there an A?', before: 'Is there an A?' }
+]
+
 function wordsOf(text: string): string[] {
   return text.toLowerCase().replace(/-/g, ' ').replace(/[^a-z0-9' ]/g, ' ').split(/\s+/).filter(Boolean)
 }
@@ -2745,6 +2779,23 @@ async function hearingCheck(): Promise<void> {
     const h = clip ? await cloud.speechKey('parakeet') : null
     const heard = clip && h ? await recognize(wavFrom(downsample(clip.pcm, clip.sampleRate, 16000), 16000), h).catch(() => null) : null
     console.log(`[wumpy] hearing check: numbers: "${said}" is said as "${heard?.text ?? '?'}"`)
+  }
+  /* Each, as it was said and as it is now: how long the sound is - a held
+     "OOOO" is seconds - and what Whisper hears in it. */
+  for (const s of SAYING_SENTENCES) {
+    const parts: string[] = []
+    for (const [label, text, asWritten] of [
+      ['before', s.before, true],
+      ['now', speakable(s.said), false]
+    ] as const) {
+      const k = await cloud.speechKey('magpie')
+      const made = k ? await synthesize(text, k, settings.get('speakVoice') || DEFAULT_VOICE, asWritten).catch(() => null) : null
+      const clip = made ? pcmFromWav(made.wav) : null
+      const h = clip ? await cloud.speechKey('parakeet') : null
+      const heard = clip && h ? await recognize(wavFrom(downsample(clip.pcm, clip.sampleRate, 16000), 16000), h).catch(() => null) : null
+      parts.push(`${label} ${clip ? (clip.pcm.length / 2 / clip.sampleRate).toFixed(1) : '?'}s, heard "${heard?.text ?? '?'}"`)
+    }
+    console.log(`[wumpy] hearing check: saying "${s.said}": ${parts.join('; ')}`)
   }
   /* Whisper's habit (see mayBeInvented): what each recogniser makes of a
      second of earbud hiss with a thump in it, and what a turn takes from it

@@ -1,3 +1,4 @@
+import { withoutKept } from '@shared/kept'
 import { memo, useEffect, useState, type ReactNode } from 'react'
 import type {
   Attachment,
@@ -109,11 +110,14 @@ export const Message = memo(function Message({
   const [copied, setCopied] = useState(false)
   const isUser = message.role === 'user'
 
+  /* The model's private note (see @shared/kept) is for the model alone. */
+  const visible = isUser ? message.content : withoutKept(message.content)
+
   const copy = (): void => {
     /* Through the main process: the page's own clipboard needs document focus
        and this panel often does not have it. The badge now follows what
        actually happened rather than the attempt. */
-    void copyText(message.content).then((ok) => {
+    void copyText(visible).then((ok) => {
       if (!ok) return
       setCopied(true)
       setTimeout(() => setCopied(false), 1400)
@@ -121,7 +125,7 @@ export const Message = memo(function Message({
   }
 
   // Reveal the answer smoothly rather than in the lumps the tokens arrive in.
-  const [shown, catchingUp] = useSmoothText(message.content, streaming, smoothText)
+  const [shown, catchingUp] = useSmoothText(visible, streaming, smoothText)
   const animating = streaming || catchingUp
 
   // Follow the global preference when it changes, but let a click override it
@@ -144,6 +148,7 @@ export const Message = memo(function Message({
             say: message.localAsk.say,
             spoken: message.localAsk.spoken,
             aliases: message.localAsk.aliases,
+            unavailable: message.localAsk.unavailable,
             confirm: message.localAsk.kind === 'confirm'
           }}
           askedAt={message.createdAt}
@@ -263,7 +268,7 @@ export const Message = memo(function Message({
   return (
     <div className="msg msg-assistant">
       {/* Code blocks could always be copied; the answer around them could not. */}
-      {!animating && !message.error && message.content.trim() && (
+      {!animating && !message.error && visible.trim() && (
         <button type="button" className="msg-copy" onClick={copy} title="Copy this answer">
           {copied ? 'Copied' : 'Copy'}
         </button>

@@ -502,6 +502,53 @@ check('a "Thank you." out of a cough is asked of Parakeet first', /mayBeInvented
     ['You know what, never mind.', false], ['Stop.', false], ['So what is the weather?', false]
   ]) check(`"${said}" ${invented ? 'is checked first' : 'is taken as said'}`, H.mayBeInvented(said), invented)
 }
+/* "no OOOOOOOO" for a lone O, and "I L L" for I’ll: what Magpie is given. */
+{
+  const V = await load('src/shared/voicetext.ts', 'voicetext')
+  const P = await load('src/shared/spoken.ts', 'spoken')
+  const K = await load('src/shared/kept.ts', 'kept')
+  const said = (t) => V.forMagpie(P.speakable(t))
+  for (const [t, want] of [
+    ['No, O.', 'No, oh.'],
+    ['_ _ O _', 'blank, blank, oh, blank'],
+    ['The word: P _ A _ E T.', 'The word: pee, blank, ay, blank, ee, tee.'],
+    ['I’ll leave you later.', "I'll leave you later."],
+    ["I'LL BE BACK.", "I'll BE BACK."],
+    ['Two O’s and an E.', 'Two ohs and an ee.'],
+    ['Is there an A?', 'Is there an ay?'],
+    ['A PC with a GPU.', 'A PC with a GPU.'],
+    ['The U.S. sells T-shirts to O’Brien.', "The U.S. sells T-shirts to O'Brien."],
+    ['Windows 11 24H2 is out.', 'Windows 11 24H2 is out.'],
+    ['Use _italic_ here.', 'Use italic here.'],
+    ['<keep>word: PLANET = P L A N E T</keep>Yes, there is an E!', 'Yes, there is an ee!'],
+    ['<keep>word: PLAN', '']
+  ]) check(`said as "${want}": ${t}`, said(t), want)
+  check('the note is never shown', K.withoutKept('<keep>PLANET</keep>\n\nGuess a letter.'), 'Guess a letter.')
+  check('a hangman board is not taken for an aside', S.withoutAsides('_ _ O _'), '_ _ O _')
+  check('an aside still is', S.withoutAsides('_Nemotron had not started - answering on Ultra instead._').trim(), '')
+  check('every word for Magpie goes through it, streamed or not', /text: asWritten \? text : forMagpie\(text\)/.test(nv) && /text: forMagpie\(text\),/.test(nv), true)
+  check('and the voice test hears both versions', /const SAYING_SENTENCES = \[/.test(main) && /\['before', s\.before, true\]/.test(main), true)
+}
+/* The game memory: in the instructions on both channels, hidden on screen. */
+check('a game keeps its secret in <keep>, on screen and in the ear', /const KEEP = \[/.test(main) && /TONE, \.\.\.KEEP\]/.test(main) && /made of it: it is not part of the question\.',\s+\.\.\.KEEP,/.test(main), true)
+check('and checks a guess against it letter by letter', /Check every guess against the letters written there, one by one/.test(main), true)
+check('letters heard as words, in a letter game', /"you" for U, "see" for C/.test(main), true)
+{
+  const msg = read('src/renderer/src/components/Message.tsx')
+  check('the note is hidden on screen and from Copy', /const visible = isUser \? message\.content : withoutKept\(message\.content\)/.test(msg) && /useSmoothText\(visible,/.test(msg) && /copyText\(visible\)/.test(msg), true)
+}
+/* Lists said as they are made, and the models past the first five. */
+{
+  const turn2 = read('src/renderer/src/hooks/useVoiceTurn.ts')
+  check('a list is streamed, not made whole first (the "..." after a command)', /async function say\(text: string, quick = false\): Promise<void> \{[\s\S]{0,300}if \(speaker\) \{/.test(turn2), true)
+  check('a silence after the question reads the rest of the options', /const heard = await listen\(1100, reading \? MORE_AFTER_MS : 8000\)/.test(turn2) && /if \(!heard && reading && idled\)/.test(turn2), true)
+  check('numbered on from the first ones', /numberedSpeech\(next\.map\(\(o\) => sayModel\(o\.label\)\), MORE_AT_ONCE, from\)/.test(turn2) && /numbered = \[\.\.\.numbered, \.\.\.next\]/.test(turn2), true)
+  check('a model that is not there is said to be not there', /choice\.unavailable!\[Number\(gone\[0\]\)\]\.why/.test(turn2) && /isn't answering right now/.test(read('src/renderer/src/App.tsx')), true)
+  check('a faint blip is not sent to be heard', /const faint = Boolean\(clip\) && talkedMs < FAINT_MS && stats\.peak < stats\.bar \* FAINT_TIMES/.test(turn2) && /if \(clip && !faint\)/.test(turn2), true)
+  const SP = await load('src/shared/spokenpick.ts', 'spokenpick')
+  check('the rest are numbered from six', SP.numberedSpeech(['Gemma 4', 'Kimi K3'], 5, 5), 'Six, Gemma 4. Seven, Kimi K3.')
+  check('and past twelve', SP.countWord(21), 'Twenty one')
+}
 check('talked over, it answers the new thing and leaves the old', /they talked over you',\s+'  on purpose: answer the new thing/.test(main), true)
 check('a conversation: short, and theirs to steer', /This is a back-and-forth conversation/.test(main) && /can talk',\s+'  over you to stop you/.test(main), true)
 

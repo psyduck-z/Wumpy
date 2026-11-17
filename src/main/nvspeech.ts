@@ -17,6 +17,7 @@
 import * as grpc from '@grpc/grpc-js'
 import * as protoLoader from '@grpc/proto-loader'
 import { resourcePath } from './tray'
+import { forMagpie } from '@shared/voicetext'
 
 const HOST = 'grpc.nvcf.nvidia.com:443'
 
@@ -429,14 +430,16 @@ export async function listVoices(borrowed: BorrowedKey): Promise<string[]> {
 export async function synthesize(
   text: string,
   borrowed: BorrowedKey,
-  voice = DEFAULT_VOICE
+  voice = DEFAULT_VOICE,
+  /** Exactly as given, without forMagpie - for `--hearing-check`, to hear what it fixes. */
+  asWritten = false
 ): Promise<{ wav: Buffer; ms: number }> {
   const started = Date.now()
   const response = await call<unknown, { audio?: Buffer }>(
     load().tts,
     'Synthesize',
     {
-      text,
+      text: asWritten ? text : forMagpie(text),
       language_code: 'en-US',
       encoding: 'LINEAR_PCM',
       sample_rate_hz: TTS_RATE,
@@ -472,7 +475,7 @@ export async function synthesizeStream(
 ): Promise<{ pieces: number; firstMs: number; ms: number; streamed: boolean }> {
   const started = Date.now()
   const request = {
-    text,
+    text: forMagpie(text),
     language_code: 'en-US',
     encoding: 'LINEAR_PCM',
     sample_rate_hz: TTS_RATE,

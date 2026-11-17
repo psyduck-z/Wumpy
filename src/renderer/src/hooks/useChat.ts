@@ -109,7 +109,7 @@ export interface ChatState {
     question: string,
     options: string[],
     kind: LocalAsk['kind'],
-    extra?: Pick<LocalAsk, 'values' | 'say' | 'spoken' | 'aliases'>
+    extra?: Pick<LocalAsk, 'values' | 'say' | 'spoken' | 'aliases' | 'unavailable'>
   ): string
   /**
    * Stops the answer. Returns the question to put back in the box when the
@@ -476,7 +476,7 @@ export function useChat(): ChatState {
       question: string,
       options: string[],
       kind: LocalAsk['kind'],
-      extra?: Pick<LocalAsk, 'values' | 'say' | 'spoken' | 'aliases'>
+      extra?: Pick<LocalAsk, 'values' | 'say' | 'spoken' | 'aliases' | 'unavailable'>
     ): string => {
       const id = nextId()
       setMessages((prev) => [

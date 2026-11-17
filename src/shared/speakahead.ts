@@ -105,7 +105,9 @@ export function readyToSay(markdown: string, done: boolean, limit = 600): string
  * two model ids before "Five."
  */
 export function withoutAsides(markdown: string): string {
-  return markdown.replace(/^[ \t]*_[^_\n][^\n]*_[ \t]*$/gm, '')
+  /* Italics hug their words; a hangman board, "_ _ O _", has spaces inside
+     its underscores and is the answer, not an aside. */
+  return markdown.replace(/^[ \t]*_[^_\s][^\n]*[^\s_]_[ \t]*$/gm, '')
 }
 
 /**

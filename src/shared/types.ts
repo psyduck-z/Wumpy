@@ -31,6 +31,12 @@ export interface LocalAsk {
   /** How many of the options `say` reads out, first to last. */
   spoken?: number
   aliases?: string[][]
+  /**
+   * What might be asked for out loud and cannot be picked, and why: a
+   * model NVIDIA has withdrawn is "not answering right now", not "sorry,
+   * which one?" as if it had been misheard.
+   */
+  unavailable?: Array<{ names: string[]; why: string }>
 }
 
 export interface ChatMessage {

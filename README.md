@@ -177,8 +177,10 @@ nothing to `PATH`, so a bare `wumpy` is not found there.
   three best overall, then the smartest and the fastest. Answer with a name,
   roughly — "Nemotron super", "Gemma", even "Jemma" or "deep seek" — or a
   place: "the second one", "the fastest". A name that fits several ("Nemotron")
-  reads those back, best first, and asks again. "Slash model fastest" reads
-  the three quickest instead. Typed, `/model nemotron` does the same matching
+  reads those back, best first, and asks again. Say nothing for a couple of
+  seconds and it reads the rest, five at a time and numbered on from six; a
+  model that is not answering is said to be not answering. "Slash model
+  fastest" reads the three quickest instead. Typed, `/model nemotron` does the same matching
   and offers the fits as buttons.
 - **Your chats, out loud.** "Slash resume" (or "resume a chat") reads your
   twelve most recent chats with numbers; say a number or a title.

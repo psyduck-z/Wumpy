@@ -307,16 +307,22 @@ export function shortlistSpeech(entries: readonly ShortEntry[], nameOf: (id: str
   return parts.join(' ')
 }
 
-const COUNT_WORDS = UNITS.slice(1, 13).map((w) => w[0].toUpperCase() + w.slice(1))
+/** "Six", "Twenty one": a place in a list, as it is said. */
+export function countWord(n: number): string {
+  const word = n < 20 ? UNITS[n] : `${TENS[Math.floor(n / 10)]}${n % 10 ? ` ${UNITS[n % 10]}` : ''}`
+  return word ? word[0].toUpperCase() + word.slice(1) : String(n)
+}
 
 /**
  * A numbered list, said: "One, Fish pie. Two, Taxes." Up to `max`, then how
  * many more there are - a long history read out in full is minutes of
- * titles, and every one of them can still be asked for by name.
+ * titles, and every one of them can still be asked for by name. `from` is
+ * how many came before, for the rest of a list read out in parts: "Six,
+ * Gemma 4. Seven, ...".
  */
-export function numberedSpeech(items: readonly string[], max = 12): string {
-  const shown = items.slice(0, Math.min(max, COUNT_WORDS.length))
-  const said = shown.map((t, i) => `${COUNT_WORDS[i]}, ${t.replace(/[.!?]+$/, '')}.`).join(' ')
+export function numberedSpeech(items: readonly string[], max = 12, from = 0): string {
+  const shown = items.slice(0, Math.min(max, 99 - from))
+  const said = shown.map((t, i) => `${countWord(from + i + 1)}, ${t.replace(/[.!?]+$/, '')}.`).join(' ')
   const rest = items.length - shown.length
   return rest > 0 ? `${said} And ${rest} older.` : said
 }

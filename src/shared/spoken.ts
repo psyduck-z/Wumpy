@@ -3,6 +3,7 @@
  * microphone: what counts as yes or no, how a spoken slash becomes a command,
  * what an approval question sounds like, and what of an answer is read aloud.
  */
+import { withoutKept } from './kept'
 
 /** Words that mean yes, and words that mean no, said on their own. */
 const YES = /^(yes|yeah|yep|yup|ya|sure|ok|okay|alright|all right|affirmative|approve|approved|confirm|confirmed|go|go ahead|do it|run it|please do)$/
@@ -67,6 +68,9 @@ export function approvalQuestion(entry: { command: string; spoken?: string }): s
 
 const FENCE = String.fromCharCode(96).repeat(3)
 
+/** Two or more blanks and single letters in a row, at least one of them a blank. */
+const BOARD = /(?<![\p{L}\p{N}_])(?=(?:[A-Za-z]\s+)*_)(?:_+|[A-Za-z])(?:\s+(?:_+|[A-Za-z]))+(?![\p{L}\p{N}_])/gu
+
 /**
  * What of an answer is worth hearing: the prose, without code, markup or
  * links read out character by character, and not so long that a question
@@ -74,8 +78,17 @@ const FENCE = String.fromCharCode(96).repeat(3)
  */
 export function speakable(markdown: string, limit = 600): string {
   const fence = new RegExp(`${FENCE}[\\s\\S]*?(${FENCE}|$)`, 'g')
-  let text = markdown
+  let text = withoutKept(markdown)
     .replace(fence, ' ')
+    /* A hangman board, "_ _ O _": blanks and letters, said one by one.
+       Taken for emphasis, the underscores went and it was a lone "O". */
+    .replace(BOARD, (board) =>
+      board
+        .trim()
+        .split(/\s+/)
+        .map((t) => (t.startsWith('_') ? 'blank' : t.toUpperCase()))
+        .join(', ')
+    )
     .replace(/`([^`]*)`/g, '$1')
     .replace(/!\[[^\]]*\]\([^)]*\)/g, ' ')
     .replace(/\[([^\]]+)\]\([^)]*\)/g, '$1')

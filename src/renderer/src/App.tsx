@@ -1627,14 +1627,23 @@ function namedControls(shot: Attachment): string[] {
         (Object.keys(top) as ShortWhy[]).flatMap((why) => (top[why] === m.id ? SPOKEN_ALIASES[why] : []))
       )
       const now = CLOUD_MODELS.find((m) => m.id === model)
+      /* Asked for by name and not on the list: why, rather than "sorry,
+         which one?" - "Deep seek" twice, the week NVIDIA withdrew it. */
+      const unavailable = CLOUD_MODELS.filter((m) => !order.includes(m)).map((m) => ({
+        names: [m.label],
+        why: providerReady(m.provider)
+          ? `${sayModel(m.label)} isn't answering right now.`
+          : `${sayModel(m.label)} needs a ${PROVIDERS[m.provider].label} key.`
+      }))
       chat.askLocal('Which model?', order.map((m) => m.label), 'model', {
         values: ids(order),
         say: `${now ? `You're on ${sayModel(now.label)}. ` : ''}${intro}`,
         spoken: listed.length,
-        aliases
+        aliases,
+        unavailable
       })
     },
-    [chat, model, readyModels]
+    [chat, model, readyModels, providerReady]
   )
 
   /**
