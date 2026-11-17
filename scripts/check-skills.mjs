@@ -96,6 +96,38 @@ check('the newest mentioned first', S.activeSkills(skills, ['hangman', 'give me 
   check('no skills and no asking: nothing at all', S.skillFacts([], ['hello'], '/x'), [])
 }
 
+/* ---------------------------------------------------------- hangman */
+
+/* "Yes, there's an E. It's the fifth letter: _ _ _ E _ _" - measured on
+   Nemotron 3.5 Super. The board is worked out here instead. */
+{
+  const H = await load('src/shared/hangman.ts', 'hangman')
+  for (const [said, want] of [
+    ['is there an E?', 'E'], ['E', 'E'], ['is there an oh?', 'O'], ['you', 'U'], ['The letter see.', 'C'],
+    ['are there any e\'s', 'E'], ['what about T', 'T'], ['a', 'A'], ['Okay, is there a why?', 'Y'],
+    ['you pick the word', null], ['is it planet?', null], ['what is the weather', null]
+  ]) check(`"${said}" guesses ${want}`, H.guessIn(said), want)
+  const game = [
+    { role: 'user', content: "let's play hangman, you pick the word" },
+    { role: 'assistant', content: '<keep>WORD: PLANET. Letters: 1 P, 2 L, 3 A, 4 N, 5 E, 6 T.</keep>I have a six-letter word.' },
+    { role: 'user', content: 'is there an E?' },
+    { role: 'assistant', content: 'Yes.' },
+    { role: 'user', content: 'is there an oh?' },
+    { role: 'assistant', content: 'No.' },
+    { role: 'user', content: 'is there an A?' }
+  ]
+  const s = H.hangmanState(game)
+  check('the word comes from the note', s?.word, 'PLANET')
+  check('the board is right where the model was not', s?.board, '_ _ A _ E _')
+  check('and the misses are counted', s?.misses, ['O'])
+  const facts = H.hangmanFacts(game).join(' ')
+  check('the model is told the board, to show as given', /their guess is A, which is in it, at place 3/.test(facts) && /The board is now "_ _ A _ E _"/.test(facts), true)
+  check('nothing on a turn that is not a guess', H.hangmanFacts([...game.slice(0, 6), { role: 'user', content: 'what is the weather' }]), [])
+  check('nothing with no word in a note', H.hangmanFacts([{ role: 'user', content: 'E' }]), [])
+  check('a new game, a new word', H.hangmanState([...game, { role: 'assistant', content: '<keep>word: tiger</keep>New game.' }, { role: 'user', content: 'E' }])?.board, '_ _ _ E _')
+  check('and it reaches the facts', /\.\.\.hangmanFacts\(messages\.map/.test(read('src/main/index.ts')), true)
+}
+
 /* ------------------------------------------------- the folder, for real */
 
 const store = new SkillStore()
@@ -122,7 +154,7 @@ check('a fact said twice is kept once', notes.read(), '- They prefer celsius.')
 const main = read('src/main/index.ts')
 const chat = read('src/renderer/src/hooks/useChat.ts')
 const assistant = read('src/shared/assistant.ts')
-check('skills reach the facts, from what they said in the chat', /\.\.\.\(skills\?\.forPrompt\(said\) \?\? \[\]\)/.test(main) && /req\.messages\.filter\(\(m\) => m\.role === 'user'\)/.test(main), true)
+check('skills reach the facts, from what they said in the chat', /\.\.\.\(skills\?\.forPrompt\(said\) \?\? \[\]\)/.test(main) && /const said = messages\.filter\(\(m\) => m\.role === 'user'\)/.test(main), true)
 check('saved when the answer is finished, not before', /if \(written\.current\.id === d\.requestId\) void keepSaves\(written\.current\.text, noteRef\.current\)/.test(chat), true)
 check('and every save is said', /Saved to your notes: /.test(read('src/renderer/src/saves.ts')) && /the skill /.test(read('src/renderer/src/saves.ts')), true)
 check('the model is told how, when it is about remembering', /put <remember>one short fact<\/remember> anywhere in your reply/.test(assistant), true)

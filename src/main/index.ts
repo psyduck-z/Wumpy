@@ -110,6 +110,7 @@ import { mayBeInvented } from '@shared/heard'
 import { speakable } from '@shared/spoken'
 import { savesIn, withoutKept } from '@shared/kept'
 import { asksToKeep } from '@shared/needs'
+import { hangmanFacts } from '@shared/hangman'
 
 /**
  * Before anything else, so that whatever happens during startup is readable.
@@ -565,8 +566,10 @@ function factsFor(
   chatTitle: string | null,
   actions: string[] = [],
   handsFree = false,
-  said: readonly string[] = []
+  messages: ChatRequest['messages'] = []
 ): string {
+  /* Everything they have said in this chat, for the skills that came up. */
+  const said = messages.filter((m) => m.role === 'user').map((m) => (typeof m.content === 'string' ? m.content : ''))
   const now = new Date()
   return [
     'Facts about right now. If the user asks about any of these, just state the answer.',
@@ -600,6 +603,8 @@ function factsFor(
       : []),
     // Their skills: one line each, and the whole of any that came up. See skills.ts.
     ...(skills?.forPrompt(said) ?? []),
+    // A guess in a game of hangman, checked here rather than by the model. See hangman.ts.
+    ...hangmanFacts(messages.map((m) => ({ role: m.role, content: typeof m.content === 'string' ? m.content : '' }))),
     // Silent unless something is running out. See quotaFacts.
     ...quotaFacts(),
     // Written by the code that performed them, not recalled by the model.
@@ -3225,7 +3230,7 @@ function withContext(req: ChatRequest): Array<Pick<ChatMessage, 'role' | 'conten
     req.context.chatTitle,
     req.context.actions ?? [],
     req.context.handsFree === true,
-    req.messages.filter((m) => m.role === 'user').map((m) => (typeof m.content === 'string' ? m.content : ''))
+    req.messages
   )
 
   /*
