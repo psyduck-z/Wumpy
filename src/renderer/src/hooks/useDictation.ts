@@ -157,9 +157,16 @@ export function useDictation(onText: (text: string) => void, commands: string[])
       setPolished(false)
       setDetail(null)
 
+      /* Into wumpy.log, as voice turns are: "holding the spacebar does not
+         work" left nothing behind to say which part did not. */
+      const asked = performance.now()
+      const note = (line: string): void => window.wumpy.voice.log(`dictation: ${line}`)
+      note(held ? 'Space held: starting' : 'started')
+
       // Loading base.en takes a second or two the first time, and recording before
       // it is ready would mean talking into a process that is not listening yet.
       const status = await window.wumpy.voice.start()
+      if (status.kind !== 'ready') note(`could not start: ${status.kind}${'detail' in status && status.detail ? ` - ${status.detail}` : ''}`)
       if (!wanted.current) {
         setState('idle')
         return
@@ -236,7 +243,9 @@ export function useDictation(onText: (text: string) => void, commands: string[])
           }
         })
         segmentsRef.current = { partials, settled: () => chain }
+        note(`recording, ${Math.round(performance.now() - asked)}ms after asking`)
       } catch (err) {
+        note(`the microphone would not open: ${err instanceof Error ? err.message : String(err)}`)
         letMusicGo()
         // Almost always the microphone being refused, by Windows or by the user.
         wanted.current = false
@@ -275,6 +284,7 @@ export function useDictation(onText: (text: string) => void, commands: string[])
       }
 
       setState('working')
+      const stopped = performance.now()
       try {
         /**
          * Wait for the pieces, then assemble - or fall back to the whole clip.
@@ -322,6 +332,7 @@ export function useDictation(onText: (text: string) => void, commands: string[])
         setState('idle')
         setHeard(result.heard || null)
         setPolished(result.polished)
+        note(`heard ${result.heard ? `"${result.heard.slice(0, 80)}"` : 'nothing'} ${Math.round(performance.now() - stopped)}ms after letting go`)
 
         if (!result.text) {
           setDetail(result.heard ? 'Only heard noise.' : 'Did not hear anything.')
@@ -335,6 +346,7 @@ export function useDictation(onText: (text: string) => void, commands: string[])
         }
         textRef.current(result.text)
       } catch (err) {
+        note(`could not transcribe: ${err instanceof Error ? err.message : String(err)}`)
         setState('error')
         setDetail(err instanceof Error ? err.message : 'Could not transcribe that.')
       }

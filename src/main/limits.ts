@@ -35,6 +35,11 @@ const sleep = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms
 export class LimitTester {
   private timer: ReturnType<typeof setInterval> | null = null
   private running = false
+
+  /** A test is filling a key to its limit right now: the ranker stays off. */
+  get busy(): boolean {
+    return this.running
+  }
   private failedAt = new Map<string, number>()
 
   constructor(private readonly deps: LimitDeps) {}

@@ -505,9 +505,13 @@ check('because guessed options are still guessing', /still guessing/.test(prompt
     plain / T.CONTEXT_TOKENS <= 0.27,
     true
   )
+  /* 49%, from 48: the write rules gained CODE THAT RUNS, 136 tokens, after
+     a game was written, called playable, and crashed on its first frame -
+     then "fixed" twice without the model ever reading the file. They go
+     out only on turns that write a file, so a plain turn does not pay. */
   check(
     `every capability on pays ~${everything}, ${((everything / T.CONTEXT_TOKENS) * 100).toFixed(0)}%`,
-    everything / T.CONTEXT_TOKENS <= 0.48,
+    everything / T.CONTEXT_TOKENS <= 0.49,
     true
   )
   /* And the gating has to be worth having, or the two numbers above are the

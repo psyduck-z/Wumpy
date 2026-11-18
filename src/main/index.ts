@@ -116,6 +116,7 @@ import { withSentTimes } from '@shared/sent'
 import { agentAsks, agentSlots, monitorAsks } from '@shared/agents'
 import { Agents } from './agents'
 import { LimitTester } from './limits'
+import { checkHtml, checkPage } from './pagecheck'
 import { gapFor, limitLine } from '@shared/limits'
 import { mayBeInvented } from '@shared/heard'
 import { speakable } from '@shared/spoken'
@@ -197,6 +198,8 @@ let pools: PoolStore
 let ranker: Ranker
 /** Background agents: see main/agents.ts. Made in registerIpc, beside judge. */
 let agents: Agents | null = null
+/** The key limit tests: see main/limits.ts. */
+let limitTester: LimitTester | null = null
 /**
  * What Wumpy has done, with the time. Read by `/log`.
  *
@@ -301,25 +304,84 @@ async function hear(audio: Uint8Array, extension: string): Promise<Transcript> {
 }
 
 /** One clip on NVIDIA: Whisper, Parakeet when it fails, null when neither answers. */
+/**
+ * How long Whisper may take before Parakeet is asked as well: usually 0.6s,
+ * so a couple of seconds is already a stall, with a little more for a long
+ * clip. "It takes forever to load": one dictation sat 30 seconds on a
+ * Whisper call that never answered - the request's own deadline - before
+ * Parakeet was tried at all.
+ */
+export function hearHedgeMs(audioSeconds: number): number {
+  return Math.round(2500 + Math.min(30, Math.max(0, audioSeconds)) * 100)
+}
+
 async function hearOnline(audio: Uint8Array): Promise<Transcript | null> {
-  {
-    for (const hearer of [HEARING, FALLBACK_HEARING]) {
-      const borrowed = await cloud.speechKey('parakeet')
-      if (!borrowed) break
-      try {
-        const heard = await recognize(audio, borrowed, hearer)
-        if (hearer === HEARING && heard.text && mayBeInvented(heard.text) && !(await parakeetHearsWords(audio))) {
-          log(`[listen] Whisper heard "${heard.text}" where Parakeet heard nothing: taken as nothing`)
-          return { ...heard, text: '', confidence: 0 }
-        }
-        if (compareHearing) void compareOn(audio, hearer, heard.text, heard.ms)
-        return heard
-      } catch (err) {
-        console.warn(`[wumpy] ${hearer.name} could not hear that${hearer === HEARING ? ', trying Parakeet' : ''}:`, err)
+  const seconds = (pcmFromWav(audio)?.pcm.length ?? 0) / 2 / (pcmFromWav(audio)?.sampleRate || 16000)
+  /*
+   * Whisper first; Parakeet as soon as Whisper fails - or is merely slow,
+   * on a connection of its own and the next key, raced, and whichever
+   * answers first is taken. The same cure as the voice's (synthesizeHedged):
+   * a stuck call on the shared connection no longer holds the turn.
+   */
+  const whisper = (async (): Promise<Transcript | null> => {
+    const borrowed = await cloud.speechKey('parakeet')
+    if (!borrowed) return null
+    try {
+      const heard = await recognize(audio, borrowed, HEARING)
+      if (heard.text && mayBeInvented(heard.text) && !(await parakeetHearsWords(audio))) {
+        log(`[listen] Whisper heard "${heard.text}" where Parakeet heard nothing: taken as nothing`)
+        return { ...heard, text: '', confidence: 0 }
       }
+      if (compareHearing) void compareOn(audio, HEARING, heard.text, heard.ms)
+      return heard
+    } catch (err) {
+      console.warn(`[wumpy] ${HEARING.name} could not hear that, trying Parakeet:`, err)
+      return null
     }
-  }
-  return null
+  })()
+  /* Parakeet starts once: at the hedge, or the moment Whisper fails. */
+  let startParakeet: (why: string) => void = () => {}
+  const parakeet = new Promise<Transcript | null>((resolve) => {
+    let started = false
+    startParakeet = (why) => {
+      if (started) return
+      started = true
+      void (async () => {
+        const borrowed = await cloud.speechKey('parakeet')
+        if (!borrowed) return resolve(null)
+        const began = Date.now()
+        try {
+          const heard = await recognize(audio, borrowed, FALLBACK_HEARING, true)
+          log(`[listen] Parakeet heard it in ${Date.now() - began}ms (${why})`)
+          resolve(heard)
+        } catch (err) {
+          console.warn(`[wumpy] ${FALLBACK_HEARING.name} could not hear that:`, err)
+          resolve(null)
+        }
+      })()
+    }
+  })
+  const hedge = hearHedgeMs(seconds)
+  const timer = setTimeout(() => {
+    log(`[listen] Whisper has not answered in ${hedge}ms for ${seconds.toFixed(1)}s of audio: asking Parakeet too`)
+    startParakeet('Whisper was slow')
+  }, hedge)
+  void whisper.then((t) => {
+    if (!t) startParakeet('Whisper failed')
+  })
+  /* The first real answer wins. Parakeet only goes unstarted when Whisper
+     answered, so this always settles. */
+  const first = await new Promise<Transcript | null>((resolve) => {
+    let empty = 0
+    for (const attempt of [whisper, parakeet]) {
+      void attempt.then((t) => {
+        if (t) resolve(t)
+        else if (++empty === 2) resolve(null)
+      })
+    }
+  })
+  clearTimeout(timer)
+  return first
 }
 
 /** Whether Parakeet hears any words in the clip - yes, when it cannot be asked, so Whisper is believed. */
@@ -411,6 +473,10 @@ function moveToChosenVoice(): void {
   if (onOld) console.log(`[wumpy] voice: ${DEFAULT_VOICE}, from ${was || 'the default'}`)
   if (onOldRate) console.log(`[wumpy] voice speed: ${DEFAULT_RATE}, from ${rate || 'the default'}`)
 }
+
+/** Where secrets live: no background agent reads these. */
+const AGENT_SECRETS =
+  /\.ssh[\\/]|id_(?:rsa|ed25519|ecdsa|dsa)\b|\.gnupg|keys\.bin|\.aws[\\/]|\.netrc|\.git-credentials|credentials\.json|(?:^|[\s/\\])\.env\b|\/etc\/shadow|\.password-store|keyring|Login Data|\bCookies\b|\.kdbx/i
 
 /**
  * How many background agents may work now: from the keys of the provider
@@ -1260,7 +1326,7 @@ function registerIpc(): void {
       left: view.left,
       lastSweepMs: view.lastSweepMs,
       traffic: {
-        busy: turnStartedAt !== null || (agents?.active() ?? 0) > 0,
+        busy: turnStartedAt !== null || (agents?.active() ?? 0) > 0 || (limitTester?.busy ?? false),
         sinceTurnMs: lastTurnEndedAt ? Date.now() - lastTurnEndedAt : Infinity,
         lastMinute: provider ? requestsInLastMinute(provider) : 0,
         perMinute: gap > 0 ? Math.round(60_000 / gap) : 0,
@@ -1485,7 +1551,7 @@ function registerIpc(): void {
    * PowerShell and came back as eight parser errors. Here the content never
    * meets a parser.
    */
-  ipcMain.handle(IPC.writeFile, (_e, req: { path: string; content: string }) => {
+  ipcMain.handle(IPC.writeFile, async (_e, req: { path: string; content: string }) => {
     if (!settings.get('shellEnabled')) {
       return {
         written: false,
@@ -1500,6 +1566,15 @@ function registerIpc(): void {
        relative path was resolved, and the resolved one is the file that now
        exists. Only on success - a refused write left nothing behind. */
     if (result.written) journal.add('write', result.path)
+    /* A page is loaded once, out of sight, and what broke goes back with
+       the result: see main/pagecheck.ts. */
+    if (result.written && /\.html?$/i.test(result.path)) {
+      const page = await checkPage(result.path)
+      if (page.checked) {
+        console.log(`[wumpy] loaded ${result.path} to check it: ${page.errors.length ? page.errors.join(' | ') : 'no errors'}`)
+        return { ...result, page: { errors: page.errors } }
+      }
+    }
     return result
   })
 
@@ -2141,6 +2216,11 @@ function registerIpc(): void {
     }),
     run: async (command, shell) => {
       const verdict = judge(command)
+      /* Out of sight, an agent reads nothing that holds a secret - whatever
+         the mode; accept-all turns the risk check off, not this. */
+      if (AGENT_SECRETS.test(command)) {
+        return { ran: false, ok: false, output: 'NOT RUN: agents do not read keys, passwords or credentials.' }
+      }
       if (!settings.get('shellEnabled') || !verdict.allowed) {
         return { ran: false, ok: false, output: 'NOT RUN: running commands is turned off.' }
       }
@@ -2185,6 +2265,7 @@ function registerIpc(): void {
             output: result.results.map((r, i) => `${i + 1}. ${r.title}\n   ${r.url}\n   ${r.snippet}`).join('\n')
           }
     },
+    checkPage: (html) => checkHtml(html),
     changed: () => panel.send(IPC.agentsChanged, agents?.list()),
     ready: (delivery) => panel.send(IPC.agentsReady, delivery),
     spent: (r) =>
@@ -2671,7 +2752,7 @@ void app.whenReady().then(async () => {
       const provider = providerFor(activeModel())
       const gap = provider ? PROVIDERS[provider].minGapMs : 0
       return {
-        busy: turnStartedAt !== null || (agents?.active() ?? 0) > 0,
+        busy: turnStartedAt !== null || (agents?.active() ?? 0) > 0 || (limitTester?.busy ?? false),
         sinceTurnMs: lastTurnEndedAt ? Date.now() - lastTurnEndedAt : Infinity,
         lastMinute: provider ? requestsInLastMinute(provider) : 0,
         /* The pacer's own ceiling rather than a second number to keep in
@@ -2734,14 +2815,16 @@ void app.whenReady().then(async () => {
     const saved = settings.get('keyLimits') ?? {}
     for (const [id, limit] of Object.entries(saved)) {
       const [provider, at] = id.split(':')
-      if (!(provider in PROVIDERS)) continue
+      if (provider !== 'nvidia') continue
       setKeyGap(provider as ProviderId, Number(at), gapFor(limit, keys.count(provider as ProviderId)))
     }
   }
   applyLimits()
   const startedAt = Date.now()
-  new LimitTester({
-    provider: () => providerFor(activeModel()),
+  limitTester = new LimitTester({
+    /* NVIDIA only: its limit is one per key whatever the model. Google's
+       differs by model, so a reading on one would pace another wrongly. */
+    provider: () => (providerFor(activeModel()) === 'nvidia' ? 'nvidia' : null),
     keys: () => {
       const provider = providerFor(activeModel())
       return provider && !PROVIDERS[provider].keyless ? keys.count(provider) : 0
@@ -2763,7 +2846,8 @@ void app.whenReady().then(async () => {
       journal.add('key', limitLine(Number(id.split(':')[1]), limit))
     },
     log: (line) => console.log(`[wumpy] ${line}`)
-  }).start()
+  })
+  limitTester.start()
   speech = new Speech()
 
   /**
@@ -3160,6 +3244,8 @@ async function agentsCheck(): Promise<void> {
       now: new Date().toLocaleString('en-GB', { weekday: 'long', day: 'numeric', month: 'long', hour: 'numeric', minute: '2-digit' })
     }),
     run: async (command, shell) => {
+      if (!settings.get('shellEnabled')) return { ran: false, ok: false, output: 'NOT RUN: running commands is turned off.' }
+      if (AGENT_SECRETS.test(command)) return { ran: false, ok: false, output: 'NOT RUN: agents do not read keys, passwords or credentials.' }
       if (!isReadOnly(command)) return { ran: false, ok: false, output: 'NOT RUN: this one would change something, and that needs the user’s click.' }
       const r = await runCommand(command, shell, settings.get('shellCwd') || undefined)
       return {
@@ -3171,11 +3257,13 @@ async function agentsCheck(): Promise<void> {
       }
     },
     search: async (query) => {
+      if (!settings.get('searchEnabled')) return { ran: false, ok: false, output: 'NOT RUN: web search is off.' }
       const r = await webSearch(query, settings.get('searchApiKey') || undefined)
       return r.error
         ? { ran: true, ok: false, output: `The search failed: ${r.error}` }
         : { ran: true, ok: true, output: r.results.map((x, i) => `${i + 1}. ${x.title}\n   ${x.url}\n   ${x.snippet}`).join('\n') }
     },
+    checkPage: (html) => checkHtml(html),
     changed: () => {},
     ready: (d) => deliveries.push(d.text),
     spent: () => {},

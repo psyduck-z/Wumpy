@@ -785,7 +785,7 @@ export interface AgentView {
   status: 'queued' | 'working' | 'reviewing' | 'done' | 'failed' | 'stopped'
   /** What it is doing, or did last: "ran df -h", "waiting for its key". */
   doing: string
-  steps: Array<{ kind: 'run' | 'search'; what: string; ok: boolean }>
+  steps: Array<{ kind: 'run' | 'search' | 'page'; what: string; ok: boolean }>
   startedAt: number
   endedAt?: number
   model: string
@@ -1227,6 +1227,12 @@ export interface WriteResult {
   /** True when something was already there. */
   overwrote: boolean
   error?: string
+  /**
+   * A web page, loaded out of sight once written (main/pagecheck.ts): what
+   * its console said went wrong. Absent when it is not a page, or no
+   * browser could load it.
+   */
+  page?: { errors: string[] }
 }
 
 /** What the card needs to describe a destination before anything is written. */

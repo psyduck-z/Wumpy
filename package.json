@@ -92,6 +92,8 @@
     "check:voicebar": "node scripts/check-voicebar.mjs",
     "check:speakahead": "node scripts/check-speakahead.mjs",
     "check:skills": "node scripts/check-skills.mjs",
+    "check:agents": "node scripts/check-agents.mjs",
+    "check:sent": "node scripts/check-sent.mjs",
     "package:linux": "electron-vite build && electron-builder --linux dir",
     "install:linux": "npm run package:linux && node scripts/install-linux.mjs"
   },

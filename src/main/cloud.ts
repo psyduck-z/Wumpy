@@ -322,8 +322,11 @@ export class CloudClient {
     const provider = providerFor(model)
     if (!provider || PROVIDERS[provider].keyless || !this.keys.available()) return null
     const held = new Set(this.heldBy(provider))
-    if (this.keys.count(provider) - held.size <= 1) return null
     const rotation = this.rotation(provider)
+    /* Counted among keys that WORK: with one refused, "two keys, one held"
+       left the chat on the agent's key - and the agent's next 429 rested it. */
+    const free = [...Array(this.keys.count(provider)).keys()].filter((i) => !held.has(i) && rotation.ready(i, Date.now(), model))
+    if (free.length <= 1) return null
     const last = this.lastChatKey.get(provider)
     const index =
       (last === undefined ? null : rotation.peek(Date.now(), model, new Set([...held, last]))) ??

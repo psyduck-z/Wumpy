@@ -510,13 +510,15 @@ check('but units in words, which it does not', /"64 gigabytes", not "64 GB"/.tes
 check('and the voice\'s name is not part of the question', /Your voice is called Jason/.test(main), true)
 check('how numbers are read is checked against the voice', /NUMBER_SENTENCES = \[/.test(main), true)
 check('a misheard word answered as meant, read by how it sounds', /Read it by how it sounds and by what you were just talking about/.test(main) && /"a specie" for "a PC"/.test(main), true)
-check('every recogniser can be compared, on sentences and on real speech', /async function hearingCheck\(\)/.test(main) && /if \(compareHearing\) void compareOn\(audio, hearer, heard\.text, heard\.ms\)/.test(main), true)
-check('and the turn never waits on the comparison', /if \(compareHearing\) void compareOn\(audio, hearer, heard\.text, heard\.ms\)\s+return heard/.test(main), true)
+check('every recogniser can be compared, on sentences and on real speech', /async function hearingCheck\(\)/.test(main) && /if \(compareHearing\) void compareOn\(audio, HEARING, heard\.text, heard\.ms\)/.test(main), true)
+check('and the turn never waits on the comparison', /if \(compareHearing\) void compareOn\(audio, HEARING, heard\.text, heard\.ms\)\s+return heard/.test(main), true)
 /* "I need more accuracy, higher accuracy" - and it has to keep up with
    NVIDIA's 40 requests a minute a key. Whisper large-v3 makes a third fewer
    mistakes than Parakeet on real speech, on the same keys. */
 check('a turn is heard by Whisper large-v3, on the NVIDIA keys', /export const HEARING: Hearer = HEARERS\.find\(\(h\) => h\.name === 'whisper-large-v3'\)!/.test(nv) && /hearer: Hearer = HEARING/.test(nv), true)
-check('and by Parakeet when Whisper fails, then the local one', /for \(const hearer of \[HEARING, FALLBACK_HEARING\]\)/.test(main) && /export const FALLBACK_HEARING: Hearer = HEARERS\[0\]/.test(nv) && /return speech\.transcribe\(audio, extension\)\s+\}/.test(main), true)
+/* And raced: "it takes forever to load" was one Whisper call stuck for its
+   whole 30-second deadline before Parakeet was asked. */
+check('and by Parakeet when Whisper fails or stalls, then the local one', /if \(!t\) startParakeet\('Whisper failed'\)/.test(main) && /startParakeet\('Whisper was slow'\)/.test(main) && /export const FALLBACK_HEARING: Hearer = HEARERS\[0\]/.test(nv) && /return speech\.transcribe\(audio, extension\)\s+\}/.test(main), true)
 check('Parakeet is still compared, now beside Whisper', /\{ name: 'parakeet-tdt-0\.6b', functionId: SPEECH_MODELS\.hear, language: 'en-US', compare: true \}/.test(nv) && /h\.compare && h !== by/.test(main), true)
 /* "What text to speech models does the free NVIDIA API key allow... and
    compare them to my current one": every one the keys reach, side by side. */

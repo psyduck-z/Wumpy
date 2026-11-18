@@ -136,6 +136,7 @@ import { DOCK_CYCLE, Header } from './components/Header'
 import { APP_WINDOW } from './appwindow'
 import { clampRounds } from '@shared/reflect'
 import { useAgents } from './hooks/useAgents'
+import { PAGE_ROUNDS, pageErrorText } from '@shared/pagecheck'
 import { Message } from './components/Message'
 import { Composer } from './components/Composer'
 import { VoiceTurnBar } from './components/VoiceTurnBar'
@@ -1099,6 +1100,29 @@ function namedControls(shot: Attachment): string[] {
   const onWritten = useCallback((result: WriteResult) => {
     if (result.written) record('write', result.path)
     chatRef.current.notify(wroteLine(result))
+    /*
+     * A page that broke when Wumpy loaded it goes back to the model - the
+     * errors, never the file. "Open that file and you can play" was said of
+     * a game that crashed on its first frame, and the user found out. Twice
+     * per request at most: past that, a person should see it.
+     */
+    const errors = result.page?.errors ?? []
+    if (!result.written || !result.page) return
+    if (!errors.length) {
+      chatRef.current.notify('Loaded the page: no errors')
+      return
+    }
+    const history = chatRef.current.messages
+    const lastAsked = history.findLastIndex((m) => m.role === 'user' && !m.automatic)
+    const rounds = history.slice(lastAsked + 1).filter((m) => m.automatic && m.content.startsWith('Wumpy loaded ')).length
+    if (rounds >= PAGE_ROUNDS) {
+      chatRef.current.note(`The page still has errors: ${errors.slice(0, 3).join('; ')}`, true)
+      return
+    }
+    const text = pageErrorText(result.path, errors)
+    if (!chatRef.current.send(text, `The page had ${errors.length} error${errors.length === 1 ? '' : 's'}`, undefined, true)) {
+      chatRef.current.notice(text)
+    }
   }, [])
 
   /* ----------------------------------------------------------------- browser */

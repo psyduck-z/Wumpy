@@ -248,6 +248,74 @@ Each review shows as a note in the transcript — *Mentor reviewing…*, then
 A new message from you is a new task and starts the count again. Every review
 is one request, so it is off by default.
 
+## Background agents
+
+With two keys or more, Wumpy can hand work off and keep talking. Ask for
+something "in the background", "while I…", "meanwhile", for several things at
+once, or for long work — an essay, a long script, research that needs several
+searches — and the chat starts an **agent** for it, with a brief that holds
+everything the agent needs (it sees nothing of the chat). A card in the answer
+shows what each agent is doing, the commands it ran, and its report.
+
+- **How many.** One key is always the chat's. With 2–4 keys, the rest are agents'
+  (3 keys: 2 agents). From 5 keys on, two go to the chat for every three to
+  agents (5 keys: 3 agents; 10 keys: 6). More asked for than that wait their turn.
+- **Each holds its own key** while it works, so the chat and the voice are never
+  queued behind one.
+- **They only read.** An agent runs a command or a web search only if it reads
+  and your approval mode would run it without a click; in manual mode it works
+  from the brief alone. It never changes anything, even on accept-all: it hands
+  back the text — the script, the letter — and the exact command for any
+  change, and the chat makes the change the usual way.
+- **They check each other.** Each report is read by a fresh reviewer against the
+  brief and the commands' real output: accepted, or sent back with notes, at
+  most twice. Claims the output does not show get sent back.
+- **Reports come back by themselves**, as a message the chat answers, once that
+  chat is open and idle — with the list of what the agent actually ran, so the
+  chat can tell a finding from a guess. A **monitor** (a `wumpy-monitor` block)
+  makes the chat wait for a set of agents and wake once they are all done, with
+  a note of what it meant to do then. Monitors only watch agents, so they need
+  no permission.
+- Agents do not survive Wumpy restarting.
+
+`wumpy --agents-check` tries all of it on the real models — whether the chat
+hands off what it should and only that, three agents on real tasks (one a trap:
+plugged in is not charging), and the chat given a report back — and writes
+what happened to `wumpy.log`. It is how the instructions were tuned; the runs
+found the chat refusing to work in the background, agents asking for the same
+refused command ten times, a script agent trying to save a file instead of
+handing it back, reviewers undoing each other, and the chat filling in numbers
+a report never had. All fixed, and in `npm run check:agents`.
+
+### Building things
+
+A page, a game or a script is not done when it is written. Whenever Wumpy writes
+an `.html` file it loads it once out of sight — Chromium, or Edge on Windows,
+with a throwaway profile, for three seconds of the page's own time — and any
+error in its console goes straight back to the model, which fixes it before you
+find it (twice at most; after that you are told). The rules say the rest: run
+the code in your head before handing it over — every name defined where it is
+used, speeds per second rather than per frame, everything asked for actually
+there — and when you say it does not work, read the file before answering.
+Background agents get the same page check as a tool (`wumpy-check-page`), and
+their reviewer sends back a page that was never loaded. /reflect's mentor checks
+running code the same way.
+
+It came from a retro Crossy Road written in one go and called playable: it
+crashed on its first frame (`car is not defined`), the cars crossed the screen
+in a twentieth of a second, and the score never went up — and three "fixes"
+later most of that was still true, because the model never ran or reread it.
+
+### Each key's real limit
+
+When Wumpy has been idle for ten minutes — no answer, no agent, the panel away —
+it tests one key a day: tiny one-token requests, a little faster than the stated
+40 a minute, until the key refuses or 75 seconds pass. What it took in the
+minute before refusing is its limit, and the pacer keeps a tenth under that on
+that key from then on, instead of one figure for every key. It stops the moment
+you use Wumpy, and `/log` records each result ("key 2 takes 40 requests a
+minute").
+
 ## How the Windows shortcut is taken
 
 The shortcut is `Win+Shift+D` (and the dedicated Copilot key). It used to be
@@ -817,6 +885,13 @@ a known write". The fix was to invert it one level deeper: multi-purpose tools
 are now listed by the reads they *are* allowed — `git status`, `npm list`,
 `ollama ps` — and interpreters get nothing but `--version` and `--help`, because
 every one of them runs arbitrary code when given an argument.
+
+Four more, found while letting background agents run reads: nothing looked
+inside `$(…)`, backticks or `<(…)`, so `echo $(rm -rf x)` counted as a read;
+`2>/dev/null` counted as a write; `grep` was on no list; and pacman's
+case-sensitive `-Ss` was lowercased onto no list either. A command inside a
+command is now judged as a command, only the null device is a harmless
+redirect, and loops are judged by what they run.
 
 `npm run check:approval` asserts all of it: 53 checks covering every mode
 against reads, writes and destructive commands, 20 bypass attempts that must

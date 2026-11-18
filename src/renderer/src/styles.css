@@ -362,6 +362,7 @@ body {
 
 .msg-user {
   align-items: flex-end;
+  position: relative;
 }
 
 .msg-user .msg-body {
@@ -437,6 +438,7 @@ body {
 }
 
 .msg-assistant:hover .msg-copy,
+.msg-user:hover .msg-copy,
 .msg-copy:focus-visible {
   opacity: 1;
 }
@@ -444,6 +446,19 @@ body {
 .msg-copy:hover {
   color: rgb(var(--text));
   border-color: rgb(var(--accent) / 0.6);
+}
+
+/* Each Copy on its own message's side: the answer's at its foot, so it no
+   longer sits under the question above it, and the question's to its left. */
+.msg-assistant > .msg-copy {
+  top: auto;
+  bottom: -6px;
+}
+
+.msg-user > .msg-copy-user {
+  right: auto;
+  left: 0;
+  top: 2px;
 }
 
 /*

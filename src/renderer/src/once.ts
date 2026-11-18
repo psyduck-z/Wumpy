@@ -47,6 +47,35 @@ export function wasClaimed(key: string): boolean {
  * reopened from disk would find its own proposals already claimed and refuse
  * to act on any of them.
  */
+/**
+ * What a claimed action came to, kept beside the claim for the same reason:
+ * a card remounts when its output joins the transcript, and one that had
+ * just said "done · 0.3s" came back saying only "already run", output
+ * gone - "it always like flickers, and I can't even tell if it's done".
+ */
+const outcomes = new Map<string, unknown>()
+
+const waiters = new Map<string, Set<() => void>>()
+
+export function rememberOutcome<T>(key: string, outcome: T): void {
+  outcomes.set(key, outcome)
+  for (const wake of waiters.get(key) ?? []) wake()
+  waiters.delete(key)
+}
+
+/** Called once the outcome is known: for a card remounted mid-run. */
+export function onOutcome(key: string, wake: () => void): () => void {
+  const set = waiters.get(key) ?? new Set<() => void>()
+  set.add(wake)
+  waiters.set(key, set)
+  return () => set.delete(wake)
+}
+
+export function outcomeOf<T>(key: string): T | undefined {
+  return outcomes.get(key) as T | undefined
+}
+
 export function forgetClaims(): void {
+  outcomes.clear()
   claimed.clear()
 }

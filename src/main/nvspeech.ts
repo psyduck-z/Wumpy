@@ -306,9 +306,14 @@ function call<Req, Res>(
   request: Req,
   borrowed: BorrowedKey,
   functionId: string,
-  timeoutMs: number
+  timeoutMs: number,
+  /* A connection of its own, closed after: for a second try raced against a
+     first that may be stuck on the shared one. */
+  fresh = false
 ): Promise<Res> {
-  const client = clientFor(Client)
+  const client = fresh
+    ? new Client(HOST, grpc.credentials.createSsl(), { 'grpc.keepalive_time_ms': 60_000, 'grpc.keepalive_timeout_ms': 10_000 })
+    : clientFor(Client)
   const metadata = new grpc.Metadata()
   metadata.set('function-id', functionId)
   metadata.set('authorization', `Bearer ${borrowed.key}`)
@@ -320,11 +325,12 @@ function call<Req, Res>(
       { deadline: Date.now() + timeoutMs },
       (err: grpc.ServiceError | null, response: Res) => {
         borrowed.done(httpStatus(err?.code ?? grpc.status.OK))
+        if (fresh) client.close()
         if (err) {
-          dropClient(Client, err.code)
+          if (!fresh) dropClient(Client, err.code)
           reject(new Error(`NVIDIA ${method}: ${err.details || err.message}`))
         } else {
-          answered(Client)
+          if (!fresh) answered(Client)
           resolve(response)
         }
       }
@@ -377,7 +383,8 @@ export function pcmFromWav(wav: Uint8Array): { pcm: Buffer; sampleRate: number }
 export async function recognize(
   wav: Uint8Array,
   borrowed: BorrowedKey,
-  hearer: Hearer = HEARING
+  hearer: Hearer = HEARING,
+  fresh = false
 ): Promise<{ text: string; confidence: number; ms: number; audioSeconds: number }> {
   const audio = pcmFromWav(wav)
   if (!audio) throw new Error('recognition needs a 16-bit PCM WAV clip')
@@ -405,7 +412,8 @@ export async function recognize(
     },
     borrowed,
     hearer.functionId,
-    30_000
+    30_000,
+    fresh
   )
   const parts = (response.results ?? []).map((r) => r.alternatives?.[0]).filter(Boolean)
   const text = parts.map((a) => a?.transcript ?? '').join(' ').replace(/\s+/g, ' ').trim()

@@ -162,7 +162,7 @@ const tokensFor = (list) => A.preambleTokens({ ...FULL, needs: list })
    save anything" to "nothing is saved without the tag", 11 tokens; how the
    tag works is in the paragraph gated on remembering, which is where the
    other 43 went. */
-check('everything, as it was', A.preambleTokens(FULL), 15664)
+check('everything, as it was', A.preambleTokens(FULL), 15800)
 check('a turn about nothing in particular', tokensFor([]), 8693)
 check('which is a third of it gone', A.preambleTokens(FULL) - tokensFor([]) > 4500, true)
 check('a turn about the screen', tokensFor(['desktop']) < A.preambleTokens(FULL), true)
@@ -239,8 +239,8 @@ check('and so is no list at all', A.shellFor(undefined) === A.SHELL_PROMPT, true
   check('the install rules cost 206', cost('install'), 206)
   check('the picture rules cost 499', cost('picture'), 499)
   /* 471 of format, less the one line of rule that stays behind in its place. */
-  check('the write format costs 429', cost('write'), 429)
-  check('all three together', cost('install') + cost('picture') + cost('write'), 1134)
+  check('the write format costs 565', cost('write'), 565)
+  check('all three together', cost('install') + cost('picture') + cost('write'), 1270)
 }
 {
   /* The prohibition has to outlive the section it starts: dropping the write
@@ -387,10 +387,10 @@ check('nor one about opening a site', needs(said('I opened vocabulary.com for yo
 
 /* ------------------------------------------------------- the shape contract */
 
-check('no list at all means everything', A.preambleTokens({ ...FULL }), 15664)
-check('an empty list is a real answer, not everything', tokensFor([]) < 15664, true)
+check('no list at all means everything', A.preambleTokens({ ...FULL }), 15800)
+check('an empty list is a real answer, not everything', tokensFor([]) < 15800, true)
 check('one capability is not the other', tokensFor(['open']) !== tokensFor(['desktop']), true)
-check('every topic together is everything', tokensFor(ALL), 15664)
+check('every topic together is everything', tokensFor(ALL), 15800)
 
 /* --------------------------------------------------------------- the wiring */
 

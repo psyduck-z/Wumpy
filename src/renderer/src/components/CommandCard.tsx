@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { registerPending, startedRunning } from '../pending'
-import { claimOnce, wasClaimed } from '../once'
+import { claimOnce, onOutcome, outcomeOf, rememberOutcome, wasClaimed } from '../once'
 import { liveOutput, onLive, forgetLive } from '../live'
 import { runningPhase, tailLines } from '@shared/running'
 import type { ShellKind, ShellResult } from '@shared/types'
@@ -122,8 +122,19 @@ export function CommandCard({
    * already been answered.
    */
   const [judged, setJudged] = useState(false)
-  const [state, setState] = useState<'idle' | 'running' | 'done' | 'cancelled'>('idle')
-  const [result, setResult] = useState<ShellResult | null>(null)
+  /* A card remounted after its command finished starts where it was: done,
+     with its result. See rememberOutcome. */
+  const [state, setState] = useState<'idle' | 'running' | 'done' | 'cancelled'>(() => {
+    const was = outcomeOf<ShellResult | 'cancelled'>(`run:${messageId}:${command}`)
+    if (was === 'cancelled') return 'cancelled'
+    if (was) return 'done'
+    /* Claimed and not finished: it is running, in the card this replaced. */
+    return wasClaimed(`run:${messageId}:${command}`) ? 'running' : 'idle'
+  })
+  const [result, setResult] = useState<ShellResult | null>(() => {
+    const was = outcomeOf<ShellResult | 'cancelled'>(`run:${messageId}:${command}`)
+    return was && was !== 'cancelled' ? was : null
+  })
   const [showOutput, setShowOutput] = useState(true)
 
   useEffect(() => {
@@ -171,7 +182,24 @@ export function CommandCard({
   const ranKey = `run:${messageId}:${command}`
   const [alreadyRan] = useState(() => wasClaimed(ranKey))
 
+  /* Remounted while it ran: the run finishing in the card this replaced
+     tells this one. */
+  useEffect(() => {
+    if (state !== 'running' || ranOnceRef()) return
+    return onOutcome(ranKey, () => {
+      const was = outcomeOf<ShellResult | 'cancelled'>(ranKey)
+      if (was === 'cancelled') setState('cancelled')
+      else if (was) {
+        setResult(was)
+        setState('done')
+      }
+    })
+  }, [state, ranKey])
+
   const ranOnce = useRef(false)
+  function ranOnceRef(): boolean {
+    return ranOnce.current
+  }
   useEffect(() => {
     if (!wouldRun || refused || allowed !== true) return
     if (state !== 'idle' || ranOnce.current || alreadyRan) return
@@ -267,9 +295,11 @@ export function CommandCard({
     forgetLive(ranKey)
     if (!res) {
       // Null means the native confirmation was declined.
+      rememberOutcome(ranKey, 'cancelled')
       setState('cancelled')
       return
     }
+    rememberOutcome(ranKey, res)
     setResult(res)
     setState('done')
     onResult(res, byItself)

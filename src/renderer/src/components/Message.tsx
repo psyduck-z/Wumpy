@@ -209,6 +209,14 @@ export const Message = memo(function Message({
   if (isUser) {
     return (
       <div className="msg msg-user">
+        {/* "when i try to copy the prompt i previously gave it" they got the
+            answer: the only Copy button was the answer's, and it sat at the
+            answer's top-right corner - right under their own message. */}
+        {message.content.trim() && (
+          <button type="button" className="msg-copy msg-copy-user" onClick={copy} title="Copy what you wrote">
+            {copied ? 'Copied' : 'Copy'}
+          </button>
+        )}
         {/* Above the text, the way they were above the box when it was sent.
             A message can be an image and nothing else. */}
         {message.images?.length ? (

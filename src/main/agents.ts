@@ -62,6 +62,8 @@ export interface AgentDeps {
   /** Runs a command if the approval mode runs it without a click. */
   run(command: string, shell: Shell): Promise<{ ran: boolean; ok: boolean; output: string }>
   search(query: string): Promise<{ ran: boolean; ok: boolean; output: string }>
+  /** Loads a page out of sight; ok when its console showed no errors. */
+  checkPage(html: string): Promise<{ ran: boolean; ok: boolean; output: string }>
   /** The list changed: tell the panel. */
   changed(): void
   /** A report is ready for a chat. */
@@ -95,6 +97,8 @@ const REVIEW_TOKENS = 900
 const QUEUE_LOOK_MS = 5000
 /** The longest an agent waits for its key to stop resting. */
 const KEY_WAIT_MS = 120_000
+/** The longest one waits in line for a key at all. */
+const QUEUE_GIVE_UP_MS = 10 * 60_000
 
 const sleep = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms))
 
@@ -178,15 +182,18 @@ export class Agents {
         return
       }
       const mine = this.agents.filter((a) => a.chatId === chatId)
-      const watched =
+      const named =
         ask.agents === 'all' ? mine.filter((a) => !ended(a)) : mine.filter((a) => (ask.agents as number[]).includes(a.number))
+      /* Only those still working: one that already reported has been
+         handed back once, and a monitor must not hand it back again. */
+      const watched = named.filter((a) => !ended(a))
       const monitor: Monitor = {
         id: `monitor-${++this.serial}`,
         key,
         chatId,
         note: ask.note,
         when: ask.when,
-        agents: watched.map((a) => a.number),
+        agents: named.map((a) => a.number),
         ids: watched.map((a) => a.id),
         fired: false
       }
@@ -197,10 +204,14 @@ export class Agents {
          fires now, so the chat is not left waiting on nothing. */
       if (!watched.length) {
         monitor.fired = true
-        this.deliver(chatId, [], monitor.note, 'There are no background agents working in this chat for that monitor to watch.')
-      } else if (watched.every(ended)) {
-        monitor.fired = true
-        this.deliver(chatId, watched.map((a) => a.finished).filter((f): f is Finished => Boolean(f)), monitor.note)
+        this.deliver(
+          chatId,
+          [],
+          monitor.note,
+          named.length
+            ? `Agent${named.length === 1 ? '' : 's'} ${named.map((a) => a.number).join(', ')} had already finished; their reports came back earlier in this chat.`
+            : 'There are no background agents working in this chat for that monitor to watch.'
+        )
       }
     })
     this.deps.changed()
@@ -224,6 +235,13 @@ export class Agents {
   /** Starts whoever is queued, while there are slots and keys. */
   private pump(): void {
     const working = (): number => this.agents.filter((a) => a.status === 'working' || a.status === 'reviewing').length
+    /* No slots at all - keys removed, or a one-key provider chosen - or a
+       wait past reason: those in line are told, rather than holding the
+       ranker and every monitor on them for ever. */
+    for (const agent of this.agents.filter((a) => a.status === 'queued')) {
+      if (this.deps.slots() === 0) this.end(agent, 'failed', 'there are no keys to spare: background agents need two that work')
+      else if (Date.now() - agent.startedAt > QUEUE_GIVE_UP_MS) this.end(agent, 'failed', 'no key came free in ten minutes')
+    }
     for (const agent of this.agents.filter((a) => a.status === 'queued')) {
       if (working() >= this.deps.slots()) break
       const model = agent.model || this.deps.model()
@@ -306,7 +324,9 @@ export class Agents {
          * saved the script. A repeat is answered from the first time, and a
          * second repeat ends the asking.
          */
-        const said = (step.kind === 'run' ? step.command : `search: ${step.query}`).replace(/\s+/g, ' ').trim()
+        const said = (step.kind === 'run' ? step.command : step.kind === 'page' ? `page: ${step.html}` : `search: ${step.query}`)
+          .replace(/\s+/g, ' ')
+          .trim()
         const first = tried.get(said)
         if (first !== undefined) {
           repeats++
@@ -429,6 +449,16 @@ export class Agents {
       this.deps.log(`[agents] ${agent.number} ${r.ran ? 'ran' : 'was refused'}: ${step.command.replace(/\s+/g, ' ').slice(0, 120)}`)
       return clip(r.output)
     }
+    if (step.kind === 'page') {
+      agent.doing = 'loading its page to see what breaks'
+      this.deps.changed()
+      const r = await this.deps.checkPage(step.html)
+      const what = `the page (${step.html.length} characters)`
+      agent.records.push({ kind: 'page', what, why: step.why, outcome: r.output })
+      agent.steps.push({ kind: 'page', what: r.ok ? 'loaded its page: no errors' : 'loaded its page: errors', ok: r.ran && r.ok })
+      this.deps.log(`[agents] ${agent.number} loaded its page: ${r.output.replace(/\s+/g, ' ').slice(0, 160)}`)
+      return clip(r.output, 3000)
+    }
     agent.doing = `searching: ${step.query.slice(0, 60)}`
     this.deps.changed()
     const r = await this.deps.search(step.query)
@@ -479,7 +509,9 @@ export class Agents {
       tookMs: agent.endedAt - agent.startedAt,
       review: agent.review,
       steps: agent.steps.length,
-      ran: agent.records.filter((_r, i) => agent.steps[i]?.ok).map((r) => (r.kind === 'run' ? r.what : `search: ${r.what}`))
+      ran: agent.records
+        .filter((_r, i) => agent.steps[i]?.ok)
+        .map((r) => (r.kind === 'run' ? r.what : r.kind === 'page' ? 'loaded its page: no errors' : `search: ${r.what}`))
     }
     this.deps.log(`[agents] ${agent.number} "${agent.title}" ${status} in ${Math.round((agent.endedAt - agent.startedAt) / 1000)}s${why ? `: ${why}` : ''}`)
     this.settle(agent)

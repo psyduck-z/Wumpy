@@ -279,7 +279,6 @@ const READ_ONLY = new Set([
   'gcm',
   'gal',
   'gl',
-  'gh',
   'join-path',
   'convertfrom-json',
   'convertto-json',
@@ -356,7 +355,6 @@ const READ_ONLY = new Set([
   'rg',
   'cut',
   'tr',
-  'uniq',
   'nl',
   // Battery and power: queries only, below.
   'upower',
@@ -508,7 +506,9 @@ function topLevelSegments(command: string): string[] {
     }
     if (c === '(' || c === '[' || c === '{') depth++
     else if (c === ')' || c === ']' || c === '}') depth = Math.max(0, depth - 1)
-    else if (depth === 0 && (c === '|' || c === ';')) {
+    else if (depth === 0 && (c === '|' || c === ';' || c === '\n' || c === '\r')) {
+      /* A new line is a new command, as much as a `;` is: `cat a` and then
+         `mv ~/Documents ~/.trash` on the next line was one read. */
       out.push(buf)
       buf = ''
       continue
@@ -516,6 +516,12 @@ function topLevelSegments(command: string): string[] {
       out.push(buf)
       buf = ''
       i++
+      continue
+    } else if (depth === 0 && c === '&' && command[i - 1] !== '>' && command[i + 1] !== '>') {
+      /* One `&` ends a command too - bash's background, PowerShell's call
+         operator - unless it is part of a redirect (`>&2`, `&>`). */
+      out.push(buf)
+      buf = ''
       continue
     }
     buf += c
@@ -534,7 +540,12 @@ function topLevelSegments(command: string): string[] {
  * something", and spent ten of its ten steps asking again. Only the exact
  * device is let through: `>/dev/nullx` is a file, and still a write.
  */
-const HARMLESS_REDIRECTS = /(^|\s)(?:\d|&)?>>?\s*(?:\/dev\/null|\$null|nul)(?=$|[\s;|&)])|(^|\s)\d>&\d(?=$|[\s;|&)])/gi
+const HARMLESS_REDIRECTS =
+  process.platform === 'win32'
+    ? /(^|\s)(?:\d|&)?>>?\s*(?:\$null|nul)(?=$|[\s;|&)])|(^|\s)\d>&\d(?=$|[\s;|&)])/gi
+    : /* Not $null or nul here: in bash `$null` is a variable that can hold
+         any path, and `> nul` makes a file called nul. */
+      /(^|\s)(?:\d|&)?>>?\s*\/dev\/null(?=$|[\s;|&)])|(^|\s)\d>&\d(?=$|[\s;|&)])/g
 
 /**
  * The commands inside a command: `$(...)`, backticks, and bash's `<(...)`.
@@ -551,11 +562,18 @@ function substitutions(command: string): string[] {
   for (let i = 0; i < command.length; i++) {
     const two = command.slice(i, i + 2)
     if (two === '$(' || two === '<(' || two === '>(') {
+      /* Quotes inside count as quotes: `$(echo ')';touch x)` ends at the
+         second bracket, not the quoted one, so `touch` is seen. */
       let depth = 1
       let j = i + 2
+      let quote: string | null = null
       for (; j < command.length && depth > 0; j++) {
-        if (command[j] === '(') depth++
-        else if (command[j] === ')') depth--
+        const c = command[j]
+        if (quote) {
+          if (c === quote) quote = null
+        } else if (c === '"' || c === "'") quote = c
+        else if (c === '(') depth++
+        else if (c === ')') depth--
       }
       out.push(command.slice(i + 2, j - 1))
       i = j - 1
@@ -569,7 +587,10 @@ function substitutions(command: string): string[] {
       i = end
     }
   }
-  return out.map((s) => s.trim()).filter((s) => s && !s.startsWith('$'))
+  /* Only a bare variable or property - `$_.Length`, `$env:USERNAME` - is
+     not a command. `$($SHELL -c ...)` and `$($x; ri C:\temp -Recurse)`
+     start with `$` too, and are. */
+  return out.map((s) => s.trim()).filter((s) => s && !/^\$[\w:]+(?:\.\w+|\[[^\]]*\])*$/.test(s))
 }
 
 export function isReadOnly(command: string): boolean {
@@ -641,13 +662,30 @@ export function isReadOnly(command: string): boolean {
     const head = tokens[0]
       .toLowerCase()
       .replace(/^[($@]+/, '')
-      .replace(/[)\].,].*$/, '')
+      .replace(/^["']+/, '')
+      .replace(/["')\].,].*$/, '')
       .replace(/\.exe$/, '')
-    if (!head) continue
-    // A pure expression segment - arithmetic, a variable, a number - has no
-    // command to allowlist, and the Verb-Noun sweep above has already
-    // vetted anything that was a call.
-    if (!/^[a-z]/.test(head)) continue
+    /* Nothing left of `./evil.sh` or `.` once the property-access trim has
+       run: a name that starts with a dot or a slash is a file to run. */
+    if (!head) {
+      if (/^[.\/\\~!{&]/.test(tokens[0].replace(/^["']+/, ''))) return false
+      continue
+    }
+    /*
+     * Not a name: a number, or one of the .NET statics that only compute -
+     * `[math]::Round(...)` - is an expression with nothing to allowlist.
+     * Everything else that does not start with a letter runs something:
+     * a path (`./x.sh`, `/bin/sh`), `.` or `!` or `{` or `&` before a
+     * command. These all used to pass, by being skipped.
+     */
+    if (!/^[a-z]/.test(head)) {
+      if (/^\d/.test(head)) continue
+      if (/^\[(?:system\.)?(?:math|io\.path)\]::/i.test(tokens[0])) continue
+      if (/^\[(?:system\.)?environment\]::get/i.test(tokens[0])) continue
+      return false
+    }
+    /* A path to a program, even one that starts with a letter. */
+    if (/[\\/]/.test(head)) return false
 
     /**
      * Any tool asked only for its version or its help is reporting.
@@ -672,6 +710,10 @@ export function isReadOnly(command: string): boolean {
 
     // `find` searches harmlessly until told to act on what it finds.
     if (head === 'find' && DANGEROUS_FIND_FLAGS.test(segment)) return false
+    /* And these each have one flag that writes or never ends. */
+    if (head === 'rg' && /(^|\s)--pre(=|\s|$)/.test(segment)) return false
+    if ((head === 'sort' || head === 'tree') && /(^|\s)(-o|--output)(=|\s|$)/.test(segment)) return false
+    if (head === 'upower' && /(^|\s)(--monitor|--monitor-detail|-m)(\s|$)/.test(segment)) return false
 
     const reads = READ_SUBCOMMANDS[head]
     if (reads) {

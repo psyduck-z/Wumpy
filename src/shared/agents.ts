@@ -108,7 +108,7 @@ export function monitorAsks(text: string): MonitorAsk[] {
       if (!line) continue
       const whenIs = /^when\s*:\s*(.+)$/i.exec(line)
       const which = /^agents?\s*:\s*(.+)$/i.exec(line)
-      if (whenIs) when = /\beach\b|\bany\b|\bevery\b|\bas\b/i.test(whenIs[1]) ? 'each' : 'all'
+      if (whenIs) when = /\beach\b|\bany\b|\bevery\b|one by one|as each/i.test(whenIs[1]) ? 'each' : 'all'
       else if (which) {
         const numbers = [...which[1].matchAll(/\d+/g)].map((m) => Number(m[0])).filter((n) => n > 0)
         agents = numbers.length ? numbers : 'all'
@@ -178,6 +178,11 @@ export function agentPrompt(world: AgentWorld): string {
     '  If something comes back NOT RUN, do not try a variant of it: say in your report what',
     '  should be run and why.',
     `- ${search}`,
+    `- To test a web page you are writing: a ${BT}wumpy-check-page block holding the whole page.`,
+    '  Wumpy loads it out of sight for 3 seconds and tells you what its console showed. Do it',
+    '  before you report any page, game or app, and fix what it finds. It catches crashes, not',
+    '  logic: check that yourself - every name defined where used, speeds per second scaled by',
+    '  the frame time, every part the brief asked for really there.',
     `- You have at most ${world.steps} tool uses. Spend them on what the task needs; a task`,
     '  that needs none - writing, reviewing, working something out - needs none.',
     '- Never ask for the same thing twice: its answer is already above.',
@@ -217,7 +222,9 @@ export const REVIEW_PROMPT = [
   '- Is every claim about the computer backed by output in the steps? A claim with nothing',
   '  behind it is a REVISE. So is reasoning from one reading to a different fact.',
   '- Is it correct: facts, code that would run, commands that exist? Is anything left as a',
-  '  placeholder?',
+  '  placeholder? For a page, game or script, run it in your head: every name defined where',
+  '  used, speeds per second scaled by frame time, every part the brief asked for really there.',
+  '  A page never loaded with wumpy-check-page, or loaded with errors left in, is a REVISE.',
   '- Agents hand work back as text. A script, letter or file given in full in the report IS',
   '  delivered; never ask for it to be saved, created or run unless the brief said so.',
   '',
@@ -245,6 +252,8 @@ export const REVIEW_ROUNDS = 2
 export type Step =
   | { kind: 'run'; command: string; why: string; shell: 'powershell' | 'bash' | 'cmd' }
   | { kind: 'search'; query: string; why: string }
+  /* A whole web page to load out of sight: see main/pagecheck.ts. */
+  | { kind: 'page'; html: string; why: string }
   | { kind: 'report'; text: string }
 
 /**
@@ -253,6 +262,15 @@ export type Step =
  * the rule, and a reply that proposes three has only been heard once.
  */
 export function stepOf(reply: string, platform: AgentWorld['platform']): Step {
+  /* A page to test: everything up to the block's own closing fence, which
+     is the last one - a page's script may hold backticks of its own. */
+  const page = new RegExp(`${BT}[ \\t]*(?:\\n[ \\t]*)?wumpy-check-page\\b[^\\n]*\\n([\\s\\S]*)${BT}`).exec(reply)
+  if (page) {
+    const lines = page[1].split(LF)
+    const why = lines[0]?.trim().startsWith('#') ? lines.shift()!.trim().replace(/^#+\s*/, '') : ''
+    const html = lines.join(LF).trim()
+    if (/<(?:!doctype|html|body|script|canvas)/i.test(html)) return { kind: 'page', html, why }
+  }
   /* "``` wumpy-run", with a space, is a command too: an agent wrote exactly
      that twice, live, and its "report" went back as an unrun command. */
   const block = new RegExp(`${BT}[ \\t]*(?:\\n[ \\t]*)?(wumpy-run(?:-bash|-cmd)?|wumpy-search)\\b[^\\n]*\\n([\\s\\S]*?)${BT}`).exec(reply)
@@ -308,7 +326,7 @@ export function clip(text: string, max = 6000): string {
 
 /** One step, as the reviewer and the log see it. */
 export interface StepRecord {
-  kind: 'run' | 'search'
+  kind: 'run' | 'search' | 'page'
   what: string
   why: string
   outcome: string
@@ -323,7 +341,9 @@ export function reviewInput(
   before: readonly string[] = []
 ): string {
   const done = steps.length
-    ? steps.map((s, i) => `${i + 1}. ${s.kind === 'run' ? 'Ran' : 'Searched'}: ${s.what}${LF}${clip(s.outcome, 1500)}`).join(LF + LF)
+    ? steps
+        .map((s, i) => `${i + 1}. ${s.kind === 'run' ? 'Ran' : s.kind === 'page' ? 'Loaded the page' : 'Searched'}: ${s.what}${LF}${clip(s.outcome, 1500)}`)
+        .join(LF + LF)
     : '(none - it worked from the brief alone)'
   const earlier = before.length
     ? [`EARLIER REVIEWS, WHICH THIS REPORT HAS ACTED ON - do not ask to undo them${LF}${before.join(LF + LF)}`]
@@ -380,7 +400,7 @@ export function deliveryText(done: readonly Finished[], note: string | null): st
     'A fact about this computer in a report is only as good as what it ran, above: what no output shows, you do not know - say so, or check. Never fill it in. And if a report is not what was asked for, say so plainly: never pass off what you know yourself as what an agent found.'
   const then = note
     ? `You set a monitor for this, saying what to do now: ${note}`
-    : 'Check the report like any claim, then tell the user what it means for them - briefly.'
+    : 'Check the report like any claim, then tell the user what it means for them - briefly. A file it hands back that was meant to be saved, write with a wumpy-write block exactly as given, every line.'
   return [head, ...parts, rule, then].join(LF + LF)
 }
 
@@ -400,8 +420,9 @@ export function agentsPrompt(slots: number): string {
     '"meanwhile", "while I...", or ask for several things at once (one agent each); and for long',
     'work - a long document or script, research needing several searches, a review. "At the same',
     'time" means agents, not blocks of your own; comparing or researching things is an agent\'s job,',
-    'and a search of your own is for one quick fact. What a few lines or one command answers, do',
-    'yourself.',
+    'and a search of your own is for one quick fact. Building something - a game, a page, an app',
+    '- is an agent\'s job too: it can load a page to see what breaks, and another agent reviews',
+    'the code before it reaches you. What a few lines or one command answers, do yourself.',
     '',
     'while I am in this meeting, draft a cover letter for that junior developer job',
     'I have an agent drafting it - you will have it when it is done.',

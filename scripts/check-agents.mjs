@@ -85,6 +85,7 @@ check('a monitor with nothing said waits on all of them', A.monitorAsks(`${BT}wu
   { note: 'Tell them', when: 'all', agents: 'all' }
 ])
 check('"when: each one finishes" is each', A.monitorAsks(`${BT}wumpy-monitor\n# Say it\nwhen: each one finishes\n${BT}`)[0].when, 'each')
+check('"when: as soon as all are done" is all', A.monitorAsks(`${BT}wumpy-monitor\n# Say it\nwhen: as soon as all are done\n${BT}`)[0].when, 'all')
 check('a block still being written starts nothing', A.agentAsks(`${BT}wumpy-agent\n# Half\nWrite the whole`), [])
 check('the fence tags guard agent blocks', /'agent', 'monitor'/.test(read('src/shared/fences.ts')), true)
 
@@ -144,7 +145,8 @@ check('"what time is it" does not', N.needsFor([{ role: 'user', content: 'what t
    window), measured the way check-ask measures it. */
 const tokens = (text) => Math.ceil(text.length / 4)
 check(`the stub is a line (~${tokens(A.agentsStub(2))} tokens)`, tokens(A.agentsStub(2)) <= 45, true)
-check(`the rules stay short (~${tokens(A.agentsPrompt(2))} tokens)`, tokens(A.agentsPrompt(2)) <= 450, true)
+/* 520: building things - games, pages, apps - joined what agents are for. */
+check(`the rules stay short (~${tokens(A.agentsPrompt(2))} tokens)`, tokens(A.agentsPrompt(2)) <= 520, true)
 {
   const FULL = { scope: 'full', search: true, screen: true, browser: true, quota: true }
   const plain = S.preambleTokens({ ...FULL, needs: [], agents: 2 })
@@ -169,6 +171,13 @@ check('the model\'s own tool-call markup is a step too', A.stepOf('<tool_call>\n
 })
 check('a command in that markup is a command', A.stepOf('<tool_call><function=wumpy-run-bash><parameter=command>df -h /</parameter></function></tool_call>', 'linux').command, 'df -h /')
 check('a report that is not what was asked for is said to be so', /never pass off what you know yourself as what an agent found/.test(A.deliveryText([], null)), true)
+check('a page to test is a step, kept whole', (() => {
+  const s = A.stepOf(`${BT}wumpy-check-page\n# does it load\n<!doctype html><script>const t = \`a\`</script>\n${BT}`, 'linux')
+  return s.kind === 'page' && s.why === 'does it load' && s.html.includes('const t = `a`')
+})(), true)
+check('an agent is told to test a page before it reports one', /Do it\s+before you report any page, game or app/.test(linux), true)
+check('and a reviewer to send back one never tested', /A page never loaded with wumpy-check-page/.test(A.REVIEW_PROMPT), true)
+check('the chat hands building to agents', /Building something - a game, a page, an app/.test(A.agentsPrompt(2)), true)
 check('a script in a bash fence is a deliverable, never run', A.stepOf(`REPORT:\n${BT}bash\nrm -rf ~/x\n${BT}`, 'linux').kind, 'report')
 check('a monitor note is passed on', /You set a monitor for this, saying what to do now: merge them/.test(A.deliveryText([], 'merge them')), true)
 
@@ -364,6 +373,34 @@ check('and the reviewer is told a REVISE needs something wrong or missing', /A R
 }
 
 {
+  /* A monitor naming agents that already reported does not send them again. */
+  const h = harness((messages) => (messages[0].content.startsWith('You are a reviewing agent') ? 'VERDICT: ACCEPT\nNOTES: ok' : 'REPORT:\nDone.'))
+  h.agents.start('c', 'm', [{ title: 'A', brief: 'first job here' }])
+  await until(() => h.ready.length > 0)
+  h.agents.monitor('c', 'm2', [{ note: 'tell them', when: 'all', agents: [1] }])
+  check('a monitor on an agent that already reported does not resend it', [h.ready.length, /had already finished/.test(h.ready[1]?.text ?? '')], [2, true])
+}
+
+{
+  /* No slots left: those in line are told, not kept for ever. */
+  let slots = 1
+  let release
+  const gate = new Promise((r) => (release = r))
+  const h = harness(() => 'REPORT:\nDone.')
+  h.agents['deps'].slots = () => slots
+  const turn = h.agents['deps'].turn
+  h.agents['deps'].turn = async (...args) => (await gate, turn(...args))
+  h.agents.start('c', 'm', [
+    { title: 'One', brief: 'The first job.' },
+    { title: 'Two', brief: 'The second job.' }
+  ])
+  slots = 0
+  release()
+  await until(() => h.agents.forChat('c')[1].status !== 'queued')
+  check('with no slots left, a queued agent fails and says why', /no keys to spare/.test(h.agents.forChat('c')[1].doing), true)
+}
+
+{
   /* Stopped: no report, its key back, its monitor still told. */
   const h = harness(() => null)
   const [a] = h.agents.start('c', 'm', [{ title: 'Slow', brief: 'Takes forever.' }])
@@ -401,12 +438,42 @@ check('never faster than a second', L.gapFor({ rpm: 200, capped: false, at: t0, 
 check('a stale reading is not used', L.gapFor({ rpm: 40, capped: true, at: t0, keys: 2 }, 3), null)
 check('said for the log', L.limitLine(1, { rpm: 40, capped: true, at: t0, keys: 3 }), 'key 2 takes 40 requests a minute')
 
+/* ------------------------------------------------------ pages, checked */
+
+const PC = await load('src/shared/pagecheck.ts', 'pagecheck')
+const mainSource = read('src/main/index.ts')
+const chromiumLog = [
+  '[73847:73847:1119/085343.327668:INFO:CONSOLE:1] "started", source: file:///tmp/x/bad.html (1)',
+  '[73847:73847:1119/085343.354723:INFO:CONSOLE:142] "Uncaught ReferenceError: car is not defined", source: file:///tmp/x/bad.html (142)',
+  '[73847:73847:1119/085343.354723:INFO:CONSOLE:142] "Uncaught ReferenceError: car is not defined", source: file:///tmp/x/bad.html (142)'
+].join('\n')
+check('a crash in the console is found, once, with its line', PC.pageErrors(chromiumLog), ['Uncaught ReferenceError: car is not defined (line 142)'])
+check('an ordinary console.log is not an error', PC.pageErrors(chromiumLog.split('\n')[0]), [])
+check('the hand-back says it was the app, and to read the file', /sent by Wumpy, not typed by the user/.test(PC.pageErrorText('/x.html', ['e'])) && /Read the file/.test(PC.pageErrorText('/x.html', ['e'])), true)
+check('a page written is loaded and its errors handed back, twice at most', /checkPage\(result\.path\)/.test(mainSource) && /rounds >= PAGE_ROUNDS/.test(read('src/renderer/src/App.tsx')), true)
+check('the write rules say code that runs is not done when written', /CODE THAT RUNS - a page, a game, a script - IS NOT DONE WHEN IT IS WRITTEN/.test(read('src/shared/writefile.ts')) && /READ\s+THE FILE before you answer/.test(read('src/shared/writefile.ts').replace(/',\s*'/g, ' ')), true)
+check('and so does the /reflect mentor', /cross the screen in a twentieth of a second is not done/.test(read('src/shared/reflect.ts').replace(/',\s*'/g, ' ')), true)
+
+/* -------------------------------------------- hearing, copying, cards */
+
+check('a slow Whisper is raced by Parakeet on a fresh connection', /recognize\(audio, borrowed, FALLBACK_HEARING, true\)/.test(mainSource) && /startParakeet\('Whisper was slow'\)/.test(mainSource), true)
+check('dictation writes what it did to the log', /note\(held \? 'Space held: starting' : 'started'\)/.test(read('src/renderer/src/hooks/useDictation.ts')), true)
+check('what they wrote can be copied, from their own message', /msg-copy msg-copy-user/.test(read('src/renderer/src/components/Message.tsx')), true)
+check('a finished command keeps "done" when its card is rebuilt', /rememberOutcome\(ranKey, res\)/.test(read('src/renderer/src/components/CommandCard.tsx')) && /outcomeOf<ShellResult \| 'cancelled'>\(`run:\$\{messageId\}:\$\{command\}`\)/.test(read('src/renderer/src/components/CommandCard.tsx')), true)
+
 /* ------------------------------------------------------------ wiring */
 
 const main = read('src/main/index.ts')
-check('agents run only reads judge() would run without a click', /const verdict = judge\(command\)[\s\S]{0,500}if \(!verdict\.auto \|\| !verdict\.readOnly\)/.test(main), true)
+check('agents run only reads judge() would run without a click', /const verdict = judge\(command\)[\s\S]{0,1000}if \(!verdict\.auto \|\| !verdict\.readOnly\)/.test(main), true)
 check('and with one key there are none', /Background agents need at least two keys/.test(main), true)
-check('the ranker stands aside while agents work', (main.match(/busy: turnStartedAt !== null \|\| \(agents\?\.active\(\) \?\? 0\) > 0,/g) ?? []).length, 2)
+check('the ranker stands aside while agents work, and while a key is tested', (main.match(/busy: turnStartedAt !== null \|\| \(agents\?\.active\(\) \?\? 0\) > 0 \|\| \(limitTester\?\.busy \?\? false\),/g) ?? []).length, 2)
+check('agents never read secrets, in any mode', [
+  'cat ~/.ssh/id_rsa',
+  'cat ~/.config/wumpy/keys.bin',
+  'cat .env',
+  'type C:\\Users\\me\\.aws\\credentials'
+].every((c) => new RegExp(/const AGENT_SECRETS =\s*\n\s*(\/.*\/i)/.exec(main)[1].slice(1, -2), 'i').test(c)), true)
+check('a key limit is only measured on NVIDIA', /provider: \(\) => \(providerFor\(activeModel\(\)\) === 'nvidia' \? 'nvidia' : null\)/.test(main), true)
 check('the chat is told about its agents', /\.\.\.agentFacts\(chatId\)/.test(main), true)
 check('a limit test stops when Wumpy is used', /if \(!this\.idle\(\)\) \{\s+controller\.abort\(\)/.test(read('src/main/limits.ts')), true)
 check('agents are started when an answer finishes, not when a card draws', /window\.wumpy\.agents\s+\.start\(d\.chatId, message\.id, message\.content\)/.test(read('src/renderer/src/hooks/useAgents.ts')), true)
