@@ -520,6 +520,24 @@ check('and what one refuses is not held against the voice in use', /if \(onlineR
   check('a long monologue, every piece under 25s', Pa.piecesOf(long, many).every((p) => p.length <= 25 * rate), true)
   check('and nothing lost between them', Pa.piecesOf(long, many).reduce((n, p) => n + p.length, 0), long.length)
   check('no pause at all still cuts, at the longest', Pa.cutsFor(talk(30, []), rate).length, 1)
+  /* Found by review: a 25.5s clip is 24s of talking and its closing pause,
+     and the pause was the quietest place to cut - leaving 1.1s of room. */
+  const tail = (speech, quiet) => {
+    const t = talk(speech, [])
+    const out = new Int16Array(Math.round((speech + quiet) * rate))
+    out.set(t)
+    for (let i = t.length; i < out.length; i++) out[i] = (i % 7) - 3
+    return out
+  }
+  check('talking that fits, with its closing pause, is not cut', Pa.cutsFor(tail(24, 1.5), rate), [])
+  check('nor after a trailing "and", three seconds', Pa.cutsFor(tail(24.5, 3), rate), [])
+  {
+    const t = tail(32, 3)
+    const c = Pa.cutsFor(t, rate)
+    const lastSpeech = 32 * rate - c[c.length - 1]
+    check('a cut leaves talking after it, not the room', c.length === 1 && lastSpeech >= rate, true)
+  }
+  check('a losing race reports its own failure, so a limited key rests', /r\.ended\.code !== grpc\.status\.CANCELLED \? httpStatus\(r\.ended\.code\) : 200/.test(nv), true)
   check('a turn hears the pieces at once, and joins them', /const parts = await Promise\.all\(wavs\.map\(\(w\) => hearOnline\(w\)\)\)/.test(main), true)
 }
 /* "First sound 7249ms after asking": Magpie's one connection sat for 18.6s

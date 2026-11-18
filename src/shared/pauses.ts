@@ -39,11 +39,25 @@ export function cutsFor(
   /* Running sums of energy, so any window's is one subtraction. */
   const energy = new Float64Array(samples.length + 1)
   for (let i = 0; i < samples.length; i++) energy[i + 1] = energy[i] + samples[i] * samples[i]
+  /*
+   * Where the talking ends. A clip keeps the pause that ended it - a second
+   * and a half, three after a trailing "and" - and that pause is the
+   * quietest thing in it: cut there, a 25.5s turn became 24.4s of speech and
+   * 1.1s of room for Whisper to invent words in. So the quiet at the end is
+   * not counted, and no cut leaves less than a second of talking after it.
+   */
+  const levels: number[] = []
+  for (let i = 0; i + gap <= samples.length; i += gap) levels.push(energy[i + gap] - energy[i])
+  const loud = [...levels].sort((a, b) => a - b)[Math.floor(levels.length * 0.9)] ?? 0
+  let talkEnd = samples.length
+  for (let w = levels.length - 1; w >= 0 && levels[w] < loud * 0.02; w--) talkEnd = w * gap
+  talkEnd = Math.min(samples.length, talkEnd + gap * 2)
+  if (talkEnd <= most) return []
   const cuts: number[] = []
   let start = 0
-  while (samples.length - start > most) {
+  while (talkEnd - start > most) {
     const from = start + least
-    const to = Math.min(start + most, samples.length) - gap
+    const to = Math.min(start + most, talkEnd - rate) - gap
     let at = start + most
     let quietest = Infinity
     for (let i = from; i <= to; i += step) {

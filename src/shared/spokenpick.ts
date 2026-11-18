@@ -246,18 +246,19 @@ export const ORDER_NAME: Record<Ordering, string> = { balanced: 'best', smarts: 
 
 /**
  * "Switch to the smartest model", "can you change to Nemotron Ultra", "use
- * the fastest one": a model asked for in passing, mid-conversation, with no
- * slash and no list on the screen. The `/model` command it means, or null.
+ * the fastest model": a model asked for in passing, mid-conversation, with
+ * no slash and no list on the screen. The `/model` command it means, or null.
  *
- * Only an imperative, and only one that lands on a model: "switch to dark
- * mode" and "go to the cloud" are not models. So a name has to be there by
- * its family ("Nemotron", "Gemma", "step fun"), or the word "model", or the
- * whole thing has to be a ranking ("the smartest", "the quickest one").
+ * Only an imperative, and only one that lands on a model by its family
+ * ("Nemotron", "Gemma", "step fun") or by the word "model". A ranking alone
+ * is not enough: "pick the best one", "change it to something faster" and
+ * "switch it to the default" are about something else far more often than
+ * about the model, and each of them switched it.
  */
 const SWITCH =
   /^(?:(?:okay|ok|hey|so|um+|uh+|wumpy|please|now|can you|could you|would you|will you|i want to|i wanna|id like to|lets|let us)\s+)*(?:switch|change|swap|move|go|jump|flip)(?:\s+(?:it|me|us|over|back|the model|models|you|across))*\s+(?:to|onto|over to)\s+(.+)$/
 const USE =
-  /^(?:(?:okay|ok|so|please|now|can you|could you|lets|let us|i want to|i wanna|id like to)\s+)*(?:use|pick|choose|select|try)\s+(.+?)\s+(?:model|one)$/
+  /^(?:(?:okay|ok|so|please|now|can you|could you|lets|let us|i want to|i wanna|id like to)\s+)*(?:use|pick|choose|select|try)\s+(.+?\s+models?)$/
 
 export function modelSwitchIn(heard: string, models: readonly Pickable[]): string | null {
   const said = heard
@@ -274,13 +275,14 @@ export function modelSwitchIn(heard: string, models: readonly Pickable[]): strin
     .replace(/\s+/g, ' ')
     .trim()
   if (!target) return null
+  const modelSaid = /\bmodels?\b/.test(said)
   const ranked = orderingIn(target)
-  if (ranked && !ranked.rest) return `/model the ${ORDER_NAME[ranked.ordering]} one`
+  if (ranked && !ranked.rest) return modelSaid ? `/model the ${ORDER_NAME[ranked.ordering]} one` : null
   const families = [...new Set(models.map((o) => tokensOf(o.names[0] ?? '')[0]).filter(Boolean))]
   const words = tokensOf(target)
   const pieces = [...words, ...words.slice(0, -1).map((w, i) => w + words[i + 1])]
   const named = pieces.some((p) => families.some((f) => p === f || near(p, f)))
-  if (!named && !/\bmodels?\b/.test(said)) return null
+  if (!named && !modelSaid) return null
   const name = target.replace(/\bmodels?\b/g, ' ').replace(/\s+/g, ' ').trim()
   if (!name || !matchSpoken(name, models).length) return null
   return `/model ${name}`

@@ -107,6 +107,20 @@ check('an alias runs as itself', said('slash logs'), { command: '/logs', name: '
 check('"Flash model" is slash model', said('Flash model'), { command: '/model', name: 'model', sure: true })
 check('but "Flash" alone is not a command', said('Flash'), null)
 check('nor "Flash" before words that are not one', said('flash is the fast one'), null)
+/* Found by review: each of these ran a command. */
+check('"Splash screen for my app..." is a question', said('Splash screen for my app, how do I make one?'), null)
+check('"Flash, quick question..." is not /quick', said('Flash, quick question about React.'), null)
+check('"Flash new features?" starts no chat', said('Flash new features?'), null)
+check('"Slash help?" is /help, not a guess', said('Slash help?'), { command: '/help', name: 'help', sure: true })
+check('"Slash new?" too', said('Slash new?'), { command: '/new', name: 'new', sure: true })
+/* "Slash log?" answered "Yeah, do it." went to the model as a question. */
+check('"Yeah, do it." is yes', S.firstYesNo('Yeah, do it.'), { said: 'yes', rest: 'do it.' })
+check('"Yes, run it." is yes', S.firstYesNo('Yes, run it.')?.said, 'yes')
+check('"No, slash log." is no, then that', S.firstYesNo('No, slash log.'), { said: 'no', rest: 'slash log.' })
+check('"no, yes" is neither', S.firstYesNo('no, yes'), null)
+check('"Nobody asked" is neither', S.firstYesNo('Nobody asked'), null)
+check('a confirm takes yes or no at the start', /const lead = firstYesNo\(reply\.heard\)/.test(turn), true)
+check('a command after a held lead-in still runs', /const standsAlone =/.test(turn) && /held && !standsAlone/.test(turn), true)
 check('nothing near: no guess', said('slash xyzzy'), null)
 check('not starting with slash: not a command', said('can you show the slash log'), null)
 check('a guess is asked, yes runs it', /if \(spoken && !spoken\.sure\)[\s\S]{0,300}confirmCommand\(spoken\.name\)/.test(turn), true)
@@ -117,7 +131,7 @@ for (const [heard, want] of [
   ['Okay. Also,', true], ['And', true], ['So, um,', true], ['Oh, and one more thing,', true],
   ['Okay.', false], ['Yes.', false], ['Also, what is the weather', false], ['And turn it off.', false]
 ]) check(`"${heard}" ${want ? 'is held for the rest' : 'is sent'}`, I.leadInOnly(heard), want)
-check('a held lead-in goes in front of what follows', /const whole = held \? \{ text: `\$\{held\.text\} \$\{heard\.text\}`/.test(turn), true)
+check('a held lead-in goes in front of what follows', /const whole = held && !standsAlone \? \{ text: `\$\{held\.text\} \$\{heard\.text\}`/.test(turn), true)
 
 check('a # line becomes the question', S.approvalQuestion({ command: '# Check whether git is installed\ncommand -v git' }), 'Can I check whether git is installed?')
 check('a card can describe itself', S.approvalQuestion({ command: '/home/x/notes.md', spoken: 'write notes.md' }), 'Can I write notes.md?')

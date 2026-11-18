@@ -1637,12 +1637,14 @@ function namedControls(shot: Attachment): string[] {
           ? `${sayModel(m.label)} isn't answering right now.`
           : `${sayModel(m.label)} needs a ${PROVIDERS[m.provider].label} key.`
       }))
+      const labels = (list: CloudModel[]): string[] => list.map((m) => m.label)
       chat.askLocal('Which model?', order.map((m) => m.label), 'model', {
         values: ids(order),
         say: `${now ? `You're on ${sayModel(now.label)}. ` : ''}${intro}`,
         spoken: listed.length,
         aliases,
-        unavailable
+        unavailable,
+        ranked: { balanced: labels(balanced), smarts: labels(readyModels('smarts')), speed: labels(readyModels('speed')) }
       })
     },
     [chat, model, readyModels, providerReady]
@@ -2009,7 +2011,13 @@ function namedControls(shot: Attachment): string[] {
                 {
                   values: offer.map((m) => m.id),
                   say: `${offer.length} of them: ${numberedSpeech(offer.map((m) => sayModel(m.label)))}`,
-                  spoken: offer.length
+                  spoken: offer.length,
+                  /* "The fastest one" among these: by the ranking, not the list. */
+                  ranked: {
+                    balanced: readyModels('balanced').map((m) => m.label),
+                    smarts: readyModels('smarts').map((m) => m.label),
+                    speed: readyModels('speed').map((m) => m.label)
+                  }
                 }
               )
               return

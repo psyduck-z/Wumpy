@@ -43,6 +43,7 @@ export function AskCard({
     spoken?: number
     aliases?: string[][]
     unavailable?: Array<{ names: string[]; why: string }>
+    ranked?: Partial<Record<'balanced' | 'smarts' | 'speed', string[]>>
     confirm?: boolean
   }
   /** When the question was asked: see AloudChoice.askedAt. */
@@ -75,11 +76,12 @@ export function AskCard({
       options: options.map((label, i) => ({ id: label, label, names: aloud?.aliases?.[i] })),
       numbered: aloud?.say ? options.slice(0, aloud.spoken ?? options.length) : undefined,
       unavailable: aloud?.unavailable,
+      ranked: aloud?.ranked,
       confirm: aloud?.confirm,
       askedAt,
       choose: (id) => answerRef.current(id)
     })
-  }, [done, question, optionKey, key, aloud?.say, aloud?.spoken, aloud?.aliases, aloud?.unavailable, aloud?.confirm, askedAt])
+  }, [done, question, optionKey, key, aloud?.say, aloud?.spoken, aloud?.aliases, aloud?.unavailable, aloud?.ranked, aloud?.confirm, askedAt])
 
   /**
    * The first option takes focus, so arrows work without a click first.

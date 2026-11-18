@@ -149,6 +149,7 @@ export const Message = memo(function Message({
             spoken: message.localAsk.spoken,
             aliases: message.localAsk.aliases,
             unavailable: message.localAsk.unavailable,
+            ranked: message.localAsk.ranked,
             confirm: message.localAsk.kind === 'confirm'
           }}
           askedAt={message.createdAt}

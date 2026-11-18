@@ -35,6 +35,23 @@ export function yesNo(heard: string): 'yes' | 'no' | null {
 }
 
 /**
+ * A reply that starts with yes or no and carries on: "Yeah, do it." is yes,
+ * "No, slash log." is no and then a command. The first word decides, and
+ * the rest is handed back. Null when it starts with neither.
+ */
+export function firstYesNo(heard: string): { said: 'yes' | 'no'; rest: string } | null {
+  const m = /^\s*([a-z']+(?:\s+(?:thanks|thank you|please))?)[\s,.!;:-]*(.*)$/i.exec(heard)
+  if (!m) return null
+  const word = m[1].toLowerCase().replace(/\s+(?:thanks|thank you|please)$/, '')
+  const said = YES.test(word) ? 'yes' : NO.test(word) ? 'no' : null
+  if (!said) return null
+  const rest = m[2].trim()
+  /* "Yes no" is not an answer, and nor is "no, yes". */
+  if (rest && yesNo(rest) && yesNo(rest) !== said) return null
+  return { said, rest }
+}
+
+/**
  * "Slash remember I like tea" -> "/remember I like tea".
  *
  * Saying "slash" means typing a command, not saying the word to the model.
@@ -90,12 +107,15 @@ export function spokenCommand(
 ): { command: string; name: string; sure: boolean } | null {
   const said = heard.trim()
   const lead = /^(?:slash|\/)[\s,.:;!-]*/i.exec(said)
-  const flash = flashToo ? /^(?:flash|splash|lash)[\s,.:;!-]+/i.exec(said) : null
+  /* "Flash model" is Whisper's "slash model" - but only that: a command's
+     own name and nothing after it. "Splash screen for my app..." is a
+     question, and "Flash new features?" starts no chat. */
+  const flash = flashToo ? /^flash[\s,.:;!-]+(?=[a-z]+[\s.!?]*$)/i.exec(said) : null
   if (!lead && !flash) return null
   const names = new Map<string, string>()
   for (const c of commands) {
     names.set(c.name.toLowerCase(), c.name)
-    for (const a of c.aliases ?? []) if (/^[a-z]{2,}$/i.test(a)) names.set(a.toLowerCase(), a)
+    if (!flash) for (const a of c.aliases ?? []) if (/^[a-z]{2,}$/i.test(a)) names.set(a.toLowerCase(), a)
   }
   const tidy = (rest: string): string => rest.trim().replace(/^[\s,.:;!-]+/, '').replace(/[.!?]+$/, '').trim()
   const build = (name: string, rest: string, sure: boolean) => {
@@ -109,7 +129,8 @@ export function spokenCommand(
 
   const body = said.slice((lead ?? flash)![0].length)
   const words = body.split(/\s+/)
-  const first = (words[0] ?? '').toLowerCase().replace(/[^a-z?]/g, '')
+  /* Letters only: "Slash help?" is /help, not a guess at "help?". */
+  const first = (words[0] ?? '').toLowerCase().replace(/[^a-z]/g, '')
   if (!first) return null
   if (names.has(first)) return build(first, words.slice(1).join(' '), true)
   if (flash) return null

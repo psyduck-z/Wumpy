@@ -716,7 +716,10 @@ export async function synthesizeHedged(
   const ended = await won.run.done
   for (const [i, r] of runs.entries()) {
     if (i === winner) continue
-    r.key.done(200)
+    /* Cancelled is this side's doing; a 429 or a refused key before that is
+       the key's, and has to be reported so it rests. */
+    const lost = r.ended && !r.ended.ok && r.ended.code !== grpc.status.CANCELLED ? httpStatus(r.ended.code) : 200
+    r.key.done(lost)
     if (r.fresh) r.client.close()
   }
   if (!ended.ok) {

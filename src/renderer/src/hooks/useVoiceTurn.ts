@@ -1,6 +1,6 @@
 import { useEffect, useRef } from 'react'
 import type { ChatMessage } from '@shared/types'
-import { approvalQuestion, speakable, spokenCommand, spokenSlash, yesNo, type CommandName } from '@shared/spoken'
+import { approvalQuestion, firstYesNo, speakable, spokenCommand, spokenSlash, yesNo, type CommandName } from '@shared/spoken'
 import {
   ORDER_NAME,
   isCancel,
@@ -956,10 +956,15 @@ export function useVoiceTurn(deps: Deps): void {
            ranking's own word. With a name - "the fastest Nemotron" - both
            are matched together. */
         const ranked = said ? orderingIn(said) : null
-        if (ranked && !ranked.rest) {
-          const top = all.find((o) => o.names?.includes(ORDER_NAME[ranked.ordering]))
+        if (ranked) {
+          /* Within what was narrowed to: after "Nemotron", "the fastest
+             one" is the fastest Nemotron. A name with it narrows too. */
+          const pool = narrowed ?? all
+          const fits = ranked.rest ? matchSpoken(ranked.rest, names(pool)) : pool.map((o) => o.id)
+          const best = choice.ranked?.[ranked.ordering]?.find((id) => fits.includes(id))
+          const top = best ?? (ranked.rest ? undefined : pool.find((o) => o.names?.includes(ORDER_NAME[ranked.ordering]))?.id)
           if (top) {
-            choice.choose(top.id)
+            choice.choose(top)
             return 'answered'
           }
         }
@@ -1054,7 +1059,11 @@ export function useVoiceTurn(deps: Deps): void {
       return talked
     }
 
-    /** "Slash log?" - yes, no, or whatever else was said instead. */
+    /**
+     * "Slash log?" - yes, no, or whatever else was said instead. "Yeah, do
+     * it" is yes; "No, slash log" is no and then that, which comes back as
+     * what was said.
+     */
     async function confirmCommand(name: string): Promise<'yes' | 'no' | { text: string; heard: string } | null> {
       asking = true
       try {
@@ -1062,7 +1071,12 @@ export function useVoiceTurn(deps: Deps): void {
         if (cancelled) return null
         const reply = await listen(900, 8000, 'Say yes or no.')
         if (!reply) return null
-        return yesNo(reply.heard) ?? reply
+        const plain = yesNo(reply.heard)
+        if (plain) return plain
+        const lead = firstYesNo(reply.heard)
+        if (lead?.said === 'yes') return 'yes'
+        if (lead?.said === 'no') return lead.rest ? { text: lead.rest, heard: lead.rest } : 'no'
+        return reply
       } finally {
         asking = false
       }
@@ -1223,7 +1237,13 @@ export function useVoiceTurn(deps: Deps): void {
             showVoice({ stage: 'listening', level: 0, detail: 'Go on.' })
             continue
           }
-          const whole = held ? { text: `${held.text} ${heard.text}`, heard: `${held.heard} ${heard.heard}` } : heard
+          /* Unless what came after is a command or a model, which has to
+             stand at the start to be heard as one: "Okay. Also," and then
+             "slash log" is /log. */
+          const standsAlone =
+            Boolean(spokenCommand(heard.heard, commandNames()) ?? spokenSlash(heard.heard)) ||
+            modelSwitchIn(heard.heard, MODEL_NAMES) !== null
+          const whole = held && !standsAlone ? { text: `${held.text} ${heard.text}`, heard: `${held.heard} ${heard.heard}` } : heard
           held = null
           await answer(whole)
         }

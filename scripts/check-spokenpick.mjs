@@ -205,7 +205,7 @@ check('nor is "Lightning", which is a name', P.orderingIn('Nemotron Lightning'),
 check('nor "Flash"', P.orderingIn('GLM Flash'), null)
 check('each ranking answers to its word', P.ORDER_NAME, { balanced: 'best', smarts: 'smartest', speed: 'fastest' })
 check('the list answers to those words', /balanced: \['best'/.test(app) && /smartest: \['smartest'/.test(app) && /fastest: \['fastest'/.test(app), true)
-check('and the picker takes the top for any of them', /const top = all\.find\(\(o\) => o\.names\?\.includes\(ORDER_NAME\[ranked\.ordering\]\)\)/.test(turn), true)
+check('and the picker takes the top for any of them', /pool\.find\(\(o\) => o\.names\?\.includes\(ORDER_NAME\[ranked\.ordering\]\)\)/.test(turn), true)
 check('/model "the most intelligent model" picks it', /readOrdering\(action\.name\.replace\(\/\\s\+one\$\/i, ''\)\) \?\? \(asked && !asked\.rest \? asked\.ordering : null\)/.test(app), true)
 
 /* "Slash model" said while the list was read chose GLM 5.3 Flash: slash
@@ -221,7 +221,7 @@ check('"Nematry Ultra" is Nemotron Ultra', labels('Nematry Ultra'), ['Nemotron 3
 const names = C.CLOUD_MODELS.map((m) => ({ id: m.id, names: [m.label] }))
 for (const [said, want] of [
   ['Switch to the smartest model.', '/model the smartest one'],
-  ['Can you change to the fastest one?', '/model the fastest one'],
+  ['Can you change to the fastest model?', '/model the fastest one'],
   ['Use the most intelligent model', '/model the smartest one'],
   ['switch to Nemotron Ultra', '/model nemotron ultra'],
   ['Okay, can you switch over to Gemma?', '/model gemma'],
@@ -230,8 +230,18 @@ for (const [said, want] of [
   ['go to the cloud', null],
   ['go to the fastest route', null],
   ['what is the smartest model?', null],
-  ['switch to the best', '/model the best one']
+  /* Found by review: each of these switched the model, and was never answered. */
+  ['Pick the best one.', null],
+  ['Choose the best one for me.', null],
+  ['Change it back to the default.', null],
+  ['Can you change it to something faster?', null],
+  ['Change it to something stronger.', null],
+  ['Try the faster one.', null],
+  ['Can you change to the fastest one?', null],
+  ['switch to the best', null]
 ]) check(`"${said}"`, P.modelSwitchIn(said, names), want)
+check('the picker takes "the fastest one" within what was narrowed', /const pool = narrowed \?\? all[\s\S]{0,200}choice\.ranked\?\.\[ranked\.ordering\]\?\.find\(\(id\) => fits\.includes\(id\)\)/.test(turn), true)
+check('and is given every ranking to do it', /ranked: \{ balanced: labels\(balanced\), smarts: labels\(readyModels\('smarts'\)\), speed: labels\(readyModels\('speed'\)\) \}/.test(app), true)
 check('and a turn sends it as the command', /spokenSlash\(heard\.heard\) \?\? modelSwitchIn\(heard\.heard, MODEL_NAMES\)/.test(turn), true)
 
 check('music is held for a voice turn', /music\.hold\(\)[\s\S]*music\.release\(\)/.test(turn), true)

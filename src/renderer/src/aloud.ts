@@ -34,6 +34,8 @@ export interface AloudChoice {
   numbered?: string[]
   /** What may be asked for and cannot be picked, and why (see LocalAsk.unavailable). */
   unavailable?: Array<{ names: string[]; why: string }>
+  /** Each ranking's order, by option id (see LocalAsk.ranked). */
+  ranked?: Partial<Record<'balanced' | 'smarts' | 'speed', string[]>>
   /**
    * Yes or no, like an approval: nothing else answers it, and it is asked
    * again until one of them is said. The first option is yes.

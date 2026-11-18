@@ -37,6 +37,12 @@ export interface LocalAsk {
    * which one?" as if it had been misheard.
    */
   unavailable?: Array<{ names: string[]; why: string }>
+  /**
+   * The options in each ranking's order, best first, by label: "the
+   * fastest one" after "Nemotron" is the fastest Nemotron, which only the
+   * ranking can say.
+   */
+  ranked?: Partial<Record<'balanced' | 'smarts' | 'speed', string[]>>
 }
 
 export interface ChatMessage {
