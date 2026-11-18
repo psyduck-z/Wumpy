@@ -322,8 +322,8 @@ check('and the sweep line is just the count', J.sweepLine({ models: 8, asked: 8,
     'it is said, newest first, ranking last',
     J.journalSpeech(day, { now }),
     'At 7:55 pm, one conversation deleted, three times. ' +
-      'At 7:53 pm, the model went from GLM 5.3 Flash to Nemotron 3.5 Super VL 120 B. ' +
-      'At 7:52 pm, the model went from Nemotron 3.5 Super VL 120 B to GLM 5.3 Flash. ' +
+      'At 7:53 pm, the model went from GLM 5.3 Flash to Nemotron 3.5 Super. ' +
+      'At 7:52 pm, the model went from Nemotron 3.5 Super to GLM 5.3 Flash. ' +
       'The models were ranked two times, the last at 7:36 pm.'
   )
   check('one sort only', J.journalSpeech(day, { now, only: 'model' }).startsWith('At 7:53 pm, the model went from GLM'), true)

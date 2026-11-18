@@ -65,6 +65,7 @@ import {
   HEARERS,
   HEARING,
   type Hearer,
+  HEDGE_AFTER_MS,
   TALKERS,
   type Talker,
   OLD_DEFAULT_RATES,
@@ -79,6 +80,7 @@ import {
   primeTalking,
   recognize,
   synthesize,
+  synthesizeHedged,
   synthesizeStream,
   warmSpeech,
   wavFrom
@@ -1559,14 +1561,19 @@ function registerIpc(): void {
     const text = String(req?.text ?? '').trim().slice(0, 1800)
     const id = String(req?.id ?? '')
     if (!text || !id || !cloudSpeech()) return null
-    const borrowed = await cloud.speechKey('magpie')
-    if (!borrowed) return null
     let sent = 0
     try {
-      const result = await synthesizeStream(text, borrowed, settings.get('speakVoice') || DEFAULT_VOICE, (pcm) => {
-        sent++
-        e.sender.send(IPC.voiceAudio, { id, pcm: pcm.buffer.slice(pcm.byteOffset, pcm.byteOffset + pcm.byteLength) })
-      })
+      /* Raced when it is late: see synthesizeHedged. */
+      const result = await synthesizeHedged(
+        text,
+        () => cloud.speechKey('magpie'),
+        settings.get('speakVoice') || DEFAULT_VOICE,
+        (pcm) => {
+          sent++
+          e.sender.send(IPC.voiceAudio, { id, pcm: pcm.buffer.slice(pcm.byteOffset, pcm.byteOffset + pcm.byteLength) })
+        }
+      )
+      if (!result) return null
       return { pieces: result.pieces, rate: TTS_RATE, firstMs: result.firstMs, ms: result.ms, streamed: result.streamed }
     } catch (err) {
       console.warn('[wumpy] Magpie could not speak:', err)
@@ -3322,6 +3329,29 @@ async function speechCheck(): Promise<void> {
     const r = await synthesizeStream(long, k, voice, () => {})
     return `first sound ${r.firstMs}ms, all ${r.ms}ms, ${r.pieces} pieces${r.streamed ? '' : ' (not streamed)'}`
   })
+  /* The race a stalled answer gets (see synthesizeHedged), run on purpose:
+     asked again almost at once, so both are in flight, and whichever speaks
+     first is the only one heard - every piece from one of them, and the
+     same sentence's worth of sound as asking once. */
+  for (const [label, after] of [
+    ['a long sentence raced at once', 1],
+    ['a long sentence raced as answers are', HEDGE_AFTER_MS]
+  ] as const) {
+    const started = Date.now()
+    let bytes = 0
+    try {
+      const r = await synthesizeHedged(long, () => cloud.speechKey('magpie'), voice, (pcm) => (bytes += pcm.length), after)
+      console.log(
+        `[wumpy] speech check: ${label}: ` +
+          (r
+            ? `first sound ${r.firstMs}ms, all ${r.ms}ms, ${r.pieces} pieces, ${(bytes / 2 / TTS_RATE).toFixed(1)}s of sound` +
+              `${r.raced ? ', raced' : ', not needed'}${r.streamed ? '' : ' (not streamed)'}`
+            : 'no key free')
+      )
+    } catch (err) {
+      console.log(`[wumpy] speech check: ${label}: failed after ${Date.now() - started}ms (${String(err)})`)
+    }
+  }
   /* And hearing, the other half of the wait: the long sentence as Magpie
      said it, back through HEARING at the rate the panel sends - how long a
      transcript takes once the last word is in, and whether it came back

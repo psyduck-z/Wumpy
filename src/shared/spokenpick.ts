@@ -350,15 +350,18 @@ export function spokenAnd(items: readonly string[]): string {
 }
 
 /**
- * A model's label as it should be said: "Gemma 4 31B (Ollama cloud)" is
- * "Gemma 4 31 B" - the provider in brackets is for the screen, and "31B"
- * run together comes out of a speech engine as one strange word.
+ * A model's label as it should be said: "Nemotron 3.5 Super VL 120B" is
+ * "Nemotron 3.5 Super". The provider in brackets is for the screen, and so
+ * are the size and the VL: read out, "V L one hundred twenty B" was most of
+ * every name, and "Slash model" took over thirteen seconds to read five.
+ * No two models here differ only by size, and the name is still matched
+ * whole when it is said back.
  */
 export function sayModel(label: string): string {
   return label
     .replace(/\s*\([^)]*\)/g, '')
-    .replace(/\bVL\b/g, 'V L')
-    .replace(/(\d)B\b/g, '$1 B')
+    .replace(/\bVL\b/g, '')
+    .replace(/\b\d+(?:\.\d+)?B\b/g, '')
     .replace(/\s+/g, ' ')
     .trim()
 }

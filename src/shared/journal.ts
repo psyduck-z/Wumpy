@@ -1,3 +1,4 @@
+import { sayModel } from './spokenpick'
 import type { ApprovalMode, WumpySettings } from './types'
 import { CLOUD_MODELS } from './cloud'
 import { DEFAULT_ORDERING, isOrdering, orderingSpec } from './order'
@@ -625,10 +626,10 @@ const COUNT_WORDS = ['no', 'one', 'two', 'three', 'four', 'five', 'six', 'seven'
 
 /** What one line of the history says, as a clause. */
 function saidEntry(e: Entry, times: number): string {
-  const what = e.what.replace(/\s*→\s*/g, ' to ').replace(/(\d)B\b/g, '$1 B')
+  const what = e.what.replace(/\s*→\s*/g, ' to ')
   const body =
     e.kind === 'model'
-      ? `the model went from ${what}`
+      ? `the model went from ${e.what.split(/\s*→\s*/).map(sayModel).join(' to ')}`
       : e.kind === 'start'
         ? 'Wumpy started'
         : e.kind === 'command'

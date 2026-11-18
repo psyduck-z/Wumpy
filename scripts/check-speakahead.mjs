@@ -522,6 +522,13 @@ check('and what one refuses is not held against the voice in use', /if \(onlineR
   check('no pause at all still cuts, at the longest', Pa.cutsFor(talk(30, []), rate).length, 1)
   check('a turn hears the pieces at once, and joins them', /const parts = await Promise\.all\(wavs\.map\(\(w\) => hearOnline\(w\)\)\)/.test(main), true)
 }
+/* "First sound 7249ms after asking": Magpie's one connection sat for 18.6s
+   while hearing answered in two. A late answer is asked again on a new
+   connection, and whichever starts first is played. */
+check('a spoken answer is raced when it is late', /await synthesizeHedged\(\s+text,\s+\(\) => cloud\.speechKey\('magpie'\)/.test(main) && /export const HEDGE_AFTER_MS = 2500/.test(nv), true)
+check('only the first to speak is heard', /if \(winner !== which\) return/.test(nv) && /if \(i !== which\) other\.run\.cancel\(\)/.test(nv), true)
+check('and the connection that answered is the one kept', /if \(won\.fresh\) \{\s+clients\.get\(Client\)\?\.close\(\)\s+clients\.set\(Client, won\.client\)/.test(nv), true)
+check('waiting for it never spins', /await new Promise\(\(r\) => setTimeout\(r, 40\)\)/.test(nv), true)
 check('a "Thank you." out of a cough is asked of Parakeet first', /mayBeInvented\(heard\.text\) && !\(await parakeetHearsWords\(audio\)\)/.test(main), true)
 {
   const H = await load('src/shared/heard.ts', 'heard')

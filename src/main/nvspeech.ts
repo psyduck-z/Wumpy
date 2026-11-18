@@ -565,4 +565,174 @@ export async function synthesizeStream(
   return { pieces: 1, firstMs: Date.now() - started, ms: Date.now() - started, streamed: false }
 }
 
+/**
+ * A stall, raced. "First sound 7249ms after asking", on the first answer of
+ * a conversation: the voice's own priming took 18.6s that time, against 0.8
+ * to 2.3s on every other day in the log, and everything asked of Magpie
+ * waited behind it - on the one connection, while hearing on its own
+ * connection answered in two. So when nothing has come back HEDGE_AFTER_MS
+ * after asking, the same sentence is asked again on a connection of its own
+ * with the next key, and whichever starts first is the one played; the
+ * other is cancelled. A stuck connection is replaced by the one that
+ * answered. One extra request, and only when it is already late.
+ */
+export const HEDGE_AFTER_MS = 2500
+
+/** One SynthesizeOnline on a given connection, cancellable. Pieces go to `onAudio`. */
+function streamOn(
+  client: grpc.Client,
+  request: unknown,
+  borrowed: BorrowedKey,
+  onAudio: (pcm: Buffer) => void
+): { done: Promise<{ ok: true } | { ok: false; code: number | undefined; why: string }>; cancel(): void } {
+  const metadata = new grpc.Metadata()
+  metadata.set('function-id', SPEECH_MODELS.talk)
+  metadata.set('authorization', `Bearer ${borrowed.key}`)
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const stream = (client as any).SynthesizeOnline(metadata, { deadline: Date.now() + 30_000 })
+  let cancelled = false
+  const done = new Promise<{ ok: true } | { ok: false; code: number | undefined; why: string }>((resolve) => {
+    stream.on('data', (response: { audio?: Buffer }) => {
+      if (!cancelled && response.audio?.length) onAudio(Buffer.from(response.audio))
+    })
+    stream.on('error', (err: grpc.ServiceError) => resolve({ ok: false, code: err.code, why: err.details || err.message }))
+    stream.on('end', () => resolve({ ok: true }))
+  })
+  stream.write(request)
+  stream.end()
+  return {
+    done,
+    cancel: () => {
+      cancelled = true
+      stream.cancel()
+    }
+  }
+}
+
+export async function synthesizeHedged(
+  text: string,
+  borrow: () => Promise<BorrowedKey | null>,
+  voice: string,
+  onAudio: (pcm: Buffer) => void,
+  hedgeMs = HEDGE_AFTER_MS
+): Promise<{ pieces: number; firstMs: number; ms: number; streamed: boolean; raced: boolean } | null> {
+  const first = await borrow()
+  if (!first) return null
+  /* Not streamed for this voice, as NVIDIA has decided before: the plain
+     way, as synthesizeStream does it, with nothing to race. */
+  if (onlineRefused) return { ...(await synthesizeStream(text, first, voice, onAudio)), raced: false }
+  const Client = load().tts
+  const request = { text: forMagpie(text), language_code: 'en-US', encoding: 'LINEAR_PCM', sample_rate_hz: TTS_RATE, voice_name: voice }
+  const started = Date.now()
+  type Ended = { ok: true } | { ok: false; code: number | undefined; why: string }
+  interface Run {
+    run: ReturnType<typeof streamOn>
+    key: BorrowedKey
+    client: grpc.Client
+    fresh: boolean
+    ended: Ended | null
+  }
+  const runs: Run[] = []
+  let winner: number | null = null
+  let pieces = 0
+  let firstMs = -1
+  const begin = (key: BorrowedKey, client: grpc.Client, fresh: boolean): void => {
+    const which = runs.length
+    const run = streamOn(client, request, key, (pcm) => {
+      if (winner === null) {
+        winner = which
+        firstMs = Date.now() - started
+        for (const [i, other] of runs.entries()) if (i !== which) other.run.cancel()
+      }
+      if (winner !== which) return
+      pieces++
+      onAudio(pcm)
+    })
+    const entry: Run = { run, key, client, fresh, ended: null }
+    runs.push(entry)
+    void run.done.then((ended) => {
+      entry.ended = ended
+    })
+  }
+  begin(first, clientFor(Client), false)
+
+  /* The second asking, if the first is still silent when it is due. */
+  let raceSettled = false
+  let giveUp = false
+  const timer = setTimeout(async () => {
+    if (winner !== null || giveUp) {
+      raceSettled = true
+      return
+    }
+    const k = await borrow()
+    if (!k || winner !== null || giveUp) {
+      k?.done(200)
+      raceSettled = true
+      return
+    }
+    console.log(`[wumpy] Magpie had said nothing ${Date.now() - started}ms after asking: asked again on a new connection`)
+    begin(k, new Client(HOST, grpc.credentials.createSsl(), { 'grpc.keepalive_time_ms': 60_000, 'grpc.keepalive_timeout_ms': 10_000 }), true)
+    raceSettled = true
+  }, hedgeMs)
+
+  /* Until one is heard, or every one has ended without a sound. Polled:
+     the second may not exist yet when this starts waiting. */
+  while (winner === null) {
+    const allEnded = runs.every((r) => r.ended)
+    /* The first failed outright before the second was due: no waiting for it. */
+    if (allEnded && !raceSettled && runs.length === 1) {
+      giveUp = true
+      clearTimeout(timer)
+      raceSettled = true
+    }
+    if (allEnded && raceSettled) break
+    await new Promise((r) => setTimeout(r, 40))
+  }
+  clearTimeout(timer)
+  giveUp = true
+
+  if (winner === null) {
+    for (const r of runs) {
+      const status = r.ended && !r.ended.ok ? httpStatus(r.ended.code) : 200
+      r.key.done(status)
+      if (r.fresh) r.client.close()
+    }
+    const failed = runs.map((r) => r.ended).find((e): e is Extract<Ended, { ok: false }> => Boolean(e && !e.ok))
+    const status = failed ? httpStatus(failed.code) : 200
+    if (status === 401 || status === 403 || status === 429) throw new Error(`NVIDIA SynthesizeOnline: ${failed?.why}`)
+    if (failed?.code === grpc.status.UNIMPLEMENTED) onlineRefused = true
+    if (failed) dropClient(Client, failed.code)
+    /* Nothing from any of them: one plain try, as synthesizeStream makes. */
+    const k = await borrow()
+    if (!k) return null
+    const plain = await call<unknown, { audio?: Buffer }>(Client, 'Synthesize', request, k, SPEECH_MODELS.talk, 30_000)
+    const pcm = plain.audio ?? Buffer.alloc(0)
+    if (pcm.length === 0) throw new Error('NVIDIA Synthesize returned no audio')
+    onAudio(Buffer.from(pcm))
+    return { pieces: 1, firstMs: Date.now() - started, ms: Date.now() - started, streamed: false, raced: runs.length > 1 }
+  }
+
+  const won = runs[winner]
+  const ended = await won.run.done
+  for (const [i, r] of runs.entries()) {
+    if (i === winner) continue
+    r.key.done(200)
+    if (r.fresh) r.client.close()
+  }
+  if (!ended.ok) {
+    won.key.done(httpStatus(ended.code))
+    if (won.fresh) won.client.close()
+    else dropClient(Client, ended.code)
+    throw new Error(`NVIDIA SynthesizeOnline broke off: ${ended.why}`)
+  }
+  won.key.done(200)
+  /* The new connection answered where the old one sat: it is the one kept. */
+  if (won.fresh) {
+    clients.get(Client)?.close()
+    clients.set(Client, won.client)
+  }
+  answered(Client)
+  return { pieces, firstMs, ms: Date.now() - started, streamed: true, raced: runs.length > 1 }
+}
+
 export { TTS_RATE }

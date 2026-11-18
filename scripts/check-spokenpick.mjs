@@ -111,7 +111,18 @@ check('the balanced three are the top three', short.slice(0, 3).map((e) => e.id)
 const label = (id) => C.CLOUD_MODELS.find((m) => m.id === id).label
 const speech = P.shortlistSpeech(short, label)
 check('it says what each one is', /^Best overall: .+\. (The|Next) smartest: .+\. (The|Next) fastest: .+\.$/.test(speech), true)
-check('"31B" is said as two words', P.sayModel('Gemma 4 31B (Ollama cloud)'), 'Gemma 4 31 B')
+/* "Slash model" took thirteen seconds to read five, the sizes most of it. */
+check('the size and the provider are for the screen', P.sayModel('Gemma 4 31B (Ollama cloud)'), 'Gemma 4')
+check('and so is VL', P.sayModel('Nemotron 3.5 Super VL 120B'), 'Nemotron 3.5 Super')
+check('the version stays', P.sayModel('GLM 5.3 Flash'), 'GLM 5.3 Flash')
+{
+  const said = C.CLOUD_MODELS.map((m) => P.sayModel(m.label))
+  check('no two models sound the same', new Set(said).size, said.length)
+  check('and each said name picks its own model', C.CLOUD_MODELS.every((m) => {
+    const hits = P.matchSpoken(P.sayModel(m.label), C.CLOUD_MODELS.map((x) => ({ id: x.id, names: [x.label] })))
+    return hits.length === 1 && hits[0] === m.id
+  }), true)
+}
 const overlap = P.modelShortlist(['a', 'b', 'c', 'd'], ['a', 'd'], ['e'])
 check('the smartest already listed: the next one, marked so', overlap[3], { id: 'd', why: 'smartest', top: false })
 check('a long history is cut, and says so', P.numberedSpeech(Array.from({ length: 15 }, (_, i) => `Chat ${i}`), 12).endsWith('And 3 older.'), true)
