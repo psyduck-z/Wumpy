@@ -250,7 +250,7 @@ check('a dropped connection is cold again', /clients\.delete\(Client\)\s+answere
 /* "Can you set the voice to a male?" Every settings file named Aria. */
 check('a male voice by default: Jason, neutral, as chosen', /export const DEFAULT_VOICE = 'Magpie-Multilingual\.EN-US\.Jason\.Neutral'/.test(nv) && /speakVoice: 'Magpie-Multilingual\.EN-US\.Jason\.Neutral'/.test(read('src/shared/defaults.ts')), true)
 check('and whoever is still on an old default is moved to it, once', /'Magpie-Multilingual\.EN-US\.Aria',\s+'Magpie-Multilingual\.EN-US\.Jason',\s+'Magpie-Multilingual\.EN-US\.Ray\.Neutral'/.test(nv), true)
-check('and a little faster again, from the old default speed', /DEFAULT_RATE = 1\.25/.test(nv) && /OLD_DEFAULT_RATES = \[1\.15\]/.test(nv) && /speakRate: 1\.25,/.test(read('src/shared/defaults.ts')), true)
+check('and a little faster again, from the old default speeds', /DEFAULT_RATE = 1\.3\b/.test(nv) && /OLD_DEFAULT_RATES = \[1\.15, 1\.25\]/.test(nv) && /VOICE_CHOICE = 'jason-neutral-1\.3'/.test(nv) && /speakRate: 1\.3,/.test(read('src/shared/defaults.ts')), true)
 check('a saved old default, voice or speed, moved to the choice, once', /if \(settings\.get\('voiceChoice'\) === VOICE_CHOICE\) return/.test(main) && /moveOffGoogle\(\)\s+moveToChosenVoice\(\)/.test(main), true)
 check('wumpy --speech-check lists the voices on offer', /listVoices\(k\)/.test(main), true)
 check('wumpy --speech-check measures what priming saves', /hearIt\('hearing it, primed'\)/.test(main), true)
@@ -458,10 +458,10 @@ check('a long wait is not a long clip', /if \(Date\.now\(\) - earSince > FRESH_E
   for (let i = 1000; i < quick.length - 1000; i += 220) worst = Math.max(worst, Math.abs(rms(quick, i, i + 220) / rms(voice, 0, n) - 1))
   check(`no window comes out loud or hollow (${worst.toFixed(2)})`, worst < 0.25, true)
   {
-    /* The speed now chosen: "can you make Jason speak a little faster?" */
-    const quicker = stretched(1.25)
+    /* The speed now chosen: "make it speak just a tiny little bit faster too". */
+    const quicker = stretched(1.3)
     const r = +(n / quicker.length).toFixed(2)
-    check(`a quarter faster is a quarter shorter (${r})`, Math.abs(r - 1.25) < 0.03, true)
+    check(`three tenths faster is that much shorter (${r})`, Math.abs(r - 1.3) < 0.03, true)
     check(`still at the same pitch (${pitch(quicker)}Hz)`, Math.abs(pitch(quicker) - pitch(voice)) <= 2, true)
     let worse = 0
     for (let i = 1000; i < quicker.length - 1000; i += 220) worse = Math.max(worse, Math.abs(rms(quicker, i, i + 220) / rms(voice, 0, n) - 1))
@@ -470,7 +470,33 @@ check('a long wait is not a long clip', /if \(Date\.now\(\) - earSince > FRESH_E
   check('as made, it is left alone', new T.Stretcher(1).push(voice) === voice, true)
   check('it is on by default, a little', /speakRate: 1\.\d+,/.test(read('src/shared/defaults.ts')), true)
   check('every streamed piece goes through it', /this\.schedule\(stretch\.push\(floats\)\)/.test(speaker) && /if \(got\) this\.schedule\(stretch\.flush\(\)\)/.test(speaker), true)
-  check('and the slower ways of speaking keep up', /audio\.playbackRate = quick \? Math\.max\(1\.2, currentSpeed\(\)\) : currentSpeed\(\)/.test(turn), true)
+  check('lists are said slower than answers, every way they can be said', /audio\.playbackRate = list \? listSpeed\(\) : currentSpeed\(\)/.test(turn) && /utterance\.rate = list \? listSpeed\(\) : currentSpeed\(\)/.test(turn) && /speaker\.say\(sentences\(text\), list \? listSpeed\(\) : null\)/.test(turn), true)
+  check('and the model picker reads its lists as lists', /await say\(prompt, listing\)/.test(turn) && (turn.match(/listing = true/g) ?? []).length === 3, true)
+  {
+    /* At the default speed, lists at 1.1; and a list never shares a batch
+       - one stretch - with an answer's sentences on either side of it. */
+    const asked = []
+    globalThis.window = {
+      wumpy: { voice: { onAudio() {}, speakStream: async (id, text) => (asked.push(text), { pieces: 0, streamed: true }) } }
+    }
+    const K = await load('src/renderer/src/speaker.ts', 'speaker')
+    K.setSpeed(1.3)
+    check('answers at 1.3, lists at 1.1', `${K.currentSpeed()} ${K.listSpeed()}`, '1.3 1.1')
+    K.setSpeed(1)
+    check('and slower than answers at any setting', K.listSpeed() < 1, true)
+    K.setSpeed(1.3)
+    const k = new K.Speaker({ onSound() {}, note() {} })
+    k.say(['Here you go.', 'Pick one.'])
+    k.say(['One, Nemotron 3.5 Super.', 'Two, GLM 5.3 Flash.'], K.listSpeed())
+    k.say(['Which one?'])
+    await k.drain()
+    check(
+      'a list is its own batch',
+      asked.some((t) => /Pick one\..*One,|Flash\..*Which/.test(t)) || !asked.some((t) => /^One, .*Two, /.test(t)),
+      false
+    )
+    delete globalThis.window
+  }
   check('the setting is read when a conversation starts', /setSpeed\(s\.speakRate \?\? 1\)/.test(turn), true)
 }
 
@@ -595,9 +621,9 @@ check('letters heard as words, in a letter game', /"you" for U, "see" for C/.tes
 /* Lists said as they are made, and the models past the first five. */
 {
   const turn2 = read('src/renderer/src/hooks/useVoiceTurn.ts')
-  check('a list is streamed, not made whole first (the "..." after a command)', /async function say\(text: string, quick = false\): Promise<void> \{[\s\S]{0,300}if \(speaker\) \{/.test(turn2), true)
+  check('a list is streamed, not made whole first (the "..." after a command)', /async function say\(text: string, list = false\): Promise<void> \{[\s\S]{0,300}if \(speaker\) \{/.test(turn2), true)
   check('a silence after the question reads the rest of the options', /const heard = await listen\(1100, reading \? MORE_AFTER_MS : 8000\)/.test(turn2) && /if \(!heard && reading && idled\)/.test(turn2), true)
-  check('numbered on from the first ones', /numberedSpeech\(next\.map\(\(o\) => sayModel\(o\.label\)\), MORE_AT_ONCE, from\)/.test(turn2) && /numbered = \[\.\.\.numbered, \.\.\.next\]/.test(turn2), true)
+  check('numbered on from the first ones', /numberedSpeech\(next\.map\(spoken\), MORE_AT_ONCE, from\)/.test(turn2) && /numbered = \[\.\.\.numbered, \.\.\.next\]/.test(turn2), true)
   check('a model that is not there is said to be not there', /choice\.unavailable!\[Number\(gone\[0\]\)\]\.why/.test(turn2) && /isn't answering right now/.test(read('src/renderer/src/App.tsx')), true)
   check('a faint blip is not sent to be heard', /const faint = Boolean\(clip\) && talkedMs < FAINT_MS && stats\.peak < stats\.bar \* FAINT_TIMES/.test(turn2) && /if \(clip && !faint\)/.test(turn2), true)
   const SP = await load('src/shared/spokenpick.ts', 'spokenpick')

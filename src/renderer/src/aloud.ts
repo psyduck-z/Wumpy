@@ -19,6 +19,8 @@ export interface AloudOption {
   label: string
   /** Other things it answers to, out loud: "fastest", "the recommended one". */
   names?: string[]
+  /** As read out, when not the model-name way (see LocalAsk.said). */
+  said?: string
 }
 
 export interface AloudChoice {

@@ -179,6 +179,12 @@ check('a name that fits several reads those back', /of them\. \$\{numberedSpeech
 check('a yes-or-no is only answered by yes or no', /choice\.confirm[\s\S]{0,400}yesNo\(heard\.heard\)/.test(turn), true)
 check('/model through the earbuds reads the list', /if \(handsFree\(\)\) askModelAloud\(null\)/.test(app), true)
 check('/resume through the earbuds reads the chats', /handsFree\(\)\) \{\s+await askChatsAloud\('resume'\)/.test(app), true)
+/* "Make sure that it can read out all my chats, when i want to change chats." */
+check('every chat is on the card, not the newest twelve', /values: pool\.map\(\(c\) => c\.id\)/.test(app) && !/pool\.slice\(0, SPOKEN_CHATS\)/.test(app), true)
+check('the newest twelve are read first, the rest after a pause', /say: `\$\{count\}\. \$\{numberedSpeech\(titles\.slice\(0, first\), first\)\}`,\s+spoken: first,\s+said: titles/.test(app), true)
+check('the rest are read as their titles, not as model names', /const spoken = \(o: AloudOption\): string => o\.said \?\? sayModel\(o\.label\)/.test(turn) && /numberedSpeech\(next\.map\(spoken\), MORE_AT_ONCE, from\)/.test(turn), true)
+check('the title as said reaches the voice', /said: aloud\?\.said\?\.\[i\]/.test(ask) && /said: message\.localAsk\.said/.test(read('src/renderer/src/components/Message.tsx')), true)
+check('"Taxes (2)" keeps its number, said', P.numberedSpeech(['Taxes (2)'], 5, 12), 'Thirteen, Taxes (2).')
 check('a delete asked for in words asks first', /action\.confirm \|\| handsFree\(\)/.test(app), true)
 check('a typed /delete still does not', /!action\.confirmed && \(action\.confirm \|\| handsFree\(\)\)/.test(app), true)
 check('the answer read is this turn’s, by time', /createdAt >= started/.test(turn), true)

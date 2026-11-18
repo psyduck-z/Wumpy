@@ -21,7 +21,7 @@ import { setHandsFree, takeTold } from '../handsfree'
 import { choiceMark, newestChoice, stillWaiting, type AloudChoice, type AloudOption } from '../aloud'
 import { setVoiceStopper, showVoice } from '../voiceview'
 import { chime, playOn, releaseOutput, startTicks, stopTicks, ticking, wakeOutput } from '../earcons'
-import { Speaker, currentSpeed, setSpeed } from '../speaker'
+import { Speaker, currentSpeed, listSpeed, setSpeed } from '../speaker'
 import { readyToSay, sentences } from '@shared/speakahead'
 import { interruption, leadInOnly, unfinished } from '@shared/interrupt'
 
@@ -70,7 +70,8 @@ function commandNames(): CommandName[] {
  * keep it, or the model's own question - is read out and answered the same
  * way: by name, roughly ("Nemotron super"), or by place ("the second one").
  * A name that fits several gets those several read back, best first. Lists
- * are read a little faster than answers, since they are for skimming.
+ * are read a little slower than answers, so the names can be kept up with
+ * (see listSpeed).
  *
  * Music playing on the machine is paused for the conversation and picked up
  * again after (see main/music.ts).
@@ -299,11 +300,11 @@ export function useVoiceTurn(deps: Deps): void {
     const leftUnanswered = new WeakSet<object>()
 
     /** Plays a WAV in an audio element. False when it could not start. */
-    function playElement(wav: ArrayBuffer, quick: boolean): Promise<boolean> {
+    function playElement(wav: ArrayBuffer, list: boolean): Promise<boolean> {
       const url = URL.createObjectURL(new Blob([wav], { type: 'audio/wav' }))
       const audio = new Audio(url)
       audio.preservesPitch = true
-      audio.playbackRate = quick ? Math.max(1.2, currentSpeed()) : currentSpeed()
+      audio.playbackRate = list ? listSpeed() : currentSpeed()
       return new Promise<boolean>((resolve) => {
         let started = false
         const end = (ok: boolean): void => {
@@ -361,20 +362,20 @@ export function useVoiceTurn(deps: Deps): void {
      * Speaks, and returns once it has finished, so listening never hears it.
      * Streamed, sentence by sentence (see speaker.ts).
      *
-     * Lists too, now. `quick` made them in one piece, to be played a fifth
-     * faster by an audio element - and that was the "..." after every
+     * Lists too, now. They used to be made in one piece, to be played a
+     * fifth faster by an audio element - and that was the "..." after every
      * command: "slash model" was 4.7s of typing and nothing said while 219
      * characters were made, "even though the AI is not even talking". The
-     * speaker plays at the speed setting at the same pitch, which at the
-     * default is as quick as `quick` was, and it starts in half a second.
-     * The one-piece way is left for when there is no speaker.
+     * speaker starts in half a second, and a `list` it says a little slower
+     * than answers, at the same pitch (see listSpeed). The one-piece way is
+     * left for when there is no speaker.
      */
-    async function say(text: string, quick = false): Promise<void> {
+    async function say(text: string, list = false): Promise<void> {
       if (!text || cancelled || interrupted) return
       showVoice({ stage: 'speaking', level: 0, detail: text.length > 160 ? `${text.slice(0, 157)}…` : text })
       if (speaker) {
         note(`speaking ${text.length} characters with Magpie, as it is made`)
-        speaker.say(sentences(text))
+        speaker.say(sentences(text), list ? listSpeed() : null)
         await speaker.drain()
         return
       }
@@ -392,7 +393,7 @@ export function useVoiceTurn(deps: Deps): void {
        * arrive.
        */
       if (wav) {
-        if ((await playElement(wav, quick)) || cancelled) return
+        if ((await playElement(wav, list)) || cancelled) return
         note('playing it through Web Audio instead')
         if ((await playWebAudio(wav)) || cancelled) return
         note('Web Audio could not play it either; using the system voice')
@@ -402,7 +403,7 @@ export function useVoiceTurn(deps: Deps): void {
       if ('speechSynthesis' in window) {
         await new Promise<void>((resolve) => {
           const utterance = new SpeechSynthesisUtterance(text)
-          utterance.rate = quick ? Math.max(1.3, currentSpeed()) : currentSpeed()
+          utterance.rate = list ? listSpeed() : currentSpeed()
           utterance.onend = () => resolve()
           utterance.onerror = () => resolve()
           stopSound = () => {
@@ -869,6 +870,8 @@ export function useVoiceTurn(deps: Deps): void {
       const names = (list: AloudOption[]): Array<{ id: string; names: string[] }> =>
         list.map((o) => ({ id: o.id, names: [o.label, ...(o.names ?? [])] }))
       const open = (): boolean => !cancelled && stillWaiting(entry.seq)
+      /* As read out: a model's name without its size; a chat's title as it is. */
+      const spoken = (o: AloudOption): string => o.said ?? sayModel(o.label)
 
       /* Yes or no, and nothing else answers it - the same rule as an
          approval, for the same reason: what follows a yes cannot be undone. */
@@ -902,11 +905,11 @@ export function useVoiceTurn(deps: Deps): void {
       let narrowed: AloudOption[] | null = null
       let prompt = choice.intro
         ? `${choice.intro} ${choice.question}`
-        : `${choice.question} ${spokenList(all.map((o) => sayModel(o.label)))}?`
-      let quick = true
+        : `${choice.question} ${spokenList(all.map(spoken))}?`
+      let listing = true
       let misses = 0
       while (open()) {
-        await say(prompt, quick)
+        await say(prompt, listing)
         if (!open()) break
         const reading = unread.length > 0 && !narrowed
         const heard = await listen(1100, reading ? MORE_AFTER_MS : 8000)
@@ -918,10 +921,10 @@ export function useVoiceTurn(deps: Deps): void {
           numbered = [...numbered, ...next]
           prompt =
             `${toldOthers ? '' : 'The others: '}` +
-            `${numberedSpeech(next.map((o) => sayModel(o.label)), MORE_AT_ONCE, from)}` +
+            `${numberedSpeech(next.map(spoken), MORE_AT_ONCE, from)}` +
             `${unread.length ? '' : ' Which one?'}`
           toldOthers = true
-          quick = true
+          listing = true
           continue
         }
         const said = heard?.heard ?? ''
@@ -981,9 +984,9 @@ export function useVoiceTurn(deps: Deps): void {
           narrowed = fits
           numbered = fits
           prompt = `${fits.length} of them. ${numberedSpeech(
-            fits.map((o) => sayModel(o.label))
+            fits.map(spoken)
           )} Which one?`
-          quick = true
+          listing = true
           continue
         }
         /* Asked for by name, and not something that can be picked. */
@@ -992,7 +995,7 @@ export function useVoiceTurn(deps: Deps): void {
           : []
         if (gone.length === 1) {
           prompt = `${choice.unavailable![Number(gone[0])].why} Pick another, or say cancel.`
-          quick = false
+          listing = false
           continue
         }
         misses++
@@ -1001,7 +1004,7 @@ export function useVoiceTurn(deps: Deps): void {
           return 'left'
         }
         prompt = `Sorry, which one? Say a name or a number, or say cancel.`
-        quick = false
+        listing = false
       }
       return 'answered'
     }

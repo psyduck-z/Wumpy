@@ -174,7 +174,7 @@ const SPOKEN_ALIASES: Record<ShortWhy, string[]> = {
   fastest: ['fastest', 'quickest', 'fast', 'quick']
 }
 
-/** How many saved chats are read out: past this it is minutes of titles. */
+/** How many saved chats are read out at first; the rest follow a pause. */
 const SPOKEN_CHATS = 12
 
 export default function App(): React.JSX.Element {
@@ -1652,8 +1652,12 @@ function namedControls(shot: Attachment): string[] {
 
   /**
    * The saved chats, read out with numbers: "they tell me all of them
-   * quickly". The most recent twelve - past that it is minutes of titles -
-   * and every one on the card can be picked by its name or its number.
+   * quickly". The most recent twelve first, then - "make sure that it can
+   * read out all my chats, when i want to change chats" - the rest, five at
+   * a time, each time nobody speaks for a moment, numbered on from
+   * thirteen, as the models are. They used to stop at twelve, "and 30
+   * older", and the older ones were not on the card at all: nothing could
+   * pick them. Every chat is on it now, by name or by number.
    */
   const askChatsAloud = useCallback(
     async (kind: 'resume' | 'deletechat'): Promise<void> => {
@@ -1665,25 +1669,22 @@ function namedControls(shot: Attachment): string[] {
         tell(none)
         return
       }
-      const shown = pool.slice(0, SPOKEN_CHATS)
       /* Two chats with one title would be one button and one answer. */
       const seen = new Map<string, number>()
-      const titles = shown.map((c) => {
+      const titles = pool.map((c) => {
         const t = (c.title || 'Untitled').trim()
         const n = (seen.get(t) ?? 0) + 1
         seen.set(t, n)
         return n > 1 ? `${t} (${n})` : t
       })
+      const first = Math.min(pool.length, SPOKEN_CHATS)
       const count =
-        pool.length > shown.length
-          ? `Your ${shown.length} most recent chats`
-          : shown.length === 1
-            ? 'One chat'
-            : `${shown.length} chats`
+        pool.length > first ? `${pool.length} chats, newest first` : pool.length === 1 ? 'One chat' : `${pool.length} chats`
       chat.askLocal(kind === 'resume' ? 'Which chat?' : 'Delete which chat?', titles, kind, {
-        values: shown.map((c) => c.id),
-        say: `${count}. ${numberedSpeech(titles, SPOKEN_CHATS)}`,
-        spoken: shown.length
+        values: pool.map((c) => c.id),
+        say: `${count}. ${numberedSpeech(titles.slice(0, first), first)}`,
+        spoken: first,
+        said: titles
       })
     },
     [chat, chatId, refreshChats, say]

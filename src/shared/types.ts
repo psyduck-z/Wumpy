@@ -43,6 +43,11 @@ export interface LocalAsk {
    * ranking can say.
    */
   ranked?: Partial<Record<'balanced' | 'smarts' | 'speed', string[]>>
+  /**
+   * Each option as it is read out, when that is not the model-name way
+   * (sayModel): a chat called "Taxes (2)" keeps its "(2)".
+   */
+  said?: string[]
 }
 
 export interface ChatMessage {

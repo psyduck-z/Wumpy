@@ -51,6 +51,19 @@ export function currentSpeed(): number {
   return speed
 }
 
+/**
+ * Lists - the models above all - slower than answers: "can you also make
+ * wumpy talk just a little bit slower when reading out models cuz i can't
+ * keep up". They were read as fast as answers, as if for skimming, but
+ * "Nemotron 3.5 Super, GLM 5.3 Flash" is names and numbers with nothing
+ * around them to guess from. 0.85 of the setting is 1.1 at the default
+ * 1.3, where they had been 1.25.
+ */
+export const LIST_PACE = 0.85
+export function listSpeed(): number {
+  return Math.max(0.7, +(speed * LIST_PACE).toFixed(2))
+}
+
 export class Speaker {
   /** The turn's output (see earcons.ts), shared so it is already awake. */
   private context: AudioContext | null = null
@@ -60,6 +73,8 @@ export class Speaker {
   private at = 0
   private readonly live = new Set<AudioBufferSourceNode>()
   private readonly waiting: string[] = []
+  /** Each waiting sentence's speed; null is the setting's. */
+  private readonly paces: Array<number | null> = []
   private pump: Promise<void> | null = null
   private stopped = false
   /** When the last scheduled sound ends, in page time - for idleFor(). */
@@ -76,10 +91,14 @@ export class Speaker {
     receive()
   }
 
-  /** Queues sentences to be said after everything already queued. */
-  say(sentences: string[]): void {
+  /**
+   * Queues sentences to be said after everything already queued, at
+   * `pace` (see listSpeed) or else the setting's speed.
+   */
+  say(sentences: string[], pace: number | null = null): void {
     if (this.stopped || !sentences.length) return
     this.waiting.push(...sentences)
+    this.paces.push(...sentences.map(() => pace))
     this.kick()
     if (!this.pump) this.pump = this.run().finally(() => (this.pump = null))
   }
@@ -114,6 +133,7 @@ export class Speaker {
   stop(): void {
     this.stopped = true
     this.waiting.length = 0
+    this.paces.length = 0
     for (const s of this.live) {
       try {
         s.stop()
@@ -153,8 +173,13 @@ export class Speaker {
         /* One sentence when nothing is playing or coming, so the first
            sound comes as soon as it can; more when there is time. */
         const batch = nextBatch(this.waiting, running.length === 0 && this.ahead() < 0.4)
+        /* One speed to a batch: it is stretched as one. */
+        const pace = this.paces[0]
+        const same = this.paces.findIndex((p) => p !== pace)
+        if (same > 0 && same < batch.length) batch.length = same
         this.waiting.splice(0, batch.length)
-        const job = this.job(batch.join(' '), this.tail, batch.length)
+        this.paces.splice(0, batch.length)
+        const job = this.job(batch.join(' '), this.tail, batch.length, pace ?? speed)
         this.tail = job
         running.push(job)
       }
@@ -171,7 +196,7 @@ export class Speaker {
   }
 
   /** Asks for one batch now; plays it once everything before it has been. */
-  private job(text: string, after: Promise<void>, count = 1): Promise<void> {
+  private job(text: string, after: Promise<void>, count = 1, rate = speed): Promise<void> {
     const id = `say-${++nextId}`
     const asked = Date.now()
     const held: ArrayBuffer[] = []
@@ -180,7 +205,7 @@ export class Speaker {
     let first = -1
     /* One per batch: its pieces run on from each other, and the last is
        let out at the end (see stretch.ts). */
-    const stretch = new Stretcher(speed)
+    const stretch = new Stretcher(rate)
     receivers.set(id, (pcm) => {
       if (first < 0) first = Date.now() - asked
       got++
@@ -208,7 +233,7 @@ export class Speaker {
             `said ${text.length} characters: first sound ${first}ms after asking` +
               `${result.streamed ? `, ${result.pieces} pieces as it was made` : ', in one piece'}`
           )
-        if (!got && !this.stopped) await this.systemVoice(text)
+        if (!got && !this.stopped) await this.systemVoice(text, rate)
       } finally {
         receivers.delete(id)
       }
@@ -255,7 +280,7 @@ export class Speaker {
     if (quiet) this.hooks.onSound()
   }
 
-  private async systemVoice(text: string): Promise<void> {
+  private async systemVoice(text: string, rate: number): Promise<void> {
     if (!('speechSynthesis' in window)) return
     while (!this.stopped && this.ahead() > 0.02) await sleep(Math.min(200, this.ahead() * 1000))
     if (this.stopped) return
@@ -263,7 +288,7 @@ export class Speaker {
     this.hooks.onSound()
     await new Promise<void>((resolve) => {
       const utterance = new SpeechSynthesisUtterance(text)
-      utterance.rate = speed
+      utterance.rate = rate
       utterance.onend = () => resolve()
       utterance.onerror = () => resolve()
       speechSynthesis.speak(utterance)

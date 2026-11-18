@@ -110,7 +110,7 @@ export interface ChatState {
     question: string,
     options: string[],
     kind: LocalAsk['kind'],
-    extra?: Pick<LocalAsk, 'values' | 'say' | 'spoken' | 'aliases' | 'unavailable' | 'ranked'>
+    extra?: Pick<LocalAsk, 'values' | 'say' | 'spoken' | 'aliases' | 'unavailable' | 'ranked' | 'said'>
   ): string
   /**
    * Stops the answer. Returns the question to put back in the box when the
@@ -488,7 +488,7 @@ export function useChat(): ChatState {
       question: string,
       options: string[],
       kind: LocalAsk['kind'],
-      extra?: Pick<LocalAsk, 'values' | 'say' | 'spoken' | 'aliases' | 'unavailable' | 'ranked'>
+      extra?: Pick<LocalAsk, 'values' | 'say' | 'spoken' | 'aliases' | 'unavailable' | 'ranked' | 'said'>
     ): string => {
       const id = nextId()
       setMessages((prev) => [

@@ -108,11 +108,15 @@ export const OLD_DEFAULT_VOICES = [
   'Magpie-Multilingual.EN-US.Jason',
   'Magpie-Multilingual.EN-US.Ray.Neutral'
 ]
-/** Answers' speed: "can you make Jason speak a little faster?" - again. */
-export const DEFAULT_RATE = 1.25
-export const OLD_DEFAULT_RATES = [1.15]
+/**
+ * Answers' speed: "can you make Jason speak a little faster?" - twice -
+ * then "regularly, make it speak just a tiny little bit faster too", from
+ * 1.25. Lists are read slower than this (see listSpeed in the renderer).
+ */
+export const DEFAULT_RATE = 1.3
+export const OLD_DEFAULT_RATES = [1.15, 1.25]
 /** What the move to the voice above is remembered by, so it happens once. */
-export const VOICE_CHOICE = 'jason-neutral-1.25'
+export const VOICE_CHOICE = 'jason-neutral-1.3'
 const TTS_RATE = 22050
 
 /**

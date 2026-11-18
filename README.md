@@ -156,9 +156,11 @@ nothing to `PATH`, so a bare `wumpy` is not found there.
   after two minutes with nobody talking. One low note twice means the mic
   never came on. A hold the earbuds report twice in quick succession counts
   once.
-- **Jason talks a quarter faster than Magpie makes him**, at the same
+- **Jason talks three tenths faster than Magpie makes him**, at the same
   pitch: Magpie ignores SSML's speaking rate, so the sound is time-stretched
-  as it arrives (`speakRate` in settings.json; 1 is as made).
+  as it arrives (`speakRate` in settings.json; 1 is as made). Lists — the
+  models, your chats — are read a little slower, at 0.85 of that, so the
+  names can be kept up with.
 - **It speaks while it writes.** Each sentence is said as soon as it is
   finished, while the model is still writing the next, and Magpie's sound is
   played as it is made rather than once the whole answer is ready. The
@@ -200,7 +202,9 @@ nothing to `PATH`, so a bare `wumpy` is not found there.
   fastest" reads the three quickest instead. Typed, `/model nemotron` does the same matching
   and offers the fits as buttons.
 - **Your chats, out loud.** "Slash resume" (or "resume a chat") reads your
-  twelve most recent chats with numbers; say a number or a title.
+  twelve most recent chats with numbers, then, each time you stay quiet for
+  a moment, the next five, until it has read them all; say a number or a
+  title.
 - **It can run Wumpy's own commands.** Ask for it in words — "delete this
   chat", "change the model to Gemma", "use the fastest model", and out
   loud "switch to the smartest model" or "can you change to Nemotron
