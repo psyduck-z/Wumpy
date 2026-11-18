@@ -112,6 +112,7 @@ import { captureScreen } from './screen'
 import { Stretcher } from '@shared/stretch'
 import { forMagpie } from '@shared/voicetext'
 import { cutsFor, piecesOf } from '@shared/pauses'
+import { withSentTimes } from '@shared/sent'
 import { mayBeInvented } from '@shared/heard'
 import { speakable } from '@shared/spoken'
 import { savesIn, withoutKept } from '@shared/kept'
@@ -622,6 +623,15 @@ function factsFor(
       month: 'long',
       year: 'numeric'
     })}.`,
+    /* See @shared/sent: what the stamps are, and what a gap in them means. */
+    ...(messages.some((m) => typeof m.sentAt === 'number')
+      ? [
+          '- Each message they wrote starts with [sent <day>, <time>], added by the app: when they sent',
+          '  it. The newest one is the time now. Never write a stamp yourself. A gap means they were',
+          '  away: after one, what a command showed before it may have changed - check again rather than',
+          '  rely on it - and the subject may have moved on.'
+        ]
+      : []),
     `- This chat is titled ${chatTitle ? `"${chatTitle}"` : 'untitled so far'}.`,
     process.platform === 'win32'
       ? `- The user is on Windows. Commands run from ${settings.get('shellCwd') || homedir()}.`
@@ -3500,7 +3510,8 @@ function withContext(req: ChatRequest): Array<Pick<ChatMessage, 'role' | 'conten
    * was sent on their behalf. This is only the wire.
    */
   const messages: Array<Pick<ChatMessage, 'role' | 'content' | 'images'>> = trimPictures(
-    req.messages.map((m) => ({ role: m.role, content: m.content, images: m.images }))
+    /* Each of their messages with when they sent it (see @shared/sent). */
+    withSentTimes(req.messages).map((m) => ({ role: m.role, content: m.content, images: m.images }))
   )
   // Directly behind the latest user turn, so everything before it stays cached.
   //

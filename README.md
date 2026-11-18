@@ -594,6 +594,18 @@ it is in, so without help it guesses. Every turn now carries a short block of
 live facts — the date, the active tier, the chat's title and length, the OS and
 the working directory — which the model may state directly.
 
+Each message you write goes out with the time you sent it — `[sent Thu 19 Nov,
+7:26 am]`, and `- 9 hours after their last message` after a long gap — so the
+model knows the time, sees when you were away, and checks again rather than
+trusting a command it ran before the gap. Only the model sees the stamp; your
+chat shows what you typed.
+
+It must check every fact about the computer with a command, and a check of one
+thing does not answer the next question: asked "am I plugged in?" it checked,
+but asked "is current going in?" it said yes from the plug, twice, while the
+battery said "Not charging" (a charge limit). Now it checks that too, and when
+asked again or doubted, it checks rather than repeating itself.
+
 Alongside it, two rules that took measuring to get right. The first draft of the
 app rules made a 3B model answer *questions* with slash commands: asked what day
 it was, it replied `/day`, a command that does not exist. Separating asking from

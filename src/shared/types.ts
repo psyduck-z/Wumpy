@@ -736,7 +736,11 @@ export interface WumpySettings {
 
 export interface ChatRequest {
   requestId: string
-  messages: Array<Pick<ChatMessage, 'role' | 'content' | 'images'>>
+  /**
+   * `sentAt` on the messages the person wrote, when they sent them: stamped
+   * onto the text on the way out (see @shared/sent).
+   */
+  messages: Array<Pick<ChatMessage, 'role' | 'content' | 'images'> & { sentAt?: number }>
   /**
    * Live facts the model has no other way to know. Without these it guesses
    * at things it could simply be told, like what the current chat is called.

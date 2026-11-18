@@ -1,3 +1,4 @@
+import { STAMP } from './sent'
 /**
  * What the model writes for Wumpy rather than for them: three tags, never
  * shown or read aloud.
@@ -29,8 +30,10 @@ const PRIVATE = /<(keep|remember|skill)\b[^>]*>[\s\S]*?(?:<\/\1>|$)/gi
 const OPENING = /<(?:k(?:e(?:e(?:p)?)?)?|r(?:e(?:m(?:e(?:m(?:b(?:e(?:r)?)?)?)?)?)?)?|s(?:k(?:i(?:l(?:l)?)?)?)?)(?:\s[^>]*)?$/i
 
 export function withoutKept(text: string): string {
-  if (!text.includes('<')) return text
-  return text.replace(PRIVATE, '').replace(OPENING, '').replace(/^\s+/, '')
+  const shown = text.includes('<') ? text.replace(PRIVATE, '').replace(OPENING, '').replace(/^\s+/, '') : text
+  /* And a "[sent ...]" stamp, should the answer copy the one on their
+     messages (see @shared/sent): the app's, not something to show or say. */
+  return shown.startsWith('[sent ') ? shown.replace(STAMP, '') : shown
 }
 
 export interface Saves {

@@ -322,8 +322,11 @@ export function useChat(): ChatState {
        * has the screenshot. The main process turns them into content parts;
        * here they are only carried.
        */
-      if (m.images?.length) return { role: m.role, content: m.content, images: m.images }
-      return { role: m.role, content: m.content }
+      /* When they sent it, for the model to see they were away (see
+         @shared/sent). Theirs only: output handed back is not them. */
+      const sent = m.role === 'user' && !m.automatic ? { sentAt: m.createdAt } : {}
+      if (m.images?.length) return { role: m.role, content: m.content, images: m.images, ...sent }
+      return { role: m.role, content: m.content, ...sent }
     })
 
     const requestId = nextId()

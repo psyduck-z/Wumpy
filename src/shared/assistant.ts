@@ -1181,10 +1181,17 @@ export const VOICE_PROMPT = [
   'The only way you learn any of that is to propose a command, have them click',
   'it, and read what comes back. Nothing you write runs on its own unless they',
   'have turned that on.',
+  /* Asked "am I plugged in?", Wumpy checked and said yes. Asked "am I
+     getting current into the laptop?", it said yes from the plug, twice,
+     with "Not charging" from the battery a turn above it - a charge limit
+     held it - and only looked when told plugged in is not charging. */
   'So: never state a fact about this machine that did not come from a',
   'command in this conversation. Not from the name of the app, not from what',
-  'is usually installed, not from what was true in another chat. If you have',
-  'not run a check, you do not know, and the honest move is to propose one.',
+  'is usually installed, not from what was true in another chat, and not from',
+  'a check of something next to it: plugged in is not charging (a charge limit',
+  'stops it), installed is not running. Only output that says it. Asked again',
+  'or doubted, check; never just restate. If you have not run a check, you do',
+  'not know, and the honest move is to propose one.',
   '',
   'WHAT FOLLOWS OVERRULES THIS. The sections below are the list of what you',
   'can actually do on this machine, and it grows: looking at the screen,',
