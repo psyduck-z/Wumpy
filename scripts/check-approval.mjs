@@ -98,6 +98,24 @@ console.log(
  * Every one of these was allowed by an earlier version of isReadOnly().
  */
 const MUST_BLOCK = [
+  /* A command inside a command was never looked at: these ran by themselves
+     on the auto mode. */
+  'echo $(rm -rf /tmp/x)',
+  'cat `rm /tmp/x`',
+  'ls $(touch /tmp/y)',
+  'echo "$(mkdir /tmp/z)"',
+  'for f in $(rm -rf ~); do echo; done',
+  'tee >(cat)',
+  /* Only the null device is harmless to write to. */
+  'cat a >/dev/nullx',
+  'cat a > /tmp/b 2>/dev/null',
+  'rm x 2>/dev/null',
+  'for f in *.jpeg; do mv "$f" x; done',
+  'upower --monitor',
+  'grep x a > out',
+  'pacman -S joplin',
+  'pacman -Syu',
+  'pacman -R obsidian',
   // The other half of the same fix: a write inside parentheses was never
   // looked at before, because only the segment head was checked.
   '(Remove-Item C:\temp -Recurse).Count',
@@ -185,6 +203,23 @@ const MUST_BLOCK = [
 
 /** Reads that must keep working, or the auto mode is useless. */
 const MUST_ALLOW = [
+  /* Reads that discard their errors, loop, or filter: a background agent
+     spent ten steps being refused these. */
+  'cat /sys/class/power_supply/BAT0/status 2>/dev/null',
+  'ls -la /home/x 2>/dev/null || echo "File does not exist"',
+  'du -sh ~/* 2>/dev/null | sort -rh | head -3',
+  'ls 2>&1',
+  'Get-ChildItem C:\\ 2>$null',
+  'for d in /sys/class/power_supply/*/; do echo "== $d =="; cat "$d/online" "$d/status" 2>/dev/null; done',
+  'if grep -q x /etc/hosts; then echo yes; fi',
+  'upower -i $(upower -e | grep BAT)',
+  /* pacman's flags are case-sensitive, and were compared lowercased. */
+  'pacman -Ss joplin',
+  'pacman -Qi obsidian',
+  'pacman -Ss joplin obsidian zim 2>&1 | head -80',
+  'ls | grep -c jpeg',
+  'echo $(date)',
+  'Write-Output "$($env:USERNAME)"',
   /**
    * Parenthesised reads, which the gate used to refuse.
    *

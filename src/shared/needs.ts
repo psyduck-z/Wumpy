@@ -53,7 +53,7 @@
  * paragraph about what winget prints is not needed to answer a question
  * about a file, and 918 tokens of it went out on every turn.
  */
-export type Capability = 'open' | 'desktop' | 'install' | 'picture' | 'write' | 'remember'
+export type Capability = 'open' | 'desktop' | 'install' | 'picture' | 'write' | 'remember' | 'agents'
 
 /** The message shape this needs: role, what was said, whether it has pictures. */
 export interface Turn {
@@ -184,8 +184,16 @@ const REMEMBER_WORDS =
 const FENCES: Partial<Record<Capability, RegExp>> = {
   open: /```wumpy-open/,
   desktop: /```wumpy-do|```wumpy-screen/,
-  write: /```wumpy-write/
+  write: /```wumpy-write/,
+  agents: /```[ \t]*wumpy-(?:agent|monitor)/
 }
+
+/**
+ * Background agents: asked about by name, or work said to be big, many or
+ * at once - and a report coming back, which names them itself.
+ */
+const AGENT_WORDS =
+  /\b(agents?|sub-?agents?|background|in parallel|parallel|at the same time|simultaneously|meanwhile|while (?:i|you)|delegate|hand (?:it |this |that )?off|monitors?|research|investigate|look into|compare|audit|review|draft|essay|long|several|multiple|lots of|many|all of (?:them|these|my)|each of)\b/i
 
 /**
  * How far back to look.
@@ -236,6 +244,7 @@ export function needsFor(messages: readonly Turn[]): Capability[] {
     if (PICTURE_WORDS.test(text)) needs.add('picture')
     if (WRITE_WORDS.test(text)) needs.add('write')
     if (REMEMBER_WORDS.test(text)) needs.add('remember')
+    if (AGENT_WORDS.test(text)) needs.add('agents')
   }
 
   return [...needs]

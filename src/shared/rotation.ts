@@ -92,7 +92,7 @@ export class KeyRotation {
    * project: a key that is out of one model is still the right key for
    * another, and skipping it for everything was quota thrown away.
    */
-  next(now: number = Date.now(), model = '', avoid: number | null = null): number | null {
+  next(now: number = Date.now(), model = '', avoid: number | ReadonlySet<number> | null = null): number | null {
     if (this.count <= 0) return null
     this.fresh(now)
     const index = chooseKey(this.pool, model, now, this.cursor, avoid)
@@ -100,6 +100,33 @@ export class KeyRotation {
     this.cursor = (index + 1) % this.count
     this.pool = spendOn(this.pool, index, model, now)
     return index
+  }
+
+  /**
+   * The key `next` would pick, without spending anything on it: for a
+   * background agent taking a key to hold, which is not yet a request.
+   * Null when none but the avoided ones are ready - an agent waits rather
+   * than share a key with the chat.
+   */
+  peek(now: number = Date.now(), model = '', avoid: ReadonlySet<number> = new Set()): number | null {
+    if (this.count <= 0) return null
+    this.fresh(now)
+    const index = chooseKey(this.pool, model, now, this.cursor, avoid)
+    return index === null || avoid.has(index) ? null : index
+  }
+
+  /** One request on a key chosen already - an agent's own. */
+  spend(index: number, model = '', now: number = Date.now()): void {
+    if (index < 0 || index >= this.count) return
+    this.fresh(now)
+    this.pool = spendOn(this.pool, index, model, now)
+  }
+
+  /** Whether a key may be asked now, for this model. */
+  ready(index: number, now: number = Date.now(), model = ''): boolean {
+    if (index < 0 || index >= this.count) return false
+    this.fresh(now)
+    return chooseKey(this.pool, model, now, index, new Set([...Array(this.count).keys()].filter((i) => i !== index))) === index
   }
 
   /**

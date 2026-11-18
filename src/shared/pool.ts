@@ -359,11 +359,12 @@ export function chooseKey(
   now: number,
   cursor = 0,
   /**
-   * A key to stay off if any other is ready - the one the worker just used,
-   * when self-reflection's mentor wants the other. Still chosen when it is
-   * the only one ready: a review on the same key beats no review.
+   * Keys to stay off if any other is ready - the one the worker just used,
+   * when self-reflection's mentor wants the other, or the keys background
+   * agents are holding. Still chosen when nothing else is ready: a review on
+   * the same key beats no review, and a question beats an agent.
    */
-  avoid: number | null = null
+  avoid: number | ReadonlySet<number> | null = null
 ): number | null {
   const slots = pool.spend.length
   if (slots <= 0) return null
@@ -378,7 +379,7 @@ export function chooseKey(
     const index = (cursor + step) % slots
     const spend = pool.spend[index]
     if (!isReady(spend, key, now)) continue
-    if (index === avoid && slots > 1) continue
+    if (slots > 1 && (typeof avoid === 'number' ? index === avoid : avoid?.has(index))) continue
     const rank: [number, number, number, number] = [
       spend?.models[key] ?? 0,
       requestsTotalOn(pool, index),

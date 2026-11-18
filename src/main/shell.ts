@@ -346,6 +346,20 @@ const READ_ONLY = new Set([
   'whereis',
   'printenv',
   'sensors',
+  /* Filters, which read what they are piped and print it: `upower -e |
+     grep BAT` and `grep -r TODO src` were refused for want of a name here.
+     None of these can write except through a redirect, which is caught
+     on its own. sed and awk are not here: both can write by themselves. */
+  'grep',
+  'egrep',
+  'fgrep',
+  'rg',
+  'cut',
+  'tr',
+  'uniq',
+  'nl',
+  // Battery and power: queries only, below.
+  'upower',
   // Linux tools that both read and change things: only their reads, below.
   'pacman',
   'yay',
@@ -398,6 +412,8 @@ const READ_SUBCOMMANDS: Record<string, string[]> = {
   systemctl: ['status', 'list-units', 'list-unit-files', 'list-timers', 'is-active', 'is-enabled', 'is-failed', 'show', 'cat'],
   bluetoothctl: ['devices', 'info', 'show', 'list', 'paired-devices'],
   wpctl: ['status', 'inspect', 'get-volume'],
+  /* -i and -e report; --monitor never ends, and nothing here changes power. */
+  upower: ['-i', '-e', '-d', '--dump', '--enumerate', '--show-info', '--version'],
   // Interpreters and editors get nothing but their version and help flags:
   // every one of them can run arbitrary code given an argument.
   node: [],
@@ -508,9 +524,60 @@ function topLevelSegments(command: string): string[] {
   return out
 }
 
+/**
+ * Redirections that throw output away or merge it, and write nothing:
+ * `2>/dev/null`, `&>/dev/null`, `2>&1`, PowerShell's `2>$null`, cmd's `>nul`.
+ *
+ * Every one of these counted as a write. A background agent, on the `auto`
+ * mode, asked `cat /sys/class/power_supply/BAT0/status 2>/dev/null` - the
+ * ordinary way to read without noise - was told it "would change
+ * something", and spent ten of its ten steps asking again. Only the exact
+ * device is let through: `>/dev/nullx` is a file, and still a write.
+ */
+const HARMLESS_REDIRECTS = /(^|\s)(?:\d|&)?>>?\s*(?:\/dev\/null|\$null|nul)(?=$|[\s;|&)])|(^|\s)\d>&\d(?=$|[\s;|&)])/gi
+
+/**
+ * The commands inside a command: `$(...)`, backticks, and bash's `<(...)`.
+ *
+ * None of these was looked at. `echo $(rm -rf ~/x)` has `echo` at its head
+ * and nothing write-shaped where the sweeps look - `rm` follows a `(`, not
+ * a space - so it counted as a read and ran by itself on the `auto` mode.
+ * Found while letting background agents run reads. Each one is judged as a
+ * command of its own now. A PowerShell subexpression that is only a
+ * variable - `$($_.Length)` - has no command in it and is left alone.
+ */
+function substitutions(command: string): string[] {
+  const out: string[] = []
+  for (let i = 0; i < command.length; i++) {
+    const two = command.slice(i, i + 2)
+    if (two === '$(' || two === '<(' || two === '>(') {
+      let depth = 1
+      let j = i + 2
+      for (; j < command.length && depth > 0; j++) {
+        if (command[j] === '(') depth++
+        else if (command[j] === ')') depth--
+      }
+      out.push(command.slice(i + 2, j - 1))
+      i = j - 1
+    } else if (command[i] === '`') {
+      const end = command.indexOf('`', i + 1)
+      if (end < 0) {
+        out.push(command.slice(i + 1))
+        break
+      }
+      out.push(command.slice(i + 1, end))
+      i = end
+    }
+  }
+  return out.map((s) => s.trim()).filter((s) => s && !s.startsWith('$'))
+}
+
 export function isReadOnly(command: string): boolean {
-  const trimmed = command.trim()
+  const trimmed = command.trim().replace(HARMLESS_REDIRECTS, ' ').trim()
   if (!trimmed) return false
+  /* Writing into a process substitution is writing. */
+  if (/>\(/.test(trimmed)) return false
+  for (const inner of substitutions(trimmed)) if (!isReadOnly(inner)) return false
 
   // Redirection, piping into a mutating cmdlet, or any write-shaped verb.
   if (WRITE_MARKERS.test(trimmed)) return false
@@ -554,7 +621,19 @@ export function isReadOnly(command: string): boolean {
      * there is still caught, because the Verb-Noun sweep above counts `=`
      * as a command position for exactly this reason.
      */
-    const body = segment.trim().replace(/^\$\w+\s*=\s*/, '')
+    /*
+     * A loop or a test around reads is a read: `for d in /sys/class/*; do
+     * cat "$d/status"; done` was refused for its `for`, `do` and `done`,
+     * and a background agent spent its steps finding that out. The keyword
+     * is set aside and what it runs is judged as usual; the list a `for`
+     * walks is words, and any command in it was judged above.
+     */
+    const body = segment
+      .trim()
+      .replace(/^\$\w+\s*=\s*/, '')
+      .replace(/^(?:do|then|else|elif|if)\s+/i, '')
+    if (/^(?:done|fi|then|do|else)$/i.test(body)) continue
+    if (/^for\s+\w+\s+in\b/i.test(body)) continue
     const tokens = body.split(/\s+/).filter(Boolean)
     if (tokens.length === 0) continue
     // Strip what wraps a call rather than names it: a leading paren, and a
@@ -610,7 +689,11 @@ export function isReadOnly(command: string): boolean {
        * accepted now: whichever of the two is a known read verb.
        */
       const firstWord = args.find((a) => !a.startsWith('-')) ?? args[0]
-      if (!reads.includes(args[0]) && !reads.includes(firstWord)) return false
+      /* As typed, too: pacman's operations are case-sensitive - -Ss reads,
+         -S installs - and lowercased, `pacman -Ss joplin` became "-ss",
+         which is on no list, so every package query was refused. */
+      const typed = tokens[1] ?? ''
+      if (!reads.includes(args[0]) && !reads.includes(firstWord) && !reads.includes(typed)) return false
       // A read subcommand must not then be handed a flag that writes.
       if (
         /(^|\s)(--global|--system|-w\b|--write|--set\b|--delete\b|--force\b|-f\b)/i.test(segment)

@@ -705,7 +705,7 @@ check('a negative wait is now', Q.untilText(-5000), 'in 0s')
 /* ---------------------------------------------------------- the wiring */
 
 const cloud = readFileSync('src/main/cloud.ts', 'utf8')
-check('a key is chosen for the model being asked', /rotation\.next\(Date\.now\(\), model\)/.test(cloud), true)
+check('a key is chosen for the model being asked, off the keys agents hold', /rotation\.next\(Date\.now\(\), model, this\.heldBy\(provider\)\)/.test(cloud), true)
 /*
  * Four branches, because a refusal means two different things depending on
  * whether the keys share an allowance. Per key: a daily cap takes out one

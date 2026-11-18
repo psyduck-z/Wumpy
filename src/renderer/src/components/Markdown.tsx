@@ -24,6 +24,7 @@ import { foldsCode, summarise } from '@shared/bulk'
 import { CommandCard } from './CommandCard'
 import { AskCard } from './AskCard'
 import { SearchCard } from './SearchCard'
+import { AgentCard, MonitorCard } from './AgentCard'
 import { ScreenCard } from './ScreenCard'
 import { LookCard } from './LookCard'
 import { DoCard } from './DoCard'
@@ -271,6 +272,14 @@ function readDo(children: ReactNode): string | null {
 /** Pulls the command out of a `wumpy-app` block. */
 function readApp(children: ReactNode): string | null {
   return readTagged(children, 'language-wumpy-app')
+}
+
+/** A background agent's block, and a monitor's. See AgentCard. */
+function readAgent(children: ReactNode): string | null {
+  return readTagged(children, 'language-wumpy-agent')
+}
+function readMonitor(children: ReactNode): string | null {
+  return readTagged(children, 'language-wumpy-monitor')
 }
 
 /** Pulls the query out of a `wumpy-search` block. */
@@ -617,6 +626,15 @@ export const Markdown = memo(function Markdown({
               />
             )
           }
+
+          /* Background agents need nothing from the message but its id: they
+             are started by the app when the answer is finished, not here. */
+          const agent = messageId ? readAgent(children) : null
+          if (agent !== null) {
+            return <AgentCard body={agent} messageId={messageId!} complete={complete !== false} />
+          }
+          const monitor = messageId ? readMonitor(children) : null
+          if (monitor !== null) return <MonitorCard body={monitor} messageId={messageId!} />
 
           const query = onSearch ? readSearch(children) : null
           if (query) {

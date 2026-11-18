@@ -61,7 +61,7 @@ export interface ChatState {
   /** False when a turn is already in flight and the message was not sent. */
   send(text: string, displayText?: string, images?: Attachment[], automatic?: boolean): boolean
   /** Live facts handed to the model each turn; set by the app. */
-  setContext(ctx: { chatTitle: string | null }): void
+  setContext(ctx: { chatTitle: string | null; chatId: string | null }): void
   /** Messages as the model would see them, for size estimates and compaction. */
   history(): Array<{ role: string; content: string }>
   /**
@@ -163,7 +163,7 @@ export function useChat(): ChatState {
   /** Assistant message being filled by that request. */
   const activeMessage = useRef<string | null>(null)
   /** Facts about the app that the model cannot see for itself. */
-  const context = useRef<{ chatTitle: string | null }>({ chatTitle: null })
+  const context = useRef<{ chatTitle: string | null; chatId: string | null }>({ chatTitle: null, chatId: null })
   /** Mirrors `messages` so `send` can read history without a stale closure. */
   const messagesRef = useRef<ChatMessage[]>([])
   messagesRef.current = messages
@@ -347,6 +347,7 @@ export function useChat(): ChatState {
       messages: history,
       context: {
         chatTitle: context.current.chatTitle,
+        chatId: context.current.chatId,
         messageCount: history.length,
         actions: actionFacts(),
         handsFree: handsFree()
@@ -482,7 +483,7 @@ export function useChat(): ChatState {
     )
   }, [])
 
-  const setContext = useCallback((ctx: { chatTitle: string | null }) => {
+  const setContext = useCallback((ctx: { chatTitle: string | null; chatId: string | null }) => {
     context.current = ctx
   }, [])
 

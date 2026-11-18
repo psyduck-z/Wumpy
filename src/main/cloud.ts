@@ -184,6 +184,16 @@ export function recordSpend(provider: ProviderId, tokens: number): void {
  * a retry, which already works; being late costs the user a wait they did
  * not need.
  */
+/**
+ * The gap for a key whose limit has been measured (see @shared/limits), in
+ * place of the provider's one figure for every key.
+ */
+const keyGaps = new Map<string, number>()
+export function setKeyGap(provider: ProviderId, key: number, gap: number | null): void {
+  if (gap === null) keyGaps.delete(`${provider}:${key}`)
+  else keyGaps.set(`${provider}:${key}`, gap)
+}
+
 async function pace(
   provider: ProviderId,
   key: number,
@@ -199,7 +209,7 @@ async function pace(
    */
   urgent = false
 ): Promise<void> {
-  const gap = urgent ? 0 : PROVIDERS[provider].minGapMs
+  const gap = urgent ? 0 : ((separate ? keyGaps.get(`${provider}:${key}`) : undefined) ?? PROVIDERS[provider].minGapMs)
   /**
    * ONE QUEUE PER ALLOWANCE, WHICH IS NOT ALWAYS ONE QUEUE PER KEY.
    *
@@ -252,6 +262,12 @@ export class CloudClient {
   private inflight = new Map<string, AbortController>()
   /** The key the last chat request went out on, per provider. See complete's otherKey. */
   private lastChatKey = new Map<ProviderId, number>()
+  /**
+   * Keys background agents are holding, per provider (see main/agents.ts).
+   * Everything else stays off them while any other key is ready: the chat,
+   * the voice, titles, the ranker.
+   */
+  private held = new Map<ProviderId, Set<number>>()
 
   /**
    * The ledger is optional so a test or a script can build a client without
@@ -288,6 +304,166 @@ export class CloudClient {
 
   abort(requestId: string): void {
     this.inflight.get(requestId)?.abort()
+  }
+
+  /** The keys agents hold for this provider. */
+  heldBy(provider: ProviderId): ReadonlySet<number> {
+    return this.held.get(provider) ?? new Set<number>()
+  }
+
+  /**
+   * A key for a background agent to hold, or null when none can be spared.
+   *
+   * Never the last key nobody holds: that one is the chat's, and the voice
+   * spends it too. Off the key the chat used last where there is a choice,
+   * so a question asked a moment ago keeps its key.
+   */
+  holdKey(model: string): number | null {
+    const provider = providerFor(model)
+    if (!provider || PROVIDERS[provider].keyless || !this.keys.available()) return null
+    const held = new Set(this.heldBy(provider))
+    if (this.keys.count(provider) - held.size <= 1) return null
+    const rotation = this.rotation(provider)
+    const last = this.lastChatKey.get(provider)
+    const index =
+      (last === undefined ? null : rotation.peek(Date.now(), model, new Set([...held, last]))) ??
+      rotation.peek(Date.now(), model, held)
+    if (index === null) return null
+    held.add(index)
+    this.held.set(provider, held)
+    return index
+  }
+
+  /**
+   * Holds one particular key: the one a limit test is filling to the brim,
+   * which nothing else should walk into meanwhile. False when it is held
+   * already or is the only key.
+   */
+  reserveKey(model: string, index: number): boolean {
+    const provider = providerFor(model)
+    if (!provider || this.keys.count(provider) < 2) return false
+    const held = new Set(this.heldBy(provider))
+    if (held.has(index)) return false
+    held.add(index)
+    this.held.set(provider, held)
+    return true
+  }
+
+  releaseKey(model: string, index: number): void {
+    const provider = providerFor(model)
+    if (provider) this.held.get(provider)?.delete(index)
+  }
+
+  /**
+   * One request of one token, unpaced, for measuring a key's limit (see
+   * main/limits.ts). Its status is the whole answer. A refusal rests the
+   * key as any other would, so nothing else walks into it.
+   */
+  async ping(model: string, index: number, signal: AbortSignal): Promise<number> {
+    const provider = providerFor(model)
+    if (!provider || !this.ready(model).ok) return 0
+    const rotation = this.rotation(provider)
+    rotation.spend(index, model)
+    /* Counted, so the account's minute knows: see recentRequests. */
+    const seen = recentRequests.get(provider) ?? []
+    seen.push(Date.now())
+    recentRequests.set(provider, seen)
+    try {
+      const res = await fetch(`${PROVIDERS[provider].base}/chat/completions`, {
+        method: 'POST',
+        headers: this.headers(provider, index),
+        body: JSON.stringify({
+          model,
+          messages: [{ role: 'user', content: 'Reply with OK.' }],
+          stream: false,
+          max_tokens: 1
+        }),
+        signal: AbortSignal.any([AbortSignal.timeout(20_000), signal])
+      })
+      if (res.status === 429) rotation.rest(index, Date.now() + 60_000, 'per-minute (limit test)')
+      await res.text().catch(() => '')
+      return res.status
+    } catch {
+      return 0
+    } finally {
+      this.remember(provider, rotation)
+    }
+  }
+
+  /** Whether a held key may be asked now, or is resting. */
+  keyReady(model: string, index: number): boolean {
+    const provider = providerFor(model)
+    return provider ? this.rotation(provider).ready(index, Date.now(), model) : false
+  }
+
+  /**
+   * One turn of a background agent, on the key it holds: not streamed,
+   * nothing shown, and every outcome reported rather than thrown.
+   *
+   * A refusal for the rate rests that key for a minute, as everywhere; the
+   * agent waits it out rather than borrow the chat's.
+   */
+  async agentTurn(
+    model: string,
+    messages: Array<{ role: 'system' | 'user' | 'assistant'; content: string }>,
+    index: number,
+    opts: { numPredict: number; timeoutMs: number; signal?: AbortSignal }
+  ): Promise<{ text: string | null; status: number; error?: string; promptTokens: number; completionTokens: number; ms: number }> {
+    const started = Date.now()
+    const nothing = { text: null, promptTokens: 0, completionTokens: 0 }
+    const check = this.ready(model)
+    if (!check.ok || !check.provider) return { ...nothing, status: 0, error: check.why, ms: 0 }
+    const provider = check.provider
+    const rotation = this.rotation(provider)
+    rotation.spend(index, model)
+    this.remember(provider, rotation)
+    await pace(provider, index, 0, this.separate(provider))
+    try {
+      const timeout = AbortSignal.timeout(opts.timeoutMs)
+      const res = await fetch(`${PROVIDERS[provider].base}/chat/completions`, {
+        method: 'POST',
+        headers: this.headers(provider, index),
+        body: JSON.stringify({
+          model,
+          messages: wireMessagesFor(provider, messages),
+          stream: false,
+          temperature: 0.3,
+          max_tokens: opts.numPredict,
+          ...(() => {
+            const kwargs = thinkingKwargsFor(provider, false)
+            return kwargs ? { chat_template_kwargs: kwargs } : {}
+          })()
+        }),
+        signal: opts.signal ? AbortSignal.any([timeout, opts.signal]) : timeout
+      })
+      if (res.status === 429) {
+        const until = Date.now() + 60_000
+        if (this.separate(provider)) rotation.rest(index, until, 'per-minute')
+        else rotation.restAll(until, 'per-minute (account)')
+        this.remember(provider, rotation)
+      } else if ([401, 403].includes(res.status)) {
+        /* Refused for good, as in chat(): the agent asks for another key. */
+        rotation.reject(index)
+        this.remember(provider, rotation)
+      }
+      if (!res.ok) {
+        const body = await res.text().catch(() => '')
+        return { ...nothing, status: res.status, error: truncate(stripKey(body), 200), ms: Date.now() - started }
+      }
+      const body = (await res.json()) as {
+        choices?: Array<{ message?: { content?: string } }>
+        usage?: { prompt_tokens?: number; completion_tokens?: number }
+      }
+      return {
+        text: body.choices?.[0]?.message?.content?.trim() ?? null,
+        status: res.status,
+        promptTokens: body.usage?.prompt_tokens ?? 0,
+        completionTokens: body.usage?.completion_tokens ?? 0,
+        ms: Date.now() - started
+      }
+    } catch (err) {
+      return { ...nothing, status: 0, error: describe(err), ms: Date.now() - started }
+    }
   }
 
   abortAll(): void {
@@ -764,7 +940,7 @@ export class CloudClient {
     const index =
       opts?.pin || this.separate(provider)
         ? lane % count
-        : (rotation.next(Date.now(), entry.id) ?? 0)
+        : (rotation.next(Date.now(), entry.id, this.heldBy(provider)) ?? 0)
     this.remember(provider, rotation)
     await pace(provider, index, 0, this.separate(provider))
 
@@ -887,7 +1063,7 @@ export class CloudClient {
     const provider: ProviderId = 'nvidia'
     if (!this.keys.available() || !this.keys.has(provider)) return null
     const rotation = this.rotation(provider)
-    const index = rotation.next(Date.now(), model)
+    const index = rotation.next(Date.now(), model, this.heldBy(provider))
     if (index === null) return null
     this.remember(provider, rotation)
     await pace(provider, index, 0, this.separate(provider), true)
@@ -1130,7 +1306,7 @@ export class CloudClient {
     const keyCount = Math.max(1, this.keys.count(provider))
     for (let attempt = 0; attempt < keyCount + 2; attempt++) {
       /* By model, because a key out of one model is the right key for another. */
-      const index = rotation.next(Date.now(), model)
+      const index = rotation.next(Date.now(), model, this.heldBy(provider))
       if (index !== null) this.lastChatKey.set(provider, index)
       if (index === null) {
         // Every key is resting. Say for how long rather than failing blank.
@@ -1553,7 +1729,8 @@ export class CloudClient {
        * title is not worth refusing outright.
        */
       const background = this.rotation(provider)
-      const avoid = opts.otherKey ? (this.lastChatKey.get(provider) ?? null) : null
+      const last = opts.otherKey ? this.lastChatKey.get(provider) : undefined
+      const avoid = new Set([...this.heldBy(provider), ...(last === undefined ? [] : [last])])
       const index = background.next(Date.now(), model, avoid) ?? 0
       this.remember(provider, background)
       /* Chosen before the wait, not after: pacing a key nobody had picked

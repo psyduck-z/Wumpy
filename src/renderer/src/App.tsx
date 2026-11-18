@@ -135,6 +135,7 @@ import {
 import { DOCK_CYCLE, Header } from './components/Header'
 import { APP_WINDOW } from './appwindow'
 import { clampRounds } from '@shared/reflect'
+import { useAgents } from './hooks/useAgents'
 import { Message } from './components/Message'
 import { Composer } from './components/Composer'
 import { VoiceTurnBar } from './components/VoiceTurnBar'
@@ -426,8 +427,8 @@ export default function App(): React.JSX.Element {
   // Keep the model's view of the app current. In an effect rather than in the
   // render body, which would write to a ref during render.
   useEffect(() => {
-    chat.setContext({ chatTitle })
-  }, [chat, chatTitle])
+    chat.setContext({ chatTitle, chatId })
+  }, [chat, chatTitle, chatId])
 
   /**
    * Close, immediately.
@@ -2954,6 +2955,17 @@ function namedControls(shot: Attachment): string[] {
     send: (text) => chatRef.current.send(text, undefined, undefined, true),
     liveNote: (content) => chatRef.current.liveNote(content),
     update: (id, content) => chatRef.current.update(id, content)
+  })
+  /* Background agents: started when an answer asks, reported back when the
+     chat is idle. See hooks/useAgents and @shared/agents. */
+  useAgents({
+    chatId,
+    streaming,
+    streamingId,
+    messages,
+    send: (text, shown) => chatRef.current.send(text, shown, undefined, true),
+    note: (content) => chatRef.current.note(content),
+    notify: (content) => chatRef.current.notify(content)
   })
   useEffect(() => {
     if (streaming || queued.length === 0) return

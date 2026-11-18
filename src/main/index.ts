@@ -26,7 +26,7 @@ import { SettingsStore } from './store'
 import { capDiskCache, reclaimCache } from './disk'
 import { ChatStore } from './chats'
 import { InputHistory } from './history'
-import { CloudClient, requestsInLastMinute, sinceLimited, whenLimited } from './cloud'
+import { CloudClient, requestsInLastMinute, setKeyGap, sinceLimited, whenLimited } from './cloud'
 import { KeyStore } from './keys'
 import { JournalStore } from './journal'
 import {
@@ -113,6 +113,10 @@ import { Stretcher } from '@shared/stretch'
 import { forMagpie } from '@shared/voicetext'
 import { cutsFor, piecesOf } from '@shared/pauses'
 import { withSentTimes } from '@shared/sent'
+import { agentAsks, agentSlots, monitorAsks } from '@shared/agents'
+import { Agents } from './agents'
+import { LimitTester } from './limits'
+import { gapFor, limitLine } from '@shared/limits'
 import { mayBeInvented } from '@shared/heard'
 import { speakable } from '@shared/spoken'
 import { savesIn, withoutKept } from '@shared/kept'
@@ -191,6 +195,8 @@ let skills: SkillStore
 let usage: UsageStore
 let pools: PoolStore
 let ranker: Ranker
+/** Background agents: see main/agents.ts. Made in registerIpc, beside judge. */
+let agents: Agents | null = null
 /**
  * What Wumpy has done, with the time. Read by `/log`.
  *
@@ -406,6 +412,16 @@ function moveToChosenVoice(): void {
   if (onOldRate) console.log(`[wumpy] voice speed: ${DEFAULT_RATE}, from ${rate || 'the default'}`)
 }
 
+/**
+ * How many background agents may work now: from the keys of the provider
+ * the chat is on (see agentSlots). Keyless providers have nothing to share.
+ */
+function agentSlotsNow(): number {
+  const provider = providerFor(activeModel())
+  if (!provider || PROVIDERS[provider].keyless || !keys.available()) return 0
+  return agentSlots(keys.count(provider))
+}
+
 function resolveModel(): string | null {
   const model = activeModel()
   return cloud?.ready(model).ok ? model : null
@@ -606,11 +622,37 @@ function channelFacts(handsFree: boolean): string[] {
   ]
 }
 
+/**
+ * This chat's background agents, as facts: what is working, what is done
+ * and handed back. So "how's it going?" is answered from the app's own
+ * record rather than from the model's memory of having started one.
+ */
+function agentFacts(chatId: string | null | undefined): string[] {
+  if (!chatId || !agents) return []
+  const mine = agents.forChat(chatId)
+  const slots = agentSlotsNow()
+  if (!mine.length) return []
+  const age = (ms: number): string => (ms < 90_000 ? `${Math.round(ms / 1000)}s` : `${Math.round(ms / 60_000)}m`)
+  const lines = mine.slice(-8).map((a) => {
+    const how =
+      a.status === 'done'
+        ? `finished after ${age((a.endedAt ?? Date.now()) - a.startedAt)}; its report was handed to you`
+        : a.status === 'failed'
+          ? `failed: ${a.doing.replace(/^failed: /, '')}`
+          : a.status === 'stopped'
+            ? 'stopped by the user'
+            : `${a.status === 'queued' ? 'waiting for a free key' : a.doing}, ${age(Date.now() - a.startedAt)} so far`
+    return `  ${a.number}. "${a.title}" - ${how}`
+  })
+  return [`- Background agents in this chat (up to ${slots} at once):`, ...lines]
+}
+
 function factsFor(
   chatTitle: string | null,
   actions: string[] = [],
   handsFree = false,
-  messages: ChatRequest['messages'] = []
+  messages: ChatRequest['messages'] = [],
+  chatId: string | null = null
 ): string {
   /* Everything they have said in this chat, for the skills that came up. */
   const said = messages.filter((m) => m.role === 'user').map((m) => (typeof m.content === 'string' ? m.content : ''))
@@ -643,6 +685,7 @@ function factsFor(
     // an empty one.
     ...folderFacts(),
     ...channelFacts(handsFree),
+    ...agentFacts(chatId),
     // One file the user owns, carried from chat to chat. See context.ts.
     ...notes.forPrompt(),
     /* "Remember that I prefer celsius" was answered "Got it - celsius it
@@ -747,7 +790,10 @@ function promptShape(
      * bug inverted: the app used to promise a picture and send none, and
      * now it sends a description the prompt says will not arrive.
      */
-    eye: readyEye() !== null
+    eye: readyEye() !== null,
+    /* With commands on or off: an agent that cannot look at the machine can
+       still write, review and work things out. */
+    agents: agentSlotsNow()
   }
 }
 
@@ -1214,7 +1260,7 @@ function registerIpc(): void {
       left: view.left,
       lastSweepMs: view.lastSweepMs,
       traffic: {
-        busy: turnStartedAt !== null,
+        busy: turnStartedAt !== null || (agents?.active() ?? 0) > 0,
         sinceTurnMs: lastTurnEndedAt ? Date.now() - lastTurnEndedAt : Infinity,
         lastMinute: provider ? requestsInLastMinute(provider) : 0,
         perMinute: gap > 0 ? Math.round(60_000 / gap) : 0,
@@ -2067,6 +2113,108 @@ function registerIpc(): void {
 
   ipcMain.handle(IPC.shellRisk, (_e, req: { command: string }) => judge(req.command))
 
+  /*
+   * Background agents. They run what judge() would run without a click and
+   * nothing else, so an agent never has more permission than the chat - and
+   * nobody is asked anything on its behalf. See main/agents.ts.
+   */
+  agents = new Agents({
+    model: () => resolveModel(),
+    slots: () => agentSlotsNow(),
+    hold: (model) => cloud.holdKey(model),
+    release: (model, key) => cloud.releaseKey(model, key),
+    keyReady: (model, key) => cloud.keyReady(model, key),
+    turn: (model, messages, key, opts) => cloud.agentTurn(model, messages, key, opts),
+    world: () => ({
+      platform: process.platform === 'win32' ? 'win32' : process.platform === 'darwin' ? 'darwin' : 'linux',
+      mode: settings.get('approvalMode'),
+      search: settings.get('searchEnabled'),
+      cwd: settings.get('shellCwd') || homedir(),
+      now: new Date().toLocaleString('en-GB', {
+        weekday: 'long',
+        day: 'numeric',
+        month: 'long',
+        year: 'numeric',
+        hour: 'numeric',
+        minute: '2-digit'
+      })
+    }),
+    run: async (command, shell) => {
+      const verdict = judge(command)
+      if (!settings.get('shellEnabled') || !verdict.allowed) {
+        return { ran: false, ok: false, output: 'NOT RUN: running commands is turned off.' }
+      }
+      /* Reads only, in every mode - accept-all included. An agent works out
+         of sight, so a change goes back to the chat as a command, and runs
+         there the way the user has said changes run. */
+      if (!verdict.auto || !verdict.readOnly) {
+        const mode = settings.get('approvalMode')
+        return {
+          ran: false,
+          ok: false,
+          output:
+            mode === 'manual'
+              ? 'NOT RUN: every command needs the user’s click under their settings.'
+              : 'NOT RUN: this one would change something. Agents only read: give the exact command in your report, and Wumpy runs it.'
+        }
+      }
+      const result = await runCommand(command, shell, settings.get('shellCwd') || undefined)
+      journal.add(
+        'command',
+        `${command} (by a background agent${result.exitCode === 0 ? '' : `, exit ${result.exitCode}`})`
+      )
+      const out = [
+        `Exit code ${result.exitCode}${result.timedOut ? ' (timed out)' : ''}, ${(result.durationMs / 1000).toFixed(1)}s.`,
+        result.stdout.trim() ? `Output:\n${result.stdout.trim()}` : 'No output.',
+        result.stderr.trim() ? `Errors:\n${result.stderr.trim()}` : ''
+      ]
+      return { ran: true, ok: result.exitCode === 0, output: out.filter(Boolean).join('\n') }
+    },
+    search: async (query) => {
+      if (!settings.get('searchEnabled')) return { ran: false, ok: false, output: 'NOT RUN: web search is off.' }
+      if (settings.get('approvalMode') === 'manual') {
+        return { ran: false, ok: false, output: 'NOT RUN: a search needs the user’s click under their settings.' }
+      }
+      const result = await webSearch(query, settings.get('searchApiKey') || undefined)
+      if (!result.error) journal.add('search', `${query} (by a background agent)`)
+      return result.error
+        ? { ran: true, ok: false, output: `The search failed: ${result.error}` }
+        : {
+            ran: true,
+            ok: true,
+            output: result.results.map((r, i) => `${i + 1}. ${r.title}\n   ${r.url}\n   ${r.snippet}`).join('\n')
+          }
+    },
+    changed: () => panel.send(IPC.agentsChanged, agents?.list()),
+    ready: (delivery) => panel.send(IPC.agentsReady, delivery),
+    spent: (r) =>
+      usage.add({
+        model: r.model,
+        via: providerFor(r.model) ?? 'unknown',
+        promptTokens: r.promptTokens,
+        completionTokens: r.completionTokens,
+        generatingMs: r.ok ? r.ms : 0,
+        ...(r.ok ? {} : { error: true, limited: r.limited })
+      }),
+    log: (line) => console.log(`[wumpy] ${line}`)
+  })
+
+  ipcMain.handle(IPC.agentsStart, (_e, req: { chatId: string; messageId: string; text: string }) => {
+    if (!agents || !req?.chatId || !req.messageId || typeof req.text !== 'string') return null
+    const asked = agentAsks(req.text)
+    if (asked.length && agentSlotsNow() === 0) {
+      return { refused: 'Background agents need at least two keys: the chat keeps one.' }
+    }
+    const started = asked.length ? agents.start(req.chatId, req.messageId, asked) : []
+    const monitors = monitorAsks(req.text)
+    const set = monitors.length ? agents.monitor(req.chatId, req.messageId, monitors) : []
+    return { started, monitors: set }
+  })
+  ipcMain.handle(IPC.agentsList, () => agents?.list() ?? { agents: [], monitors: [] })
+  ipcMain.handle(IPC.agentsStop, (_e, id: string) => agents?.stop(String(id)))
+  ipcMain.handle(IPC.agentsPending, (_e, chatId: string) => agents?.pendingFor(String(chatId)) ?? [])
+  ipcMain.handle(IPC.agentsDelivered, (_e, id: string) => agents?.delivered(String(id)))
+
   /**
    * Runs a command the user approved in the panel.
    *
@@ -2523,7 +2671,7 @@ void app.whenReady().then(async () => {
       const provider = providerFor(activeModel())
       const gap = provider ? PROVIDERS[provider].minGapMs : 0
       return {
-        busy: turnStartedAt !== null,
+        busy: turnStartedAt !== null || (agents?.active() ?? 0) > 0,
         sinceTurnMs: lastTurnEndedAt ? Date.now() - lastTurnEndedAt : Infinity,
         lastMinute: provider ? requestsInLastMinute(provider) : 0,
         /* The pacer's own ceiling rather than a second number to keep in
@@ -2576,6 +2724,46 @@ void app.whenReady().then(async () => {
     stoodDown: (why) => journal.add('rank', rankNote(why, modelLabel(activeModel())))
   })
   ranker.start()
+
+  /*
+   * Each key's real limit, measured while nobody is using Wumpy (see
+   * main/limits.ts), and kept to by the pacer from then on. What earlier
+   * tests found is applied now, before anything is asked.
+   */
+  const applyLimits = (): void => {
+    const saved = settings.get('keyLimits') ?? {}
+    for (const [id, limit] of Object.entries(saved)) {
+      const [provider, at] = id.split(':')
+      if (!(provider in PROVIDERS)) continue
+      setKeyGap(provider as ProviderId, Number(at), gapFor(limit, keys.count(provider as ProviderId)))
+    }
+  }
+  applyLimits()
+  const startedAt = Date.now()
+  new LimitTester({
+    provider: () => providerFor(activeModel()),
+    keys: () => {
+      const provider = providerFor(activeModel())
+      return provider && !PROVIDERS[provider].keyless ? keys.count(provider) : 0
+    },
+    model: () => resolveModel(),
+    quietFor: () => Date.now() - Math.max(startedAt, lastTurnEndedAt),
+    busy: () =>
+      turnStartedAt !== null ||
+      (agents?.active() ?? 0) > 0 ||
+      panel.onScreen ||
+      ranker.view().sinceProbeMs < 90_000,
+    ping: (model, index, signal) => cloud.ping(model, index, signal),
+    reserve: (model, index) => cloud.reserveKey(model, index),
+    release: (model, index) => cloud.releaseKey(model, index),
+    saved: () => settings.get('keyLimits') ?? {},
+    save: (id, limit) => {
+      settings.patch({ keyLimits: { ...(settings.get('keyLimits') ?? {}), [id]: limit } })
+      applyLimits()
+      journal.add('key', limitLine(Number(id.split(':')[1]), limit))
+    },
+    log: (line) => console.log(`[wumpy] ${line}`)
+  }).start()
   speech = new Speech()
 
   /**
@@ -2684,6 +2872,10 @@ app.on('second-instance', (_event, argv) => {
     void memoryCheck()
     return
   }
+  if (argv.includes('--agents-check')) {
+    void agentsCheck()
+    return
+  }
   if (argv.includes('--compare-hearing')) {
     compareHearing = !compareHearing
     console.log(`[wumpy] comparing recognisers on what is said: ${compareHearing ? 'on, until a restart' : 'off'}`)
@@ -2729,7 +2921,7 @@ let launchChat: string | null =
 if (launchChat && !/^[\w-]{1,80}$/.test(launchChat)) launchChat = null
 
 /** Wumpy's own launch flags, which describe one start and are not carried over. */
-const OWN_FLAGS = /^--(?:hidden|voice|toggle|restart|speech-check|voice-samples|compare-voices|hearing-check|memory-check|compare-hearing|resume-chat=.*)$/
+const OWN_FLAGS = /^--(?:hidden|voice|toggle|restart|speech-check|voice-samples|compare-voices|hearing-check|memory-check|agents-check|compare-hearing|resume-chat=.*)$/
 
 async function restartWumpy(why: string, chatId: string | null): Promise<void> {
   if (restarting) return
@@ -2900,6 +3092,136 @@ async function modelSays(messages: ChatRequest['messages'], handsFree: boolean):
     }
   )
   return text
+}
+
+/**
+ * `wumpy --agents-check`: background agents, on the real models and keys.
+ *
+ * "refine all of their guidelines, bc a bad one is where EVERYTHING fails -
+ * wumpy becomes idiotic, the bg agents don't help". The unit checks cover
+ * the machinery; only the models can say whether the words work. So:
+ *
+ *   1. The chat, through its real instructions: does it hand off what is
+ *      worth handing off - and only that - with a brief that stands alone?
+ *   2. Real agents on real tasks - one a trap (plugged in is not charging),
+ *      one a look round the disk, one pure writing - reviewed as usual.
+ *   3. The chat given a report back: does it pass it on, or thank the user
+ *      for writing it?
+ *
+ * Commands here run only if read-only, whatever the approval mode says: a
+ * check must not change the machine. Everything goes to wumpy.log.
+ */
+async function agentsCheck(): Promise<void> {
+  const one = (t: string, n = 400): string => JSON.stringify(t.replace(/\s+/g, ' ').slice(0, n))
+  const say = (line: string): void => console.log(`[wumpy] agents check: ${line}`)
+  const model = resolveModel()
+  say(`on ${model ?? 'no model'}, ${agentSlotsNow()} agent slot(s)`)
+  if (!model) return
+
+  /* 1. Handing off, or not. */
+  const asks: Array<{ said: string; want: string }> = [
+    { said: 'what is 17 times 23?', want: 'an answer, no agent' },
+    { said: 'am I charging right now?', want: 'a command, no agent' },
+    {
+      said: 'Research the three best free note-taking apps for Linux and compare them, and meanwhile find out how much free disk space I have',
+      want: 'two agents, or one and a command; a monitor'
+    },
+    { said: 'in the background, write me a 1200-word essay on the history of the transistor', want: 'one agent' }
+  ]
+  let handedOff: { said: string; reply: string } | null = null
+  for (const ask of asks) {
+    const reply = await modelSays([{ role: 'user', content: ask.said, sentAt: Date.now() }], false)
+    const started = agentAsks(reply)
+    const monitors = monitorAsks(reply)
+    say(
+      `"${ask.said.slice(0, 60)}" -> ${started.length} agent(s), ${monitors.length} monitor(s), ` +
+        `command ${/\x60\x60\x60wumpy-run/.test(reply)}; wanted ${ask.want}`
+    )
+    for (const a of started) say(`   agent "${a.title}", brief of ${a.brief.length} characters: ${one(a.brief, 500)}`)
+    for (const m of monitors) say(`   monitor (${m.when}, ${JSON.stringify(m.agents)}): ${one(m.note, 160)}`)
+    say(`   said: ${one(reply.replace(/\x60\x60\x60[\s\S]*?\x60\x60\x60/g, '[block]'), 300)}`)
+    if (started.length && !handedOff) handedOff = { said: ask.said, reply }
+  }
+
+  /* 2. Agents at work. Read-only commands only, whatever the mode. */
+  const deliveries: string[] = []
+  const tester = new Agents({
+    model: () => resolveModel(),
+    slots: () => Math.max(1, agentSlotsNow()),
+    hold: (m) => cloud.holdKey(m),
+    release: (m, key) => cloud.releaseKey(m, key),
+    keyReady: (m, key) => cloud.keyReady(m, key),
+    turn: (m, messages, key, opts) => cloud.agentTurn(m, messages, key, opts),
+    world: () => ({
+      platform: process.platform === 'win32' ? 'win32' : process.platform === 'darwin' ? 'darwin' : 'linux',
+      mode: 'auto',
+      search: settings.get('searchEnabled'),
+      cwd: settings.get('shellCwd') || homedir(),
+      now: new Date().toLocaleString('en-GB', { weekday: 'long', day: 'numeric', month: 'long', hour: 'numeric', minute: '2-digit' })
+    }),
+    run: async (command, shell) => {
+      if (!isReadOnly(command)) return { ran: false, ok: false, output: 'NOT RUN: this one would change something, and that needs the user’s click.' }
+      const r = await runCommand(command, shell, settings.get('shellCwd') || undefined)
+      return {
+        ran: true,
+        ok: r.exitCode === 0,
+        output: [`Exit code ${r.exitCode}.`, r.stdout.trim() ? `Output:\n${r.stdout.trim()}` : 'No output.', r.stderr.trim() ? `Errors:\n${r.stderr.trim()}` : '']
+          .filter(Boolean)
+          .join('\n')
+      }
+    },
+    search: async (query) => {
+      const r = await webSearch(query, settings.get('searchApiKey') || undefined)
+      return r.error
+        ? { ran: true, ok: false, output: `The search failed: ${r.error}` }
+        : { ran: true, ok: true, output: r.results.map((x, i) => `${i + 1}. ${x.title}\n   ${x.url}\n   ${x.snippet}`).join('\n') }
+    },
+    changed: () => {},
+    ready: (d) => deliveries.push(d.text),
+    spent: () => {},
+    log: (line) => say(line.replace(/^\[agents\] /, ''))
+  })
+  const tasks = [
+    {
+      title: 'Is it charging',
+      brief: 'Find out whether this laptop is plugged in, and separately whether its battery is charging right now. Report both answers, each from what the system says.'
+    },
+    {
+      title: 'Disk and big folders',
+      brief: 'How much free space is on the root filesystem, and which three folders directly inside the home directory are the biggest? Use quick commands; do not scan the whole disk.'
+    },
+    {
+      title: 'Rename script',
+      brief: 'Write a bash script, rename-jpeg.sh, that renames every .jpeg file in the folder given as its argument to .jpg, with a --dry-run flag that only prints what it would do. It must not overwrite an existing .jpg. Hand back the whole script.'
+    }
+  ]
+  const began = Date.now()
+  tester.start('agents-check', `check-${began}`, tasks)
+  /* And the agents the chat itself asked for above, so the report handed
+     back in part 3 is one it is waiting for. */
+  const theirs = handedOff ? agentAsks(handedOff.reply) : []
+  if (theirs.length) tester.start('agents-check', `chat-${began}`, theirs)
+  const total = tasks.length + theirs.length
+  while (deliveries.length < total && Date.now() - began < 15 * 60_000) await new Promise((r) => setTimeout(r, 2000))
+  for (const a of tester.forChat('agents-check')) {
+    say(`${a.number} "${a.title}": ${a.status}, ${a.review || 'not reviewed'}, ${a.steps.length} step(s): ${a.steps.map((s) => s.what).join(' | ')}`)
+    say(`   report: ${one(a.report ?? a.doing, 1200)}`)
+  }
+
+  /* 3. A report handed back to the chat: one from an agent it started. */
+  const back = theirs.length ? deliveries.find((d) => d.includes(theirs[0].title)) : undefined
+  if (handedOff && back) {
+    const answer = await modelSays(
+      [
+        { role: 'user', content: handedOff.said, sentAt: began - 60_000 },
+        { role: 'assistant', content: handedOff.reply },
+        { role: 'user', content: back }
+      ],
+      false
+    )
+    say(`given its agent's report back, the chat said: ${one(answer, 700)}`)
+  }
+  say(`done in ${Math.round((Date.now() - began) / 1000)}s`)
 }
 
 async function memoryCheck(): Promise<void> {
@@ -3463,6 +3785,7 @@ function startVoiceTurn(why: string): void {
 }
 
 app.on('will-quit', () => {
+  agents?.stopAll()
   void releaseAllMusic()
   unregisterHotkeys()
   lowLevelHook?.stop()
@@ -3493,7 +3816,8 @@ function withContext(req: ChatRequest): Array<Pick<ChatMessage, 'role' | 'conten
     req.context.chatTitle,
     req.context.actions ?? [],
     req.context.handsFree === true,
-    req.messages
+    req.messages,
+    req.context.chatId ?? null
   )
 
   /*

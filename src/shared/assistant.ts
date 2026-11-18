@@ -5,6 +5,7 @@ import { LOOK_PROMPT } from './look'
 import { STUBS, type Capability } from './needs'
 import { SEARCH_ENGINES, type SearchEngine } from './links'
 import { middlePrompt } from './lean'
+import { agentsPrompt, agentsStub } from './agents'
 
 /**
  * Appended when Wumpy may act. The model never runs anything itself: it
@@ -1634,6 +1635,19 @@ lean?: boolean
    * exists.
    */
   eye?: boolean
+  /**
+   * How many background agents may work at once (see @shared/agents), or
+   * nothing with one key. The full rules when agents are in play, one line
+   * otherwise.
+   */
+  agents?: number
+}
+
+/** The agents section for this turn: the rules, the stub, or nothing. */
+function agentsFor(shape: PromptShape, wants: (c: Capability) => boolean): string {
+  const slots = shape.agents ?? 0
+  if (slots <= 0) return ''
+  return wants('agents') ? agentsPrompt(slots) : agentsStub(slots)
 }
 
 /**
@@ -1769,7 +1783,8 @@ export function promptSections(shape: PromptShape): string[] {
         ? wants('desktop')
           ? DESKTOP_PROMPT
           : STUBS.desktop
-        : ''
+        : '',
+      agentsFor(shape, wants)
     ].filter(Boolean)
   }
 
@@ -1790,6 +1805,7 @@ export function promptSections(shape: PromptShape): string[] {
         ? DESKTOP_PROMPT
         : STUBS.desktop
       : '',
+    agentsFor(shape, wants),
     ASK_PROMPT
   ].filter(Boolean)
 }
@@ -1842,6 +1858,7 @@ function linuxSections(shape: PromptShape): string[] {
     screen ? looking : '',
     screen && wants('picture') ? LOOK_PROMPT : '',
     quota ? QUOTA_PROMPT : '',
+    agentsFor(shape, wants),
     ASK_PROMPT
   ].filter(Boolean)
 }

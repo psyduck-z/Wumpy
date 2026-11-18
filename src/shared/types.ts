@@ -593,6 +593,11 @@ export interface WumpySettings {
    * on the next launch exactly as it does on the next keystroke.
    */
   latencies: Record<string, Fresh>
+  /**
+   * Each key's measured limit, by "provider:index" (see @shared/limits):
+   * what the pacer keeps to on that key instead of the provider's figure.
+   */
+  keyLimits?: Record<string, import('./limits').KeyLimit>
   /** Working directory for commands. Empty means the user's home directory. */
   shellCwd: string
   /**
@@ -747,6 +752,8 @@ export interface ChatRequest {
    */
   context: {
     chatTitle: string | null
+    /** Which chat, so the model can be told about its background agents. */
+    chatId?: string | null
     messageCount: number
     /**
      * What Wumpy has already done in this chat, stated by the app.
@@ -764,6 +771,46 @@ export interface ChatRequest {
      */
     handsFree?: boolean
   }
+}
+
+/** One background agent, as the panel shows it. See @shared/agents. */
+export interface AgentView {
+  id: string
+  /** The block that asked for it: `${messageId}:${index}`. */
+  key: string
+  chatId: string
+  /** Its number in its chat: "agent 2". */
+  number: number
+  title: string
+  status: 'queued' | 'working' | 'reviewing' | 'done' | 'failed' | 'stopped'
+  /** What it is doing, or did last: "ran df -h", "waiting for its key". */
+  doing: string
+  steps: Array<{ kind: 'run' | 'search'; what: string; ok: boolean }>
+  startedAt: number
+  endedAt?: number
+  model: string
+  /** "accepted on review", "revised once, then accepted", or empty. */
+  review: string
+  /** The report, once there is one. */
+  report?: string
+}
+
+/** A monitor a chat set on its agents. */
+export interface MonitorView {
+  id: string
+  key: string
+  chatId: string
+  note: string
+  when: 'all' | 'each'
+  agents: number[]
+  fired: boolean
+}
+
+/** A report on its way to a chat, as one automatic message. */
+export interface AgentDelivery {
+  id: string
+  chatId: string
+  text: string
 }
 
 export interface ChatDelta {
@@ -910,6 +957,18 @@ export const IPC = {
   /** Main tells the panel to run a spoken turn (wumpy --voice). */
   voiceTurn: 'voice:turn',
   reflectReview: 'reflect:review',
+  /** Background agents (see @shared/agents): start the ones an answer asks for, and its monitors; stop one. */
+  agentsStart: 'agents:start',
+  agentsStop: 'agents:stop',
+  /** Every agent there is, for the cards. */
+  agentsList: 'agents:list',
+  /** Main tells the panel the list changed. */
+  agentsChanged: 'agents:changed',
+  /** Reports waiting to be handed to a chat, and the panel saying one was. */
+  agentsPending: 'agents:pending',
+  agentsDelivered: 'agents:delivered',
+  /** Main tells the panel a report is ready for a chat. */
+  agentsReady: 'agents:ready',
   musicHold: 'music:hold',
   musicRelease: 'music:release',
   /** The panel restarts Wumpy, naming the chat to come back to (/restart). */

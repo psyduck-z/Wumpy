@@ -270,7 +270,7 @@ check('a cushion before each stretch rides out a late piece', /export const CUSH
 check('the next batch is asked for while this one plays', /if \(running\.length >= 2\) await running\.shift\(\)/.test(speaker), true)
 check('and held until everything before it is scheduled', /await after\s+released = true/.test(speaker), true)
 check('speech never waits on the key spacing', /await pace\(provider, index, 0, this\.separate\(provider\), true\)/.test(read('src/main/cloud.ts')), true)
-check('but is still counted towards it', /const gap = urgent \? 0 : PROVIDERS\[provider\]\.minGapMs/.test(read('src/main/cloud.ts')), true)
+check('but is still counted towards it', /const gap = urgent \? 0 : \(\(separate \? keyGaps\.get\(`\$\{provider\}:\$\{key\}`\) : undefined\) \?\? PROVIDERS\[provider\]\.minGapMs\)/.test(read('src/main/cloud.ts')), true)
 check('larger output buffers, so a busy page is not a click', /latencyHint: 'playback'/.test(earcons), true)
 check('the bar says the wait is the earbuds, not a model loading', /Waiting for the earbuds’ microphone/.test(turn), true)
 check('the typing stops at the first sound', /new Speaker\(\{ onSound: stopTicks, note \}\)/.test(turn), true)

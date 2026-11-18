@@ -8,6 +8,9 @@ import type { Entry } from '@shared/journal'
 import type { RankView } from '@shared/types'
 import type { LookResult } from '../main/look'
 import type {
+  AgentDelivery,
+  AgentView,
+  MonitorView,
   Attachment,
   DesktopResult,
   ChatDelta,
@@ -345,6 +348,24 @@ const api = {
       ipcRenderer.invoke(IPC.voiceMicState),
     /** A spoken turn was asked for (wumpy --voice, the tray). */
     onTurn: (cb: () => void) => on<void>(IPC.voiceTurn, cb)
+  },
+  /** Background agents and their monitors. See @shared/agents and main/agents.ts. */
+  agents: {
+    /** Starts what a finished answer's wumpy-agent and wumpy-monitor blocks ask for. */
+    start: (
+      chatId: string,
+      messageId: string,
+      text: string
+    ): Promise<{ started?: AgentView[]; monitors?: MonitorView[]; refused?: string } | null> =>
+      ipcRenderer.invoke(IPC.agentsStart, { chatId, messageId, text }),
+    list: (): Promise<{ agents: AgentView[]; monitors: MonitorView[] }> => ipcRenderer.invoke(IPC.agentsList),
+    stop: (id: string): Promise<void> => ipcRenderer.invoke(IPC.agentsStop, id),
+    /** Reports waiting for a chat, and the panel saying it handed one over. */
+    pending: (chatId: string): Promise<AgentDelivery[]> => ipcRenderer.invoke(IPC.agentsPending, chatId),
+    delivered: (id: string): Promise<void> => ipcRenderer.invoke(IPC.agentsDelivered, id),
+    onChanged: (cb: (list: { agents: AgentView[]; monitors: MonitorView[] }) => void) =>
+      on<{ agents: AgentView[]; monitors: MonitorView[] }>(IPC.agentsChanged, cb),
+    onReady: (cb: (delivery: AgentDelivery) => void) => on<AgentDelivery>(IPC.agentsReady, cb)
   },
   app: {
     /** Restart Wumpy and open this chat again; null starts on an empty one. */
