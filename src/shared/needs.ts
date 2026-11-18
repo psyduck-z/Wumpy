@@ -193,7 +193,7 @@ const FENCES: Partial<Record<Capability, RegExp>> = {
  * at once - and a report coming back, which names them itself.
  */
 const AGENT_WORDS =
-  /\b(agents?|sub-?agents?|background|in parallel|parallel|at the same time|simultaneously|meanwhile|while (?:i|you)|delegate|hand (?:it |this |that )?off|monitors?|research|investigate|look into|compare|audit|review|draft|essay|long|several|multiple|lots of|many|all of (?:them|these|my)|each of)\b/i
+  /\b(agents?|sub-?agents?|background|in parallel|parallel|at the same time|simultaneously|meanwhile|while (?:i|you)|delegate|hand (?:it |this |that )?off|monitors?|research|investigate|look into|compare|audit|review|draft|essay|long|several|multiple|lots of|many|all of (?:them|these|my)|each of|games?|apps?|website|web ?page|html|build|program|playable|play)\b/i
 
 /**
  * How far back to look.

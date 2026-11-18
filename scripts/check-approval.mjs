@@ -229,14 +229,20 @@ const MUST_BLOCK = [
 const MUST_ALLOW = [
   /* Reads that discard their errors, loop, or filter: a background agent
      spent ten steps being refused these. */
-  'cat /sys/class/power_supply/BAT0/status 2>/dev/null',
-  'ls -la /home/x 2>/dev/null || echo "File does not exist"',
-  'du -sh ~/* 2>/dev/null | sort -rh | head -3',
+  /* Bash's discard, which only means that on Linux: on Windows a path
+     like /dev/null is a file that could be written. */
+  ...(process.platform === 'win32'
+    ? []
+    : [
+        'cat /sys/class/power_supply/BAT0/status 2>/dev/null',
+        'ls -la /home/x 2>/dev/null || echo "File does not exist"',
+        'du -sh ~/* 2>/dev/null | sort -rh | head -3',
+        'for d in /sys/class/power_supply/*/; do echo "== $d =="; cat "$d/online" "$d/status" 2>/dev/null; done'
+      ]),
   'ls 2>&1',
   /* PowerShell's discard. On Linux $null is a bash variable, which could
      name any file, so there it is a write. */
   ...(process.platform === 'win32' ? ['Get-ChildItem C:\\ 2>$null'] : []),
-  'for d in /sys/class/power_supply/*/; do echo "== $d =="; cat "$d/online" "$d/status" 2>/dev/null; done',
   'if grep -q x /etc/hosts; then echo yes; fi',
   'upower -i $(upower -e | grep BAT)',
   /* pacman's flags are case-sensitive, and were compared lowercased. */

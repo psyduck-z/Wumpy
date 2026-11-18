@@ -37,6 +37,8 @@ type Shell = 'powershell' | 'bash' | 'cmd'
 
 export interface TurnResult {
   text: string | null
+  /** Stopped at the length limit mid-reply. */
+  cutOff?: boolean
   status: number
   error?: string
   promptTokens: number
@@ -90,8 +92,14 @@ interface Monitor extends MonitorView {
 
 /** How long a single turn may take before it counts as stalled. */
 const TURN_TIMEOUT_MS = 240_000
-/** Room for a long deliverable: a file, a section, a full answer. */
-const AGENT_TOKENS = 4096
+/**
+ * Room for a long deliverable: a file, a section, a full answer. It was
+ * 4,096, and a whole game came back cut off mid-line three times running;
+ * past this, a cut-off reply is asked to carry on (see ask).
+ */
+const AGENT_TOKENS = 8192
+/** How many times a reply cut off by the length limit is asked to carry on. */
+const CARRY_ON = 3
 const REVIEW_TOKENS = 900
 /** How often a queued agent looks for a free key. */
 const QUEUE_LOOK_MS = 5000
@@ -283,6 +291,9 @@ export class Agents {
     let lastReport = ''
     /* What earlier reviews asked for, so a later one does not undo it. */
     const asked: string[] = []
+    let pageSendBacks = 0
+    /* The last report whose page loaded clean, with a player that moved. */
+    let lastGoodPage = ''
     for (;;) {
       if (agent.controller.signal.aborted) return
       agent.doing = used ? `thinking, after ${used} step${used === 1 ? '' : 's'}` : 'working on it'
@@ -352,6 +363,41 @@ export class Agents {
         return
       }
       lastReport = step.text
+      /*
+       * A page in the report is loaded before anyone reviews it - every
+       * report, not the first few: a revision made for a reviewer once
+       * undid the fix that had made the player move, and nobody loaded
+       * it. Errors go back to the agent, three times at most. The last
+       * version that loaded clean and moved is kept, and stands if a
+       * later one breaks.
+       */
+      const page = pageIn(step.text)
+      let pageBroken = false
+      if (page) {
+        agent.doing = 'loading the page it wrote'
+        this.deps.changed()
+        const r = await this.deps.checkPage(page)
+        if (agent.controller.signal.aborted) return
+        agent.records.push({ kind: 'page', what: `the page in its report (${page.length} characters)`, why: 'checked before review', outcome: r.output })
+        agent.steps.push({ kind: 'page', what: r.ok ? 'its page loaded: no errors' : 'its page loaded with errors', ok: r.ran && r.ok })
+        this.deps.log(`[agents] ${agent.number} its page: ${r.output.replace(/\s+/g, ' ').slice(0, 160)}`)
+        pageBroken = r.ran && !r.ok
+        if (!pageBroken && r.ran) lastGoodPage = step.text
+        if (pageBroken && pageSendBacks < 3) {
+          pageSendBacks++
+          messages.push({
+            role: 'user',
+            content: `Wumpy loaded the page in your report. ${r.output}\n\nFix the cause - read your code, do not guess - and give your whole REPORT again.`
+          })
+          continue
+        }
+      }
+      /* Out of chances with a broken page: the last one that worked. */
+      if (pageBroken && lastGoodPage) {
+        agent.review = `${agent.review ? `${agent.review}; ` : ''}its last version broke the page, so the one before it stands`
+        this.finishReport(agent, lastGoodPage, true)
+        return
+      }
       /* Feedback from another agent before the report goes anywhere: up to
          REVIEW_ROUNDS reviews, and the answer to the last one stands. */
       if (rounds < REVIEW_ROUNDS) {
@@ -372,7 +418,10 @@ export class Agents {
               'Another agent reviewed your report against the brief and the steps, and found:',
               review.notes,
               '',
-              `Fix what it found - with tool uses if you need them (${Math.max(0, AGENT_STEPS - used)} left) - and give your whole REPORT again.`
+              `Fix what it found - with tool uses if you need them (${Math.max(0, AGENT_STEPS - used)} left) - and give your whole REPORT again.`,
+              /* A reviewer that misread the brief once had a working hop
+                 slowed to eight seconds a tile, and the agent obliged. */
+              'A note can be wrong. If one contradicts the brief or misreads your code, do not follow it: say why, in one line, in your report.'
             ].join('\n')
           })
           continue
@@ -415,7 +464,8 @@ export class Agents {
         completionTokens: r.completionTokens,
         ms: r.ms
       })
-      if (r.text) return r.text
+      if (r.text?.trim() && r.cutOff) return this.carryOn(agent, messages, numPredict, r.text)
+      if (r.text?.trim()) return r.text.trim()
       if (agent.controller.signal.aborted) return null
       this.deps.log(`[agents] ${agent.number} turn failed: ${r.status || 'no answer'} ${r.error ?? ''}`.trim())
       if (r.status === 401 || r.status === 403) {
@@ -437,6 +487,40 @@ export class Agents {
     }
     agent.why = 'the model did not answer, four times'
     return null
+  }
+
+  /**
+   * A reply the length limit cut off, finished: asked to carry on from
+   * exactly where it stopped, and joined, up to CARRY_ON times.
+   */
+  private async carryOn(
+    agent: Agent,
+    messages: Array<{ role: 'system' | 'user' | 'assistant'; content: string }>,
+    numPredict: number,
+    begun: string
+  ): Promise<string> {
+    let text = begun
+    for (let i = 0; i < CARRY_ON && agent.heldKey !== null && !agent.controller.signal.aborted; i++) {
+      this.deps.log(`[agents] ${agent.number}'s reply was cut off at ${text.length} characters: asking it to carry on`)
+      const r = await this.deps.turn(
+        agent.model,
+        [
+          ...messages,
+          { role: 'assistant', content: text },
+          {
+            role: 'user',
+            content: 'Your reply was cut off by the length limit. Carry on from exactly where it stopped - the very next character - with no repeat, no preamble and no fence of your own unless the cut fell inside one.'
+          }
+        ],
+        agent.heldKey,
+        { numPredict, timeoutMs: TURN_TIMEOUT_MS, signal: agent.controller.signal }
+      )
+      this.deps.spent({ model: agent.model, ok: Boolean(r.text), limited: r.status === 429, promptTokens: r.promptTokens, completionTokens: r.completionTokens, ms: r.ms })
+      if (!r.text) break
+      text += r.text
+      if (!r.cutOff) break
+    }
+    return text.trim()
   }
 
   private async act(agent: Agent, step: Exclude<ReturnType<typeof stepOf>, { kind: 'report' }>): Promise<string> {
@@ -547,6 +631,12 @@ export class Agents {
     this.pending.push(delivery)
     this.deps.ready(delivery)
   }
+}
+
+/** A whole web page in a report, if there is one. */
+export function pageIn(report: string): string | null {
+  const m = /(<!doctype html[\s\S]*?<\/html>|<html[\s\S]*?<\/html>)/i.exec(report)
+  return m && /<script|<canvas|<body/i.test(m[1]) ? m[1] : null
 }
 
 function ended(a: AgentView): boolean {

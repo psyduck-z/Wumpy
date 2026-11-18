@@ -1,9 +1,8 @@
-import { spawn } from 'node:child_process'
+import { BrowserWindow, session } from 'electron'
 import { existsSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { delimiter, join } from 'node:path'
-import { pathToFileURL } from 'node:url'
-import { pageErrors } from '@shared/pagecheck'
+import { join } from 'node:path'
+import { LOOK_JS, playFrom, pressJs } from '@shared/pagecheck'
 
 /**
  * Loads a web page Wumpy just wrote, out of sight, and reports what broke.
@@ -12,105 +11,106 @@ import { pageErrors } from '@shared/pagecheck'
  * play a basic retro crossy road" was written, said to work - "open that file
  * and you play it with the arrow keys" - and crashed on its first frame:
  * `car` was not defined in the log-drawing loop. The model then guessed the
- * window needed focus. One headless load prints the error in a second:
- * "Uncaught ReferenceError: car is not defined". So the app does that load
- * itself after writing any .html file, and hands the errors to the model.
+ * window needed focus. One load prints the error in a second: "Uncaught
+ * ReferenceError: car is not defined". So the app does that load itself
+ * after writing any .html file, presses the up arrow to see whether its
+ * player moves, and hands what it found to the model.
  *
- * A Chromium-family browser, which every Windows machine has as Edge, with a
- * throwaway profile so nothing of the user's is opened, touched or locked.
- * Three seconds of the page's own time, then it is closed.
+ * In a window of Wumpy's own, never shown: Chromium already, the same on
+ * Windows and Linux, nothing to find or install. A headless browser on the
+ * command line was tried first, and with a game loop running it printed
+ * its findings on some runs and hung on others. This window is sandboxed,
+ * has no Node, no preload and no network - only the page's own files - in
+ * a session kept in memory, and is destroyed when the check is done.
  */
 export interface PageCheck {
-  /** Whether a browser was found and the page was loaded at all. */
+  /** Whether the page was loaded at all. */
   checked: boolean
   /** "Uncaught ReferenceError: car is not defined (line 142)". */
   errors: string[]
-  browser?: string
+  /** What pressing the up arrow did to its `player`, when it has one. */
+  play?: { moved: boolean; line: string }
 }
 
-function onPath(name: string): string | null {
-  for (const dir of (process.env.PATH ?? '').split(delimiter)) {
-    if (!dir) continue
-    const full = join(dir, name)
-    if (existsSync(full)) return full
-  }
-  return null
-}
+const sleep = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms))
 
-/** A Chromium-family browser that can run headless, or null. */
-export function headlessBrowser(): string | null {
-  if (process.platform === 'win32') {
-    const roots = [process.env['ProgramFiles(x86)'], process.env.ProgramFiles, process.env.LOCALAPPDATA].filter(Boolean) as string[]
-    for (const root of roots) {
-      for (const rel of ['Microsoft\\Edge\\Application\\msedge.exe', 'Google\\Chrome\\Application\\chrome.exe']) {
-        const full = join(root, rel)
-        if (existsSync(full)) return full
-      }
-    }
-    return null
-  }
-  if (process.platform === 'darwin') {
-    for (const app of ['/Applications/Google Chrome.app/Contents/MacOS/Google Chrome', '/Applications/Chromium.app/Contents/MacOS/Chromium']) {
-      if (existsSync(app)) return app
-    }
-    return null
-  }
-  for (const name of ['chromium', 'chromium-browser', 'google-chrome-stable', 'google-chrome', 'brave', 'microsoft-edge']) {
-    const found = onPath(name)
-    if (found) return found
-  }
-  return null
-}
-
-export function checkPage(path: string): Promise<PageCheck> {
-  if (!/\.html?$/i.test(path)) return Promise.resolve({ checked: false, errors: [] })
-  const browser = headlessBrowser()
-  if (!browser) return Promise.resolve({ checked: false, errors: [] })
-  const profile = mkdtempSync(join(tmpdir(), 'wumpy-pagecheck-'))
-  const args = [
-    '--headless=new',
-    '--disable-gpu',
-    '--no-first-run',
-    '--no-default-browser-check',
-    '--disable-extensions',
-    `--user-data-dir=${profile}`,
-    '--enable-logging=stderr',
-    '--v=0',
-    '--virtual-time-budget=3000',
-    '--dump-dom',
-    pathToFileURL(path).href
-  ]
-  return new Promise((resolve) => {
-    let stderr = ''
-    let done = false
-    const finish = (checked: boolean): void => {
-      if (done) return
-      done = true
-      clearTimeout(timer)
-      try {
-        rmSync(profile, { recursive: true, force: true })
-      } catch {
-        /* a locked file in a temporary folder is not worth an error */
-      }
-      resolve({ checked, errors: checked ? pageErrors(stderr) : [], browser })
-    }
-    let child: ReturnType<typeof spawn>
-    try {
-      child = spawn(browser, args, { windowsHide: true, stdio: ['ignore', 'ignore', 'pipe'] })
-    } catch {
-      finish(false)
-      return
-    }
-    const timer = setTimeout(() => {
-      child.kill()
-      finish(true)
-    }, 20_000)
-    child.stderr?.on('data', (chunk: Buffer) => {
-      if (stderr.length < 200_000) stderr += chunk.toString()
+let fenced = false
+/** The session the checks run in: in memory, and walled off from the network. */
+function checkSession(): Electron.Session {
+  const s = session.fromPartition('wumpy-pagecheck')
+  if (!fenced) {
+    fenced = true
+    s.webRequest.onBeforeRequest((details, done) => {
+      const local = /^(?:file|data|blob|devtools):/i.test(details.url)
+      done({ cancel: !local })
     })
-    child.on('error', () => finish(false))
-    child.on('close', () => finish(true))
+    s.setPermissionRequestHandler((_wc, _permission, done) => done(false))
+  }
+  return s
+}
+
+export async function checkPage(path: string): Promise<PageCheck> {
+  if (!/\.html?$/i.test(path) || !existsSync(path)) return { checked: false, errors: [] }
+  const win = new BrowserWindow({
+    show: false,
+    width: 900,
+    height: 1000,
+    webPreferences: {
+      offscreen: true,
+      sandbox: true,
+      contextIsolation: true,
+      nodeIntegration: false,
+      session: checkSession(),
+      /* A hidden window's timers and frames would otherwise be slowed or
+         stopped, and a game loop with them. */
+      backgroundThrottling: false
+    }
   })
+  const errors: string[] = []
+  const contents = win.webContents
+  contents.setFrameRate(30)
+  contents.on('console-message', (details) => {
+    if (details.level !== 'error') return
+    if (details.sourceId && !details.sourceId.startsWith('file:')) return
+    const said = `${details.message}${details.lineNumber ? ` (line ${details.lineNumber})` : ''}`
+    if (!errors.includes(said) && errors.length < 8) errors.push(said)
+  })
+  contents.setWindowOpenHandler(() => ({ action: 'deny' }))
+  contents.on('will-navigate', (e) => e.preventDefault())
+  /* Never more than a few seconds a step: a page can hang its own thread. */
+  const run = async (js: string): Promise<unknown> =>
+    Promise.race([contents.executeJavaScript(js, true).catch(() => null), sleep(2500).then(() => null)])
+  try {
+    const loaded = await Promise.race([win.loadFile(path).then(() => true).catch(() => false), sleep(8000).then(() => false)])
+    if (!loaded && contents.isDestroyed()) return { checked: false, errors: [] }
+    await sleep(900)
+    /*
+     * A page that stops answering is the worst kind of broken: a Crossy
+     * Road's lane builder looped for ever the moment the player stepped
+     * up, freezing the tab. Asked something, it does not answer - so a
+     * page that answered before the keys and not after them froze.
+     */
+    const alive = await run('1')
+    if (alive === null) {
+      errors.push('The page stopped responding as soon as it loaded: an endless loop, most likely.')
+      return { checked: true, errors }
+    }
+    const before = (await run(LOOK_JS)) as Parameters<typeof playFrom>[0]
+    for (let i = 0; i < 3; i++) {
+      await run(pressJs('ArrowUp'))
+      await sleep(350)
+    }
+    await sleep(1300)
+    if ((await run('1')) === null) {
+      errors.push('The page stopped responding after the up arrow was pressed: an endless loop, most likely, in what the key starts.')
+      return { checked: true, errors }
+    }
+    const after = (await run(LOOK_JS)) as Parameters<typeof playFrom>[1]
+    const play = playFrom(before, after)
+    return { checked: true, errors, ...(play.moved === null ? {} : { play: { moved: play.moved, line: play.line } }) }
+  } finally {
+    if (!win.isDestroyed()) win.destroy()
+  }
 }
 
 /**
@@ -124,10 +124,16 @@ export async function checkHtml(html: string): Promise<{ ran: boolean; ok: boole
   try {
     writeFileSync(file, html)
     const result = await checkPage(file)
-    if (!result.checked) return { ran: false, ok: false, output: 'NOT RUN: no browser here can load a page out of sight.' }
-    return result.errors.length
-      ? { ran: true, ok: false, output: `Loaded it for 3 seconds. Its console showed:\n${result.errors.map((e) => `- ${e}`).join('\n')}` }
-      : { ran: true, ok: true, output: 'Loaded it for 3 seconds: no errors in its console. (That rules out crashes, not wrong behaviour.)' }
+    if (!result.checked) return { ran: false, ok: false, output: 'NOT RUN: the page could not be loaded.' }
+    const play = result.play ? `\n${result.play.line}` : ''
+    const stuck = result.play?.moved === false
+    return result.errors.length || stuck
+      ? {
+          ran: true,
+          ok: false,
+          output: `Loaded it for 4 seconds.${result.errors.length ? ` Its console showed:\n${result.errors.map((e) => `- ${e}`).join('\n')}` : ' No errors in its console.'}${play}`
+        }
+      : { ran: true, ok: true, output: `Loaded it for 4 seconds: no errors in its console.${play} (That rules out crashes, not every wrong behaviour.)` }
   } finally {
     rmSync(dir, { recursive: true, force: true })
   }

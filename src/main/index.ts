@@ -4,6 +4,7 @@ import { existsSync, mkdirSync, unlinkSync, writeFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { IPC } from '@shared/types'
 import type {
+  AgentDelivery,
   Attachment,
   ChatMessage,
   CommandVerdict,
@@ -1571,8 +1572,11 @@ function registerIpc(): void {
     if (result.written && /\.html?$/i.test(result.path)) {
       const page = await checkPage(result.path)
       if (page.checked) {
-        console.log(`[wumpy] loaded ${result.path} to check it: ${page.errors.length ? page.errors.join(' | ') : 'no errors'}`)
-        return { ...result, page: { errors: page.errors } }
+        /* A player that did not move for the arrow keys is as broken as a
+           crash, and reads the same to the model. */
+        const errors = [...page.errors, ...(page.play?.moved === false ? [page.play.line] : [])]
+        console.log(`[wumpy] loaded ${result.path} to check it: ${errors.length ? errors.join(' | ') : 'no errors'}${page.play?.moved ? ' (the player moved)' : ''}`)
+        return { ...result, page: { errors } }
       }
     }
     return result
@@ -2960,6 +2964,24 @@ app.on('second-instance', (_event, argv) => {
     void agentsCheck()
     return
   }
+  if (argv.includes('--build-check')) {
+    void agentsCheck('build')
+    return
+  }
+  if (argv.includes('--delegate-check')) {
+    void agentsCheck('delegate')
+    return
+  }
+  /* `wumpy --page-check=<file>`: the check a written page gets, on any page. */
+  const pageArg = argv.find((a) => a.startsWith('--page-check='))
+  if (pageArg) {
+    const file = pageArg.slice('--page-check='.length)
+    const started = Date.now()
+    void checkPage(file).then((r) =>
+      console.log(`[wumpy] page check: ${file}: ${JSON.stringify(r)} in ${Date.now() - started}ms`)
+    )
+    return
+  }
   if (argv.includes('--compare-hearing')) {
     compareHearing = !compareHearing
     console.log(`[wumpy] comparing recognisers on what is said: ${compareHearing ? 'on, until a restart' : 'off'}`)
@@ -3005,7 +3027,7 @@ let launchChat: string | null =
 if (launchChat && !/^[\w-]{1,80}$/.test(launchChat)) launchChat = null
 
 /** Wumpy's own launch flags, which describe one start and are not carried over. */
-const OWN_FLAGS = /^--(?:hidden|voice|toggle|restart|speech-check|voice-samples|compare-voices|hearing-check|memory-check|agents-check|compare-hearing|resume-chat=.*)$/
+const OWN_FLAGS = /^--(?:hidden|voice|toggle|restart|speech-check|voice-samples|compare-voices|hearing-check|memory-check|agents-check|build-check|delegate-check|page-check=.*|compare-hearing|resume-chat=.*)$/
 
 async function restartWumpy(why: string, chatId: string | null): Promise<void> {
   if (restarting) return
@@ -3179,57 +3201,11 @@ async function modelSays(messages: ChatRequest['messages'], handsFree: boolean):
 }
 
 /**
- * `wumpy --agents-check`: background agents, on the real models and keys.
- *
- * "refine all of their guidelines, bc a bad one is where EVERYTHING fails -
- * wumpy becomes idiotic, the bg agents don't help". The unit checks cover
- * the machinery; only the models can say whether the words work. So:
- *
- *   1. The chat, through its real instructions: does it hand off what is
- *      worth handing off - and only that - with a brief that stands alone?
- *   2. Real agents on real tasks - one a trap (plugged in is not charging),
- *      one a look round the disk, one pure writing - reviewed as usual.
- *   3. The chat given a report back: does it pass it on, or thank the user
- *      for writing it?
- *
- * Commands here run only if read-only, whatever the approval mode says: a
- * check must not change the machine. Everything goes to wumpy.log.
+ * Agents for the checks: as the app's own, except that commands run only if
+ * they read, whatever the approval mode - a check must not change anything.
  */
-async function agentsCheck(): Promise<void> {
-  const one = (t: string, n = 400): string => JSON.stringify(t.replace(/\s+/g, ' ').slice(0, n))
-  const say = (line: string): void => console.log(`[wumpy] agents check: ${line}`)
-  const model = resolveModel()
-  say(`on ${model ?? 'no model'}, ${agentSlotsNow()} agent slot(s)`)
-  if (!model) return
-
-  /* 1. Handing off, or not. */
-  const asks: Array<{ said: string; want: string }> = [
-    { said: 'what is 17 times 23?', want: 'an answer, no agent' },
-    { said: 'am I charging right now?', want: 'a command, no agent' },
-    {
-      said: 'Research the three best free note-taking apps for Linux and compare them, and meanwhile find out how much free disk space I have',
-      want: 'two agents, or one and a command; a monitor'
-    },
-    { said: 'in the background, write me a 1200-word essay on the history of the transistor', want: 'one agent' }
-  ]
-  let handedOff: { said: string; reply: string } | null = null
-  for (const ask of asks) {
-    const reply = await modelSays([{ role: 'user', content: ask.said, sentAt: Date.now() }], false)
-    const started = agentAsks(reply)
-    const monitors = monitorAsks(reply)
-    say(
-      `"${ask.said.slice(0, 60)}" -> ${started.length} agent(s), ${monitors.length} monitor(s), ` +
-        `command ${/\x60\x60\x60wumpy-run/.test(reply)}; wanted ${ask.want}`
-    )
-    for (const a of started) say(`   agent "${a.title}", brief of ${a.brief.length} characters: ${one(a.brief, 500)}`)
-    for (const m of monitors) say(`   monitor (${m.when}, ${JSON.stringify(m.agents)}): ${one(m.note, 160)}`)
-    say(`   said: ${one(reply.replace(/\x60\x60\x60[\s\S]*?\x60\x60\x60/g, '[block]'), 300)}`)
-    if (started.length && !handedOff) handedOff = { said: ask.said, reply }
-  }
-
-  /* 2. Agents at work. Read-only commands only, whatever the mode. */
-  const deliveries: string[] = []
-  const tester = new Agents({
+function agentRunner(ready: (d: AgentDelivery) => void, say: (line: string) => void): Agents {
+  return new Agents({
     model: () => resolveModel(),
     slots: () => Math.max(1, agentSlotsNow()),
     hold: (m) => cloud.holdKey(m),
@@ -3265,10 +3241,102 @@ async function agentsCheck(): Promise<void> {
     },
     checkPage: (html) => checkHtml(html),
     changed: () => {},
-    ready: (d) => deliveries.push(d.text),
+    ready: (d) => ready(d),
     spent: () => {},
     log: (line) => say(line.replace(/^\[agents\] /, ''))
   })
+}
+
+/**
+ * `wumpy --agents-check`: background agents, on the real models and keys.
+ *
+ * "refine all of their guidelines, bc a bad one is where EVERYTHING fails -
+ * wumpy becomes idiotic, the bg agents don't help". The unit checks cover
+ * the machinery; only the models can say whether the words work. So:
+ *
+ *   1. The chat, through its real instructions: does it hand off what is
+ *      worth handing off - and only that - with a brief that stands alone?
+ *   2. Real agents on real tasks - one a trap (plugged in is not charging),
+ *      one a look round the disk, one pure writing - reviewed as usual.
+ *   3. The chat given a report back: does it pass it on, or thank the user
+ *      for writing it?
+ *
+ * Commands here run only if read-only, whatever the approval mode says: a
+ * check must not change the machine. Everything goes to wumpy.log.
+ */
+async function agentsCheck(only?: 'build' | 'delegate'): Promise<void> {
+  const one = (t: string, n = 400): string => JSON.stringify(t.replace(/\s+/g, ' ').slice(0, n))
+  const say = (line: string): void => console.log(`[wumpy] agents check: ${line}`)
+  const model = resolveModel()
+  say(`on ${model ?? 'no model'}, ${agentSlotsNow()} agent slot(s)`)
+  if (!model) return
+  /*
+   * `wumpy --build-check`: one agent builds the game that failed in the
+   * chat - "a basic retro crossy road" - with its page tool and its
+   * reviewer, and what it hands back is saved beside the log, to be played
+   * and probed. The measure of "creating things" is whether that works.
+   */
+  if (only === 'build') {
+    const built: string[] = []
+    const builder = agentRunner((d) => built.push(d.text), say)
+    const began = Date.now()
+    builder.start('build-check', `build-${began}`, [
+      {
+        title: 'Retro Crossy Road in one HTML file',
+        brief:
+          'Write a complete single-file HTML page (inline CSS and JavaScript, no libraries, no network) where the player can play a basic retro Crossy Road: a chicken hops one tile per arrow-key or WASD press - a quick hop, about a fifth of a second - across grass, roads with cars and rivers with logs; it dies when hit by a car or when it lands in the water off a log; the world scrolls so the game keeps going until you die; the score is the furthest row reached; game over shows the score and Space or a button restarts. Every speed is in pixels per second, scaled by the time since the last frame. Hand back the whole file in your report.'
+      }
+    ])
+    while (!built.length && Date.now() - began < 15 * 60_000) await new Promise((r) => setTimeout(r, 2000))
+    const a = builder.forChat('build-check')[0]
+    say(`built: ${a?.status}, ${a?.review || 'not reviewed'}, ${a?.steps.length} step(s): ${a?.steps.map((s) => s.what).join(' | ')}`)
+    const html = /```(?:html)?\s*\n(<!doctype html[\s\S]*?<\/html>)\s*```/i.exec(a?.report ?? '')?.[1] ?? /(<!doctype html[\s\S]*<\/html>)/i.exec(a?.report ?? '')?.[1]
+    if (html) {
+      const out = join(app.getPath('userData'), 'build-check.html')
+      writeFileSync(out, html)
+      say(`saved the page to ${out} (${html.length} characters)`)
+    } else say(`no page in the report: ${one(a?.report ?? a?.doing ?? '', 600)}`)
+    say(`done in ${Math.round((Date.now() - began) / 1000)}s`)
+    return
+  }
+
+  /* 1. Handing off, or not. */
+  const asks: Array<{ said: string; want: string }> = [
+    { said: 'what is 17 times 23?', want: 'an answer, no agent' },
+    { said: 'am I charging right now?', want: 'a command, no agent' },
+    {
+      said: 'Research the three best free note-taking apps for Linux and compare them, and meanwhile find out how much free disk space I have',
+      want: 'two agents, or one and a command; a monitor'
+    },
+    { said: 'in the background, write me a 1200-word essay on the history of the transistor', want: 'one agent' },
+    /* The request that went wrong in the chat, word for word. */
+    {
+      said: 'create a html file in my downloads folder that opens a page where i can play a basic retro crossy road',
+      want: 'one agent, building it'
+    }
+  ]
+  let handedOff: { said: string; reply: string } | null = null
+  for (const ask of asks) {
+    const reply = await modelSays([{ role: 'user', content: ask.said, sentAt: Date.now() }], false)
+    const started = agentAsks(reply)
+    const monitors = monitorAsks(reply)
+    say(
+      `"${ask.said.slice(0, 60)}" -> ${started.length} agent(s), ${monitors.length} monitor(s), ` +
+        `command ${/\x60\x60\x60wumpy-run/.test(reply)}; wanted ${ask.want}`
+    )
+    for (const a of started) say(`   agent "${a.title}", brief of ${a.brief.length} characters: ${one(a.brief, 500)}`)
+    for (const m of monitors) say(`   monitor (${m.when}, ${JSON.stringify(m.agents)}): ${one(m.note, 160)}`)
+    say(`   said: ${one(reply.replace(/\x60\x60\x60[\s\S]*?\x60\x60\x60/g, '[block]'), 300)}`)
+    if (started.length && !handedOff) handedOff = { said: ask.said, reply }
+  }
+  if (only === 'delegate') {
+    say('done in 0s')
+    return
+  }
+
+  /* 2. Agents at work. Read-only commands only, whatever the mode. */
+  const deliveries: string[] = []
+  const tester = agentRunner((d) => deliveries.push(d.text), say)
   const tasks = [
     {
       title: 'Is it charging',

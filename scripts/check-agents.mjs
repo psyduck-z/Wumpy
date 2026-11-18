@@ -146,7 +146,7 @@ check('"what time is it" does not', N.needsFor([{ role: 'user', content: 'what t
 const tokens = (text) => Math.ceil(text.length / 4)
 check(`the stub is a line (~${tokens(A.agentsStub(2))} tokens)`, tokens(A.agentsStub(2)) <= 45, true)
 /* 520: building things - games, pages, apps - joined what agents are for. */
-check(`the rules stay short (~${tokens(A.agentsPrompt(2))} tokens)`, tokens(A.agentsPrompt(2)) <= 520, true)
+check(`the rules stay short (~${tokens(A.agentsPrompt(2))} tokens)`, tokens(A.agentsPrompt(2)) <= 560, true)
 {
   const FULL = { scope: 'full', search: true, screen: true, browser: true, quota: true }
   const plain = S.preambleTokens({ ...FULL, needs: [], agents: 2 })
@@ -176,8 +176,9 @@ check('a page to test is a step, kept whole', (() => {
   return s.kind === 'page' && s.why === 'does it load' && s.html.includes('const t = `a`')
 })(), true)
 check('an agent is told to test a page before it reports one', /Do it\s+before you report any page, game or app/.test(linux), true)
-check('and a reviewer to send back one never tested', /A page never loaded with wumpy-check-page/.test(A.REVIEW_PROMPT), true)
-check('the chat hands building to agents', /Building something - a game, a page, an app/.test(A.agentsPrompt(2)), true)
+check('and a reviewer to check every requirement in the brief', /list EVERY requirement in the brief/.test(A.REVIEW_PROMPT) && /press each control once/.test(A.REVIEW_PROMPT), true)
+check('a page in a report is found for loading', [M.pageIn('REPORT:\n```html\n<!DOCTYPE html><html><body><script>x()</script></body></html>\n```'), M.pageIn('no page here')].map((x) => (x ? 'page' : null)), ['page', null])
+check('the chat hands building to agents, always', /MAKING A GAME, A WEB PAGE OR AN APP IS ALWAYS AN AGENT'S JOB/.test(A.agentsPrompt(2)), true)
 check('a script in a bash fence is a deliverable, never run', A.stepOf(`REPORT:\n${BT}bash\nrm -rf ~/x\n${BT}`, 'linux').kind, 'report')
 check('a monitor note is passed on', /You set a monitor for this, saying what to do now: merge them/.test(A.deliveryText([], 'merge them')), true)
 
@@ -421,6 +422,56 @@ check('and the reviewer is told a REVISE needs something wrong or missing', /A R
   check('a refused command is a step, not a failure', [v.status, v.steps[0]?.ok], ['done', false])
 }
 
+{
+  /* A report with a page that breaks goes back before any review. */
+  const h = harness((messages) => {
+    if (messages[0].content.startsWith('You are a reviewing agent')) return 'VERDICT: ACCEPT\nNOTES: ok'
+    const last = messages[messages.length - 1].content
+    return last.includes('Wumpy loaded the page in your report')
+      ? 'REPORT:\n<!doctype html><html><body><script>ok()</script></body></html>'
+      : 'REPORT:\n<!doctype html><html><body><script>car.x()</script></body></html>'
+  })
+  let loads = 0
+  h.agents['deps'].checkPage = async (html) => (loads++, html.includes('car.x') ? { ran: true, ok: false, output: 'Its console showed:\n- Uncaught ReferenceError: car is not defined' } : { ran: true, ok: true, output: 'no errors' })
+  h.agents.start('c', 'm', [{ title: 'Game', brief: 'Build a game page.' }])
+  await until(() => h.ready.length > 0)
+  const v = h.agents.forChat('c')[0]
+  check('a page that breaks goes back to its agent before review', [loads, v.report.includes('ok()'), v.steps.map((s) => s.ok)], [2, true, [false, true]])
+}
+
+{
+  /* A reply cut off by the length limit is carried on and joined. */
+  let calls = 0
+  const h = harness(() => null)
+  h.agents['deps'].turn = async (_m, messages) => {
+    calls++
+    if (messages[0].content.startsWith('You are a reviewing agent')) return { text: 'VERDICT: ACCEPT\nNOTES: ok', status: 200, promptTokens: 1, completionTokens: 1, ms: 1 }
+    const last = messages[messages.length - 1].content
+    if (last.startsWith('Your reply was cut off')) return { text: 'arc(1)</script></html>', status: 200, promptTokens: 1, completionTokens: 1, ms: 1 }
+    return { text: 'REPORT:\n<!doctype html><html><script>ctx.', cutOff: true, status: 200, promptTokens: 1, completionTokens: 1, ms: 1 }
+  }
+  h.agents['deps'].checkPage = async () => ({ ran: true, ok: true, output: 'no errors' })
+  h.agents.start('c', 'm', [{ title: 'Long', brief: 'A long page.' }])
+  await until(() => h.ready.length > 0)
+  check('a reply cut off at the length limit is carried on, joined exactly', h.agents.forChat('c')[0].report, '<!doctype html><html><script>ctx.arc(1)</script></html>')
+}
+
+{
+  /* A revision that breaks a page that worked: the working one stands. */
+  const h = harness((messages) => {
+    if (messages[0].content.startsWith('You are a reviewing agent')) return 'VERDICT: REVISE\nNOTES:\n1. Make the canvas taller.'
+    const asked = messages.filter((m) => m.role === 'user').length
+    return asked === 1
+      ? 'REPORT:\n<!doctype html><html><body><script>good()</script></body></html>'
+      : 'REPORT:\n<!doctype html><html><body><script>broken()</script></body></html>'
+  })
+  h.agents['deps'].checkPage = async (html) => (html.includes('broken') ? { ran: true, ok: false, output: 'did not move the player at all' } : { ran: true, ok: true, output: 'moved' })
+  h.agents.start('c', 'm', [{ title: 'Game', brief: 'Build a game page.' }])
+  await until(() => h.ready.length > 0)
+  const v = h.agents.forChat('c')[0]
+  check('a revision that breaks a working page is dropped for the one that worked', [v.report.includes('good()'), /the one before it stands/.test(v.review)], [true, true])
+}
+
 /* --------------------------------------------------------- key limits */
 
 const t0 = 1_000_000
@@ -450,6 +501,15 @@ const chromiumLog = [
 check('a crash in the console is found, once, with its line', PC.pageErrors(chromiumLog), ['Uncaught ReferenceError: car is not defined (line 142)'])
 check('an ordinary console.log is not an error', PC.pageErrors(chromiumLog.split('\n')[0]), [])
 check('the hand-back says it was the app, and to read the file', /sent by Wumpy, not typed by the user/.test(PC.pageErrorText('/x.html', ['e'])) && /Read the file/.test(PC.pageErrorText('/x.html', ['e'])), true)
+const seen = (player) => ({ player })
+check('the play test sees a player that moved', PC.playFrom(seen({ x: 5, y: 10 }), seen({ x: 5, y: 7 })).moved, true)
+check('and one that only set its target, which did not', PC.playFrom(seen({ col: 5, row: 11, targetRow: 11, t: 1 }), seen({ col: 5, row: 11, targetRow: 10, t: 0 })).moved, false)
+check('and says nothing for a page with no player', PC.playFrom({}, {}).moved, null)
+check('a flat playerX / playerY counts as where the player is', PC.playFrom(seen({ playerX: 5, playerY: 14 }), seen({ playerX: 5, playerY: 11 })).moved, true)
+check('it looks for the player by the names games use', /'player', 'chicken', 'frog', 'hero'/.test(PC.LOOK_JS), true)
+check('pages are checked in a hidden window with no network', /offscreen: true/.test(read('src/main/pagecheck.ts')) && /done\(\{ cancel: !local \}\)/.test(read('src/main/pagecheck.ts')), true)
+check('a stuck player goes back to the chat as an error', /page\.play\?\.moved === false \? \[page\.play\.line\]/.test(mainSource), true)
+check('an agent may refuse a wrong review note, saying why', /A note can be wrong/.test(read('src/main/agents.ts')), true)
 check('a page written is loaded and its errors handed back, twice at most', /checkPage\(result\.path\)/.test(mainSource) && /rounds >= PAGE_ROUNDS/.test(read('src/renderer/src/App.tsx')), true)
 check('the write rules say code that runs is not done when written', /CODE THAT RUNS - a page, a game, a script - IS NOT DONE WHEN IT IS WRITTEN/.test(read('src/shared/writefile.ts')) && /READ\s+THE FILE before you answer/.test(read('src/shared/writefile.ts').replace(/',\s*'/g, ' ')), true)
 check('and so does the /reflect mentor', /cross the screen in a twentieth of a second is not done/.test(read('src/shared/reflect.ts').replace(/',\s*'/g, ' ')), true)

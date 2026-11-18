@@ -411,7 +411,7 @@ export class CloudClient {
     messages: Array<{ role: 'system' | 'user' | 'assistant'; content: string }>,
     index: number,
     opts: { numPredict: number; timeoutMs: number; signal?: AbortSignal }
-  ): Promise<{ text: string | null; status: number; error?: string; promptTokens: number; completionTokens: number; ms: number }> {
+  ): Promise<{ text: string | null; status: number; error?: string; promptTokens: number; completionTokens: number; ms: number; cutOff?: boolean }> {
     const started = Date.now()
     const nothing = { text: null, promptTokens: 0, completionTokens: 0 }
     const check = this.ready(model)
@@ -454,11 +454,15 @@ export class CloudClient {
         return { ...nothing, status: res.status, error: truncate(stripKey(body), 200), ms: Date.now() - started }
       }
       const body = (await res.json()) as {
-        choices?: Array<{ message?: { content?: string } }>
+        choices?: Array<{ message?: { content?: string }; finish_reason?: string }>
         usage?: { prompt_tokens?: number; completion_tokens?: number }
       }
       return {
-        text: body.choices?.[0]?.message?.content?.trim() ?? null,
+        /* Untrimmed: a reply cut off mid-word is carried on from the very
+           next character, and a trimmed join would weld two words. */
+        text: body.choices?.[0]?.message?.content || null,
+        /* Stopped by the length limit, not because it had finished. */
+        cutOff: body.choices?.[0]?.finish_reason === 'length',
         status: res.status,
         promptTokens: body.usage?.prompt_tokens ?? 0,
         completionTokens: body.usage?.completion_tokens ?? 0,
