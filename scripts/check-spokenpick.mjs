@@ -172,6 +172,57 @@ check('a delete asked for in words asks first', /action\.confirm \|\| handsFree\
 check('a typed /delete still does not', /!action\.confirmed && \(action\.confirm \|\| handsFree\(\)\)/.test(app), true)
 check('the answer read is this turn’s, by time', /createdAt >= started/.test(turn), true)
 
+/* ------------------------------------------- the rankings, said any way */
+
+/* "Allow me to say the smartest one, or like smartest model, or like you
+   know most intelligent model... the fastest model, quickest model, and
+   also the best overall model, generally efficient model." */
+for (const [said, want] of [
+  ['the smartest one', 'smarts'], ['smartest model', 'smarts'], ['most intelligent model', 'smarts'],
+  ['the cleverest', 'smarts'], ['the most capable one', 'smarts'], ['the brainiest', 'smarts'],
+  ['the fastest model', 'speed'], ['quickest model', 'speed'], ['the speediest one', 'speed'], ['lowest latency', 'speed'],
+  ['the best overall model', 'balanced'], ['generally efficient model', 'balanced'], ['the most efficient one', 'balanced'],
+  ['best overall', 'balanced'], ['the recommended one', 'balanced'], ['fast and smart', 'balanced'],
+  ['the best fast one', 'speed'], ['the best smart model', 'smarts']
+]) {
+  const got = P.orderingIn(said)
+  check(`"${said}" is the top of ${want}`, got && !got.rest ? got.ordering : got, want)
+}
+check('"the fastest Nemotron" leaves the name', P.orderingIn('the fastest Nemotron'), { ordering: 'speed', rest: 'nemotron' })
+check('a name is not a ranking', P.orderingIn('Nemotron Ultra'), null)
+check('nor is "Lightning", which is a name', P.orderingIn('Nemotron Lightning'), null)
+check('nor "Flash"', P.orderingIn('GLM Flash'), null)
+check('each ranking answers to its word', P.ORDER_NAME, { balanced: 'best', smarts: 'smartest', speed: 'fastest' })
+check('the list answers to those words', /balanced: \['best'/.test(app) && /smartest: \['smartest'/.test(app) && /fastest: \['fastest'/.test(app), true)
+check('and the picker takes the top for any of them', /const top = all\.find\(\(o\) => o\.names\?\.includes\(ORDER_NAME\[ranked\.ordering\]\)\)/.test(turn), true)
+check('/model "the most intelligent model" picks it', /readOrdering\(action\.name\.replace\(\/\\s\+one\$\/i, ''\)\) \?\? \(asked && !asked\.rest \? asked\.ordering : null\)/.test(app), true)
+
+/* "Slash model" said while the list was read chose GLM 5.3 Flash: slash
+   is one slip from flash. */
+check('"slash model" names no model', labels('slash model'), [])
+check('"Flash" still does', labels('the flash one').every((l) => /Flash/.test(l)) && labels('the flash one').length > 0, true)
+check('a command said to the picker leaves it and runs', /if \(command\?\.sure\) \{[\s\S]{0,200}depsRef\.current\.send\(command\.command\)\s+return 'left'/.test(turn), true)
+check('but "Flash model" there is a model', /spokenCommand\(said, commandNames\(\), false\)/.test(turn), true)
+/* "Nematry Ultra": Whisper's Nemotron Ultra. The Ultra lands it. */
+check('"Nematry Ultra" is Nemotron Ultra', labels('Nematry Ultra'), ['Nemotron 3 Ultra 550B'])
+
+/* Mid-conversation, with no slash: "switch to the smartest model". */
+const names = C.CLOUD_MODELS.map((m) => ({ id: m.id, names: [m.label] }))
+for (const [said, want] of [
+  ['Switch to the smartest model.', '/model the smartest one'],
+  ['Can you change to the fastest one?', '/model the fastest one'],
+  ['Use the most intelligent model', '/model the smartest one'],
+  ['switch to Nemotron Ultra', '/model nemotron ultra'],
+  ['Okay, can you switch over to Gemma?', '/model gemma'],
+  ['change the model to step fun', '/model step fun'],
+  ['switch to dark mode', null],
+  ['go to the cloud', null],
+  ['go to the fastest route', null],
+  ['what is the smartest model?', null],
+  ['switch to the best', '/model the best one']
+]) check(`"${said}"`, P.modelSwitchIn(said, names), want)
+check('and a turn sends it as the command', /spokenSlash\(heard\.heard\) \?\? modelSwitchIn\(heard\.heard, MODEL_NAMES\)/.test(turn), true)
+
 check('music is held for a voice turn', /music\.hold\(\)[\s\S]*music\.release\(\)/.test(turn), true)
 check('and while dictating', /music\.hold\(\)/.test(dictation) && /letMusicGo\(\)/.test(dictation), true)
 check('main pauses only when the setting allows', /settings\.get\('pauseMusic'\) !== false/.test(main), true)

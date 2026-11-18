@@ -97,6 +97,12 @@ export class Ranker {
   private running = false
   /** When the sweep that is running took its first measurement. */
   private sweepStartedAt = 0
+  /**
+   * The same moment on a clock that only goes forward. "8 models in 498599
+   * h" was a sweep timed by the wall clock, which read 1970 for a moment
+   * after the machine woke: the duration is this clock's, never the wall's.
+   */
+  private sweepStartedTick = 0
   /** Measured in this sweep, and asked for. A model can fail or be dropped. */
   private measured = 0
   private asked = 0
@@ -128,6 +134,7 @@ export class Ranker {
     this.asked = this.left.length
     this.measured = 0
     this.sweepStartedAt = 0
+    this.sweepStartedTick = 0
   }
 
   /**
@@ -156,9 +163,10 @@ export class Ranker {
     this.deps.swept?.({
       models: this.measured,
       asked: this.asked,
-      tookMs: this.sweepStartedAt ? Date.now() - this.sweepStartedAt : 0
+      tookMs: this.sweepStartedAt ? performance.now() - this.sweepStartedTick : 0
     })
     this.sweepStartedAt = 0
+    this.sweepStartedTick = 0
   }
 
   stop(): void {
@@ -227,6 +235,7 @@ export class Ranker {
     const controller = new AbortController()
     this.inflight = controller
     const startedAt = Date.now()
+    const startedTick = performance.now()
     try {
       const result = await this.deps.probe(id, this.deps.preamble(), verdict.key, controller.signal)
       /* Cancelled means a turn started. Whatever came back describes that
@@ -242,6 +251,7 @@ export class Ranker {
          the re-ranking actually happened. */
       if (!this.sweepStartedAt) {
         this.sweepStartedAt = startedAt
+        this.sweepStartedTick = startedTick
         this.deps.began?.({ asked: this.asked })
       }
       this.left = this.left.filter((m) => m !== id)

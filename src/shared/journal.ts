@@ -604,10 +604,82 @@ export function journalLines(entries: readonly Entry[], view: JournalView = {}):
 
 /** How long something took, in the units a person would say it in. */
 export function took(ms: number): string {
-  if (!Number.isFinite(ms) || ms <= 0) return ''
+  /* "8 models in 498599 h": the clock read 1970 for a moment after this
+     MacBook woke, and the sweep's start was taken then. A sweep is minutes;
+     past a day it is a clock that moved, and says nothing. */
+  if (!Number.isFinite(ms) || ms <= 0 || ms > 24 * 60 * 60 * 1000) return ''
   if (ms < 90_000) return `${Math.max(1, Math.round(ms / 1000))}s`
   const minutes = Math.round(ms / 60_000)
   return minutes < 90 ? `${minutes} min` : `${Math.round(minutes / 60)} h`
+}
+
+/** 19:55 as it is said: "7:55 pm". */
+function saidClock(at: number): string {
+  const d = new Date(at)
+  const h = d.getHours()
+  const m = d.getMinutes()
+  return `${h % 12 || 12}${m ? `:${String(m).padStart(2, '0')}` : ''} ${h < 12 ? 'am' : 'pm'}`
+}
+
+const COUNT_WORDS = ['no', 'one', 'two', 'three', 'four', 'five', 'six', 'seven', 'eight', 'nine', 'ten']
+
+/** What one line of the history says, as a clause. */
+function saidEntry(e: Entry, times: number): string {
+  const what = e.what.replace(/\s*→\s*/g, ' to ').replace(/(\d)B\b/g, '$1 B')
+  const body =
+    e.kind === 'model'
+      ? `the model went from ${what}`
+      : e.kind === 'start'
+        ? 'Wumpy started'
+        : e.kind === 'command'
+          ? `it ran ${what}`
+          : e.kind === 'write'
+            ? `it wrote ${what}`
+            : e.kind === 'open'
+              ? `it opened ${what}`
+              : e.kind === 'search'
+                ? `it searched for ${what}`
+                : e.kind === 'skill'
+                  ? `the skill ${what}`
+                  : e.kind === 'desktop'
+                    ? `it worked another app, ${what}`
+                    : what
+  return times > 1 ? `${body}, ${COUNT_WORDS[times] ?? times} times` : body
+}
+
+/**
+ * `/log`, through the earbuds. The panel's listing is a block of columns,
+ * and the voice reads prose: what came out of "slash log" was "What Wumpy
+ * has done. Today only, on this machine..." - the block itself skipped
+ * whole. So the same history, said: the newest few things, then the
+ * hourly ranking as one sentence, since ten of those read out one by one
+ * would be all anybody heard.
+ */
+export function journalSpeech(entries: readonly Entry[], view: JournalView = {}): string {
+  const now = view.now ?? Date.now()
+  const kept = prune(entries, now).filter((e) => !view.only || e.kind === view.only)
+  if (!kept.length) return view.only ? 'Nothing of that sort today.' : 'Nothing yet today.'
+  const ranks = kept.filter((e) => e.kind === 'rank')
+  const rest = view.only === 'rank' ? [] : kept.filter((e) => e.kind !== 'rank')
+  /* A run of the same thing is one thing done several times. */
+  const runs: Array<{ e: Entry; times: number }> = []
+  for (const e of [...rest].reverse()) {
+    const last = runs.at(-1)
+    if (last && last.e.kind === e.kind && last.e.what === e.what) last.times++
+    else runs.push({ e, times: 1 })
+  }
+  const SAID = 5
+  const parts = runs.slice(0, SAID).map((r) => `At ${saidClock(r.e.at)}, ${saidEntry(r.e, r.times)}.`)
+  if (runs.length > SAID) parts.push(`And ${runs.length - SAID} more before that, on the screen.`)
+  if (ranks.length) {
+    const last = ranks[ranks.length - 1]
+    parts.push(
+      ranks.length === 1
+        ? `The models were ranked once, at ${saidClock(last.at)}.`
+        : `The models were ranked ${COUNT_WORDS[ranks.length] ?? ranks.length} times, the last at ${saidClock(last.at)}.`
+    )
+  }
+  return parts.join(' ')
 }
 
 /**

@@ -4,6 +4,7 @@
  * what an approval question sounds like, and what of an answer is read aloud.
  */
 import { withoutKept } from './kept'
+import { damerau } from './nearest'
 
 /** Words that mean yes, and words that mean no, said on their own. */
 const YES = /^(yes|yeah|yep|yup|ya|sure|ok|okay|alright|all right|affirmative|approve|approved|confirm|confirmed|go|go ahead|do it|run it|please do)$/
@@ -46,6 +47,104 @@ export function spokenSlash(heard: string): string | null {
   if (!m) return null
   const rest = m[2].trim().replace(/[.!?]+$/, '')
   return `/${m[1].toLowerCase()}${rest ? ` ${rest}` : ''}`
+}
+
+/** A command as the voice knows it: its name and the other names it answers to. */
+export interface CommandName {
+  name: string
+  aliases?: readonly string[]
+}
+
+/**
+ * What Whisper has written for a command word, heard from these earbuds:
+ * "slash log" came back "Slash love", "slash delete" came back "slash the
+ * leak". Each is a guess, asked about before it runs.
+ */
+const HEARD_AS: Record<string, string> = {
+  love: 'log', lug: 'log', lock: 'log', blog: 'log', lob: 'log', lag: 'log',
+  'the leak': 'delete', 'the lead': 'delete', 'the league': 'delete', 'the lead it': 'delete', deleat: 'delete',
+  modal: 'model', muddle: 'model', modell: 'model', 'mod all': 'model',
+  knew: 'new', nu: 'new',
+  'resumé': 'resume', presume: 'resume',
+  'remember me': 'remember'
+}
+
+/**
+ * A spoken slash command, as it was meant.
+ *
+ * `sure` when the word is a command as heard: it runs. Otherwise it is the
+ * nearest command by how it is written and how it sounds - the same first
+ * letter, a slip or two - and is asked about, because a wrong command run is
+ * worse than a question: "Unknown command /love. Did you mean /move?" was
+ * what "slash log" got, read out.
+ *
+ * Put right in the same breath, the correction is what is meant: "slash love,
+ * I mean the slash log" is /log. "Flash" for "slash" only counts before a
+ * command's own name, since Flash is also a model.
+ */
+export function spokenCommand(
+  heard: string,
+  commands: readonly CommandName[],
+  /* Not while models are being chosen, where "Flash model" is GLM 5.3 Flash. */
+  flashToo = true
+): { command: string; name: string; sure: boolean } | null {
+  const said = heard.trim()
+  const lead = /^(?:slash|\/)[\s,.:;!-]*/i.exec(said)
+  const flash = flashToo ? /^(?:flash|splash|lash)[\s,.:;!-]+/i.exec(said) : null
+  if (!lead && !flash) return null
+  const names = new Map<string, string>()
+  for (const c of commands) {
+    names.set(c.name.toLowerCase(), c.name)
+    for (const a of c.aliases ?? []) if (/^[a-z]{2,}$/i.test(a)) names.set(a.toLowerCase(), a)
+  }
+  const tidy = (rest: string): string => rest.trim().replace(/^[\s,.:;!-]+/, '').replace(/[.!?]+$/, '').trim()
+  const build = (name: string, rest: string, sure: boolean) => {
+    const args = tidy(rest)
+    return { command: `/${name.toLowerCase()}${args ? ` ${args}` : ''}`, name: name.toLowerCase(), sure }
+  }
+  /* "...I mean the slash log": the last command said after a correction. */
+  const fixes = [...said.matchAll(/\b(?:i mean|i meant|sorry|no|or rather|rather|actually|correction)[\s,.:;!-]+(?:the\s+|a\s+)?(?:slash|\/)[\s,.:;!-]*([a-z]+)\b(.*)$/gi)]
+  const fix = fixes.at(-1)
+  if (fix && names.has(fix[1].toLowerCase())) return build(fix[1], fix[2], true)
+
+  const body = said.slice((lead ?? flash)![0].length)
+  const words = body.split(/\s+/)
+  const first = (words[0] ?? '').toLowerCase().replace(/[^a-z?]/g, '')
+  if (!first) return null
+  if (names.has(first)) return build(first, words.slice(1).join(' '), true)
+  if (flash) return null
+  const plain = (w: string | undefined): string => (w ?? '').toLowerCase().replace(/[^a-zé]/g, '')
+  /* A word Whisper is known to write instead, one word or two. */
+  for (const n of [3, 2, 1]) {
+    const phrase = words.slice(0, n).map(plain).join(' ')
+    const meant = HEARD_AS[phrase]
+    if (meant && names.has(meant)) return build(meant, words.slice(n).join(' '), false)
+  }
+  /* The nearest by spelling, run together where it was split ("the leak"),
+     with the first sound weighed: "love" is nearer "move" by letters and
+     nearer "log" as said. One clear winner, or nothing. */
+  const tries = [
+    { text: first, used: 1 },
+    { text: `${first}${plain(words[1])}`, used: 2 },
+    { text: `${first.replace(/^th/, 'd')}${plain(words[1])}`, used: 2 }
+  ].filter((t) => t.text.length >= 3)
+  let best: { name: string; cost: number; used: number } | null = null
+  let tie = false
+  for (const t of tries) {
+    for (const name of names.keys()) {
+      if (name.length < 3) continue
+      const edits = damerau(t.text, name)
+      const allowed = t.text.length <= 4 ? 2 : t.text.length <= 7 ? 2 : 3
+      if (edits > allowed) continue
+      const cost = edits + (t.text[0] === name[0] ? 0 : 1.5) + (t.used - 1) * 0.25
+      if (!best || cost < best.cost) {
+        best = { name, cost, used: t.used }
+        tie = false
+      } else if (cost === best.cost && name !== best.name) tie = true
+    }
+  }
+  if (!best || tie || best.cost > 2.5) return null
+  return build(best.name, words.slice(best.used).join(' '), false)
 }
 
 /**

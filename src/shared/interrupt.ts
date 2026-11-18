@@ -57,3 +57,26 @@ export function unfinished(heard: string): boolean {
      one-word "yes" or "Leo" is still finished. */
   return last.split(' ').length > 2 || TRAILING.test(last)
 }
+
+/**
+ * Only the start of something: "Okay. Also," and then a pause to think.
+ * Sent alone, it was answered - four words back to a sentence that had not
+ * begun - and what they then said arrived as a separate question. So it is
+ * held and put in front of what they say next. Finished words are never
+ * held: "Okay." on its own is an answer, and is sent.
+ */
+const LEAD_IN = new Set([
+  'okay', 'ok', 'so', 'also', 'and', 'um', 'umm', 'uh', 'er', 'erm', 'well', 'right', 'alright', 'then', 'but',
+  'plus', 'oh', 'hmm', 'like', 'actually', 'anyway', 'wait', 'yeah', 'hey', 'wumpy', 'now', 'next', 'another',
+  'thing', 'one', 'more', 'other', 'the', 'a', 'and then', 'oh and', 'last', 'lastly', 'finally', 'besides'
+])
+
+export function leadInOnly(heard: string): boolean {
+  const words = heard
+    .toLowerCase()
+    .replace(/[’']/g, '')
+    .replace(/[^a-z ]+/g, ' ')
+    .split(/\s+/)
+    .filter(Boolean)
+  return words.length > 0 && words.length <= 6 && words.every((w) => LEAD_IN.has(w)) && unfinished(heard)
+}

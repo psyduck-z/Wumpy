@@ -291,6 +291,46 @@ check('a duration in seconds', J.took(8_000), '8s')
 check('and in minutes once that reads better', J.took(8 * MINUTE), '8 min')
 check('and in hours past an hour and a half', J.took(3 * HOUR), '3 h')
 check('something that took no time says nothing', J.took(0), '')
+/* "8 models in 498599 h": the wall clock read 1970 for a moment after the
+   MacBook woke. A sweep is minutes; a duration of years says nothing. */
+check('a clock that jumped says nothing', J.took(Date.now()), '')
+check('and the sweep line is just the count', J.sweepLine({ models: 8, asked: 8, tookMs: 1.79e12 }), '8 models')
+{
+  const ranker = readFileSync('src/main/ranker.ts', 'utf8')
+  check('a sweep is timed on a clock that only goes forward', /tookMs: this\.sweepStartedAt \? performance\.now\(\) - this\.sweepStartedTick : 0/.test(ranker), true)
+}
+
+/* "Slash log", through the earbuds: the listing is columns in a block, and
+   what was read out was the heading and the footer. Now it is said. */
+{
+  const at = (h, m) => {
+    const d = new Date(NOW)
+    d.setHours(h, m, 0, 0)
+    return d.getTime()
+  }
+  const day = [
+    J.entry('rank', '8 models in 9 min', at(1, 59)),
+    J.entry('rank', '8 models in 7 min', at(19, 36)),
+    J.entry('model', 'Nemotron 3.5 Super VL 120B → GLM 5.3 Flash', at(19, 52)),
+    J.entry('model', 'GLM 5.3 Flash → Nemotron 3.5 Super VL 120B', at(19, 53)),
+    J.entry('chat', 'one conversation deleted', at(19, 53)),
+    J.entry('chat', 'one conversation deleted', at(19, 54)),
+    J.entry('chat', 'one conversation deleted', at(19, 55))
+  ]
+  const now = at(20, 0)
+  check(
+    'it is said, newest first, ranking last',
+    J.journalSpeech(day, { now }),
+    'At 7:55 pm, one conversation deleted, three times. ' +
+      'At 7:53 pm, the model went from GLM 5.3 Flash to Nemotron 3.5 Super VL 120 B. ' +
+      'At 7:52 pm, the model went from Nemotron 3.5 Super VL 120 B to GLM 5.3 Flash. ' +
+      'The models were ranked two times, the last at 7:36 pm.'
+  )
+  check('one sort only', J.journalSpeech(day, { now, only: 'model' }).startsWith('At 7:53 pm, the model went from GLM'), true)
+  check('nothing today, said so', J.journalSpeech([], { now }), 'Nothing yet today.')
+  const app = readFileSync('src/renderer/src/App.tsx', 'utf8')
+  check('and said through the earbuds', /if \(handsFree\(\)\) tell\(speakable\(journalSpeech\(entries, view\), 700\)\)/.test(app), true)
+}
 
 check('a whole sweep', J.sweepLine({ models: 9, asked: 9, tookMs: 8 * MINUTE }), '9 models in 8 min')
 /* The interesting case: a model that could not be reached is the most useful
@@ -675,6 +715,10 @@ check('nor the window furniture', changed({ compactWidth: 462, smoothText: true 
   const realNow = Date.now
   let clock = NOW
   Date.now = () => clock
+  /* And the clock that only goes forward, which is what a sweep is timed
+     on now: one fake clock for both, as a machine that does not sleep has. */
+  const realTick = performance.now
+  performance.now = () => clock
   /* Nothing is logged out of a check. The ranker narrates each measurement
      to the console, which is wumpy.log's job and not this output's. */
   const realLog = console.log
@@ -823,6 +867,7 @@ check('nor the window furniture', changed({ compactWidth: 462, smoothText: true 
     check('and so is coming back on', stood, ['off', null])
   } finally {
     Date.now = realNow
+    performance.now = realTick
     console.log = realLog
   }
 }

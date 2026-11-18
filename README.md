@@ -175,11 +175,25 @@ nothing to `PATH`, so a bare `wumpy` is not found there.
   answers it. Anything else, or silence, and it asks again; it cannot be
   skipped by ignoring it. Clicking the card in the window answers it too.
 - **Saying "slash" types a command.** "Slash remember I like tea" is
-  `/remember I like tea`, not the word "slash" sent to the model.
+  `/remember I like tea`, not the word "slash" sent to the model. Misheard,
+  it asks rather than guesses: "slash love" (Whisper's "slash log") is
+  answered "Slash log?", and yes runs it. Put right in the same breath —
+  "slash love, I mean slash log" — the correction is what runs. "Slash log"
+  reads the day's history out in sentences: the latest few things, then the
+  re-ranking as one line.
+- **Long turns are heard whole.** Whisper listens in thirty-second windows,
+  and a 34-second turn heard in one piece lost 22 of its 119 words. A turn
+  longer than 25 seconds is cut at a pause, the pieces heard at once, and
+  joined: none lost, and quicker.
+- **A lead-in waits for the rest.** "Okay. Also," and then a pause to think
+  is not sent on its own to be answered: it goes in front of what you say
+  next.
 - **Choosing a model out loud.** "Slash model" reads out five, quickly: the
   three best overall, then the smartest and the fastest. Answer with a name,
   roughly — "Nemotron super", "Gemma", even "Jemma" or "deep seek" — or a
-  place: "the second one", "the fastest". A name that fits several ("Nemotron")
+  place: "the second one" — or the ranking in any words: "the smartest one",
+  "the most intelligent model", "the quickest", "best overall", "a generally
+  efficient one", "the fastest Nemotron". A name that fits several ("Nemotron")
   reads those back, best first, and asks again. Say nothing for a couple of
   seconds and it reads the rest, five at a time and numbered on from six; a
   model that is not answering is said to be not answering. "Slash model
@@ -188,7 +202,9 @@ nothing to `PATH`, so a bare `wumpy` is not found there.
 - **Your chats, out loud.** "Slash resume" (or "resume a chat") reads your
   twelve most recent chats with numbers; say a number or a title.
 - **It can run Wumpy's own commands.** Ask for it in words — "delete this
-  chat", "change the model to Gemma", "use the fastest model" — or ask the
+  chat", "change the model to Gemma", "use the fastest model", and out
+  loud "switch to the smartest model" or "can you change to Nemotron
+  Ultra?" — or ask the
   model, which proposes the command on a card. Anything that cannot be undone
   asks first: "Delete this chat, Fish pie? Say yes or no." Typing `/delete`
   yourself still just does it. The model can never run `/key` or `/approve`.

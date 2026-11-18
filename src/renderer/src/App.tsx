@@ -72,6 +72,7 @@ import {
   matchSpoken,
   modelShortlist,
   numberedSpeech,
+  orderingIn,
   sayModel,
   shortlistSpeech,
   spokenAnd,
@@ -79,6 +80,7 @@ import {
   type ShortWhy
 } from '@shared/spokenpick'
 import { afterTurn, handsFree, tell } from './handsfree'
+import { speakable } from '@shared/spoken'
 import { useChat, nextId, type ChatStats } from './hooks/useChat'
 import { useListening } from './hooks/useListening'
 import type { AudioSource } from './loopback'
@@ -115,7 +117,7 @@ import { poolLines } from './quota'
 import { footprintLines } from '@shared/footprint'
 import { settingsLines } from './settingsreport'
 import { rankLines, rankSummary } from '@shared/ranking'
-import { journalLines, type JournalView } from '@shared/journal'
+import { journalLines, journalSpeech, type JournalView } from '@shared/journal'
 import { DEFAULT_RUNS, freshLatencies, probeLines } from '@shared/probe'
 import { copyText } from './copy'
 import { Toast } from './components/Toast'
@@ -1962,7 +1964,11 @@ function namedControls(shot: Attachment): string[] {
           /* "Use the fastest model": the top of that list, of the ones that
              can answer now. Typed, `/model fastest` opens the list on that
              tab instead - this is the sentence, which asks for the model. */
-          const ordering = readOrdering(action.name.replace(/\s+one$/i, ''))
+          /* And said every other way: "the most intelligent model", "best
+             overall", "a generally efficient one" - see orderingIn. */
+          const asked = orderingIn(action.name)
+          const ordering =
+            readOrdering(action.name.replace(/\s+one$/i, '')) ?? (asked && !asked.rest ? asked.ordering : null)
           const wanted = (ordering && readyModels(ordering)[0]?.id) || action.name
           let hosted = CLOUD_MODELS.find(
             (m) => m.id === wanted || m.label.toLowerCase() === wanted.toLowerCase()
@@ -2283,6 +2289,9 @@ function namedControls(shot: Attachment): string[] {
             id: chat.liveNote(journalLines(entries, view).join(NEWLINE), 'journal'),
             view
           }
+          /* Through the earbuds the listing is columns nobody can hear: the
+             same history, said. */
+          if (handsFree()) tell(speakable(journalSpeech(entries, view), 700))
           return
         }
         case 'remember': {

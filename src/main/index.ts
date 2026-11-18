@@ -109,6 +109,7 @@ import { captureConsole, log, logPath } from './log'
 import { captureScreen } from './screen'
 import { Stretcher } from '@shared/stretch'
 import { forMagpie } from '@shared/voicetext'
+import { cutsFor, piecesOf } from '@shared/pauses'
 import { mayBeInvented } from '@shared/heard'
 import { speakable } from '@shared/spoken'
 import { savesIn, withoutKept } from '@shared/kept'
@@ -256,6 +257,43 @@ function voiceStatus(): VoiceStatus {
  */
 async function hear(audio: Uint8Array, extension: string): Promise<Transcript> {
   if (cloudSpeech() && extension === 'wav') {
+    /* Past Whisper's thirty-second window, in pieces cut at pauses, heard
+       at once and joined: whole, a 34.7s turn lost 21 of its 119 words. */
+    const clip = pcmFromWav(audio)
+    const samples = clip ? new Int16Array(clip.pcm.buffer, clip.pcm.byteOffset, clip.pcm.length >> 1) : null
+    const cuts = clip && samples ? cutsFor(samples, clip.sampleRate) : []
+    if (clip && samples && cuts.length) {
+      const wavs = piecesOf(samples, cuts).map((p) =>
+        wavFrom(Buffer.from(p.buffer, p.byteOffset, p.byteLength), clip.sampleRate)
+      )
+      const parts = await Promise.all(wavs.map((w) => hearOnline(w)))
+      if (parts.every((p): p is Transcript => p !== null)) {
+        log(
+          `[listen] a ${(samples.length / clip.sampleRate).toFixed(1)}s turn heard in ${parts.length} pieces, ` +
+            `cut at pauses at ${cuts.map((c) => `${(c / clip.sampleRate).toFixed(1)}s`).join(', ')}`
+        )
+        /* A piece that starts mid-sentence comes back unpunctuated, and an
+           ending with no full stop reads as trailing off - three seconds'
+           more wait (see unfinished). A long last piece is a sentence. */
+        const last = parts[parts.length - 1].text.trim()
+        const stop = last.split(/\s+/).length >= 6 && !/[.?!…]$/.test(last) ? '.' : ''
+        return {
+          text: `${parts.map((p) => p.text).filter(Boolean).join(' ').replace(/\s+/g, ' ').trim()}${stop}`,
+          confidence: parts.reduce((n, p) => n + p.confidence, 0) / parts.length,
+          ms: Math.max(...parts.map((p) => p.ms)),
+          audioSeconds: parts.reduce((n, p) => n + p.audioSeconds, 0)
+        }
+      }
+    }
+    const whole = await hearOnline(audio)
+    if (whole) return whole
+  }
+  return speech.transcribe(audio, extension)
+}
+
+/** One clip on NVIDIA: Whisper, Parakeet when it fails, null when neither answers. */
+async function hearOnline(audio: Uint8Array): Promise<Transcript | null> {
+  {
     for (const hearer of [HEARING, FALLBACK_HEARING]) {
       const borrowed = await cloud.speechKey('parakeet')
       if (!borrowed) break
@@ -272,7 +310,7 @@ async function hear(audio: Uint8Array, extension: string): Promise<Transcript> {
       }
     }
   }
-  return speech.transcribe(audio, extension)
+  return null
 }
 
 /** Whether Parakeet hears any words in the clip - yes, when it cannot be asked, so Whisper is believed. */
@@ -2765,6 +2803,17 @@ const SAYING_SENTENCES = [
   { said: 'Is there an A?', before: 'Is there an A?' }
 ]
 
+/** About forty seconds said, past Whisper's thirty-second window: see hearingCheck. */
+const LONG_TURN = [
+  'Okay, so can you improve the assistant a bit?',
+  'When I am picking a model, let me just say the smartest one, or the most intelligent model, and pick it for me.',
+  'And the same for the fastest model, the quickest one, and the best overall model too.',
+  'Also make sure that the log command works when I say it out loud, because last time it said nothing useful at all.',
+  'And keep refining how it hears me, because what I say to it is the part that matters most.',
+  'If I talk for a long time like this, every word at the end has to get through as well.',
+  'The last thing I say is the word pineapple.'
+]
+
 function wordsOf(text: string): string[] {
   return text.toLowerCase().replace(/-/g, ' ').replace(/[^a-z0-9' ]/g, ' ').split(/\s+/).filter(Boolean)
 }
@@ -2956,6 +3005,34 @@ async function hearingCheck(): Promise<void> {
     }
     const turn = await hear(hiss, 'wav').then((x) => `"${x.text}"`, (e) => `failed (${String(e).slice(0, 80)})`)
     console.log(`[wumpy] hearing check: noise: a turn takes it as ${turn}`)
+  }
+  /* One long turn, the way it is really said: "heard 36.5s of talking", and
+     Whisper's window is 30 seconds. Heard whole, the way a turn hears it,
+     so whatever falls off the end shows as missing words at the end. */
+  {
+    const pieces: Buffer[] = []
+    for (const said of LONG_TURN) {
+      const k = await cloud.speechKey('magpie')
+      const made = k ? await synthesize(said, k, settings.get('speakVoice') || DEFAULT_VOICE).catch(() => null) : null
+      const clip = made ? pcmFromWav(made.wav) : null
+      if (!clip) continue
+      pieces.push(downsample(clip.pcm, clip.sampleRate, 16000), Buffer.alloc(16000 * 2 * 0.35))
+    }
+    const pcm = Buffer.concat(pieces)
+    const seconds = pcm.length / 2 / 16000
+    const said = LONG_TURN.join(' ')
+    const wav = wavFrom(earbudsLike(pcm), 16000)
+    const k = await cloud.speechKey('parakeet')
+    const whole = k ? await recognize(wav, k, HEARING).catch(() => null) : null
+    const r = await hear(wav, 'wav').catch(() => null)
+    for (const [how, got] of [
+      ['whole, as Whisper takes it', whole],
+      ['as a turn hears it', r]
+    ] as const)
+      console.log(
+        `[wumpy] hearing check: a ${seconds.toFixed(1)}s turn, ${wordsOf(said).length} words, ${how}: ` +
+          (got ? `${wordErrors(said, got.text)} wrong in ${got.ms}ms: "${got.text}"` : 'failed')
+      )
     if (clips[0]) {
       const r = await hear(clips[0].wav, 'wav').then((x) => `"${x.text}" in ${x.ms}ms`, (e) => `failed (${String(e).slice(0, 80)})`)
       console.log(`[wumpy] hearing check: a turn hears "${clips[0].said}" as ${r}`)

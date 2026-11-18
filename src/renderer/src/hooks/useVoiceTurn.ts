@@ -1,14 +1,19 @@
 import { useEffect, useRef } from 'react'
 import type { ChatMessage } from '@shared/types'
-import { approvalQuestion, speakable, spokenSlash, yesNo } from '@shared/spoken'
+import { approvalQuestion, speakable, spokenCommand, spokenSlash, yesNo, type CommandName } from '@shared/spoken'
 import {
+  ORDER_NAME,
   isCancel,
   matchSpoken,
+  modelSwitchIn,
   numberedSpeech,
+  orderingIn,
   placeIn,
   sayModel,
   spokenList
 } from '@shared/spokenpick'
+import { allCommands } from '../commands'
+import { CLOUD_MODELS } from '@shared/cloud'
 import { record, strictBar, type Recording } from '../recorder'
 import { clipForSpeech } from '../wav'
 import { newestPending, runningCount } from '../pending'
@@ -18,7 +23,15 @@ import { setVoiceStopper, showVoice } from '../voiceview'
 import { chime, playOn, releaseOutput, startTicks, stopTicks, ticking, wakeOutput } from '../earcons'
 import { Speaker, currentSpeed, setSpeed } from '../speaker'
 import { readyToSay, sentences } from '@shared/speakahead'
-import { interruption, unfinished } from '@shared/interrupt'
+import { interruption, leadInOnly, unfinished } from '@shared/interrupt'
+
+/** Every model by its name, for hearing one asked for in passing. */
+const MODEL_NAMES = CLOUD_MODELS.map((m) => ({ id: m.id, names: [m.label] }))
+
+/** Every command and what else it answers to, for hearing one said. */
+function commandNames(): CommandName[] {
+  return allCommands().map((c) => ({ name: c.name, aliases: c.aliases }))
+}
 
 /**
  * A spoken conversation, run from the hidden panel: `wumpy --voice` (holding
@@ -762,7 +775,10 @@ export function useVoiceTurn(deps: Deps): void {
           const words = guessed?.heard ? guessed : await hearClip(clip.blob, clip.extension, r.onsetMs())
           note(
             words.heard
-              ? `heard "${words.heard.slice(0, 120)}" ${Date.now() - endedAt}ms after the pause${guessed?.heard ? ', from the guess' : ''}`
+              ? /* Whole, or near it: cut at 120, "heard 36.5s of talking" could
+                   not show whether the end of it got through. */
+                `heard "${words.heard.length > 600 ? `${words.heard.slice(0, 597)}...` : words.heard}" (${words.heard.split(/\s+/).length} words) ` +
+                `${Date.now() - endedAt}ms after the pause${guessed?.heard ? ', from the guess' : ''}`
               : 'the transcriber returned no words'
           )
           if (words.heard) {
@@ -909,6 +925,15 @@ export function useVoiceTurn(deps: Deps): void {
           continue
         }
         const said = heard?.heard ?? ''
+        /* "Slash model" said while the list was read was taken for a name -
+           one slip from "flash" - and chose GLM 5.3 Flash. A command is
+           not an answer: it leaves the question on the screen and runs. */
+        const command = said ? spokenCommand(said, commandNames(), false) : null
+        if (command?.sure) {
+          note(`"${said.slice(0, 60)}" is ${command.command}: the question is left for it`)
+          depsRef.current.send(command.command)
+          return 'left'
+        }
         /* The model's own "Shall I?" with Yes and No buttons: "no" is an
            answer to that, not a way out of it. */
         const word = said ? yesNo(said) : null
@@ -926,8 +951,21 @@ export function useVoiceTurn(deps: Deps): void {
           choice.choose(numbered[place].id)
           return 'answered'
         }
-        let hits: string[] = said ? matchSpoken(said, names(narrowed ?? all)) : []
-        if (!hits.length && narrowed && said) hits = matchSpoken(said, names(all))
+        /* "The smartest one", "most intelligent model", "best overall",
+           "the quickest": the top of that ranking, which answers to the
+           ranking's own word. With a name - "the fastest Nemotron" - both
+           are matched together. */
+        const ranked = said ? orderingIn(said) : null
+        if (ranked && !ranked.rest) {
+          const top = all.find((o) => o.names?.includes(ORDER_NAME[ranked.ordering]))
+          if (top) {
+            choice.choose(top.id)
+            return 'answered'
+          }
+        }
+        const asked = ranked ? `${ORDER_NAME[ranked.ordering]} ${ranked.rest}` : said
+        let hits: string[] = said ? matchSpoken(asked, names(narrowed ?? all)) : []
+        if (!hits.length && narrowed && said) hits = matchSpoken(asked, names(all))
         if (hits.length === 1) {
           choice.choose(hits[0])
           return 'answered'
@@ -1016,19 +1054,48 @@ export function useVoiceTurn(deps: Deps): void {
       return talked
     }
 
+    /** "Slash log?" - yes, no, or whatever else was said instead. */
+    async function confirmCommand(name: string): Promise<'yes' | 'no' | { text: string; heard: string } | null> {
+      asking = true
+      try {
+        await say(`Slash ${name}?`)
+        if (cancelled) return null
+        const reply = await listen(900, 8000, 'Say yes or no.')
+        if (!reply) return null
+        return yesNo(reply.heard) ?? reply
+      } finally {
+        asking = false
+      }
+    }
+
     /** Sends what was said, and stays with it until it has all been answered. */
     async function answer(heard: { text: string; heard: string }): Promise<void> {
-      showVoice({ stage: 'thinking', heard: heard.heard, detail: '' })
       /* An answer still being written to what came before - talked over,
          and this is the next question - stops here, or this would wait. */
       if (depsRef.current.streaming()) depsRef.current.stop()
+      /* "Slash love", "slash the leak": a command misheard is asked about,
+         not run and not sent to the model as words. Yes runs it; anything
+         else they say instead is what they meant. */
+      const spoken = spokenCommand(heard.heard, commandNames())
+      if (spoken && !spoken.sure) {
+        note(`"${heard.heard.slice(0, 60)}" sounds like ${spoken.command}: asking`)
+        const reply = await confirmCommand(spoken.name)
+        if (cancelled) return
+        if (reply && typeof reply === 'object') return answer(reply)
+        if (reply !== 'yes') {
+          await say('Okay.')
+          return
+        }
+      }
+      showVoice({ stage: 'thinking', heard: heard.heard, detail: '' })
       /* By time, not by position: a chat opened by this turn replaces the
          transcript, and its old answers are not this turn's to read. */
       const started = Date.now()
       const mark = choiceMark()
       answerSince = started
       answerMark = mark
-      const slash = spokenSlash(heard.heard)
+      /* "Switch to the smartest model", with no slash: the model it means. */
+      const slash = spoken?.command ?? spokenSlash(heard.heard) ?? modelSwitchIn(heard.heard, MODEL_NAMES)
       /* No chime for "sent": "there's no need for that." The typing that
          started at "got it" runs on, unbroken, until the answer starts. */
       depsRef.current.send(slash ?? heard.text)
@@ -1106,6 +1173,8 @@ export function useVoiceTurn(deps: Deps): void {
       const strictness = setInterval(() => {
         ear?.strict(ticking() || (speaker?.busy() ?? false) || stopSound !== null)
       }, 50)
+      /* A lead-in on its own, waiting for what it leads into. */
+      let held: { text: string; heard: string } | null = null
       try {
         while (!cancelled) {
           interrupted = false
@@ -1147,7 +1216,16 @@ export function useVoiceTurn(deps: Deps): void {
             showVoice({ stage: 'listening', level: 0, detail: 'Talk any time. Hold again to finish.' })
             continue
           }
-          await answer(heard)
+          /* "Okay. Also," - a breath before the question: held for it. */
+          if (leadInOnly(heard.heard)) {
+            note(`"${heard.heard}" is only the start of something: holding it for the rest`)
+            held = held ? { text: `${held.text} ${heard.text}`, heard: `${held.heard} ${heard.heard}` } : heard
+            showVoice({ stage: 'listening', level: 0, detail: 'Go on.' })
+            continue
+          }
+          const whole = held ? { text: `${held.text} ${heard.text}`, heard: `${held.heard} ${heard.heard}` } : heard
+          held = null
+          await answer(whole)
         }
       } finally {
         clearInterval(strictness)

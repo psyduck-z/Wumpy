@@ -496,6 +496,32 @@ check('Parakeet is still compared, now beside Whisper', /\{ name: 'parakeet-tdt-
    compare them to my current one": every one the keys reach, side by side. */
 check('the voice models on the keys can be compared', /async function compareVoices\(\)/.test(main) && /compare-voices\|/.test(main) && /ddacc747-1269-4fab-bfd9-8f593dead106/.test(nv), true)
 check('and what one refuses is not held against the voice in use', /if \(onlineRefused && ours\)/.test(nv) && /UNIMPLEMENTED && ours\) onlineRefused = true/.test(nv), true)
+/* A 34.7s turn, heard whole by Whisper: 21 of 119 words wrong. Its window
+   is thirty seconds, so a long turn is cut at a pause and heard in pieces. */
+{
+  const Pa = await load('src/shared/pauses.ts', 'pauses')
+  const rate = 16000
+  const talk = (seconds, gaps) => {
+    const out = new Int16Array(Math.round(seconds * rate))
+    let seed = 5
+    for (let i = 0; i < out.length; i++) {
+      seed = (seed * 16807) % 2147483647
+      const t = i / rate
+      const quiet = gaps.some((g) => t >= g && t < g + 0.3)
+      out[i] = quiet ? 0 : Math.round(((seed / 2147483647) * 2 - 1) * 8000)
+    }
+    return out
+  }
+  check('a turn that fits the window is not cut', Pa.cutsFor(talk(20, []), rate), [])
+  const cuts = Pa.cutsFor(talk(36.5, [8, 18.2, 31]), rate)
+  check('36.5s is cut once, in its pause between 12s and 25s', cuts.length === 1 && Math.abs(cuts[0] / rate - 18.35) < 0.2, true)
+  const long = talk(70, [10, 22, 41, 60])
+  const many = Pa.cutsFor(long, rate)
+  check('a long monologue, every piece under 25s', Pa.piecesOf(long, many).every((p) => p.length <= 25 * rate), true)
+  check('and nothing lost between them', Pa.piecesOf(long, many).reduce((n, p) => n + p.length, 0), long.length)
+  check('no pause at all still cuts, at the longest', Pa.cutsFor(talk(30, []), rate).length, 1)
+  check('a turn hears the pieces at once, and joins them', /const parts = await Promise\.all\(wavs\.map\(\(w\) => hearOnline\(w\)\)\)/.test(main), true)
+}
 check('a "Thank you." out of a cough is asked of Parakeet first', /mayBeInvented\(heard\.text\) && !\(await parakeetHearsWords\(audio\)\)/.test(main), true)
 {
   const H = await load('src/shared/heard.ts', 'heard')

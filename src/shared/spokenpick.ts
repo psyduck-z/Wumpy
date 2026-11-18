@@ -20,6 +20,7 @@
  * Pure, so the whole thing is checked without a microphone.
  */
 import { damerau } from './nearest'
+import type { Ordering } from './order'
 
 /** Something that can be picked: its id and every name it answers to. */
 export interface Pickable {
@@ -110,7 +111,10 @@ const FILLER = new Set([
   'model', 'models', 'please', 'one', 'that', 'this', 'it', 'go', 'with', 'for', 'me', 'i', 'want',
   'id', 'like', 'lets', 'let', 'try', 'okay', 'ok', 'uh', 'um', 'erm', 'hmm', 'and', 'of', 'chat',
   'conversation', 'called', 'named', 'about', 'on', 'my', 'is', 'just', 'wumpy', 'open', 'resume',
-  'back', 'into', 'in'
+  'back', 'into', 'in',
+  /* "Slash model", said while the list was being read, was one slip from
+     "flash" and chose GLM 5.3 Flash. Nothing is called slash. */
+  'slash'
 ])
 
 /** Close enough to be the same word misheard: one slip in five letters, two in eight. */
@@ -179,6 +183,107 @@ export function matchSpoken(heard: string, options: readonly Pickable[]): string
     if (whole.length === 1) return [whole[0].id]
   }
   return top.map((s) => s.id)
+}
+
+/**
+ * "The smartest one", "the most intelligent model", "best overall", "a
+ * generally efficient model", "the quickest": which of the rankings a spoken
+ * answer asks for the top of. Asked for in these words: "allow me to say the
+ * smartest one, or like smartest model, or like most intelligent model...
+ * the fastest model, quickest model, and also the best overall model,
+ * generally efficient model".
+ *
+ * Words, not a list of sentences, so the ways nobody wrote down land too:
+ * "the brainiest", "lowest latency", "the most capable one". Both kinds of
+ * speed and smarts at once - "fast and smart" - is the balanced ranking,
+ * which is exactly that trade. `rest` is whatever else was said, after the
+ * words that carry no name: empty means the ranking is the whole answer,
+ * and "the fastest Nemotron" leaves "nemotron" to be matched with it.
+ */
+const ORDER_WORDS: ReadonlyArray<readonly [Ordering, RegExp]> = [
+  [
+    'smarts',
+    /\b(?:smart(?:est|er)?|clever(?:est|er)?|intelligen(?:t|ce)|brain(?:y|ier|iest)|bright(?:er|est)?|capable|powerful|strong(?:er|est)|genius|wis(?:e|er|est)|accura(?:te|cy)|(?:highest |best |top )?quality)\b/g
+  ],
+  [
+    'speed',
+    /\b(?:fast(?:est|er)?|quick(?:est|er)?|speed(?:y|ier|iest)?|rapid|swift(?:est|er)?|snapp(?:y|ier|iest)|responsive|(?:low(?:est)? )?latency|instant)\b/g
+  ],
+  [
+    'balanced',
+    /\b(?:best(?: overall| all ?round(?:er)?)?|overall|balanced|recommended|default|efficient|efficiency|general(?:ly)?|all ?round(?:er)?|optimal|ideal)\b/g
+  ]
+]
+const ORDER_FILLER = new Set([
+  ...FILLER, 'most', 'very', 'really', 'possible', 'available', 'you', 'have', 'got', 'there', 'what', 'which',
+  'whats', 'give', 'gimme', 'ones', 'llm', 'ai', 'of', 'all', 'now', 'right', 'can', 'could', 'would', 'we',
+  'do', 'get', 'need', 'something', 'thats', 'out', 'here', 'then', 'go', 'put', 'make', 'over'
+])
+
+export function orderingIn(heard: string): { ordering: Ordering; rest: string } | null {
+  let text = normaliseSpoken(dropPronounOne(heard))
+  const found = new Set<Ordering>()
+  for (const [ordering, words] of ORDER_WORDS) {
+    text = text.replace(words, () => {
+      found.add(ordering)
+      return ' '
+    })
+  }
+  if (!found.size) return null
+  /* "The best fast one" is the fastest, "the best smart model" the
+     smartest: "best" next to either is only emphasis. */
+  if (found.size > 1) found.delete('balanced')
+  const ordering: Ordering = found.size === 1 ? [...found][0] : 'balanced'
+  const rest = text
+    .split(/\s+/)
+    .filter((w) => w && !ORDER_FILLER.has(w))
+    .join(' ')
+  return { ordering, rest }
+}
+
+/** The word each ranking's top model is also called, on a spoken list. */
+export const ORDER_NAME: Record<Ordering, string> = { balanced: 'best', smarts: 'smartest', speed: 'fastest' }
+
+/**
+ * "Switch to the smartest model", "can you change to Nemotron Ultra", "use
+ * the fastest one": a model asked for in passing, mid-conversation, with no
+ * slash and no list on the screen. The `/model` command it means, or null.
+ *
+ * Only an imperative, and only one that lands on a model: "switch to dark
+ * mode" and "go to the cloud" are not models. So a name has to be there by
+ * its family ("Nemotron", "Gemma", "step fun"), or the word "model", or the
+ * whole thing has to be a ranking ("the smartest", "the quickest one").
+ */
+const SWITCH =
+  /^(?:(?:okay|ok|hey|so|um+|uh+|wumpy|please|now|can you|could you|would you|will you|i want to|i wanna|id like to|lets|let us)\s+)*(?:switch|change|swap|move|go|jump|flip)(?:\s+(?:it|me|us|over|back|the model|models|you|across))*\s+(?:to|onto|over to)\s+(.+)$/
+const USE =
+  /^(?:(?:okay|ok|so|please|now|can you|could you|lets|let us|i want to|i wanna|id like to)\s+)*(?:use|pick|choose|select|try)\s+(.+?)\s+(?:model|one)$/
+
+export function modelSwitchIn(heard: string, models: readonly Pickable[]): string | null {
+  const said = heard
+    .toLowerCase()
+    .replace(/[’']/g, '')
+    .replace(/[“”"!?.,;:]+/g, ' ')
+    .replace(/\b(?:please|now|instead|thanks|thank you|for me|then)\s*$/g, '')
+    .replace(/\s+/g, ' ')
+    .trim()
+  const m = SWITCH.exec(said) ?? USE.exec(said)
+  if (!m) return null
+  const target = m[1]
+    .replace(/\b(?:please|now|instead|thanks|thank you|for me|then)\b/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+  if (!target) return null
+  const ranked = orderingIn(target)
+  if (ranked && !ranked.rest) return `/model the ${ORDER_NAME[ranked.ordering]} one`
+  const families = [...new Set(models.map((o) => tokensOf(o.names[0] ?? '')[0]).filter(Boolean))]
+  const words = tokensOf(target)
+  const pieces = [...words, ...words.slice(0, -1).map((w, i) => w + words[i + 1])]
+  const named = pieces.some((p) => families.some((f) => p === f || near(p, f)))
+  if (!named && !/\bmodels?\b/.test(said)) return null
+  const name = target.replace(/\bmodels?\b/g, ' ').replace(/\s+/g, ' ').trim()
+  if (!name || !matchSpoken(name, models).length) return null
+  return `/model ${name}`
 }
 
 const ORDINALS: Record<string, number> = {
