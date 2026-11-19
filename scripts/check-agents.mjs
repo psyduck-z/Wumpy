@@ -605,6 +605,8 @@ check('an edit whose code sits in fences of its own is still read', A.editsIn('`
 check('and what is left of a broken one is never the file', A.fileIn('```wumpy-edit\nFIND:\nint a;\n```\nREPLACE:\nint b;\nint c;\nint d;\nint e;\nint f;\nint g;\n```\nmore'), null)
 check('a tool block is never the file in a report', A.fileIn('REPORT:\n```wumpy-edit\nFIND>\na\nb\nc\nd\ne\nf\n```'), null)
 check('a build report without its file is sent back, not saved', /Your report has no file in it/.test(read('src/main/agents.ts')), true)
+check('a game written beside the agent building it is held', A.heldForAgent('I have an agent on it.\n```wumpy-agent\n# Build\nbrief\n```\n```wumpy-write\npath: ~/a.html\n---\n<html></html>\n```', { path: '~/a.html' }), true)
+check('but not a save of the agent\'s own file, nor a note', [A.heldForAgent('```wumpy-agent\n# B\nb\n```', { path: '~/a.html', from: 'agent-1' }), A.heldForAgent('```wumpy-agent\n# B\nb\n```', { path: '~/notes.txt' })], [false, false])
 check('agents are told they can fix by edits, on a file Wumpy keeps', /Wumpy keeps it; it is on no disk/.test(linux) && /wumpy-edit blocks:/.test(linux), true)
 check('and can see it as it is now', A.stepOf('```wumpy-show\n```', 'linux').kind === 'show' && /wumpy-show block/.test(linux), true)
 check('a missed FIND is shown the closest place as it reads now', (() => { const r = A.applyEdits('a\nlet speed = 4;\nb', [{ find: 'let speed = 5', replace: 'x' }]); return !r.ok && /let speed = 4;/.test(r.why) })(), true)

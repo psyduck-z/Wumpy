@@ -114,7 +114,7 @@ import { Stretcher } from '@shared/stretch'
 import { forMagpie } from '@shared/voicetext'
 import { cutsFor, piecesOf } from '@shared/pauses'
 import { withSentTimes } from '@shared/sent'
-import { agentAsks, agentSlots, monitorAsks, withoutRetypedCode } from '@shared/agents'
+import { agentAsks, agentSlots, heldForAgent, monitorAsks, withoutRetypedCode } from '@shared/agents'
 import { Agents } from './agents'
 import { LimitTester } from './limits'
 import { checkHtml, checkPage } from './pagecheck'
@@ -3509,6 +3509,11 @@ async function buildCheck(arg: string): Promise<void> {
       const back: string[] = []
       for (const b of found.filter((x) => x.tag === 'wumpy-write')) {
         const req = readWriteRequest(b.body)
+        if (heldForAgent(reply, req)) {
+          say(`  not written: it was written beside a wumpy-agent block for the same thing (${req.path})`)
+          transcript.push(`> not written (an agent is building it): ${req.path}`)
+          continue
+        }
         if (req.from) {
           const file = runner.fileOf(req.from)
           say(`  the write asks for ${req.from}'s file: ${file ? `${file.length} characters` : 'there is none'}`)

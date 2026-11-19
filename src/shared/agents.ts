@@ -160,7 +160,9 @@ export const BUILDING = [
   '  and check it as it starts: flood-fill from the player, and throw an Error naming any dot',
   '  or exit it cannot reach. Wumpy\'s test shows that error. Sizes come from the data -',
   '  ROWS = MAZE.length - never a second number typed beside it.',
-  '- Enemies move from the first seconds: ghosts leave their pen, cars drive.',
+  '- Enemies move from the first seconds: ghosts leave their pen, cars drive. Lanes start',
+  '  full - cars and logs already spread along them, not all entering from the edge, which',
+  '  left a Crossy Road\'s rivers empty and uncrossable for its first seconds.',
   '- On a grid - a maze, Pac-Man, Snake, Tetris - things move from tile centre to tile centre:',
   '  a turn pressed early waits for the next centre, a wall is checked one tile ahead, and the',
   '  tile is what collides. Never a free x and y nudged against walls: that Pac-Man stuck in',
@@ -621,6 +623,18 @@ export function withoutRetypedCode(text: string): string {
   return text.replace(/^([ \t]{0,3})(`{3,})[ \t]*(html?|javascript|js|typescript|ts|python|py|cpp|c\+\+|c|css|bash|sh)?[ \t]*\n([\s\S]*?)\n[ \t]{0,3}\2`*[ \t]*$/gm, (whole, indent: string, _fence, _tag, body: string) =>
     body.split(LF).length >= 12 ? `${indent}_(code left out: the file saved is the agent's, as it wrote it)_` : whole
   )
+}
+
+/**
+ * A write the chat made of a built thing in the same reply that hands it to
+ * an agent: not written. Told to delegate, it did both - the agent's tested
+ * file comes back to be saved, and the chat's untested one would only be
+ * overwritten by it, after being played as though it were the answer.
+ */
+export function heldForAgent(reply: string, write: { path: string | null; from?: string | null }): boolean {
+  if (write.from || !write.path) return false
+  if (!/^\s{0,3}`{3,}[ \t]*wumpy-agent\b/m.test(reply)) return false
+  return /\.(?:html?|py|pyw|cpp|cc|cxx|c|js|mjs|ts|sh)$/i.test(write.path.trim())
 }
 
 /** Output handed back to the agent, trimmed to what a model can use. */

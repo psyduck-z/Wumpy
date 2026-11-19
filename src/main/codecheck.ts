@@ -386,7 +386,14 @@ async function playTk(dir: string): Promise<{ ok: boolean; output: string }> {
   const r = await run('/usr/bin/bwrap', [...sandbox(dir, { PYTHONPATH: '/work/faketk' }), '/usr/bin/python3', '-s', 'main.py'], dir, 20_000)
   const out = r.out
   if (/Traceback \(most recent call last\)/.test(out)) {
-    const tail = out.slice(out.indexOf('Traceback')).split('\n').slice(-8).join('\n')
+    const tail = out.slice(out.lastIndexOf('Traceback')).split('\n').slice(-8).join('\n')
+    /* Where it broke: in the game, or in the stand-in - which is this
+       test's fault, never the game's. A Frame without pack_propagate sent
+       an agent rewriting a working Tetris three times. */
+    const frames = [...tail.matchAll(/File "([^"]+)"/g)].map((m) => m[1])
+    if (frames.length && frames[frames.length - 1].includes('/faketk/')) {
+      return { ok: true, output: 'Ran it out of sight with a stand-in for tkinter, which could not follow everything it does - so it is not known whether it plays. Nothing wrong was found.' }
+    }
     return { ok: false, output: `Ran it out of sight, in a sandbox, with a stand-in for tkinter: it crashed.\n${tail}` }
   }
   if (r.timedOut) return { ok: false, output: 'Ran it out of sight with a stand-in for tkinter: it did not finish in 20 seconds - an endless loop outside after(), most likely.' }

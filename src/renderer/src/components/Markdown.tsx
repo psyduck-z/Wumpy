@@ -19,7 +19,8 @@ import type {
 import ReactMarkdown, { type Options } from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import rehypeHighlight from 'rehype-highlight'
-import { withoutRetypedCode } from '@shared/agents'
+import { heldForAgent, withoutRetypedCode } from '@shared/agents'
+import { readWriteRequest } from '@shared/writefile'
 import { normaliseFences } from '@shared/fences'
 import { foldsCode, summarise } from '@shared/bulk'
 import { CommandCard } from './CommandCard'
@@ -551,6 +552,9 @@ export const Markdown = memo(function Markdown({
       components={{
         pre: ({ children }) => {
           const file = onWriteFile ? readWrite(children) : null
+          if (file && heldForAgent(text, readWriteRequest(file))) {
+            return <p className="agent-held">Not written: an agent is building this, and its tested file is saved when it reports.</p>
+          }
           if (file) {
             return (
               <WriteCard

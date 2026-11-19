@@ -19,6 +19,16 @@ END='end'; BOTH='both'; LEFT='left'; RIGHT='right'; TOP='top'; BOTTOM='bottom'; 
 N='n'; S='s'; E='e'; W='w'; NW='nw'; NE='ne'; SW='sw'; SE='se'; CENTER='center'; HIDDEN='hidden'; NORMAL='normal'; DISABLED='disabled'; ALL='all'
 class TclError(Exception): pass
 _now = 0.0; _q = []; _seq = itertools.count(); _binds = {}; _canvases = []; _texts = []
+# The game's clocks follow this one: a game timing its gravity by
+# time.time() would otherwise never see a second pass.
+import time as _time
+_base = _time.time()
+_time.time = lambda: _base + _now / 1000.0
+_time.monotonic = lambda: 1000.0 + _now / 1000.0
+_time.perf_counter = lambda: 1000.0 + _now / 1000.0
+_time.time_ns = lambda: int((_base + _now / 1000.0) * 1e9)
+_time.monotonic_ns = lambda: int((1000.0 + _now / 1000.0) * 1e9)
+_time.sleep = lambda s: None
 class _Var:
     def __init__(self, master=None, value=None, name=None): self._v = value if value is not None else self._d
     def get(self): return self._v
@@ -29,8 +39,14 @@ class IntVar(_Var): _d = 0
 class DoubleVar(_Var): _d = 0.0
 class BooleanVar(_Var): _d = False
 class Event: pass
+def _noop(*a, **k): return None
 class Misc:
-    def __init__(self, master=None, **kw): self.master = master; self.kw = dict(kw)
+    def __init__(self, master=None, *a, **kw): self.master = master; self.kw = dict(kw)
+    def __getattr__(self, name):
+        # Anything this stand-in does not know - pack_propagate, wm_title,
+        # tk_setPalette - does nothing, rather than fail the game for it.
+        if name.startswith('__'): raise AttributeError(name)
+        return _noop
     def pack(self, **k): pass
     def grid(self, **k): pass
     def place(self, **k): pass
@@ -75,6 +91,14 @@ class Misc:
     def iconbitmap(self, *a, **k): pass
     def attributes(self, *a, **k): pass
 class Tk(Misc): pass
+class PhotoImage(Misc):
+    def width(self): return 16
+    def height(self): return 16
+def __getattr__(name):
+    # Widgets and constants this stand-in does not spell out: a plain widget.
+    if name.startswith('__'): raise AttributeError(name)
+    if name[:1].isupper() and not name.isupper(): return type(name, (Misc,), {})
+    return name.lower()
 Toplevel = Tk
 class Frame(Misc): pass
 LabelFrame = Frame
@@ -175,9 +199,14 @@ def _run():
 `
 
 export const FAKE_TK_MESSAGEBOX = String.raw`
-def showinfo(*a, **k): return 'ok'
+import tkinter as _tk
+def showinfo(*a, **k):
+    _tk._texts.append(' '.join(str(x) for x in a) + ' ' + str(k.get('message', '')))
+    return 'ok'
 showwarning = showerror = showinfo
-def askyesno(*a, **k): return True
+def askyesno(*a, **k):
+    _tk._texts.append(' '.join(str(x) for x in a) + ' ' + str(k.get('message', '')))
+    return True
 askokcancel = askretrycancel = askyesno
 def askquestion(*a, **k): return 'yes'
 `
