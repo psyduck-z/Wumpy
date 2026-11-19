@@ -563,7 +563,7 @@ export class Agents {
           sendBacks++
           messages.push({
             role: 'user',
-            content: `Wumpy loaded the page in your report. ${r.output}\n\nFix the cause - read your code, do not guess - with wumpy-edit blocks, or your whole REPORT again.`
+            content: `Wumpy loaded the page in your report. ${r.output}\n\n${/did not move|did not start again|never got anywhere|nothing started/.test(r.output) ? 'Look before you change anything: a wumpy-probe block plays your page and reads values back (press: ArrowLeft, wait: 500, show: <the player>, show: <what your movement code checks>). Then fix' : 'Fix'} the cause - read your code, do not guess - with wumpy-edit blocks, or your whole REPORT again.`
           })
           continue
         }

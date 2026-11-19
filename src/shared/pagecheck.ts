@@ -42,11 +42,11 @@ export function pageErrors(log: string, max = 8): string[] {
  */
 export const HOOK_JS = `(() => {
   if (window.__wumpy) return true
-  const w = (window.__wumpy = { texts: [] })
+  const w = (window.__wumpy = { texts: [], said: '' })
   const P = window.CanvasRenderingContext2D && CanvasRenderingContext2D.prototype
   if (P) for (const m of ['fillText', 'strokeText']) {
     const orig = P[m]
-    P[m] = function (t, ...a) { if (w.texts.length < 400) w.texts.push(String(t)); return orig.call(this, t, ...a) }
+    P[m] = function (t, ...a) { if (w.texts.length < 400) w.texts.push(String(t)); if (w.said.length < 4000) w.said += ' ' + String(t); return orig.call(this, t, ...a) }
   }
   return true
 })()`

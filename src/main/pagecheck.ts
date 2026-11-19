@@ -206,9 +206,16 @@ export async function checkPage(path: string): Promise<PageCheck> {
       if (p.moved) break
       before = after
     }
-    /* Moved, but only once its button was clicked: no key started it. */
+    /* Moved, but only once its button was clicked: no key started it. A
+       page that says "Press Space or Enter to start" and means it only of
+       its button is broken: a Pac-Man looked its keys up in its arrow table
+       first, and returned before Space was ever seen. */
     if (play?.moved && startedBy && !/^(?:Space|Enter)$/.test(startedBy)) {
       play = { moved: true, line: `${play.line} It only started after ${startedBy} was clicked: Space and Enter did nothing on its title screen.` }
+      const promised = await run(`(document.body ? document.body.innerText : '') + ' ' + ((window.__wumpy && window.__wumpy.said) || '')`)
+      if (/\b(?:press|hit|tap)\b[^.\n]{0,30}\b(?:space|enter|any key)\b/i.test(String(promised ?? ''))) {
+        errors.push(`Its title screen says to press Space or Enter (or any key), but neither started it - only ${startedBy} did.`)
+      }
     }
     if (play && !play.moved && tried.length > 1) {
       play = {
