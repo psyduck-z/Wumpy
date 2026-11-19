@@ -315,8 +315,15 @@ that alone was not enough, said again beside the message that asks. On the way:
   seconds inside bubblewrap — no network, no home folder, the system
   read-only, killed after — with Space, Enter and the arrows pressed. A
   crash, a traceback, a program that never draws, or one that quits by
-  itself at its own "play again?" comes back as a bug. On Windows it is
-  compiled and not run.
+  itself at its own "play again?" comes back as a bug. C and C++ run with
+  AddressSanitizer and UBSan, so an index off the end of an array stops the
+  program at that line every time instead of crashing one run in five.
+- **A tkinter game is played too**, through a stand-in tkinter that needs no
+  screen, in the same sandbox, on the game's own clock: minutes of play in
+  a second — keys pressed, played to game over, restarted, and watched for
+  a loop that stopped (a Tetris whose restart left the piece hanging). What
+  the stand-in cannot follow is never blamed on the game.
+  On Windows, programs are compiled or parsed and not run.
 - **Errors come back with the lines they point at,** to the agent before any
   review, and to the chat when it writes a file itself.
 - **Fixes are edits, not rewrites.** An agent changes the file in its last

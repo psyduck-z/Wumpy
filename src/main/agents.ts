@@ -711,6 +711,13 @@ export class Agents {
     begun: string
   ): Promise<string> {
     let text = begun
+    /* Already past what a basic game needs, at its first cut: not carried
+       on at all, and what it was writing goes to the log. */
+    if (text.length > 45_000) {
+      this.deps.log(`[agents] ${agent.number}'s reply was cut off at ${text.length} characters, past any basic game: not carrying on. It ended: ${JSON.stringify(text.slice(-300))}`)
+      agent.tooLong = text.length
+      return text.trim()
+    }
     for (let i = 0; i < CARRY_ON && agent.heldKey !== null && !agent.controller.signal.aborted; i++) {
       this.deps.log(`[agents] ${agent.number}'s reply was cut off at ${text.length} characters: asking it to carry on`)
       const r = await this.deps.turn(
