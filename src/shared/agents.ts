@@ -317,7 +317,9 @@ export const REVIEW_PROMPT = [
   'enough to act on. A REVISE names something WRONG or MISSING for the brief. Not taste,',
   'not something the brief did not ask for, not more checking when the output already',
   'shows the claim, and never the undoing of what an earlier review asked for. Not a bug:',
-  'the game drawn behind its title or game-over overlay, as real games do. If it is',
+  'the game drawn behind its title or game-over overlay, as real games do. Never require',
+  'what the brief does not say because "the real game does": a reviewer sent a Crossy Road',
+  'back to start the player on a road, and the change broke it. If it is',
   'right, ACCEPT - a round that changes nothing wastes the user’s time and quota.',
   '',
   'Reply in exactly this form and nothing else:',
@@ -650,6 +652,15 @@ export function reportOfRead(path: string, text: string): string {
   return `REPORT:${LF}${name}, with the changes asked for.${LF}${BT}${lang}${LF}${text.replace(/\n$/, '')}${LF}${BT}`
 }
 
+/** A reply up to the end of its first wumpy- block, or null when that block never closes. */
+export function firstBlock(reply: string): string | null {
+  const lines = reply.split(LF)
+  const at = lines.findIndex((l) => /^\s{0,3}`{3,}[ \t]*wumpy-/.test(l))
+  if (at === -1) return null
+  const end = lines.findIndex((l, i) => i > at && /^\s{0,3}`{3,}\s*$/.test(l))
+  return end === -1 ? null : lines.slice(0, end + 1).join(LF)
+}
+
 export function withFile(report: string, file: string): string {
   const span = fileSpan(report)
   if (!span) return report
@@ -834,7 +845,7 @@ export function deliveryText(done: readonly Finished[], note: string | null): st
        talked the chat out of saving a C++ game it had been handed. */
     return d.ok
       ? `AGENT ${d.number}: ${d.title} (${how})${LF}${ran}${LF}${d.file && d.id ? withoutFile(d.text, d.id) : d.text}${file}`
-      : `AGENT ${d.number}: ${d.title} - FAILED (${how}): ${d.text}`
+      : `AGENT ${d.number}: ${d.title} - FAILED (${how}): ${d.text}${isBuild(d.title) ? `${LF}It was building or changing something. Say plainly it did not finish, and start one more agent with the same brief - never write the file yourself instead: a Crossy Road the chat wrote itself after a failed agent was four thousand characters, with cars that never killed.` : ''}`
   })
   const rule =
     'A fact about this computer in a report is only as good as what it ran, above: what no output shows, you do not know - say so, or check. Never fill it in. And if a report is not what was asked for, say so plainly: never pass off what you know yourself as what an agent found.'

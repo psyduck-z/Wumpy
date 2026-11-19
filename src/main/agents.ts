@@ -9,6 +9,7 @@ import {
   fileIn,
   fileNamed,
   fileRead,
+  firstBlock,
   reportOfRead,
   sameWork,
   fileSpan,
@@ -385,7 +386,14 @@ export class Agents {
     /* The page as it looked mid-game, and at game over, for a reviewer
        that can see. */
     let shots: string[] | undefined
+    /* Said with the next answer it is given. */
+    let note = ''
     for (;;) {
+      const lastMessage = messages[messages.length - 1]
+      if (note && lastMessage?.role === 'user' && typeof lastMessage.content === 'string') {
+        lastMessage.content = `${lastMessage.content}\n\n${note}`
+        note = ''
+      }
       if (agent.controller.signal.aborted) return
       agent.doing = used ? `thinking, after ${used} step${used === 1 ? '' : 's'}` : 'working on it'
       this.deps.changed()
@@ -402,6 +410,23 @@ export class Agents {
       if (reply === null) {
         this.end(agent, 'failed', agent.why ?? 'the model did not answer')
         return
+      }
+      /*
+       * A tool block, then the same block again and again until the length
+       * limit: the first is used and the rest dropped. A Crossy Road agent
+       * wrote one probe some two hundred times, three replies running, and
+       * was ended for replies too long - its question never asked once.
+       */
+      const looks = /^\s{0,3}`{3,}[ \t]*wumpy-(?:probe|show|run|run-bash|run-cmd|search|check-page)\b/gm
+      const repeated = (reply.match(looks) ?? []).length
+      if (repeated > 1 && !/^\s{0,3}`{3,}[ \t]*wumpy-edit\b/m.test(reply)) {
+        const first = firstBlock(reply)
+        if (first && (agent.tooLong || repeated > 3)) {
+          agent.tooLong = undefined
+          this.deps.log(`[agents] ${agent.number} wrote ${repeated} tool blocks in one reply: using the first`)
+          reply = `${first}`
+          note = `(Only your first block was used: one tool block per reply - you wrote ${repeated}.)`
+        }
       }
       /* Far too long to be a basic game, and cut off besides: said, and
          written again smaller - a Pac-Man ran to seventy-eight thousand. */

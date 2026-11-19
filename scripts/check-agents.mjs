@@ -732,6 +732,30 @@ check('nor a question after one', N.asksToBuild('what time is it in Tokyo', true
 check('the chat knows when something was built here', /const built = messages\.some\(\(m\) => m\.role === 'assistant' && /.test(read('src/main/index.ts')), true)
 check('an earlier card whose file is there word for word says saved, with no buttons', /const already = earlier && target\?\.same === true/.test(read('src/renderer/src/components/WriteCard.tsx')) && /!missingFrom && !already/.test(read('src/renderer/src/components/WriteCard.tsx')), true)
 check('chat cards keep the same component functions across renders', /const components = useMemo<Components>/.test(read('src/renderer/src/components/Markdown.tsx')) && /components=\{components\}/.test(read('src/renderer/src/components/Markdown.tsx')), true)
+check('a failed build goes back saying to start one more agent, never to write it', /start one more agent with the same brief - never write the file yourself/.test(A.deliveryText([{ number: 1, title: 'Build a Crossy Road game in one HTML file', ok: false, text: 'its replies kept running far too long', tookMs: 1000, review: '', steps: 3 }], null)), true)
+{
+  /* One probe written over and over to the length limit: the first is used. */
+  let asked = 0
+  const h = harness(
+    (messages, turn) => {
+      if (messages[0].content.startsWith('You are a reviewing agent')) return 'VERDICT: ACCEPT\nNOTES: Fine.'
+      if (turn === 1) return `REPORT:\nThe game.\n${BT}html\n<!doctype html><html><body><script>let x = 1</script></body></html>\n${BT}`
+      if (turn === 2) return Array.from({ length: 40 }, () => `${BT}wumpy-probe\npress: Space\nshow: x\n${BT}`).join('\n')
+      asked++
+      return `REPORT:\nThe game.\n${BT}html\n<!doctype html><html><body><script>let x = 2</script></body></html>\n${BT}`
+    },
+    {
+      deps: {
+        checkPage: async (html) => (/x = 2/.test(html) ? { ran: true, ok: true, output: 'fine' } : { ran: true, ok: false, output: 'did not move' }),
+        probePage: async () => ({ ran: true, ok: true, output: 'x = 1' }),
+        sees: () => false
+      }
+    }
+  )
+  h.agents.start('c', 'm', [{ title: 'Build a game', brief: 'Build a Snake game in one HTML file.' }])
+  await until(() => h.ready.length > 0)
+  check('a reply of one probe forty times runs the first, once', [h.log.filter((l) => /probed its page/.test(l)).length, h.log.some((l) => /wrote 40 tool blocks in one reply: using the first/.test(l)), h.agents.forChat('c')[0].status], [1, true, 'done'])
+}
 check('an agent is named after the file its brief names', [A.fileNamed('Restyle ~/Downloads/wumpy-tests/pacman.html with neon walls.'), A.fileNamed('Make snake.cpp faster'), A.fileNamed('Build a Pac-Man game in one HTML file. Hand back the whole file.')], ['pacman.html', 'snake.cpp', undefined])
 check('a retry of a broken build is the same thing, a new game is not', [A.sameWork('Build a Pac-Man game in one HTML file', 'Rebuild the Pac-Man game so the player moves'), A.sameWork('Build a Pac-Man game in one HTML file', 'Build a Snake game in one HTML file')], [true, false])
 check('the card shows the file, not a number', /<span className="cmd-shell">\{name\}<\/span>/.test(read('src/renderer/src/components/AgentCard.tsx')), true)
