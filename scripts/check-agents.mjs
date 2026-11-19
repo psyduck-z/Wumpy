@@ -551,6 +551,13 @@ check('a guarded import is optional, not missing', /optional\.add\(n\.lineno\)/.
 check('build agents build maps in code and check them as they start', /fill a grid from\s+a list of wall rectangles/.test(A.BUILDING.join(' ')) && /flood-fill from the player/.test(A.BUILDING.join(' ')), true)
 check('keys are held, not tapped', /keyJs\(key, 'keydown'\)[\s\S]{0,80}await sleep\(ms\)[\s\S]{0,80}keyJs\(key, 'keyup'\)/.test(read('src/main/pagecheck.ts')), true)
 
+const TK = await load('src/shared/faketk.ts', 'faketk')
+check('a tkinter game frozen after its restart is caught', TK.tkVerdict('KEY Left bound\nOVER 90000\nRESTARTED space\nMOVING no\nEND').ok, false)
+check('and one that restarts and runs is not', TK.tkVerdict('KEY Left bound\nOVER 90000\nRESTARTED Return\nMOVING yes\nEND'), { ok: true, line: 'Played until it was over, and Enter started a new game that runs.' })
+check('nor one whose loop stops by itself', TK.tkVerdict('KEY Left bound\nSTOPPED 4000\nEND').ok, false)
+check('the stand-in runs the game on its own clock, never a real window', /def _run\(\)/.test(TK.FAKE_TK) && !/import _tkinter/.test(TK.FAKE_TK), true)
+check('tkinter games are played through it in the sandbox', /PYTHONPATH: '\/work\/faketk'/.test(read('src/main/codecheck.ts')), true)
+
 /* ------------------------------------------- files saved, not retyped */
 
 const pageReport = 'REPORT:\n```html\n<!DOCTYPE html>\n<html><body><canvas></canvas><script>let a = 1</script></body></html>\n```\nChecked: loaded.'
@@ -594,9 +601,12 @@ check('code retyped beside a from: save is left out of the reply', /code left ou
 check('and code in an ordinary reply is not', A.withoutRetypedCode('```html\n' + '<p>x</p>\n'.repeat(14) + '```'), '```html\n' + '<p>x</p>\n'.repeat(14) + '```')
 check('an edit in the style models know is read too', A.editsIn('```wumpy-edit\n<<<<<<< SEARCH\nlet a = 1;\n=======\nlet a = 2;\n>>>>>>> REPLACE\n```'), [{ find: 'let a = 1;', replace: 'let a = 2;' }])
 check('and FIND> for FIND:', A.editsIn('```wumpy-edit\nFIND>\nlet a = 1;\nREPLACE>\nlet a = 2;\n```'), [{ find: 'let a = 1;', replace: 'let a = 2;' }])
+check('an edit whose code sits in fences of its own is still read', A.editsIn('```wumpy-edit\nFIND:\n```cpp\nint a = 1;\n```\nREPLACE:\n```cpp\nint a = 2;\n```\n```'), [{ find: 'int a = 1;', replace: 'int a = 2;' }])
+check('and what is left of a broken one is never the file', A.fileIn('```wumpy-edit\nFIND:\nint a;\n```\nREPLACE:\nint b;\nint c;\nint d;\nint e;\nint f;\nint g;\n```\nmore'), null)
 check('a tool block is never the file in a report', A.fileIn('REPORT:\n```wumpy-edit\nFIND>\na\nb\nc\nd\ne\nf\n```'), null)
 check('a build report without its file is sent back, not saved', /Your report has no file in it/.test(read('src/main/agents.ts')), true)
 check('agents are told they can fix by edits, on a file Wumpy keeps', /Wumpy keeps it; it is on no disk/.test(linux) && /wumpy-edit blocks:/.test(linux), true)
+check('and can see it as it is now', A.stepOf('```wumpy-show\n```', 'linux').kind === 'show' && /wumpy-show block/.test(linux), true)
 check('a missed FIND is shown the closest place as it reads now', (() => { const r = A.applyEdits('a\nlet speed = 4;\nb', [{ find: 'let speed = 5', replace: 'x' }]); return !r.ok && /let speed = 4;/.test(r.why) })(), true)
 check('a runaway reply is not carried on for ever', /text\.length > 45_000/.test(read('src/main/agents.ts')), true)
 check('a build asked for is said beside the message', /\.\.\.buildFacts\(messages\)/.test(mainSource), true)

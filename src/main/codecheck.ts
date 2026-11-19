@@ -3,6 +3,8 @@ import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'no
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { PY_CHECK, codeVerdictText, langOfPath, librariesFor, unsafeInclude, type CodeLang, type CodeVerdict } from '@shared/codecheck'
+import { FAKE_TK, FAKE_TK_FONT, FAKE_TK_MESSAGEBOX, tkVerdict } from '@shared/faketk'
+import { mkdirSync } from 'node:fs'
 
 /**
  * Checks a program without running it: see shared/codecheck.ts.
@@ -184,7 +186,7 @@ const OVER_LINE = /^[^a-z0-9]*(?:game\s*over|you\s+(?:lose|lost|died)|final scor
 
 /** A program a player plays in a terminal or a window: worth running. */
 export function isInteractive(code: string): boolean {
-  return /\b(?:curses|ncurses|termios|conio|getch|kbhit|pygame|tcsetattr|SDL_|raylib|keyboard\.is_pressed)\b/.test(code)
+  return /\b(?:curses|ncurses|termios|conio|getch|kbhit|pygame|tkinter|tcsetattr|SDL_|raylib|keyboard\.is_pressed)\b/.test(code)
 }
 
 /** What the terminal showed last: after its last clear, without escapes. */
@@ -221,12 +223,25 @@ export function lastScreen(raw: string): string {
  */
 export async function runProgram(code: string, lang: CodeLang): Promise<{ ok: boolean; output: string } | null> {
   if (process.platform !== 'linux' || (lang !== 'python' && lang !== 'cpp' && lang !== 'c')) return null
-  if (lang === 'python' && /^\s*(?:import\s+tkinter|from\s+tkinter\s+import)/m.test(code) && !/^\s*(?:import\s+(?:curses|pygame)|from\s+(?:curses|pygame)\b)/m.test(code)) return null
+  /* A window rather than a terminal: played through a stand-in tkinter. */
+  const tk = lang === 'python' && /^\s*(?:import\s+tkinter|from\s+tkinter\b)/m.test(code) && !/^\s*(?:import\s+(?:curses|pygame)|from\s+(?:curses|pygame)\b)/m.test(code)
   const tools = ['/usr/bin/bwrap', '/usr/bin/script', ...(lang === 'python' ? ['/usr/bin/python3'] : [])]
   if (!tools.every((t) => existsSync(t))) return null
   const dir = mkdtempSync(join(tmpdir(), 'wumpy-run-'))
   try {
     let program: string
+    if (tk) {
+      writeFileSync(join(dir, 'main.py'), code)
+      mkdirSync(join(dir, 'faketk', 'tkinter'), { recursive: true })
+      writeFileSync(join(dir, 'faketk', 'tkinter', '__init__.py'), FAKE_TK)
+      writeFileSync(join(dir, 'faketk', 'tkinter', 'messagebox.py'), FAKE_TK_MESSAGEBOX)
+      writeFileSync(join(dir, 'faketk', 'tkinter', 'font.py'), FAKE_TK_FONT)
+      writeFileSync(
+        join(dir, 'faketk', 'tkinter', 'ttk.py'),
+        'from tkinter import *\nclass Style:\n    def __init__(self, *a, **k): pass\n    def configure(self, *a, **k): pass\n    def theme_use(self, *a): pass\nCombobox = Entry\nProgressbar = Frame\n'
+      )
+      return await playTk(dir)
+    }
     if (lang === 'python') {
       writeFileSync(join(dir, 'main.py'), code)
       program = 'python3 -I main.py'
@@ -241,28 +256,7 @@ export async function runProgram(code: string, lang: CodeLang): Promise<{ ok: bo
       program = './main'
     }
     const args = [
-      '--ro-bind', '/usr', '/usr',
-      '--symlink', 'usr/lib', '/lib',
-      '--symlink', 'usr/lib64', '/lib64',
-      '--symlink', 'usr/bin', '/bin',
-      '--symlink', 'usr/bin', '/sbin',
-      '--ro-bind', '/etc', '/etc',
-      '--proc', '/proc',
-      '--dev', '/dev',
-      '--tmpfs', '/tmp',
-      '--bind', dir, '/work',
-      '--chdir', '/work',
-      '--unshare-all',
-      '--die-with-parent',
-      '--new-session',
-      '--cap-drop', 'ALL',
-      '--clearenv',
-      '--setenv', 'TERM', 'xterm-256color',
-      '--setenv', 'PATH', '/usr/bin',
-      '--setenv', 'HOME', '/work',
-      '--setenv', 'LANG', 'C.UTF-8',
-      '--setenv', 'SDL_VIDEODRIVER', 'dummy',
-      '--setenv', 'SDL_AUDIODRIVER', 'dummy',
+      ...sandbox(dir),
       '/usr/bin/script', '-qfec', `stty rows 30 cols 90 2>/dev/null; exec ${program}`, '/dev/null'
     ]
     return await new Promise((resolve) => {
@@ -353,4 +347,50 @@ export async function runProgram(code: string, lang: CodeLang): Promise<{ ok: bo
   } finally {
     rmSync(dir, { recursive: true, force: true })
   }
+}
+
+/** bubblewrap's walls: see runProgram. */
+function sandbox(dir: string, env: Record<string, string> = {}): string[] {
+  return [
+    '--ro-bind', '/usr', '/usr',
+    '--symlink', 'usr/lib', '/lib',
+    '--symlink', 'usr/lib64', '/lib64',
+    '--symlink', 'usr/bin', '/bin',
+    '--symlink', 'usr/bin', '/sbin',
+    '--ro-bind', '/etc', '/etc',
+    '--proc', '/proc',
+    '--dev', '/dev',
+    '--tmpfs', '/tmp',
+    '--bind', dir, '/work',
+    '--chdir', '/work',
+    '--unshare-all',
+    '--die-with-parent',
+    '--new-session',
+    '--cap-drop', 'ALL',
+    '--clearenv',
+    '--setenv', 'TERM', 'xterm-256color',
+    '--setenv', 'PATH', '/usr/bin',
+    '--setenv', 'HOME', '/work',
+    '--setenv', 'LANG', 'C.UTF-8',
+    '--setenv', 'SDL_VIDEODRIVER', 'dummy',
+    '--setenv', 'SDL_AUDIODRIVER', 'dummy',
+    ...Object.entries(env).flatMap(([k, v]) => ['--setenv', k, v])
+  ]
+}
+
+/**
+ * A tkinter game, played through the stand-in (shared/faketk.ts) on its own
+ * clock, in the same sandbox: minutes of play in a second or two.
+ */
+async function playTk(dir: string): Promise<{ ok: boolean; output: string }> {
+  const r = await run('/usr/bin/bwrap', [...sandbox(dir, { PYTHONPATH: '/work/faketk' }), '/usr/bin/python3', '-s', 'main.py'], dir, 20_000)
+  const out = r.out
+  if (/Traceback \(most recent call last\)/.test(out)) {
+    const tail = out.slice(out.indexOf('Traceback')).split('\n').slice(-8).join('\n')
+    return { ok: false, output: `Ran it out of sight, in a sandbox, with a stand-in for tkinter: it crashed.\n${tail}` }
+  }
+  if (r.timedOut) return { ok: false, output: 'Ran it out of sight with a stand-in for tkinter: it did not finish in 20 seconds - an endless loop outside after(), most likely.' }
+  if (!/^END$/m.test(out)) return { ok: false, output: `Ran it out of sight with a stand-in for tkinter: it ended before its window's loop was run (exit code ${r.code}).${out.trim() ? `\n${out.trim().split('\n').slice(-6).join('\n')}` : ''}` }
+  const v = tkVerdict(out)
+  return { ok: v.ok, output: `Ran it out of sight, in a sandbox, with a stand-in for tkinter on its own clock. ${v.line}` }
 }

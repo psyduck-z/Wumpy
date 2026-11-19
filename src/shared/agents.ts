@@ -237,7 +237,7 @@ export function agentPrompt(world: AgentWorld): string {
     `- To fix the file in your last report - Wumpy keeps it; it is on no disk - send ${BT}wumpy-edit blocks:`,
     '  a line FIND:, the lines to change copied exactly from the file (enough to be in one place),',
     '  a line REPLACE:, the new lines; as many pairs as it needs. Wumpy makes the changes and tests',
-    '  the result as your new report.',
+    `  the result as your new report. To see the file as it is now, a ${BT}wumpy-show block.`,
     '- You change nothing on this computer: you look, and you hand back. To write something - a',
     '  script, a document, a file - is to give that text, in full, in your report; Wumpy saves',
     '  it. A brief that says to save a file at a path means: hand back its whole content, and',
@@ -327,6 +327,8 @@ export type Step =
   | { kind: 'page'; html: string; why: string }
   /* Changes to the file in its last report: see applyEdits. */
   | { kind: 'edit'; edits: Array<{ find: string; replace: string }> }
+  /* The file in its last report, as it is now. */
+  | { kind: 'show' }
   | { kind: 'report'; text: string }
 
 /**
@@ -337,6 +339,7 @@ export type Step =
 export function stepOf(reply: string, platform: AgentWorld['platform']): Step {
   const edits = editsIn(reply)
   if (edits.length) return { kind: 'edit', edits }
+  if (/^\s{0,3}`{3,}[ \t]*wumpy-show\b/m.test(reply)) return { kind: 'show' }
   /* A page to test: everything up to the block's own closing fence, which
      is the last one - a page's script may hold backticks of its own. */
   const page = new RegExp(`${BT}[ \\t]*(?:\\n[ \\t]*)?wumpy-check-page\\b[^\\n]*\\n([\\s\\S]*)${BT}`).exec(reply)
@@ -413,8 +416,9 @@ export function fileSpan(report: string): { text: string; kind: string; start: n
     let j = i + 1
     while (j < lines.length && !new RegExp(`^\\s{0,3}${open[1]}\x60*\\s*$`).test(lines[j])) j++
     const body = lines.slice(i + 1, j)
-    /* Its own tool blocks are never the file: a malformed edit once was. */
-    if (/^wumpy-/i.test(open[2])) {
+    /* Its own tool blocks are never the file, nor what is left of an edit
+       whose block closed early: a malformed edit once was saved as a game. */
+    if (/^wumpy-/i.test(open[2]) || body.some((l) => /^\s*(?:<{3,}\s*)?(?:FIND|SEARCH|REPLACE)\s*[:>]?\s*$|^\s*>{3,}\s*REPLACE\s*$/i.test(l))) {
       i = j
       continue
     }
@@ -455,12 +459,17 @@ export function withoutFile(report: string, id: string): string {
 export function editsIn(reply: string): Array<{ find: string; replace: string }> {
   const out: Array<{ find: string; replace: string }> = []
   const lines = reply.split(LF)
+  const MARK_FIND = /^\s*(?:<{3,}\s*)?(?:FIND|SEARCH)\s*[:>]?\s*$/i
+  const MARK_REPLACE = /^\s*REPLACE(?:\s+WITH)?\s*[:>]?\s*$/i
+  const MARK_MID = /^\s*={5,}\s*$/
+  const MARK_END = /^\s*>{3,}\s*REPLACE\s*$/i
+  const FENCE = /^\s{0,3}`{3,}[\w+#.-]*\s*$/
+  const nextReal = (from: number): string => {
+    for (let k = from; k < lines.length; k++) if (lines[k].trim()) return lines[k]
+    return ''
+  }
   for (let i = 0; i < lines.length; i++) {
-    const open = /^\s{0,3}(`{3,})[ \t]*wumpy-edit\b/.exec(lines[i])
-    if (!open) continue
-    let j = i + 1
-    while (j < lines.length && !new RegExp(`^\\s{0,3}${open[1]}\x60*\\s*$`).test(lines[j])) j++
-    const body = lines.slice(i + 1, j)
+    if (!/^\s{0,3}`{3,}[ \t]*wumpy-edit\b/.test(lines[i])) continue
     let mode: 'none' | 'find' | 'replace' = 'none'
     let find: string[] = []
     let replace: string[] = []
@@ -469,17 +478,39 @@ export function editsIn(reply: string): Array<{ find: string; replace: string }>
       find = []
       replace = []
     }
-    /* FIND: and REPLACE:, as asked - or FIND>, SEARCH:, and the
-       <<<<<<< SEARCH / ======= / >>>>>>> REPLACE that models know. */
-    for (const l of body) {
-      if (/^\s*(?:<{3,}\s*)?(?:FIND|SEARCH)\s*[:>]?\s*$/i.test(l)) {
+    let j = i + 1
+    for (; j < lines.length; j++) {
+      const l = lines[j]
+      /* FIND: and REPLACE:, as asked - or FIND>, SEARCH:, and the
+         <<<<<<< SEARCH / ======= / >>>>>>> REPLACE that models know. */
+      if (MARK_FIND.test(l)) {
         flush()
         mode = 'find'
-      } else if (mode === 'find' && (/^\s*REPLACE(?:\s+WITH)?\s*[:>]?\s*$/i.test(l) || /^\s*={5,}\s*$/.test(l))) mode = 'replace'
-      else if (mode === 'replace' && /^\s*>{3,}\s*REPLACE\s*$/i.test(l)) {
+        continue
+      }
+      if (mode === 'find' && (MARK_REPLACE.test(l) || MARK_MID.test(l))) {
+        mode = 'replace'
+        continue
+      }
+      if (mode === 'replace' && MARK_END.test(l)) {
         flush()
         mode = 'none'
-      } else if (mode === 'find') find.push(l)
+        continue
+      }
+      /*
+       * A fence inside the block: the code of a FIND or REPLACE wrapped in
+       * its own, which closed a C++ Snake's edit early - and the pieces
+       * left over were taken for its file. A fence that opens a section,
+       * or closes one with another marker after it, is skipped; any other
+       * closes the block.
+       */
+      if (FENCE.test(l)) {
+        const after = nextReal(j + 1)
+        const opensSection = /`{3,}[\w+#.-]+/.test(l) || ((mode === 'find' || mode === 'replace') && !find.length && !replace.length)
+        if (opensSection || MARK_FIND.test(after) || MARK_REPLACE.test(after) || MARK_MID.test(after)) continue
+        break
+      }
+      if (mode === 'find') find.push(l)
       else if (mode === 'replace') replace.push(l)
     }
     flush()

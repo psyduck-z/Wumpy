@@ -289,9 +289,11 @@ a report never had. All fixed, and in `npm run check:agents`.
 
 ### Building things
 
-Asked for a game, a page, an app or a program — in any language — the chat
-hands it to a background agent instead of writing it in its reply, and writes
-the file when the agent's report comes back. On the way:
+Asked for a game, a page, an app or a program — in any language — or a change
+to one ("now make it look like a neon arcade"), the chat hands it to a
+background agent instead of writing it in its reply, and writes the file when
+the agent's report comes back. The rule is in its instructions and, because
+that alone was not enough, said again beside the message that asks. On the way:
 
 - **A page is played, not just loaded.** Out of sight, in a sandboxed window
   with no network, Wumpy loads it, finds its player (a `player`, `chicken`,
@@ -331,11 +333,19 @@ the file when the agent's report comes back. On the way:
   reviews a built page is shown it mid-game, as a player would see it — a
   Pac-Man maze typed in rows of different lengths passed every other check.
   A build gets three reviews rather than two.
+- **Long replies are stitched cleanly.** A build agent may write sixteen
+  thousand tokens a turn, so a whole game usually fits in one; when one is
+  cut off and continued, whatever the continuation repeats of the cut line
+  is dropped, since the seams were where code broke ("missing ) after
+  argument list"). A reply that runs past 45,000 characters is not carried on.
 - **The rules for building** are sent to an agent whose brief is for one: a
   game starts on a key press and never kills the player first; game over
   restarts a game that runs; speeds are per second, and
   `requestAnimationFrame` time is milliseconds; one unit for every size and
-  position; mazes generated or checked in code, never trusted as typed.
+  position; maps built in code from rectangles and flood-filled as they
+  start, never typed as rows that must line up; sizes taken from the data;
+  grid games moving tile centre to tile centre; a basic game in a few
+  hundred lines.
 
 `wumpy --build-check=<request or spec.json>` plays a request through all of it
 — the chat's real instructions, model and keys, its agents, their reviews, the

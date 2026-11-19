@@ -100,6 +100,8 @@ interface Agent extends AgentView {
   why?: string
   /** Every version it built failed Wumpy's test. */
   stillBroken?: boolean
+  /** Its last reply ran past the length it may have, by this many characters. */
+  tooLong?: number
 }
 
 interface Monitor extends MonitorView {
@@ -140,6 +142,7 @@ const QUEUE_GIVE_UP_MS = 10 * 60_000
 
 const sleep = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms))
 const LF = String.fromCharCode(10)
+const BT3 = String.fromCharCode(96).repeat(3)
 
 /** Said with the picture of the page the reviewer is shown. */
 const SEEN_NOTE = [
@@ -342,6 +345,7 @@ export class Agents {
     let lastGood = ''
     let missingSaid = false
     let badEdits = 0
+    let shows = 0
     /* The page as it looked mid-game, for a reviewer that can see. */
     let shot: string | undefined
     for (;;) {
@@ -361,9 +365,40 @@ export class Agents {
         this.end(agent, 'failed', agent.why ?? 'the model did not answer')
         return
       }
+      /* Far too long to be a basic game, and cut off besides: said, and
+         written again smaller - a Pac-Man ran to seventy-eight thousand. */
+      if (agent.tooLong) {
+        const long = agent.tooLong
+        agent.tooLong = undefined
+        badEdits++
+        messages.push({ role: 'assistant', content: reply.slice(0, 4000) })
+        messages.push({
+          role: 'user',
+          content: `NOT USED: that reply ran past ${long} characters and was cut off unfinished. A basic game is 300 to 600 lines - about 20,000 characters. Write it again, whole and smaller: short comments, no long explanations, nothing extra.`
+        })
+        if (badEdits >= 4) {
+          this.end(agent, 'failed', 'its replies kept running far too long to finish')
+          return
+        }
+        continue
+      }
       messages.push({ role: 'assistant', content: reply })
       let step = stepOf(reply, world.platform)
 
+      /* Its file as it is now, after edits: it is on no disk, and agents
+         went looking for it with cat and find. */
+      if (step.kind === 'show') {
+        const file = lastReport ? fileIn(lastReport) : null
+        shows++
+        messages.push({
+          role: 'user',
+          content: file
+            ? `Your file as it is now (${file.text.split(LF).length - 1} lines):${LF}${BT3}${LF}${clip(file.text, 60_000)}${BT3}`
+            : 'There is no file in a report of yours yet.'
+        })
+        if (shows > 3) lastCall = true
+        continue
+      }
       /* Edits to the file in its last report: made, and the result goes on
          as its report. A FIND that matches nowhere goes back to it. */
       if (step.kind === 'edit') {
@@ -692,13 +727,14 @@ export class Agents {
          lost its way - one restyle ran on to a hundred thousand. */
       if (text.length > 45_000) {
         this.deps.log(`[agents] ${agent.number}'s reply ran past ${text.length} characters: not carrying on`)
+        agent.tooLong = text.length
         break
       }
     }
     return text.trim()
   }
 
-  private async act(agent: Agent, step: Exclude<ReturnType<typeof stepOf>, { kind: 'report' } | { kind: 'edit' }>): Promise<string> {
+  private async act(agent: Agent, step: Exclude<ReturnType<typeof stepOf>, { kind: 'report' } | { kind: 'edit' } | { kind: 'show' }>): Promise<string> {
     if (step.kind === 'run') {
       agent.doing = `running: ${step.command.split('\n')[0].slice(0, 60)}`
       this.deps.changed()
@@ -712,6 +748,10 @@ export class Agents {
           ...r,
           output: 'NOT RUN: you never save files - not with cat, tee, python, or anything. Put the whole file in your REPORT; Wumpy saves it from there, every time. Do not mention saving in your report.'
         }
+      }
+      /* Looking on disk for the file it is building, which is not there. */
+      if (isBuild(agent.brief) && /\.(?:html?|py|cpp|cc|c|js|sh)\b|\*\./.test(step.command) && /No such file|cannot access|not found|^Exit code [1-9][\s\S]*No output/im.test(r.output)) {
+        r = { ...r, output: `${r.output}\nThe file you are building is on no disk: Wumpy keeps it from your last report. A wumpy-show block shows it as it is now.` }
       }
       agent.records.push({ kind: 'run', what: step.command, why: step.why, outcome: r.output })
       agent.steps.push({ kind: 'run', what: step.command.split('\n')[0].slice(0, 120), ok: r.ran && r.ok })
