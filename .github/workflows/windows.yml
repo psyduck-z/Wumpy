@@ -40,6 +40,9 @@ jobs:
         with:
           name: wumpy-windows
           path: dist/*-setup.exe
+          # A day's testing ran to forty installers and filled the repo's storage,
+          # so the next one could not be kept. Each is copied out within the hour.
+          retention-days: 3
       - name: Checks, on Windows
         run: npm run typecheck
       # The recorder in Windows' own Chromium, on a fake mic playing a made-up
