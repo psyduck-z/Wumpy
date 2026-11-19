@@ -30,6 +30,7 @@ import { CommandCard } from './CommandCard'
 import { AskCard } from './AskCard'
 import { SearchCard } from './SearchCard'
 import { AgentCard, MonitorCard } from './AgentCard'
+import { useAgentState } from '../agentstate'
 import { ScreenCard } from './ScreenCard'
 import { LookCard } from './LookCard'
 import { DoCard } from './DoCard'
@@ -406,8 +407,16 @@ function readFence(children: ReactNode): { shell: ShellKind; code: string } | nu
 /** A held game write: the card only once main has said no agent can take it. */
 function HeldForTakeOver({ messageId, children }: { messageId: string; children: ReactNode }): React.JSX.Element {
   const released = useReleased(messageId)
+  const { agents } = useAgentState()
   if (released) return <>{children}</>
-  return <p className="agent-held">Not written: an agent is building this instead, and it is played and tested before it is saved.</p>
+  /* The agent that took it, as its own card: what it is doing, and done. */
+  const agent = agents.find((a) => a.key.startsWith(`${messageId}:take-over`))
+  return (
+    <>
+      <p className="agent-held">Not written: an agent is building this instead, and it is played and tested before it is saved.</p>
+      {agent && <AgentCard body={`# ${agent.title}\n${agent.title}`} messageId={messageId} complete />}
+    </>
+  )
 }
 
 export interface MarkdownProps {
