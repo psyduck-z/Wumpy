@@ -151,8 +151,8 @@ export const BUILDING = [
   'BUILDING A GAME, A PAGE OR A PROGRAM',
   '- One file, whole: every function it calls written out, every name defined where it is',
   '  used. Nothing left out, shortened or "similar to above".',
-  '- A game starts the way a player expects: a title or "press a key to start", and nothing',
-  '  can kill the player before they have pressed one.',
+  '- A game starts the way a player expects: a title or "press a key to start" - Space and',
+  '  Enter start it, as well as any button - and nothing can kill the player before then.',
   '- Controls: arrow keys and WASD (Space where it fits). The arrows must not scroll the page.',
   '- Never type a map as rows of text that must line up: models miscount them, and a Pac-Man',
   '  failed five times on rows of 19, 21 and 22 characters. Build it in code - fill a grid from',
@@ -729,7 +729,7 @@ export function deliveryText(done: readonly Finished[], note: string | null): st
       d.ok && d.file && d.id && !d.broken
         ? [
             '',
-            `ITS FILE (${d.file.kind}, ${d.file.lines} lines) is tested and kept by Wumpy. Whatever the report says about saving, this is how it is saved. Your whole reply: a sentence or two for the user, then this block with the path they asked for - and no code of your own anywhere, before it or after it. Never retype the file.`,
+            `ITS FILE (${d.file.kind}, ${d.file.lines} lines) IS READY, tested and kept by Wumpy. Whatever the report says about saving, folders or what it could not check, save it now: your whole reply is a sentence or two for the user, then this block with the path they asked for - the write makes any missing folder - and no code of your own anywhere. Never retype the file.`,
             `${BT}wumpy-write`,
             `# Save ${d.title.replace(/^(?:build|write|make|create)\s+/i, '')}`,
             'path: <the path they asked for>',
@@ -739,8 +739,11 @@ export function deliveryText(done: readonly Finished[], note: string | null): st
         : d.broken
           ? `${LF}IT DOES NOT WORK YET: every version failed Wumpy's test (below). Say so plainly, and start one more agent with the same brief plus what the test found. Never save this file, and never write one of your own instead.`
           : ''
+    /* The file's save block comes last, after the report: its own words
+       about folders it could not check and writes it could not make once
+       talked the chat out of saving a C++ game it had been handed. */
     return d.ok
-      ? `AGENT ${d.number}: ${d.title} (${how})${LF}${ran}${file}${LF}${d.file && d.id ? withoutFile(d.text, d.id) : d.text}`
+      ? `AGENT ${d.number}: ${d.title} (${how})${LF}${ran}${LF}${d.file && d.id ? withoutFile(d.text, d.id) : d.text}${file}`
       : `AGENT ${d.number}: ${d.title} - FAILED (${how}): ${d.text}`
   })
   const rule =

@@ -149,14 +149,27 @@ export async function checkPage(path: string): Promise<PageCheck> {
     let play: { moved: boolean; line: string } | undefined
     let lastKey = 'ArrowUp'
     let started = ''
+    let startedBy = ''
     const tried: string[] = []
     const order = ['ArrowUp', 'ArrowLeft', 'ArrowRight', 'ArrowDown', 'start', 'ArrowUp', 'ArrowLeft']
     for (let k = 0; k < order.length; k++) {
       const key = order[k]
       if (key === 'start') {
+        /* Space and Enter first, looked at after each: a game that only a
+           click on its button starts is said to be one. */
+        const was = (await look())?.frame
         await hold('Space', 80)
-        await hold('Enter', 80)
-        started = String((await run(CLICK_JS)) || 'a click')
+        await sleep(300)
+        const afterSpace = await look()
+        if (afterSpace?.frame !== was) {
+          started = 'Space'
+        } else {
+          await hold('Enter', 80)
+          await sleep(300)
+          const afterEnter = await look()
+          started = afterEnter?.frame !== was ? 'Enter' : String((await run(CLICK_JS)) || 'a click')
+        }
+        startedBy = started
         await sleep(500)
         before = await look()
         continue
@@ -189,6 +202,10 @@ export async function checkPage(path: string): Promise<PageCheck> {
       play = { moved: p.moved, line: p.line }
       if (p.moved) break
       before = after
+    }
+    /* Moved, but only once its button was clicked: no key started it. */
+    if (play?.moved && startedBy && !/^(?:Space|Enter)$/.test(startedBy)) {
+      play = { moved: true, line: `${play.line} It only started after ${startedBy} was clicked: Space and Enter did nothing on its title screen.` }
     }
     if (play && !play.moved && tried.length > 1) {
       play = {
@@ -254,8 +271,14 @@ export async function checkPage(path: string): Promise<PageCheck> {
         ['button', () => run(CLICK_JS)]
       ] as Array<[string, () => Promise<unknown>]>) {
         const r = await act()
-        await sleep(450)
-        const s = await look()
+        /* Up to a second and a half for it to go: a game-over screen that
+           fades out is still on its way out at the first look. */
+        let s: Seen = null
+        for (let wait = 0; wait < 5; wait++) {
+          await sleep(300)
+          s = await look()
+          if (s && !s.over) break
+        }
         if (s && !s.over) {
           how = label === 'button' ? String(r || 'a click') : label
           break

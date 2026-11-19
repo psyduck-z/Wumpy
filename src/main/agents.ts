@@ -110,7 +110,7 @@ interface Monitor extends MonitorView {
 }
 
 /** A command that writes a file: an agent trying to save its work itself. */
-const SAVES_FILE = /(?:^|[^<>2&])>\s*[~\/\w$"']|\btee\b|open\([^)]*['"][wa]['"]|write_text|Set-Content|Out-File|New-Item|\bcp\s|\bmv\s|<<\s*['"]?EOF/i
+const SAVES_FILE = /(?:^|[^<>2&])>\s*[~\/\w$"']|\btee\b|open\([^)]*['"][wa]['"]|write_text|Set-Content|Out-File|New-Item|\bcp\s|\bmv\s|\bmkdir\b|\btouch\s|<<\s*['"]?EOF/i
 
 /** A command that prints a file: its output is kept whole, up to a point. */
 const READS_FILE = /^\s*(?:cat|Get-Content|gc|type|bat|nl|head|tail|sed\s+-n)\b/i
@@ -746,7 +746,7 @@ export class Agents {
       if (!r.ran && SAVES_FILE.test(step.command)) {
         r = {
           ...r,
-          output: 'NOT RUN: you never save files - not with cat, tee, python, or anything. Put the whole file in your REPORT; Wumpy saves it from there, every time. Do not mention saving in your report.'
+          output: 'NOT RUN: you never save files or make folders - not with cat, tee, mkdir, python, or anything. Put the whole file in your REPORT; Wumpy saves it from there, every time, making any folder it needs. Do not mention saving or folders in your report.'
         }
       }
       /* Looking on disk for the file it is building, which is not there. */

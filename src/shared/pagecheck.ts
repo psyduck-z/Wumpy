@@ -109,8 +109,10 @@ export const LOOK_JS = `(() => {
     for (const e of document.querySelectorAll('body *')) {
       const t = (e.children.length ? '' : e.textContent || '').trim()
       if (!t || t.length > 40 || !OVER.test(t)) continue
-      const cs = getComputedStyle(e)
-      if (e.getClientRects().length && cs.visibility !== 'hidden' && Number(cs.opacity) > 0.05) { over = true; break }
+      /* Shown, counting its parents: an overlay faded out by its parent's
+         opacity is not on screen. */
+      const shown = e.checkVisibility ? e.checkVisibility({ opacityProperty: true, visibilityProperty: true, contentVisibilityAuto: true }) : (e.getClientRects().length && getComputedStyle(e).visibility !== 'hidden' && Number(getComputedStyle(e).opacity) > 0.05)
+      if (shown) { over = true; break }
     }
   }
   /* Or by what it drew on the canvas since the last look. */
