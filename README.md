@@ -329,6 +329,12 @@ that alone was not enough, said again beside the message that asks. On the way:
   On Windows, programs are compiled or parsed and not run.
 - **Errors come back with the lines they point at,** to the agent before any
   review, and to the chat when it writes a file itself.
+- **Agents can look inside what they built.** A `wumpy-probe` block plays
+  the agent's page as it says — `press: Space, ArrowLeft`, `wait: 500` — and
+  reads back any expression on it — `show: pacman`, `show: canMove(3, 4,
+  'left')` — so "the player did not move" is answered by looking, not by
+  rewriting the movement code blind. `wumpy-show` gives it the file as it
+  is now, after its edits; older versions are dropped from what it reads.
 - **Fixes are edits, not rewrites.** An agent changes the file in its last
   report with `wumpy-edit` blocks — FIND the lines as they are, REPLACE with
   the new ones — instead of writing twenty thousand characters again and
