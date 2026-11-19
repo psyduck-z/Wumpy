@@ -129,5 +129,5 @@ function claimsAhead(before: string, block: { kind: string; body: string }): boo
  * lecture about whose fault that is.
  */
 export const NOT_YET_LINE =
-  'That says it is done — but the command above has not finished. Whatever it claims, ' +
+  'That says it is done — but the command in this message has not finished. Whatever it claims, ' +
   'the result is whatever the output says.'
