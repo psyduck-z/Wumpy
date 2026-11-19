@@ -529,7 +529,7 @@ export class Agents {
         const base = file?.text ?? read?.text
         const made = base
           ? applyEdits(base, step.edits)
-          : ({ ok: false, why: 'There is no file to change yet: read it first with a plain `cat <its path>`, or give your whole REPORT.' } as const)
+          : ({ ok: false, why: 'There is no file to change yet: write the whole file in your REPORT. (To change a file already saved, read it first with a plain `cat <its path>`.)' } as const)
         this.deps.log(`[agents] ${agent.number} sent ${step.edits.length} edit(s): ${made.ok ? 'made' : made.why.slice(0, 120)}`)
         if (!made.ok) {
           badEdits++
