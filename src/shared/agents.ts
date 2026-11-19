@@ -178,6 +178,10 @@ export const BUILDING = [
   '- Outside the browser, write for what is installed here, and give the exact command that',
   '  runs it. Wumpy\'s check of your code says what is installed; so does `pip show <package>`.',
   '  `python -c` never runs here: it runs code.',
+  '- Fair to play: enemies a little slower than the player (ghosts about 85% of Pac-Man\'s',
+  '  speed), not all hunting the same way, and a second\'s grace after a life is lost - a',
+  '  Pac-Man lost all three lives in four seconds. Every timer in seconds, never in frames.',
+  '- Overlays - title, game over - are a centred column: heading, score, how to play again.',
   '- Compact: a basic game is 300 to 600 lines. Short comments; no essays in the code.',
   '- Before you report, play it in your head: the first second, each key once, losing, the',
   '  restart, and the score.'

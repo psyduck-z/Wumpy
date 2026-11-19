@@ -39,14 +39,25 @@ class IntVar(_Var): _d = 0
 class DoubleVar(_Var): _d = 0.0
 class BooleanVar(_Var): _d = False
 class Event: pass
-def _noop(*a, **k): return None
-class Misc:
-    def __init__(self, master=None, *a, **kw): self.master = master; self.kw = dict(kw)
+class _Anything:
+    # What this stand-in does not know - pack_propagate, wm_title, root.tk -
+    # answers anything asked of it with nothing, rather than fail the game.
+    def __call__(self, *a, **k): return None
     def __getattr__(self, name):
-        # Anything this stand-in does not know - pack_propagate, wm_title,
-        # tk_setPalette - does nothing, rather than fail the game for it.
         if name.startswith('__'): raise AttributeError(name)
-        return _noop
+        return _Anything()
+class _Tcl(_Anything):
+    # root.tk.call('clock', 'milliseconds') - Tcl's own clock - is this one.
+    def call(self, *a, **k):
+        if len(a) >= 2 and a[0] == 'clock':
+            return int(_now) if a[1] == 'milliseconds' else int(_now * 1000) if a[1] == 'microseconds' else int(_now / 1000)
+        return None
+    def eval(self, *a, **k): return ''
+class Misc:
+    def __init__(self, master=None, *a, **kw): self.master = master; self.kw = dict(kw); self.tk = _Tcl()
+    def __getattr__(self, name):
+        if name.startswith('__'): raise AttributeError(name)
+        return _Anything()
     def pack(self, **k): pass
     def grid(self, **k): pass
     def place(self, **k): pass
@@ -176,12 +187,20 @@ def _run():
         _step(t)
         print('KEY %s %s' % (k, 'bound' if _fire(k) else 'unbound'), flush=True)
     # Played on, with nothing pressed, for up to five minutes of its own time.
+    # Nothing on the canvas changing for thirty seconds, while not over, is
+    # a game that froze: a Tetris whose second piece never came.
     t = 1500
+    shape = _shape(); changed = t
     while t < 300000 and not _over():
         t += 250
         _step(t)
         if not _q and not _over():
             print('STOPPED %d' % _now, flush=True); print('END', flush=True); return
+        now_shape = _shape()
+        if now_shape != shape:
+            shape = now_shape; changed = t
+        elif t - changed >= 30000:
+            print('STILL %d' % changed, flush=True); print('END', flush=True); return
     if not _over():
         print('NEVER OVER', flush=True); print('MOVING yes', flush=True); print('END', flush=True); return
     print('OVER %d' % _now, flush=True)
@@ -227,6 +246,14 @@ export function tkVerdict(out: string): { ok: boolean; line: string } {
   const keys = unbound.length === 6 ? ' None of the keys pressed - the arrows, Space - did anything: is anything bound?' : ''
   if (lines.some((l) => l.startsWith('STOPPED'))) {
     return { ok: false, line: `Played on its own clock: its game loop stopped by itself before the game was over - nothing was left scheduled with after().${keys}` }
+  }
+  const still = lines.find((l) => l.startsWith('STILL '))
+  if (still) {
+    const at = Math.round(Number(still.split(' ')[1]) / 1000)
+    return {
+      ok: false,
+      line: `Played on its own clock: ${at} seconds in, everything on its canvas stopped changing, and stayed so for thirty seconds without the game being over - it froze (a piece that never comes, a loop doing nothing).${keys}`
+    }
   }
   if (lines.includes('NEVER OVER')) return { ok: !keys, line: `Played five minutes of its own time with no keys pressed: it kept running and never ended.${keys}` }
   const raw = lines.find((l) => l.startsWith('RESTARTED'))?.split(' ')[1]

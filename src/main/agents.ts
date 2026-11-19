@@ -147,9 +147,11 @@ const BT3 = String.fromCharCode(96).repeat(3)
 /** Said with the picture of the page the reviewer is shown. */
 const SEEN_NOTE = [
   'THE PICTURE is the page as Wumpy saw it after playing it for a few seconds. Look at it as a',
-  'player would: is it the thing the brief asked for, and is it drawn right? Walls, tiles or',
-  'paths out of line, shapes overlapping that should not, things missing, text cut off, a blank',
-  'or black screen - each is a REVISE, said plainly. Judge only what it shows.'
+  'player would: is it the thing the brief asked for, and is it drawn right? Look at where each',
+  'thing is: a car on the grass, a log off the river, a ghost inside a wall, a player off the',
+  'board - something drawn a row out from where it belongs. Walls or paths out of line, shapes',
+  'overlapping that should not, things missing, text cut off or laid out sideways, a blank or',
+  'black screen - each is a REVISE, said plainly. Judge only what it shows.'
 ].join(LF)
 
 export class Agents {
@@ -663,11 +665,7 @@ export class Agents {
         await sleep(5000)
         waited += 5000
       }
-      const r = await this.deps.turn(agent.model, messages, agent.heldKey, {
-        numPredict,
-        timeoutMs: TURN_TIMEOUT_MS,
-        signal: agent.controller.signal
-      })
+      const r = await this.guarded(agent, messages, numPredict)
       this.deps.spent({
         model: agent.model,
         ok: Boolean(r.text),
@@ -702,6 +700,28 @@ export class Agents {
   }
 
   /**
+   * One model turn that cannot hang: its own timeout is the first line, and
+   * this the last. An agent building a Tetris waited eighteen minutes on a
+   * turn that should have given up after four, and said nothing meanwhile.
+   */
+  private async guarded(agent: Agent, messages: WireMessage[], numPredict: number): Promise<TurnResult> {
+    const started = Date.now()
+    const turn = this.deps.turn(agent.model, messages, agent.heldKey!, { numPredict, timeoutMs: TURN_TIMEOUT_MS, signal: agent.controller.signal })
+    let timer: ReturnType<typeof setTimeout> | undefined
+    const watchdog = new Promise<TurnResult>((resolve) => {
+      timer = setTimeout(
+        () => resolve({ text: null, status: 0, error: 'no answer within the turn limit', promptTokens: 0, completionTokens: 0, ms: Date.now() - started }),
+        TURN_TIMEOUT_MS + 30_000
+      )
+    })
+    const r = await Promise.race([turn, watchdog])
+    clearTimeout(timer)
+    const took = Date.now() - started
+    if (took > 120_000) this.deps.log(`[agents] ${agent.number}'s turn took ${Math.round(took / 1000)}s (${r.completionTokens} tokens out${r.error ? `, ${r.error}` : ''})`)
+    return r
+  }
+
+  /**
    * A reply the length limit cut off, finished: asked to carry on from
    * exactly where it stopped, and joined, up to CARRY_ON times.
    */
@@ -721,8 +741,8 @@ export class Agents {
     }
     for (let i = 0; i < CARRY_ON && agent.heldKey !== null && !agent.controller.signal.aborted; i++) {
       this.deps.log(`[agents] ${agent.number}'s reply was cut off at ${text.length} characters: asking it to carry on`)
-      const r = await this.deps.turn(
-        agent.model,
+      const r = await this.guarded(
+        agent,
         [
           ...messages,
           { role: 'assistant', content: text },
@@ -731,8 +751,7 @@ export class Agents {
             content: 'Your reply was cut off by the length limit. Carry on from exactly where it stopped - the very next character - with no repeat, no preamble and no fence of your own unless the cut fell inside one.'
           }
         ],
-        agent.heldKey,
-        { numPredict, timeoutMs: TURN_TIMEOUT_MS, signal: agent.controller.signal }
+        numPredict
       )
       this.deps.spent({ model: agent.model, ok: Boolean(r.text), limited: r.status === 429, promptTokens: r.promptTokens, completionTokens: r.completionTokens, ms: r.ms })
       if (!r.text) break
