@@ -112,7 +112,7 @@ check('a bracket that is not a stamp is left alone', K.withoutKept('[1] First, t
 const main = read('src/main/index.ts')
 const chatHook = read('src/renderer/src/hooks/useChat.ts')
 check('the renderer sends when each of theirs was sent', /m\.role === 'user' && !m\.automatic \? \{ sentAt: m\.createdAt \}/.test(chatHook), true)
-check('main stamps them on the way out', /withSentTimes\(req\.messages\)\.map\(\(m\) => \(\{ role: m\.role, content: m\.content, images: m\.images \}\)\)/.test(main), true)
+check('main stamps them on the way out', /withSentTimes\(req\.messages\)\.map\(\(m\) => \(\{\s*role: m\.role,[\s\S]{0,240}?content: m\.role === 'assistant'[^\n]*: m\.content,\s*images: m\.images\s*\}\)\)/.test(main), true)
 check('and the model is told what a stamp and a gap mean', /starts with \[sent <day>, <time>\], added by the app/.test(main) && /Never write a stamp yourself/.test(main) && /check again rather than/.test(main), true)
 
 /* ---------------------------------------------------- verify, no shortcuts */

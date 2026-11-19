@@ -19,6 +19,7 @@ import type {
 import ReactMarkdown, { type Options } from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import rehypeHighlight from 'rehype-highlight'
+import { withoutRetypedCode } from '@shared/agents'
 import { normaliseFences } from '@shared/fences'
 import { foldsCode, summarise } from '@shared/bulk'
 import { CommandCard } from './CommandCard'
@@ -709,7 +710,7 @@ export const Markdown = memo(function Markdown({
       {/* Loose fences are promoted first, then the one-button rule applies
           to whatever that produced - in that order, or a promoted fence
           would be the second runnable block and get demoted again. */}
-      {onRunCommand ? keepFirstRunnable(looseFences ? normaliseFences(text) : text) : text}
+      {withoutRetypedCode(onRunCommand ? keepFirstRunnable(looseFences ? normaliseFences(text) : text) : text)}
     </ReactMarkdown>
   )
 })

@@ -114,7 +114,7 @@ import { Stretcher } from '@shared/stretch'
 import { forMagpie } from '@shared/voicetext'
 import { cutsFor, piecesOf } from '@shared/pauses'
 import { withSentTimes } from '@shared/sent'
-import { agentAsks, agentSlots, monitorAsks } from '@shared/agents'
+import { agentAsks, agentSlots, monitorAsks, withoutRetypedCode } from '@shared/agents'
 import { Agents } from './agents'
 import { LimitTester } from './limits'
 import { checkHtml, checkPage } from './pagecheck'
@@ -4220,7 +4220,12 @@ function withContext(req: ChatRequest): Array<Pick<ChatMessage, 'role' | 'conten
    */
   const messages: Array<Pick<ChatMessage, 'role' | 'content' | 'images'>> = trimPictures(
     /* Each of their messages with when they sent it (see @shared/sent). */
-    withSentTimes(req.messages).map((m) => ({ role: m.role, content: m.content, images: m.images }))
+    withSentTimes(req.messages).map((m) => ({
+      role: m.role,
+      /* Its own retyping of an agent's file stays out of what it reads back. */
+      content: m.role === 'assistant' && typeof m.content === 'string' ? withoutRetypedCode(m.content) : m.content,
+      images: m.images
+    }))
   )
   // Directly behind the latest user turn, so everything before it stays cached.
   //

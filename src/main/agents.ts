@@ -8,6 +8,7 @@ import {
   clip,
   fileIn,
   isBuild,
+  joinContinuation,
   withFile,
   deliveryText,
   reviewInput,
@@ -120,6 +121,13 @@ const TURN_TIMEOUT_MS = 240_000
  * past this, a cut-off reply is asked to carry on (see ask).
  */
 const AGENT_TOKENS = 8192
+/**
+ * A build's turns get twice that, so a whole game fits in one reply more
+ * often: every cut-off is a seam, and seams are where the code broke. A
+ * model that refuses it gets the usual, and is remembered.
+ */
+const BUILD_TOKENS = 16384
+const refusedBig = new Set<string>()
 /** How many times a reply cut off by the length limit is asked to carry on. */
 const CARRY_ON = 3
 const REVIEW_TOKENS = 900
@@ -340,7 +348,14 @@ export class Agents {
       if (agent.controller.signal.aborted) return
       agent.doing = used ? `thinking, after ${used} step${used === 1 ? '' : 's'}` : 'working on it'
       this.deps.changed()
-      const reply = await this.ask(agent, messages, AGENT_TOKENS)
+      const big = isBuild(agent.brief) && !refusedBig.has(agent.model)
+      let reply = await this.ask(agent, messages, big ? BUILD_TOKENS : AGENT_TOKENS)
+      if (reply === null && big && agent.why?.includes('(400)') && !agent.controller.signal.aborted) {
+        refusedBig.add(agent.model)
+        agent.why = undefined
+        this.deps.log(`[agents] ${agent.number}: ${agent.model} refused ${BUILD_TOKENS} tokens; asking for ${AGENT_TOKENS}`)
+        reply = await this.ask(agent, messages, AGENT_TOKENS)
+      }
       if (agent.controller.signal.aborted) return
       if (reply === null) {
         this.end(agent, 'failed', agent.why ?? 'the model did not answer')
@@ -421,6 +436,24 @@ export class Agents {
       if (step.text.length < 2) {
         this.end(agent, 'failed', 'it reported nothing')
         return
+      }
+      /* A build's report without its file - an edit it got wrong, or a
+         note about one - when the last report had it: the file is not
+         thrown away for it. A Pac-Man's last word was a broken edit
+         block, and that block was saved as pacman.html. */
+      if (isBuild(agent.brief) && lastReport && fileIn(lastReport) && !fileIn(step.text)) {
+        badEdits++
+        messages.push({
+          role: 'user',
+          content: /wumpy-edit/.test(step.text)
+            ? 'NOT MADE: that wumpy-edit block has no FIND: and REPLACE: lines Wumpy could read, so nothing was changed. Send it again in that form, or your whole REPORT with the whole file.'
+            : 'Your report has no file in it. Send the change as wumpy-edit blocks, or your whole REPORT with the whole file.'
+        })
+        if (badEdits >= 4) {
+          this.finishReport(agent, lastGood || lastReport, true)
+          return
+        }
+        continue
       }
       lastReport = step.text
       /*
@@ -653,7 +686,7 @@ export class Agents {
       )
       this.deps.spent({ model: agent.model, ok: Boolean(r.text), limited: r.status === 429, promptTokens: r.promptTokens, completionTokens: r.completionTokens, ms: r.ms })
       if (!r.text) break
-      text += r.text
+      text = joinContinuation(text, r.text)
       if (!r.cutOff) break
       /* A whole game is twenty thousand characters; a reply past this has
          lost its way - one restyle ran on to a hundred thousand. */

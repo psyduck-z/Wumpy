@@ -175,6 +175,7 @@ export const BUILDING = [
   '- Outside the browser, write for what is installed here, and give the exact command that',
   '  runs it. Wumpy\'s check of your code says what is installed; so does `pip show <package>`.',
   '  `python -c` never runs here: it runs code.',
+  '- Compact: a basic game is 300 to 600 lines. Short comments; no essays in the code.',
   '- Before you report, play it in your head: the first second, each key once, losing, the',
   '  restart, and the score.'
 ]
@@ -412,6 +413,11 @@ export function fileSpan(report: string): { text: string; kind: string; start: n
     let j = i + 1
     while (j < lines.length && !new RegExp(`^\\s{0,3}${open[1]}\x60*\\s*$`).test(lines[j])) j++
     const body = lines.slice(i + 1, j)
+    /* Its own tool blocks are never the file: a malformed edit once was. */
+    if (/^wumpy-/i.test(open[2])) {
+      i = j
+      continue
+    }
     if (body.length >= 6 && (!best || body.join(LF).length > best.text.length)) {
       best = { text: `${body.join(LF)}${LF}`, kind: open[2] ? `${open[2]} code` : 'a file', start: offsets[i + 1], end: offsets[i + 1] + body.join(LF).length }
     }
@@ -463,12 +469,17 @@ export function editsIn(reply: string): Array<{ find: string; replace: string }>
       find = []
       replace = []
     }
+    /* FIND: and REPLACE:, as asked - or FIND>, SEARCH:, and the
+       <<<<<<< SEARCH / ======= / >>>>>>> REPLACE that models know. */
     for (const l of body) {
-      if (/^\s*FIND:\s*$/.test(l)) {
+      if (/^\s*(?:<{3,}\s*)?(?:FIND|SEARCH)\s*[:>]?\s*$/i.test(l)) {
         flush()
         mode = 'find'
-      } else if (/^\s*REPLACE:\s*$/.test(l) && mode === 'find') mode = 'replace'
-      else if (mode === 'find') find.push(l)
+      } else if (mode === 'find' && (/^\s*REPLACE(?:\s+WITH)?\s*[:>]?\s*$/i.test(l) || /^\s*={5,}\s*$/.test(l))) mode = 'replace'
+      else if (mode === 'replace' && /^\s*>{3,}\s*REPLACE\s*$/i.test(l)) {
+        flush()
+        mode = 'none'
+      } else if (mode === 'find') find.push(l)
       else if (mode === 'replace') replace.push(l)
     }
     flush()
@@ -543,6 +554,42 @@ export function withFile(report: string, file: string): string {
   const span = fileSpan(report)
   if (!span) return report
   return `${report.slice(0, span.start)}${file.replace(/\n$/, '')}${report.slice(span.end)}`
+}
+
+/**
+ * A continuation joined to what it continues. A reply cut off by the length
+ * limit and asked to carry on "from the very next character" often starts a
+ * little before it - the half line again, or the code fence reopened - and
+ * a game stitched from three such pieces came back "missing ) after
+ * argument list" at a seam, version after version. The overlap goes.
+ */
+export function joinContinuation(before: string, after: string): string {
+  let next = after
+  /* A fence reopened at the top, when the cut fell inside one. */
+  const open = (before.match(/^\s{0,3}`{3,}/gm) ?? []).length % 2 === 1
+  if (open) next = next.replace(/^\s*`{3,}[\w-]*[ \t]*\n/, '')
+  /* The longest tail of what came before that it starts by repeating. */
+  const max = Math.min(400, before.length, next.length)
+  for (let n = max; n >= 12; n--) {
+    if (before.endsWith(next.slice(0, n))) return before + next.slice(n)
+  }
+  /* Or the whole cut line again, from its start. */
+  const lastLine = before.slice(before.lastIndexOf('\n') + 1)
+  if (lastLine.trim().length >= 8 && next.startsWith(lastLine)) return before + next.slice(lastLine.length)
+  return before + next
+}
+
+/**
+ * A reply that saves an agent's file by reference, without any long block
+ * of code written beside it. Told not to, the chat still followed its
+ * `from:` save with a game of its own invention in an html block - fifteen
+ * seconds spent, and shown to the user as though it were what was saved.
+ */
+export function withoutRetypedCode(text: string): string {
+  if (!/`{3,}[ \t]*wumpy-write[\s\S]*?\n[ \t]*from:\s*agent-\d+/i.test(text)) return text
+  return text.replace(/^([ \t]{0,3})(`{3,})[ \t]*(html?|javascript|js|typescript|ts|python|py|cpp|c\+\+|c|css|bash|sh)?[ \t]*\n([\s\S]*?)\n[ \t]{0,3}\2`*[ \t]*$/gm, (whole, indent: string, _fence, _tag, body: string) =>
+    body.split(LF).length >= 12 ? `${indent}_(code left out: the file saved is the agent's, as it wrote it)_` : whole
+  )
 }
 
 /** Output handed back to the agent, trimmed to what a model can use. */
@@ -637,7 +684,7 @@ export function deliveryText(done: readonly Finished[], note: string | null): st
       d.ok && d.file && d.id && !d.broken
         ? [
             '',
-            `ITS FILE (${d.file.kind}, ${d.file.lines} lines) is tested and kept by Wumpy. Whatever the report says about saving, this is how it is saved: your reply holds this block, with the path they asked for, and nothing below the from: line - never retype the file.`,
+            `ITS FILE (${d.file.kind}, ${d.file.lines} lines) is tested and kept by Wumpy. Whatever the report says about saving, this is how it is saved. Your whole reply: a sentence or two for the user, then this block with the path they asked for - and no code of your own anywhere, before it or after it. Never retype the file.`,
             `${BT}wumpy-write`,
             `# Save ${d.title.replace(/^(?:build|write|make|create)\s+/i, '')}`,
             'path: <the path they asked for>',
