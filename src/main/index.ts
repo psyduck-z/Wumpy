@@ -126,7 +126,7 @@ import { gapFor, limitLine } from '@shared/limits'
 import { mayBeInvented } from '@shared/heard'
 import { speakable } from '@shared/spoken'
 import { savesIn, withoutKept } from '@shared/kept'
-import { asksToKeep } from '@shared/needs'
+import { asksToBuild, asksToKeep } from '@shared/needs'
 import { hangmanFacts } from '@shared/hangman'
 
 /**
@@ -718,6 +718,32 @@ function agentFacts(chatId: string | null | undefined): string[] {
   return [`- Background agents in this chat (up to ${slots} at once):`, ...lines]
 }
 
+/**
+ * A build asked for and not yet handed to an agent: said beside the message
+ * (see asksToBuild). Not once an agent has been asked for since - its report
+ * coming back is to be saved, not built again.
+ */
+function buildFacts(messages: ChatRequest['messages']): string[] {
+  if (agentSlotsNow() <= 0) return []
+  const text = (m: ChatRequest['messages'][number]): string => (typeof m.content === 'string' ? m.content : '')
+  const recent = messages.slice(-4)
+  let ask: 'make' | 'change' | null = null
+  for (let i = recent.length - 1; i >= 0 && !ask; i--) {
+    const m = recent[i]
+    if (m.role !== 'user') continue
+    if (/^(?:I ran that command|That command|Wumpy (?:loaded|checked)|Background agents? )/.test(text(m))) continue
+    ask = asksToBuild(text(m))
+    if (ask && recent.slice(i + 1).some((later) => later.role === 'assistant' && /\x60\x60\x60\s*wumpy-agent/.test(text(later)))) return []
+    break
+  }
+  if (!ask) return []
+  return [
+    ask === 'make'
+      ? '- They are asking for something to be built. Start a background agent for it now (a wumpy-agent block) - never write it in your reply, and never check the folder first: a write makes its folder.'
+      : '- They are asking for a change to something built. Start a background agent for it (a wumpy-agent block), with the file\'s full path in the brief so it reads the file - never rewrite it in your reply.'
+  ]
+}
+
 function factsFor(
   chatTitle: string | null,
   actions: string[] = [],
@@ -768,6 +794,7 @@ function factsFor(
           '  in <remember>one short fact about them</remember> in your reply, or it is not kept for later chats.'
         ]
       : []),
+    ...buildFacts(messages),
     // Their skills: one line each, and the whole of any that came up. See skills.ts.
     ...(skills?.forPrompt(said) ?? []),
     // A guess in a game of hangman, checked here rather than by the model. See hangman.ts.

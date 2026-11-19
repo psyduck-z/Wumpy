@@ -585,7 +585,10 @@ check('even when the indentation was copied wrong', A.applyEdits('a\n      b();\
 check('a FIND that is not there changes nothing and says so', (() => { const r = A.applyEdits(gameFile, [{ find: 'const ROWS = 30;', replace: 'x' }, { find: 'nowhere()', replace: 'y' }]); return !r.ok && /not in your file/.test(r.why) })(), true)
 check('nor one that is in two places', (() => { const r = A.applyEdits('a\na\n', [{ find: 'a', replace: 'b' }]); return !r.ok && /2 times/.test(r.why) })(), true)
 check('the edited file takes the old one\'s place in the report', A.withFile(pageReport, '<!DOCTYPE html>\n<html><body>new</body></html>\n'), 'REPORT:\n```html\n<!DOCTYPE html>\n<html><body>new</body></html>\n```\nChecked: loaded.')
-check('agents are told they can fix by edits', /wumpy-edit blocks instead of all of it again/.test(linux), true)
+check('agents are told they can fix by edits, on a file Wumpy keeps', /Wumpy keeps it; it is on no disk/.test(linux) && /wumpy-edit blocks:/.test(linux), true)
+check('a missed FIND is shown the closest place as it reads now', (() => { const r = A.applyEdits('a\nlet speed = 4;\nb', [{ find: 'let speed = 5', replace: 'x' }]); return !r.ok && /let speed = 4;/.test(r.why) })(), true)
+check('a runaway reply is not carried on for ever', /text\.length > 45_000/.test(read('src/main/agents.ts')), true)
+check('a build asked for is said beside the message', /\.\.\.buildFacts\(messages\)/.test(mainSource), true)
 
 /* -------------------------------------------- hearing, copying, cards */
 

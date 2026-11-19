@@ -655,6 +655,12 @@ export class Agents {
       if (!r.text) break
       text += r.text
       if (!r.cutOff) break
+      /* A whole game is twenty thousand characters; a reply past this has
+         lost its way - one restyle ran on to a hundred thousand. */
+      if (text.length > 45_000) {
+        this.deps.log(`[agents] ${agent.number}'s reply ran past ${text.length} characters: not carrying on`)
+        break
+      }
     }
     return text.trim()
   }

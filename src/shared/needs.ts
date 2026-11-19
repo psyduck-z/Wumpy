@@ -164,6 +164,20 @@ export function asksToKeep(text: string): boolean {
   return REMEMBER_WORDS.test(text)
 }
 
+/**
+ * Whether a message asks for something to be built - or something built to
+ * be changed - which is a background agent's job. Said beside the message,
+ * because the rule far above was not enough: asked for a Crossy Road, the
+ * chat checked the folder existed, then wrote the game itself, with the up
+ * arrow walking the chicken backwards.
+ */
+export function asksToBuild(text: string): 'make' | 'change' | null {
+  const thing = /\b(games?|apps?|application|web ?page|website|html|program|script|tool|tetris|snake|pac-?man|pong|breakout|platformer|crossy|frogger|asteroids|invaders|minesweeper|sudoku|chess|2048|flappy)\b/i
+  if (/\b(make|create|build|write|code|program|generate|develop|design)\b/i.test(text) && thing.test(text)) return 'make'
+  if (/\b(change|restyle|redesign|update|improve|fix|add|make it|turn it)\b/i.test(text) && (thing.test(text) || /\b(graphics|colou?rs?|sprites?|high ?score|levels?|controls|sound|speed)\b/i.test(text))) return 'change'
+  return null
+}
+
 const REMEMBER_WORDS =
   /\b(remember|remembers|remembered|remembering|forget|forgets|forgot|memorise|memorize|keep in mind|bear in mind|from now on|going forward|in future|in the future|next time|every time|permanently|persist|preference|preferences|my name is|call me|i prefer|i'd prefer|i always|i never|note that|make a note|keep a note|take note)\b/i
 

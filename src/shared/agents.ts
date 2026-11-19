@@ -161,6 +161,10 @@ export const BUILDING = [
   '  or exit it cannot reach. Wumpy\'s test shows that error. Sizes come from the data -',
   '  ROWS = MAZE.length - never a second number typed beside it.',
   '- Enemies move from the first seconds: ghosts leave their pen, cars drive.',
+  '- On a grid - a maze, Pac-Man, Snake, Tetris - things move from tile centre to tile centre:',
+  '  a turn pressed early waits for the next centre, a wall is checked one tile ahead, and the',
+  '  tile is what collides. Never a free x and y nudged against walls: that Pac-Man stuck in',
+  '  corners and could not turn.',
   '- Every speed and timer is per second, times the time since the last frame - capped, so a',
   '  tab coming back does not jump everything. requestAnimationFrame gives milliseconds:',
   '  divide by 1000 once, in one place. One unit for every position and size - tiles or',
@@ -229,7 +233,7 @@ export function agentPrompt(world: AgentWorld): string {
     `- You have at most ${world.steps} tool uses. Spend them on what the task needs; a task`,
     '  that needs none - writing, reviewing, working something out - needs none.',
     '- Never ask for the same thing twice: its answer is already above.',
-    `- To fix the file in your last report, send ${BT}wumpy-edit blocks instead of all of it again:`,
+    `- To fix the file in your last report - Wumpy keeps it; it is on no disk - send ${BT}wumpy-edit blocks:`,
     '  a line FIND:, the lines to change copied exactly from the file (enough to be in one place),',
     '  a line REPLACE:, the new lines; as many pairs as it needs. Wumpy makes the changes and tests',
     '  the result as your new report.',
@@ -501,12 +505,37 @@ export function applyEdits(file: string, edits: ReadonlyArray<{ find: string; re
         ok: false,
         why: at.length
           ? `FIND number ${n + 1} (starting "${first}") matches ${at.length} places: give more lines around it.`
-          : `FIND number ${n + 1} (starting "${first}") is not in your file. Copy the lines exactly as they are in the file in your last report.`
+          : `FIND number ${n + 1} (starting "${first}") is not in your file. Copy the lines exactly as they are now${nearest(text, first)}`
       }
     }
     text = [...have.slice(0, at[0]), ...e.replace.split(LF), ...have.slice(at[0] + want.length)].join(LF)
   }
   return { ok: true, text }
+}
+
+/**
+ * Where in the file a missed FIND most likely meant, as it reads now -
+ * earlier edits change the file under a later one - so the next try can
+ * copy it rather than remember it.
+ */
+function nearest(file: string, line: string): string {
+  const words = (t: string): string[] => t.toLowerCase().match(/[a-z_$][\w$]*|\d+/g) ?? []
+  const want = new Set(words(line))
+  if (!want.size) return ':'
+  const lines = file.split(LF)
+  let best = -1
+  let score = 0
+  lines.forEach((l, i) => {
+    const got = words(l)
+    const hit = got.filter((w) => want.has(w)).length / Math.max(want.size, got.length)
+    if (hit > score) {
+      score = hit
+      best = i
+    }
+  })
+  if (best < 0 || score < 0.3) return ' - nothing in it is close.'
+  const from = Math.max(0, best - 4)
+  return `. The closest place, as it reads now:${LF}${lines.slice(from, best + 5).join(LF)}`
 }
 
 /** The report with its file swapped for a new one: an edited version. */
