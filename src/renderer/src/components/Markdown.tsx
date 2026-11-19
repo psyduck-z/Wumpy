@@ -433,7 +433,7 @@ export interface MarkdownProps {
   onCommandResult?: (result: ShellResult, unattended: boolean) => void
   /** Supplied for assistant turns that may create files. */
   onWriteFile?: (path: string, content: string) => Promise<WriteResult>
-  onCheckWrite?: (path: string) => Promise<WriteTarget>
+  onCheckWrite?: (path: string, content?: string) => Promise<WriteTarget>
   onWritten?: (result: WriteResult, messageId: string, content?: string) => void
   /** True when accept-all is on, so a file may be written without a click. */
   autoWrite?: boolean

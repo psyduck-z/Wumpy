@@ -730,6 +730,8 @@ check('and "the ghosts are too fast, slow them down"', N.asksToBuild('the ghosts
 check('but not before anything was built', N.asksToBuild('make it so I die when I get hit by the cars', false), null)
 check('nor a question after one', N.asksToBuild('what time is it in Tokyo', true), null)
 check('the chat knows when something was built here', /const built = messages\.some\(\(m\) => m\.role === 'assistant' && /.test(read('src/main/index.ts')), true)
+check('an earlier card whose file is there word for word says saved, with no buttons', /const already = earlier && target\?\.same === true/.test(read('src/renderer/src/components/WriteCard.tsx')) && /!missingFrom && !already/.test(read('src/renderer/src/components/WriteCard.tsx')), true)
+check('chat cards keep the same component functions across renders', /const components = useMemo<Components>/.test(read('src/renderer/src/components/Markdown.tsx')) && /components=\{components\}/.test(read('src/renderer/src/components/Markdown.tsx')), true)
 check('an agent is named after the file its brief names', [A.fileNamed('Restyle ~/Downloads/wumpy-tests/pacman.html with neon walls.'), A.fileNamed('Make snake.cpp faster'), A.fileNamed('Build a Pac-Man game in one HTML file. Hand back the whole file.')], ['pacman.html', 'snake.cpp', undefined])
 check('a retry of a broken build is the same thing, a new game is not', [A.sameWork('Build a Pac-Man game in one HTML file', 'Rebuild the Pac-Man game so the player moves'), A.sameWork('Build a Pac-Man game in one HTML file', 'Build a Snake game in one HTML file')], [true, false])
 check('the card shows the file, not a number', /<span className="cmd-shell">\{name\}<\/span>/.test(read('src/renderer/src/components/AgentCard.tsx')), true)

@@ -1257,4 +1257,6 @@ export interface WriteTarget {
   path: string
   why: string | null
   exists: boolean
+  /** What is there already is exactly what would be written: asked only with the content. */
+  same?: boolean
 }

@@ -1,6 +1,6 @@
 import { app, clipboard, dialog, ipcMain, nativeImage, session, Tray } from 'electron'
 import { cpus, homedir } from 'node:os'
-import { existsSync, mkdirSync, readFileSync, unlinkSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, readFileSync, statSync, unlinkSync, writeFileSync } from 'node:fs'
 import { basename, dirname, join, resolve } from 'node:path'
 import { IPC } from '@shared/types'
 import type {
@@ -1643,9 +1643,18 @@ function registerIpc(): void {
     return {}
   })
 
-  ipcMain.handle(IPC.writeCheck, (_e, path: string) =>
-    inspectWriteTarget(path, settings.get('shellCwd') || homedir())
-  )
+  ipcMain.handle(IPC.writeCheck, async (_e, path: string, content?: string) => {
+    const target = await inspectWriteTarget(path, settings.get('shellCwd') || homedir())
+    /* Already there, word for word: a card re-drawn after a restart says
+       saved, instead of offering to replace the file with itself. */
+    if (typeof content !== 'string' || !target.ok || !target.exists) return target
+    try {
+      const st = statSync(target.path)
+      return { ...target, same: st.size < 8_000_000 && readFileSync(target.path, 'utf8') === content }
+    } catch {
+      return target
+    }
+  })
 
   /* ------------------------------------------------------------------ browser */
 

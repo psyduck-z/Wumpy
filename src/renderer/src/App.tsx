@@ -1086,7 +1086,7 @@ function namedControls(shot: Attachment): string[] {
     (path: string, content: string) => window.wumpy.files.write(path, content),
     []
   )
-  const checkWrite = useCallback((path: string) => window.wumpy.files.check(path), [])
+  const checkWrite = useCallback((path: string, content?: string) => window.wumpy.files.check(path, content), [])
 
   /**
    * Says what was written, without telling the model the contents back.

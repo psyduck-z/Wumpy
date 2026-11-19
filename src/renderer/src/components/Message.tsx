@@ -78,7 +78,7 @@ export const Message = memo(function Message({
   onAnswer?: (messageId: string, option: string) => void
   /** Supplied when Wumpy may search the web. */
   onWriteFile?: (path: string, content: string) => Promise<WriteResult>
-  onCheckWrite?: (path: string) => Promise<WriteTarget>
+  onCheckWrite?: (path: string, content?: string) => Promise<WriteTarget>
   onWritten?: (result: WriteResult, messageId: string, content?: string) => void
   autoWrite?: boolean
   onCaptureScreen?: () => Promise<Attachment>

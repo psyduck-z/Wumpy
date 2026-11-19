@@ -34,7 +34,7 @@ export function WriteCard({
   complete?: boolean
   /** True when the user has turned on accept-all. */
   autoWrite: boolean
-  onCheck(path: string): Promise<WriteTarget>
+  onCheck(path: string, content?: string): Promise<WriteTarget>
   onWrite(path: string, content: string): Promise<WriteResult>
   onWritten(result: WriteResult, messageId: string, content?: string): void
   messageId: string
@@ -83,7 +83,7 @@ export function WriteCard({
   useEffect(() => {
     if (!complete || !path || (from && fromFile === undefined)) return
     let live = true
-    void onCheck(path).then((t) => {
+    void onCheck(path, earlier ? content : undefined).then((t) => {
       if (live) setTarget(missingFrom && !earlier ? { ...t, ok: false, why: `There is no file from ${from} to save: its report held none.` } : t)
     })
     return () => {
@@ -119,7 +119,9 @@ export function WriteCard({
   const lines = content ? content.split('\n').length : 0
   const bytes = new TextEncoder().encode(content).length
   /* Never offered with nothing to write: an earlier agent's file, gone. */
-  const waiting = state === 'idle' && complete && target?.ok && !autoWrite && !missingFrom
+  /* An earlier session's file, there already word for word: saved. */
+  const already = earlier && target?.same === true
+  const waiting = state === 'idle' && complete && target?.ok && !autoWrite && !missingFrom && !already
 
   /**
    * Registered so Ctrl+Enter reaches this too.
@@ -167,7 +169,7 @@ export function WriteCard({
           </>
         )}
         {state === 'writing' && <span className="cmd-status">writing…</span>}
-        {state === 'done' && <span className="cmd-status">saved</span>}
+        {(state === 'done' || (state === 'idle' && already)) && <span className="cmd-status">saved</span>}
         {state === 'skipped' && <span className="cmd-status">skipped</span>}
       </div>
 
