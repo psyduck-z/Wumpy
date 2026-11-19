@@ -185,6 +185,8 @@ export const BUILDING = [
   '  in the player\'s lane - the same row, not the row next to it - and its x span overlaps the',
   '  player\'s. Wumpy stands the player in a road and waits for a car: one that drives through',
   '  sends it back. Twice a Crossy Road was "fixed" and its cars still drove through the chicken.',
+  '- To change a file already saved: read it whole with a plain `cat <its path>`, then send',
+  '  wumpy-edit blocks - they change the file you read. Never type the whole file out again.',
   '- Asked to change how it plays - dying when hit, the spacing, a speed - change exactly that,',
   '  and show it: a probe that sets the case up and reads the result, e.g. `show: (player.row =',
   '  cars[0].row, player.col = Math.round(cars[0].x), 1)`, `wait: 300`, `show: gameOver`.',
@@ -602,6 +604,35 @@ function nearest(file: string, line: string): string {
 }
 
 /** The report with its file swapped for a new one: an edited version. */
+/**
+ * The last file it read whole, with a plain `cat <path>`: what its edits
+ * change when it has written no file of its own. Asked to make a Crossy
+ * Road's cars kill, an agent read the game, sent three edits - "There is no
+ * file in a report of yours to change yet" - and then typed out all 34,000
+ * characters of it again, cut off twice on the way.
+ */
+export function fileRead(records: ReadonlyArray<{ kind: string; what: string; outcome: string }>): { path: string; text: string } | null {
+  for (let i = records.length - 1; i >= 0; i--) {
+    const r = records[i]
+    if (r.kind !== 'run') continue
+    const m = /^\s*(?:cat|type|Get-Content|gc)\s+("[^"]+"|'[^']+'|[^\s|;&<>]+)\s*$/i.exec(r.what)
+    if (!m) continue
+    const out = /^Exit code 0\b[^\n]*\nOutput:\n([\s\S]*?)(?:\nErrors:\n[\s\S]*)?$/.exec(r.outcome)
+    if (!out || /…output truncated…/.test(out[1])) continue
+    return { path: m[1].replace(/^["']|["']$/g, ''), text: `${out[1]}${LF}` }
+  }
+  return null
+}
+
+const FENCE_LANG: Record<string, string> = { html: 'html', htm: 'html', py: 'python', cpp: 'cpp', cc: 'cpp', c: 'c', js: 'javascript', sh: 'bash', ts: 'typescript', css: 'css' }
+
+/** A report holding a file it read and changed, as if it had written it out. */
+export function reportOfRead(path: string, text: string): string {
+  const name = path.split(/[\\/]/).pop() ?? path
+  const lang = FENCE_LANG[(name.split('.').pop() ?? '').toLowerCase()] ?? ''
+  return `REPORT:${LF}${name}, with the changes asked for.${LF}${BT}${lang}${LF}${text.replace(/\n$/, '')}${LF}${BT}`
+}
+
 export function withFile(report: string, file: string): string {
   const span = fileSpan(report)
   if (!span) return report

@@ -8,6 +8,8 @@ import {
   clip,
   fileIn,
   fileNamed,
+  fileRead,
+  reportOfRead,
   sameWork,
   fileSpan,
   isBuild,
@@ -521,7 +523,13 @@ export class Agents {
          as its report. A FIND that matches nowhere goes back to it. */
       if (step.kind === 'edit') {
         const file = lastReport ? fileIn(lastReport) : null
-        const made = file ? applyEdits(file.text, step.edits) : ({ ok: false, why: 'There is no file in a report of yours to change yet: give your whole REPORT first.' } as const)
+        /* Or the file it read, when it has written none: a change asked for
+           to a file already saved. */
+        const read = file ? null : fileRead(agent.records)
+        const base = file?.text ?? read?.text
+        const made = base
+          ? applyEdits(base, step.edits)
+          : ({ ok: false, why: 'There is no file to change yet: read it first with a plain `cat <its path>`, or give your whole REPORT.' } as const)
         this.deps.log(`[agents] ${agent.number} sent ${step.edits.length} edit(s): ${made.ok ? 'made' : made.why.slice(0, 120)}`)
         if (!made.ok) {
           badEdits++
@@ -532,7 +540,7 @@ export class Agents {
           continue
         }
         agent.steps.push({ kind: 'code', what: `changed ${step.edits.length} place${step.edits.length === 1 ? '' : 's'} in its file`, ok: true })
-        step = { kind: 'report', text: withFile(lastReport, made.text) }
+        step = { kind: 'report', text: file ? withFile(lastReport, made.text) : reportOfRead(read!.path, made.text) }
       }
 
       if (step.kind !== 'report') {

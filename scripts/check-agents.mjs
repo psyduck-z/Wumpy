@@ -699,6 +699,29 @@ check('agents are started when an answer finishes, not when a card draws', /wind
   await until(() => h.ready.length > 0 || h.turns() > 40)
   check('a repeated probe is not run again, and the agent ends', [h.ready.length, h.log.filter((l) => /probed its page/.test(l)).length], [1, 1])
 }
+{
+  /* Asked to change a saved game: it reads it, edits what it read. */
+  const GAME = '<!doctype html><html><body><canvas></canvas><script>let hit = false</script></body></html>'
+  const h = harness(
+    (messages, turn) => {
+      if (messages[0].content.startsWith('You are a reviewing agent')) return 'VERDICT: ACCEPT\nNOTES: Fine.'
+      if (turn === 1) return `${BT}wumpy-run-bash\n# The game as saved\ncat ~/Downloads/crossy-road.html\n${BT}`
+      if (turn === 2) return `${BT}wumpy-edit\nFIND:\nlet hit = false\nREPLACE:\nlet hit = true\n${BT}`
+      return 'REPORT:\nDone.'
+    },
+    {
+      deps: {
+        run: async () => ({ ran: true, ok: true, output: `Exit code 0, 0.0s.\nOutput:\n${GAME}` }),
+        checkPage: async () => ({ ran: true, ok: true, output: 'Loaded it and played it: no errors.' }),
+        sees: () => false
+      }
+    }
+  )
+  h.agents.start('c', 'm', [{ title: 'Make cars kill', brief: 'Change the Crossy Road game at ~/Downloads/crossy-road.html so a car kills the player. Hand back the whole file.' }])
+  await until(() => h.ready.length > 0)
+  const v = h.agents.forChat('c')[0]
+  check('edits change the file it read, when it wrote none', [v.status, /let hit = true/.test(v.report ?? ''), /<!doctype html>/.test(v.report ?? '')], ['done', true, true])
+}
 check('an agent is named after the file its brief names', [A.fileNamed('Restyle ~/Downloads/wumpy-tests/pacman.html with neon walls.'), A.fileNamed('Make snake.cpp faster'), A.fileNamed('Build a Pac-Man game in one HTML file. Hand back the whole file.')], ['pacman.html', 'snake.cpp', undefined])
 check('a retry of a broken build is the same thing, a new game is not', [A.sameWork('Build a Pac-Man game in one HTML file', 'Rebuild the Pac-Man game so the player moves'), A.sameWork('Build a Pac-Man game in one HTML file', 'Build a Snake game in one HTML file')], [true, false])
 check('the card shows the file, not a number', /<span className="cmd-shell">\{name\}<\/span>/.test(read('src/renderer/src/components/AgentCard.tsx')), true)
