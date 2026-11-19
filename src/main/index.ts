@@ -114,7 +114,7 @@ import { Stretcher } from '@shared/stretch'
 import { forMagpie } from '@shared/voicetext'
 import { cutsFor, piecesOf } from '@shared/pauses'
 import { withSentTimes } from '@shared/sent'
-import { agentAsks, agentSlots, heldForAgent, monitorAsks, withoutRetypedCode } from '@shared/agents'
+import { agentAsks, agentSlots, fileIn, heldForAgent, monitorAsks, withoutRetypedCode } from '@shared/agents'
 import { Agents } from './agents'
 import { LimitTester } from './limits'
 import { checkHtml, checkPage, probePage } from './pagecheck'
@@ -3612,6 +3612,15 @@ async function buildCheck(arg: string): Promise<void> {
         for (const a of runner.forChat(chatId).filter((x) => x.key.startsWith(`reply-${turnNo}-${step}:`))) {
           say(`  agent ${a.number} "${a.title}": ${a.status}, ${a.review || 'not reviewed'}, ${Math.round(((a.endedAt ?? Date.now()) - a.startedAt) / 1000)}s, steps: ${a.steps.map((x) => x.what).join(' | ') || 'none'}`)
           transcript.push(`> agent ${a.number} "${a.title}": ${a.status}, ${a.review || 'not reviewed'}; steps: ${a.steps.map((x) => x.what).join(' | ') || 'none'}`)
+          /* Its last file, kept beside the transcript - a broken one too,
+             to tell a game's bug from the test's. */
+          const last = a.report ? fileIn(a.report) : null
+          if (last) {
+            const dir = join(app.getPath('userData'), 'build-checks')
+            mkdirSync(dir, { recursive: true })
+            const ext = last.kind === 'a web page' ? 'html' : 'txt'
+            writeFileSync(join(dir, `${spec.name}-agent-${a.number}-${new Date().toISOString().replace(/[:.]/g, '-')}.${ext}`), last.text)
+          }
         }
         back.push(...deliveries.slice(had))
       }
