@@ -303,6 +303,11 @@ that alone was not enough, said again beside the message that asks. On the way:
   the page's own restart button, and checks a new game really runs. It
   watches the ghosts, cars and aliens too: ones that never leave where they
   started, or that cross the screen in under a second, are reported.
+- **The player stands in the road.** In a game with cars, Wumpy puts the
+  player in a lane with traffic — placed there if walking would end in a
+  river — and waits for a car. One that drives right through, with no game
+  over and no life lost, sends the page back; so do a lane's cars sitting on
+  top of one another and moving as one.
 - **A program is compiled, never run.** Python is parsed, every name it uses
   is looked up and every import checked against what is installed (and which
   of tkinter, pygame and curses this Python can draw with); C and C++ are
