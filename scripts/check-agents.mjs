@@ -614,6 +614,8 @@ check('agents are told they can fix by edits, on a file Wumpy keeps', /Wumpy kee
 check('and can see it as it is now', A.stepOf('```wumpy-show\n```', 'linux').kind === 'show' && /wumpy-show block/.test(linux), true)
 check('a missed FIND is shown the closest place as it reads now', (() => { const r = A.applyEdits('a\nlet speed = 4;\nb', [{ find: 'let speed = 5', replace: 'x' }]); return !r.ok && /let speed = 4;/.test(r.why) })(), true)
 check('a runaway reply is not carried on for ever', /text\.length > 45_000/.test(read('src/main/agents.ts')), true)
+check('nor a reply of many tool blocks taken as a step', /that reply held \$\{blocks\} tool blocks/.test(read('src/main/agents.ts')), true)
+check('and only the newest version of a file stays in what an agent reads', /an earlier version of the file/.test(read('src/main/agents.ts')) && /leaner\(messages\)/.test(read('src/main/agents.ts')), true)
 check('a build asked for is said beside the message', /\.\.\.buildFacts\(messages\)/.test(mainSource), true)
 
 /* -------------------------------------------- hearing, copying, cards */

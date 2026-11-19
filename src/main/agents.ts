@@ -7,6 +7,7 @@ import {
   applyEdits,
   clip,
   fileIn,
+  fileSpan,
   isBuild,
   joinContinuation,
   withFile,
@@ -355,6 +356,7 @@ export class Agents {
       if (agent.controller.signal.aborted) return
       agent.doing = used ? `thinking, after ${used} step${used === 1 ? '' : 's'}` : 'working on it'
       this.deps.changed()
+      leaner(messages)
       const big = isBuild(agent.brief) && !refusedBig.has(agent.model)
       let reply = await this.ask(agent, messages, big ? BUILD_TOKENS : AGENT_TOKENS)
       if (reply === null && big && agent.why?.includes('(400)') && !agent.controller.signal.aborted) {
@@ -381,6 +383,19 @@ export class Agents {
         })
         if (badEdits >= 4) {
           this.end(agent, 'failed', 'its replies kept running far too long to finish')
+          return
+        }
+        continue
+      }
+      /* A reply of many tool blocks is no step at all: a Pac-Man agent
+         ended its last replies with dozens of `echo "Done"` blocks. */
+      const blocks = reply.match(/^\s{0,3}`{3,}[ \t]*wumpy-(?:run|search|check-page)/gm)?.length ?? 0
+      if (blocks > 3) {
+        badEdits++
+        messages.push({ role: 'assistant', content: reply.slice(0, 2000) })
+        messages.push({ role: 'user', content: `NOT USED: that reply held ${blocks} tool blocks. One tool block per reply, or your REPORT.` })
+        if (badEdits >= 4) {
+          this.end(agent, 'failed', 'its replies kept running on')
           return
         }
         continue
@@ -947,4 +962,23 @@ function view(a: Agent): AgentView {
 
 function monitorView(m: Monitor): MonitorView {
   return { id: m.id, key: m.key, chatId: m.chatId, note: m.note, when: m.when, agents: [...m.agents], fired: m.fired }
+}
+
+/**
+ * Earlier versions of its file, left out of what an agent reads again:
+ * only the newest stays whole. A Pac-Man agent's conversation held five
+ * versions of a twenty-thousand-character game, and by the fifth its
+ * replies were dozens of `echo "Done"` blocks.
+ */
+function leaner(messages: WireMessage[]): void {
+  const replies = messages.map((m, i) => (m.role === 'assistant' && typeof m.content === 'string' && m.content.length > 8000 ? i : -1)).filter((i) => i >= 0)
+  for (const i of replies.slice(0, -1)) {
+    const text = messages[i].content as string
+    const span = fileSpan(text)
+    if (!span) continue
+    messages[i] = {
+      ...messages[i],
+      content: `${text.slice(0, span.start)}[an earlier version of the file, ${span.text.split('\n').length - 1} lines - left out; the newest is further on]${text.slice(span.end)}`
+    }
+  }
 }
