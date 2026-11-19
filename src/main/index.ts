@@ -742,7 +742,7 @@ function buildFacts(messages: ChatRequest['messages']): string[] {
   return [
     ask === 'make'
       ? '- They are asking for something to be built. Start a background agent for it now (a wumpy-agent block) - never write it in your reply, and never check the folder first: a write makes its folder.'
-      : '- They are asking for a change to something built. Start a background agent for it (a wumpy-agent block), with the file\'s full path in the brief so it reads the file - never rewrite it in your reply.'
+      : '- They are asking for a change to something built. Start a background agent for it now (a wumpy-agent block), with the file\'s full path in the brief so it reads the file - never rewrite it in your reply, and never look at it first. What they say about how it plays is the truth, over any earlier report: "cars don\'t kill me" means they do not. Put what they saw in the brief.'
   ]
 }
 
