@@ -154,7 +154,9 @@ export function WriteCard({
     >
       <div className="cmd-head">
         <KindMark kind="write" />
-        <span className="cmd-shell">{target?.exists ? 'Replace file' : 'New file'}</span>
+        {/* Neither until it is known: "New file" turning into "Replace file"
+            a moment later was a flicker on every card for a file already there. */}
+        <span className="cmd-shell">{target ? (target.exists ? 'Replace file' : 'New file') : 'File'}</span>
         <span className="spacer" />
         {state === 'idle' && !complete && <span className="cmd-status">still writing…</span>}
         {state === 'idle' && complete && !target && <span className="cmd-status">checking…</span>}
