@@ -756,6 +756,14 @@ check('a failed build goes back saying to start one more agent, never to write i
   await until(() => h.ready.length > 0)
   check('a reply of one probe forty times runs the first, once', [h.log.filter((l) => /probed its page/.test(l)).length, h.log.some((l) => /wrote 40 tool blocks in one reply: using the first/.test(l)), h.agents.forChat('c')[0].status], [1, true, 'done'])
 }
+{
+  const GAME = '<!doctype html><html><body><canvas></canvas><script>' + 'let x = 0;\n'.repeat(200) + 'requestAnimationFrame(loop)</script></body></html>'
+  const wrote = (path) => 'Here it is.\n```wumpy-write\npath: ' + path + '\n---\n' + GAME + '\n```'
+  check('a game the chat wrote itself is taken from it', A.gameWritten(wrote('~/Downloads/crossy.html')), '~/Downloads/crossy.html')
+  check('but not one written beside an agent, nor saved from one, nor a notes file', [A.gameWritten(wrote('~/a.html') + '\n```wumpy-agent\n# B\nb\n```'), A.gameWritten('```wumpy-write\npath: ~/a.html\nfrom: agent-2\n```'), A.gameWritten(wrote('~/notes.txt'))], [null, null, null])
+  check('a change taken over reads the file and edits it', /read it whole with a plain `cat ~\/a.html`/.test(A.takeOverAsk('make the cars kill me', '~/a.html', true).brief), true)
+}
+check('the panel holds a game the chat wrote itself while an agent takes it', /gameWritten\(message\.content\)/.test(read('src/renderer/src/hooks/useAgents.ts')) && /<HeldForTakeOver/.test(read('src/renderer/src/components/Markdown.tsx')), true)
 check('an agent is named after the file its brief names', [A.fileNamed('Restyle ~/Downloads/wumpy-tests/pacman.html with neon walls.'), A.fileNamed('Make snake.cpp faster'), A.fileNamed('Build a Pac-Man game in one HTML file. Hand back the whole file.')], ['pacman.html', 'snake.cpp', undefined])
 check('a retry of a broken build is the same thing, a new game is not', [A.sameWork('Build a Pac-Man game in one HTML file', 'Rebuild the Pac-Man game so the player moves'), A.sameWork('Build a Pac-Man game in one HTML file', 'Build a Snake game in one HTML file')], [true, false])
 check('the card shows the file, not a number', /<span className="cmd-shell">\{name\}<\/span>/.test(read('src/renderer/src/components/AgentCard.tsx')), true)

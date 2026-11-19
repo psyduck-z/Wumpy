@@ -368,6 +368,9 @@ const api = {
     delivered: (id: string): Promise<void> => ipcRenderer.invoke(IPC.agentsDelivered, id),
     /** The file an agent handed back, as it wrote it - for a write block's `from:`. */
     file: (id: string): Promise<string | null> => ipcRenderer.invoke(IPC.agentsFile, id),
+    /** A game the chat wrote itself, handed to an agent instead: false when none can take it. */
+    takeOver: (chatId: string, messageId: string, request: string, path: string): Promise<{ started: boolean }> =>
+      ipcRenderer.invoke(IPC.agentsTakeOver, { chatId, messageId, request, path }),
     /** Its file was saved there: the card takes the file's name. */
     saved: (id: string, path: string): Promise<void> => ipcRenderer.invoke(IPC.agentsSaved, id, path),
     onChanged: (cb: (list: { agents: AgentView[]; monitors: MonitorView[] }) => void) =>

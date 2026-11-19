@@ -114,7 +114,7 @@ import { Stretcher } from '@shared/stretch'
 import { forMagpie } from '@shared/voicetext'
 import { cutsFor, piecesOf } from '@shared/pauses'
 import { withSentTimes } from '@shared/sent'
-import { agentAsks, agentSlots, fileIn, heldForAgent, monitorAsks, withoutRetypedCode } from '@shared/agents'
+import { agentAsks, agentSlots, fileIn, gameWritten, heldForAgent, monitorAsks, takeOverAsk, withoutRetypedCode } from '@shared/agents'
 import { Agents } from './agents'
 import { LimitTester } from './limits'
 import { checkHtml, checkPage, probePage } from './pagecheck'
@@ -2375,6 +2375,14 @@ function registerIpc(): void {
   ipcMain.handle(IPC.agentsDelivered, (_e, id: string) => agents?.delivered(String(id)))
   ipcMain.handle(IPC.agentsFile, (_e, id: string) => agents?.fileOf(String(id)) ?? null)
   ipcMain.handle(IPC.agentsSaved, (_e, id: string, path: string) => agents?.saved(String(id), String(path)))
+  ipcMain.handle(IPC.agentsTakeOver, (_e, req: { chatId: string; messageId: string; request: string; path: string }) => {
+    if (!agents || agentSlotsNow() === 0 || !req?.chatId || !req.messageId || typeof req.path !== 'string') return { started: false }
+    const full = req.path.replace(/^~(?=$|[\\/])/, homedir())
+    const ask = takeOverAsk(String(req.request ?? ''), req.path, existsSync(full))
+    const started = agents.start(req.chatId, `${req.messageId}:take-over`, [ask])
+    log(`[agents] took over a game the chat wrote itself: ${ask.title}`)
+    return { started: started.length > 0 }
+  })
 
   /**
    * Runs a command the user approved in the panel.
@@ -3521,8 +3529,15 @@ async function buildCheck(arg: string): Promise<void> {
       const found = blocks(reply)
       say(`  reply ${step}: ${reply.length} characters, blocks: ${found.map((b) => b.tag || 'plain').join(', ') || 'none'}`)
       const back: string[] = []
+      /* A game it wrote itself: held, and handed to an agent, as the panel does. */
+      const game = agentSlotsNow() > 0 && step === 1 ? gameWritten(reply) : null
+      if (game) {
+        say(`  it wrote a game itself (${game}): held, and handed to an agent`)
+        transcript.push(`> not written (a game the chat wrote itself, handed to an agent): ${game}`)
+      }
       for (const b of found.filter((x) => x.tag === 'wumpy-write')) {
         const req = readWriteRequest(b.body)
+        if (game && req.path === game) continue
         if (heldForAgent(reply, req)) {
           say(`  not written: it was written beside a wumpy-agent block for the same thing (${req.path})`)
           transcript.push(`> not written (an agent is building it): ${req.path}`)
@@ -3595,7 +3610,7 @@ async function buildCheck(arg: string): Promise<void> {
         transcript.push(`> ran: ${command}\n\n${BT3}\n${out}\n${BT3}`)
         back.push(`I ran that command. Exit code ${r.exitCode}.\n\n${out ? `${BT3}\n${out}\n${BT3}` : '(no output)'}`)
       }
-      const asks = agentAsks(reply)
+      const asks = game ? [takeOverAsk(said, inDir(game), existsSync(inDir(game)))] : agentAsks(reply)
       if (asks.length) {
         const had = deliveries.length
         runner.start(chatId, `reply-${turnNo}-${step}`, asks)

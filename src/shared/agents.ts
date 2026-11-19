@@ -738,6 +738,33 @@ export function heldForAgent(reply: string, write: { path: string | null; from?:
   return /\.(?:html?|py|pyw|cpp|cc|cxx|c|js|mjs|ts|sh)$/i.test(write.path.trim())
 }
 
+/**
+ * A game the chat wrote itself, in an answer that started no agent: its
+ * path, or null. Told every way there is that a game is an agent's job, the
+ * chat still wrote a four-thousand-character Crossy Road - and then wrote
+ * the change asked for to it as well - and the cars never killed. Wumpy
+ * holds that write and hands the request to an agent instead.
+ */
+export function gameWritten(reply: string): string | null {
+  if (/^\s{0,3}`{3,}[ \t]*wumpy-agent\b/m.test(reply)) return null
+  const blocks = reply.split(/^\s{0,3}`{3,}[ \t]*wumpy-write[ \t]*$/m).slice(1)
+  for (const block of blocks) {
+    const path = /^\s*path:\s*(.+)$/m.exec(block)?.[1]?.trim()
+    if (!path || /^\s*from:/m.test(block) || !/\.(?:html?|py|pyw|cpp|cc|cxx|c|js)$/i.test(path)) continue
+    if (block.length > 1500 && /<canvas|requestAnimationFrame|import curses|import pygame|tkinter|ncurses|getch\(|\bgame ?over\b/i.test(block)) return path
+  }
+  return null
+}
+
+/** The agent a held game write is handed to: the request, and where it goes. */
+export function takeOverAsk(request: string, path: string, change: boolean): AgentAsk {
+  const name = path.split(/[\\/]/).pop() ?? path
+  return {
+    title: `${change ? 'Change' : 'Build'} ${name}`,
+    brief: `${request.trim()}${LF}${LF}${change ? `The file is ${path}: read it whole with a plain \`cat ${path}\`, then change it with wumpy-edit blocks. ` : `It goes in ${path}. `}Hand back the whole file.`
+  }
+}
+
 /** Output handed back to the agent, trimmed to what a model can use. */
 export function clip(text: string, max = 6000): string {
   if (text.length <= max) return text

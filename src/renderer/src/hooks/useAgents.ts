@@ -1,6 +1,8 @@
 import { useEffect, useRef } from 'react'
 import type { AgentDelivery, ChatMessage } from '@shared/types'
 import { onPendingChange, pendingCount, runningCount } from '../pending'
+import { gameWritten } from '@shared/agents'
+import { release } from '../takeover'
 
 /**
  * Background agents, from the panel's side: starting the ones an answer
@@ -48,6 +50,24 @@ export function useAgents(deps: Deps): void {
     const d = depsRef.current
     const message = d.messages.find((m) => m.id === id)
     if (!message || message.role !== 'assistant' || message.error) return
+    /* A game it wrote itself instead of starting an agent: the request
+       goes to an agent, and the write is held - or let go, when main says
+       no agent can take it. */
+    /* Only in answer to the person: a game retyped from an agent's report
+       taken over again would go round for ever. */
+    const before = d.messages[d.messages.findIndex((m) => m.id === message.id) - 1]
+    const game = before?.role === 'user' && !before.automatic ? gameWritten(message.content) : null
+    if (game) {
+      const request = [...d.messages].reverse().find((m) => m.role === 'user' && !m.automatic)?.content ?? ''
+      void window.wumpy.agents
+        .takeOver(d.chatId, message.id, request, game)
+        .then((r) => {
+          if (r?.started) depsRef.current.notify('An agent is building it instead, to test it before it is saved')
+          else release(message.id)
+        })
+        .catch(() => release(message.id))
+      return
+    }
     if (!/```[ \t]*wumpy-(agent|monitor)\b/.test(message.content)) return
     void window.wumpy.agents
       .start(d.chatId, message.id, message.content)

@@ -976,6 +976,8 @@ export const IPC = {
   agentsFile: 'agents:file',
   /** The panel saved an agent's file: where, so its card can be named after it. */
   agentsSaved: 'agents:saved',
+  /** A game the chat wrote itself, handed to an agent. */
+  agentsTakeOver: 'agents:take-over',
   /** Main tells the panel a report is ready for a chat. */
   agentsReady: 'agents:ready',
   musicHold: 'music:hold',

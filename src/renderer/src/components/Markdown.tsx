@@ -21,7 +21,8 @@ import type {
 import ReactMarkdown, { type Components, type Options } from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import rehypeHighlight from 'rehype-highlight'
-import { heldForAgent, withoutRetypedCode } from '@shared/agents'
+import { gameWritten, heldForAgent, withoutRetypedCode } from '@shared/agents'
+import { useReleased } from '../takeover'
 import { readWriteRequest } from '@shared/writefile'
 import { normaliseFences } from '@shared/fences'
 import { foldsCode, summarise } from '@shared/bulk'
@@ -402,6 +403,13 @@ function readFence(children: ReactNode): { shell: ShellKind; code: string } | nu
   return trimmed ? { shell, code: trimmed } : null
 }
 
+/** A held game write: the card only once main has said no agent can take it. */
+function HeldForTakeOver({ messageId, children }: { messageId: string; children: ReactNode }): React.JSX.Element {
+  const released = useReleased(messageId)
+  if (released) return <>{children}</>
+  return <p className="agent-held">Not written: an agent is building this instead, and it is played and tested before it is saved.</p>
+}
+
 export interface MarkdownProps {
   text: string
   /** Supplied for assistant turns that may ask the user a question. */
@@ -561,6 +569,24 @@ export const Markdown = memo(function Markdown({
           const file = onWriteFile ? readWrite(children) : null
           if (file && heldForAgent(text, readWriteRequest(file))) {
             return <p className="agent-held">Not written: an agent is building this, and its tested file is saved when it reports.</p>
+          }
+          /* A game the chat wrote itself, in this session: held while an
+             agent takes the request over (see useAgents). */
+          if (file && canAutoRun && messageId && gameWritten(text)) {
+            return (
+              <HeldForTakeOver messageId={messageId}>
+                <WriteCard
+                  request={file}
+                  complete={settled(file)}
+                  autoWrite={autoWrite}
+                  onCheck={onCheckWrite!}
+                  onWrite={onWriteFile!}
+                  onWritten={onWritten ?? (() => {})}
+                  messageId={messageId}
+                  earlier={false}
+                />
+              </HeldForTakeOver>
+            )
           }
           if (file) {
             return (
