@@ -40,6 +40,9 @@ export interface PageCheck {
   stuck?: string
   /** What it looked like, mid-game: a PNG, for a model that can see. */
   shot?: Buffer
+  /** And at game over, when it got there: a sideways game-over panel was
+      on no screenshot the reviewer had. */
+  overShot?: Buffer
 }
 
 const sleep = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms))
@@ -262,7 +265,14 @@ export async function checkPage(path: string): Promise<PageCheck> {
     if (still.length) {
       stuck = `${stuck ? `${stuck} ` : ''}Its ${still.join(' and ')} never got anywhere in the ${Math.round((Date.now() - crowdAt) / 1000)} seconds it was played: none went more than a short way from where it was${still.includes('ghosts') ? ' - can they get out of their pen, and do they choose a way to go?' : '.'}`
     }
+    let overShot: Buffer | undefined
     if (state?.over) {
+      try {
+        const image = await contents.capturePage()
+        overShot = (image.getSize().width > 640 ? image.resize({ width: 640 }) : image).toPNG()
+      } catch {
+        overShot = undefined
+      }
       let how = ''
       for (const [label, act] of [
         ['Space', () => hold('Space', 80)],
@@ -312,7 +322,8 @@ export async function checkPage(path: string): Promise<PageCheck> {
       ...(play ? { play } : {}),
       ...(restart ? { restart } : {}),
       ...(stuck ? { stuck } : {}),
-      ...(shot ? { shot } : {})
+      ...(shot ? { shot } : {}),
+      ...(overShot ? { overShot } : {})
     }
   } finally {
     if (!win.isDestroyed()) win.destroy()
@@ -324,14 +335,15 @@ export async function checkPage(path: string): Promise<PageCheck> {
  * saved - loaded the same way from a temporary file, which is then removed.
  * Said as the agent should read it.
  */
-export async function checkHtml(html: string): Promise<{ ran: boolean; ok: boolean; output: string; shot?: string }> {
+export async function checkHtml(html: string): Promise<{ ran: boolean; ok: boolean; output: string; shots?: string[] }> {
   const dir = mkdtempSync(join(tmpdir(), 'wumpy-page-'))
   const file = join(dir, 'page.html')
   try {
     writeFileSync(file, html)
     const result = await checkPage(file)
     if (!result.checked) return { ran: false, ok: false, output: 'NOT RUN: the page could not be loaded.' }
-    const shot = result.shot ? { shot: `data:image/png;base64,${result.shot.toString('base64')}` } : {}
+    const pictures = [result.shot, result.overShot].filter((b): b is Buffer => Boolean(b)).map((b) => `data:image/png;base64,${b.toString('base64')}`)
+    const shot = pictures.length ? { shots: pictures } : {}
     const play = `${result.play ? `\n${result.play.line}` : ''}${result.restart ? `\n${result.restart.line}` : ''}${result.stuck ? `\n${result.stuck}` : ''}`
     const stuck = result.play?.moved === false || result.restart?.ok === false || Boolean(result.stuck)
     return result.errors.length || stuck

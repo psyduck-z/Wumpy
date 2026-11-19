@@ -74,7 +74,7 @@ export interface AgentDeps {
   search(query: string): Promise<{ ran: boolean; ok: boolean; output: string }>
   /** Loads a page out of sight; ok when its console showed no errors. A
       picture of it mid-game, as a data URL, when one was taken. */
-  checkPage(html: string): Promise<{ ran: boolean; ok: boolean; output: string; shot?: string }>
+  checkPage(html: string): Promise<{ ran: boolean; ok: boolean; output: string; shots?: string[] }>
   /** Whether the model can be shown a picture. */
   sees(model: string): boolean
   /** Compiles or parses a program without running it: see main/codecheck.ts. */
@@ -346,8 +346,9 @@ export class Agents {
     let missingSaid = false
     let badEdits = 0
     let shows = 0
-    /* The page as it looked mid-game, for a reviewer that can see. */
-    let shot: string | undefined
+    /* The page as it looked mid-game, and at game over, for a reviewer
+       that can see. */
+    let shots: string[] | undefined
     for (;;) {
       if (agent.controller.signal.aborted) return
       agent.doing = used ? `thinking, after ${used} step${used === 1 ? '' : 's'}` : 'working on it'
@@ -518,7 +519,7 @@ export class Agents {
         agent.steps.push({ kind: 'page', what: r.ok ? 'its page loaded: no errors' : 'its page loaded with errors', ok: r.ran && r.ok })
         this.deps.log(`[agents] ${agent.number} its page: ${r.output.replace(/\s+/g, ' ').slice(0, 160)}`)
         broken = r.ran && !r.ok
-        shot = r.shot
+        shots = r.shots
         if (!broken && r.ran) lastGood = step.text
         if (broken && sendBacks < 3) {
           sendBacks++
@@ -615,7 +616,7 @@ export class Agents {
         agent.status = 'reviewing'
         agent.doing = 'being reviewed by another agent'
         this.deps.changed()
-        const review = await this.review(agent, step.text, asked, page ? shot : undefined)
+        const review = await this.review(agent, step.text, asked, page ? shots : undefined)
         if (agent.controller.signal.aborted) return
         agent.status = 'working'
         if (review?.verdict === 'revise') {
@@ -799,7 +800,7 @@ export class Agents {
     agent: Agent,
     report: string,
     before: readonly string[],
-    shot?: string
+    shots?: string[]
   ): Promise<{ verdict: 'accept' | 'revise'; notes: string } | null> {
     const text = reviewInput(agent.brief, agent.records, report, before)
     /*
@@ -808,13 +809,19 @@ export class Agents {
      * of different lengths, walls drawn across the dots, and its ghosts
      * shut in their pen. One look shows it; no reading of the code did.
      */
-    const seeing = Boolean(shot) && this.deps.sees(agent.model)
+    const seeing = Boolean(shots?.length) && this.deps.sees(agent.model)
     const raw = await this.ask(
       agent,
       [
         { role: 'system', content: REVIEW_PROMPT },
         seeing
-          ? { role: 'user', content: [{ type: 'text', text: `${text}${LF}${LF}${SEEN_NOTE}` }, { type: 'image_url', image_url: { url: shot! } }] }
+          ? {
+              role: 'user',
+              content: [
+                { type: 'text', text: `${text}${LF}${LF}${SEEN_NOTE}${shots!.length > 1 ? `${LF}The second picture is the game-over screen.` : ''}` },
+                ...shots!.map((url) => ({ type: 'image_url' as const, image_url: { url } }))
+              ]
+            }
           : { role: 'user', content: text }
       ],
       REVIEW_TOKENS

@@ -546,7 +546,7 @@ check('cars at a dozen times their speed are too fast', PC.tooFast(fastLook(0, [
 check('cars at two tiles a second are not', PC.tooFast(fastLook(0, [[1, 3], [5, 4]]), fastLook(200, [[1.4, 3], [4.6, 4]])), [])
 check('nor one wrapping round the screen', PC.tooFast(fastLook(0, [[9.9, 3], [5, 4]]), fastLook(200, [[-1, 3], [5.3, 4]])), [])
 check('builds get a third review, since the reviewer sees them', /isBuild\(agent\.brief\) \? BUILD_REVIEW_ROUNDS : REVIEW_ROUNDS/.test(read('src/main/agents.ts')), true)
-check('a reviewer that can see is shown the page', /this\.deps\.sees\(agent\.model\)/.test(read('src/main/agents.ts')) && /image_url: \{ url: shot! \}/.test(read('src/main/agents.ts')), true)
+check('a reviewer that can see is shown the page, and its game-over screen', /this\.deps\.sees\(agent\.model\)/.test(read('src/main/agents.ts')) && /shots!\.map\(\(url\) => \(\{ type: 'image_url' as const/.test(read('src/main/agents.ts')) && /overShot/.test(read('src/main/pagecheck.ts')), true)
 check('a guarded import is optional, not missing', /optional\.add\(n\.lineno\)/.test(CC.PY_CHECK), true)
 check('build agents build maps in code and check them as they start', /fill a grid from\s+a list of wall rectangles/.test(A.BUILDING.join(' ')) && /flood-fill from the player/.test(A.BUILDING.join(' ')), true)
 check('keys are held, not tapped', /keyJs\(key, 'keydown'\)[\s\S]{0,80}await sleep\(ms\)[\s\S]{0,80}keyJs\(key, 'keyup'\)/.test(read('src/main/pagecheck.ts')), true)
