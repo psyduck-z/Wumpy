@@ -659,6 +659,38 @@ export function reportOfRead(path: string, text: string): string {
   return `REPORT:${LF}${name}, with the changes asked for.${LF}${BT}${lang}${LF}${text.replace(/\n$/, '')}${LF}${BT}`
 }
 
+/**
+ * A reply with its loops taken out: a line, or a run of up to four lines,
+ * repeated straight after itself is kept once. A fence left open by the
+ * cut is closed.
+ */
+export function withoutRepeats(reply: string): string {
+  const lines = reply.split(LF)
+  const out: string[] = []
+  for (let i = 0; i < lines.length; ) {
+    /* Five times running or more: a loop, not code - code repeats a closing
+       brace three times, not three thousand. */
+    let jumped = false
+    for (let p = 1; p <= 4 && !jumped; p++) {
+      const unit = lines.slice(i, i + p)
+      if (unit.length < p || !unit.some((l) => l.trim())) continue
+      let n = 1
+      while (unit.every((l, k) => lines[i + n * p + k] === l)) n++
+      if (n >= 5) {
+        out.push(...unit)
+        i += n * p
+        jumped = true
+      }
+    }
+    if (!jumped) out.push(lines[i++])
+  }
+  /* The cut fell mid-line: that piece goes. */
+  if (out.length > 1 && !reply.endsWith(LF)) out.pop()
+  const fences = out.filter((l) => /^\s{0,3}`{3,}/.test(l)).length
+  if (fences % 2 === 1) out.push(BT)
+  return out.join(LF)
+}
+
 /** A reply up to the end of its first wumpy- block, or null when that block never closes. */
 export function firstBlock(reply: string): string | null {
   const lines = reply.split(LF)

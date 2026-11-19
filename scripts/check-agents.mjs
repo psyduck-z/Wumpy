@@ -767,6 +767,9 @@ check('a failed build goes back saying to start one more agent, never to write i
 }
 check('the panel holds a game the chat wrote itself while an agent takes it', /gameWritten\(message\.content\)/.test(read('src/renderer/src/hooks/useAgents.ts')) && /<HeldForTakeOver/.test(read('src/renderer/src/components/Markdown.tsx')), true)
 check('an edit mixing ======= and REPLACE: keeps the word out of the code', A.editsIn('```wumpy-edit\n<<<<<<< SEARCH\nlet a = 1\n=======\nREPLACE:\nlet a = 2\n>>>>>>> REPLACE\n```'), [{ find: 'let a = 1', replace: 'let a = 2' }])
+check('a probe that repeats one line to the limit is kept once, and closed', A.withoutRepeats('```wumpy-probe\npress: Space\n' + 'show: a.b()\n'.repeat(3000) + 'show: a.'), '```wumpy-probe\npress: Space\nshow: a.b()\n```')
+check('but three closing braces stay three', A.withoutRepeats('a {\n}\n}\n}\n'), 'a {\n}\n}\n}\n')
+check('and two lines repeated, too', A.withoutRepeats('x\n' + 'press: Up\nwait: 300\n'.repeat(500)), 'x\npress: Up\nwait: 300\n')
 check('an agent is named after the file its brief names', [A.fileNamed('Restyle ~/Downloads/wumpy-tests/pacman.html with neon walls.'), A.fileNamed('Make snake.cpp faster'), A.fileNamed('Build a Pac-Man game in one HTML file. Hand back the whole file.')], ['pacman.html', 'snake.cpp', undefined])
 check('a retry of a broken build is the same thing, a new game is not', [A.sameWork('Build a Pac-Man game in one HTML file', 'Rebuild the Pac-Man game so the player moves'), A.sameWork('Build a Pac-Man game in one HTML file', 'Build a Snake game in one HTML file')], [true, false])
 check('the card shows the file, not a number', /<span className="cmd-shell">\{name\}<\/span>/.test(read('src/renderer/src/components/AgentCard.tsx')), true)

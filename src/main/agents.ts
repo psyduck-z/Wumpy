@@ -10,6 +10,7 @@ import {
   fileNamed,
   fileRead,
   firstBlock,
+  withoutRepeats,
   reportOfRead,
   sameWork,
   fileSpan,
@@ -398,7 +399,10 @@ export class Agents {
       agent.doing = used ? `thinking, after ${used} step${used === 1 ? '' : 's'}` : 'working on it'
       this.deps.changed()
       leaner(messages)
-      const big = isBuild(agent.brief) && !refusedBig.has(agent.model)
+      /* The room for a whole file only until there is one: past that a reply
+         is edits and probes, and a carry-on covers a file written again. A
+         reply that loops on one line fills whatever room it is given. */
+      const big = isBuild(agent.brief) && !refusedBig.has(agent.model) && !lastReport
       let reply = await this.ask(agent, messages, big ? BUILD_TOKENS : AGENT_TOKENS)
       if (reply === null && big && agent.why?.includes('(400)') && !agent.controller.signal.aborted) {
         refusedBig.add(agent.model)
@@ -426,6 +430,19 @@ export class Agents {
           this.deps.log(`[agents] ${agent.number} wrote ${repeated} tool blocks in one reply: using the first`)
           reply = `${first}`
           note = `(Only your first block was used: one tool block per reply - you wrote ${repeated}.)`
+        }
+      }
+      /* One line, or a few, written over and over until the limit: the
+         repeats go, and what is left is used. A Crossy Road agent's probe
+         asked for the same value some three thousand times, three replies
+         running, and was ended without one answer. */
+      if (agent.tooLong) {
+        const squeezed = withoutRepeats(reply)
+        if (squeezed.length < reply.length * 0.5) {
+          this.deps.log(`[agents] ${agent.number}'s reply repeated itself to ${reply.length} characters: ${squeezed.length} kept`)
+          agent.tooLong = undefined
+          reply = squeezed
+          note = '(Your last reply repeated the same lines over and over until it was cut off; the repeats were dropped.)'
         }
       }
       /* Far too long to be a basic game, and cut off besides: said, and
