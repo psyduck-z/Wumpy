@@ -37,6 +37,8 @@ jobs:
       - run: npx electron-vite build
       - run: npx electron-builder --win --x64 --publish never
       - uses: actions/upload-artifact@v4
+        # Storage full is no reason to skip the Windows checks below.
+        continue-on-error: true
         with:
           name: wumpy-windows
           path: dist/*-setup.exe
