@@ -98,12 +98,11 @@ export function readWriteRequest(raw: string): WriteRequest {
   return {
     reason: reason.join(' ').trim() || null,
     path,
-    /* With a from: line, the file is the agent's - unless the model wrote
-       one of its own after it, which is then the one it means: a chat fixing
-       an agent's broken page kept its from: line, and its fix was thrown
-       away twice. */
-    content: fromAgent && !content.trim() ? '' : content,
-    from: content.trim() ? null : fromAgent
+    /* With a from: line the file is the agent's, whatever follows it: a
+       chat that could not see the agent's tested Snake wrote from: and then
+       a Snake of its own invention, which did not move. */
+    content: fromAgent ? '' : content,
+    from: fromAgent
   }
 }
 
@@ -168,6 +167,8 @@ export function checkWritePath(
   }
   // A wildcard is not a destination, and nor is a stream name.
   if (/[*?]/.test(text)) return { ok: false, path: '', why: 'A path cannot have wildcards in it.' }
+  // "<the path they asked for>", copied from a template instead of filled in.
+  if (/<[^>]*>/.test(text)) return { ok: false, path: '', why: 'That path is still a placeholder: put in where the file goes.' }
 
   // The spellings a model actually produces for the home directory.
   let expanded = text

@@ -150,11 +150,13 @@ export async function checkPage(path: string): Promise<PageCheck> {
     let lastKey = 'ArrowUp'
     let started = ''
     const tried: string[] = []
-    for (const key of ['ArrowUp', 'ArrowLeft', 'ArrowRight', 'ArrowDown', 'start', 'ArrowUp', 'ArrowLeft']) {
+    const order = ['ArrowUp', 'ArrowLeft', 'ArrowRight', 'ArrowDown', 'start', 'ArrowUp', 'ArrowLeft']
+    for (let k = 0; k < order.length; k++) {
+      const key = order[k]
       if (key === 'start') {
         await hold('Space', 80)
         await hold('Enter', 80)
-        started = String((await run(CLICK_JS)) || '')
+        started = String((await run(CLICK_JS)) || 'a click')
         await sleep(500)
         before = await look()
         continue
@@ -171,6 +173,14 @@ export async function checkPage(path: string): Promise<PageCheck> {
          Its moves are measured from here. */
       if (p.moved === null && after?.player && !before?.player) {
         before = after
+        continue
+      }
+      /* No player anywhere yet: a game that makes its player when it
+         starts. Start it - Space, Enter, its button - before giving up:
+         a Pac-Man threw the moment Space was pressed, and the test, having
+         found nobody to move, had stopped before it pressed it. */
+      if (p.moved === null && !started && k < order.indexOf('start')) {
+        k = order.indexOf('start') - 1
         continue
       }
       if (p.moved === null) break

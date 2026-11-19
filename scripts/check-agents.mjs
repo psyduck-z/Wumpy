@@ -183,7 +183,7 @@ check('a C++ or Python program is a build', A.isBuild('write a tetris in python'
 check('and a reviewer to check every requirement in the brief', /list EVERY requirement in the brief/.test(A.REVIEW_PROMPT) && /each\s+control once, losing, and the restart/.test(A.REVIEW_PROMPT), true)
 check('and never to ask an agent to save a file the brief named', /also when the brief says to save it at a path/.test(A.REVIEW_PROMPT), true)
 check('a page in a report is found for loading', [M.pageIn('REPORT:\n```html\n<!DOCTYPE html><html><body><script>x()</script></body></html>\n```'), M.pageIn('no page here')].map((x) => (x ? 'page' : null)), ['page', null])
-check('the chat hands building to agents, always, in any language', /MAKING A GAME, A WEB PAGE, AN APP OR ANY REAL PROGRAM IS ALWAYS AN AGENT'S JOB, in any\s+language/.test(A.agentsPrompt(2)), true)
+check('the chat hands building to agents, always, in any language', /MAKING OR CHANGING A GAME, A WEB PAGE, AN APP OR ANY REAL PROGRAM IS ALWAYS AN AGENT'S\s+JOB, in any language/.test(A.agentsPrompt(2)), true)
 check('and its example is a game, with no save asked of the agent', /Build a Snake game/.test(A.agentsPrompt(2)) && /it cannot save a\s+file/.test(A.agentsPrompt(2)), true)
 check('a script in a bash fence is a deliverable, never run', A.stepOf(`REPORT:\n${BT}bash\nrm -rf ~/x\n${BT}`, 'linux').kind, 'report')
 check('a monitor note is passed on', /You set a monitor for this, saying what to do now: merge them/.test(A.deliveryText([], 'merge them')), true)
@@ -553,21 +553,39 @@ check('keys are held, not tapped', /keyJs\(key, 'keydown'\)[\s\S]{0,80}await sle
 
 /* ------------------------------------------- files saved, not retyped */
 
+const pageReport = 'REPORT:\n```html\n<!DOCTYPE html>\n<html><body><canvas></canvas><script>let a = 1</script></body></html>\n```\nChecked: loaded.'
+
 const W = await load('src/shared/writefile.ts', 'writefile')
 const asWritten = W.readWriteRequest('# Save the game\npath: ~/Downloads/snake.html\nfrom: agent-7\n')
 check('a write block can name an agent\'s file instead of holding it', [asWritten.path, asWritten.from, asWritten.content], ['~/Downloads/snake.html', 'agent-7', ''])
 check('and an ordinary one is as it was', W.readWriteRequest('path: a.py\n---\nprint(1)\n').from, null)
-check('content after a from: line is the model\'s own fix, and wins', W.readWriteRequest('path: a.html\nfrom: agent-1\n---\n<html>fixed</html>\n').content, '<html>fixed</html>\n')
+check('a from: line wins over anything typed after it', [W.readWriteRequest('path: a.html\nfrom: agent-1\n---\n<html>invented</html>\n').content, W.readWriteRequest('path: a.html\nfrom: agent-1\n---\n<html>invented</html>\n').from], ['', 'agent-1'])
+const handedBroken = A.deliveryText([{ id: 'agent-7', broken: true, file: { lines: 2, kind: 'a web page' }, number: 1, title: 'Pac-Man', ok: true, text: pageReport, tookMs: 60000, review: 'it still breaks', steps: 2, ran: [] }], null)
+check('a build that never passed is not offered for saving', !/from: agent-7\n/.test(handedBroken) && /IT DOES NOT WORK YET/.test(handedBroken) && /start one more agent/.test(handedBroken), true)
 check('a build that never passed goes back saying so', /WUMPY'S TEST OF THIS FINAL VERSION FOUND IT STILL BROKEN/.test(read('src/main/agents.ts')), true)
-const pageReport = 'REPORT:\n```html\n<!DOCTYPE html>\n<html><body><canvas></canvas><script>let a = 1</script></body></html>\n```\nChecked: loaded.'
 check('the file in a report is its page, exactly', A.fileIn(pageReport)?.text, '<!DOCTYPE html>\n<html><body><canvas></canvas><script>let a = 1</script></body></html>\n')
 check('or its longest block', A.fileIn('REPORT:\n```cpp\n' + 'int x;\n'.repeat(7) + '```\nRun:\n```bash\ng++ a.cpp\n```')?.kind, 'cpp code')
 const handed = A.deliveryText([{ id: 'agent-7', file: { lines: 180, kind: 'a web page' }, number: 1, title: 'Snake', ok: true, text: 'the page', tookMs: 60000, review: 'accepted', steps: 2, ran: [] }], null)
-check('the hand-back says to save it by reference, never retyped', /from: agent-7/.test(handed) && /never retype it/.test(handed), true)
+check('the hand-back says to save it by reference, never retyped, with the block to write', /from: agent-7/.test(handed) && /never retype the file/.test(handed) && /```wumpy-write\n# Save Snake\npath: <the path they asked for>\nfrom: agent-7\n```/.test(handed), true)
+check('an agent trying to save its file is told it never does', /you never save files/.test(read('src/main/agents.ts')), true)
 const handedPage = A.deliveryText([{ id: 'agent-7', file: { lines: 2, kind: 'a web page' }, number: 1, title: 'Snake', ok: true, text: pageReport, tookMs: 60000, review: 'accepted', steps: 2, ran: [] }], null)
 check('and does not show the file, so it cannot be retyped', !/<canvas>/.test(handedPage) && /not shown here; it is saved as written with from: agent-7/.test(handedPage) && /Checked: loaded/.test(handedPage), true)
 check('the write card fetches an agent\'s file itself', /window\.wumpy\.agents\s*\.file\(from\)/.test(read('src/renderer/src/components/WriteCard.tsx')), true)
 check('a terminal game is played in a sandbox, without the home folder or network', /'--unshare-all'/.test(read('src/main/codecheck.ts')) && !/--bind', homedir|ro-bind', '\/home/.test(read('src/main/codecheck.ts')), true)
+
+/* ------------------------------------------------ fixed by edits */
+
+const editReply = 'Fixing the maze.\n```wumpy-edit\nFIND:\n  if (maze[y][x] === 0) dotCount++;\nREPLACE:\n  if (maze[y] && maze[y][x] === 0) dotCount++;\nFIND:\nconst ROWS = 30;\nREPLACE:\nconst ROWS = maze.length;\n```'
+check('edits are read from a reply, pair by pair', A.editsIn(editReply).map((e) => e.find.trim()), ['if (maze[y][x] === 0) dotCount++;', 'const ROWS = 30;'])
+check('and a reply with them is an edit step', A.stepOf(editReply, 'linux').kind, 'edit')
+const gameFile = 'const ROWS = 30;\nfunction count() {\n    if (maze[y][x] === 0) dotCount++;\n}\n'
+const madeEdits = A.applyEdits(gameFile, A.editsIn(editReply))
+check('they are made to the file, its own indentation kept', madeEdits.ok && madeEdits.text, 'const ROWS = maze.length;\nfunction count() {\n    if (maze[y] && maze[y][x] === 0) dotCount++;\n}\n')
+check('even when the indentation was copied wrong', A.applyEdits('a\n      b();\nc', [{ find: 'b();', replace: 'b2();' }]).ok, true)
+check('a FIND that is not there changes nothing and says so', (() => { const r = A.applyEdits(gameFile, [{ find: 'const ROWS = 30;', replace: 'x' }, { find: 'nowhere()', replace: 'y' }]); return !r.ok && /not in your file/.test(r.why) })(), true)
+check('nor one that is in two places', (() => { const r = A.applyEdits('a\na\n', [{ find: 'a', replace: 'b' }]); return !r.ok && /2 times/.test(r.why) })(), true)
+check('the edited file takes the old one\'s place in the report', A.withFile(pageReport, '<!DOCTYPE html>\n<html><body>new</body></html>\n'), 'REPORT:\n```html\n<!DOCTYPE html>\n<html><body>new</body></html>\n```\nChecked: loaded.')
+check('agents are told they can fix by edits', /wumpy-edit blocks instead of all of it again/.test(linux), true)
 
 /* -------------------------------------------- hearing, copying, cards */
 

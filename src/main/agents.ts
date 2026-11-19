@@ -4,9 +4,11 @@ import {
   REVIEW_PROMPT,
   REVIEW_ROUNDS,
   agentPrompt,
+  applyEdits,
   clip,
   fileIn,
   isBuild,
+  withFile,
   deliveryText,
   reviewInput,
   stepOf,
@@ -95,12 +97,17 @@ interface Agent extends AgentView {
   finished?: Finished
   /** Why it failed, when it did. */
   why?: string
+  /** Every version it built failed Wumpy's test. */
+  stillBroken?: boolean
 }
 
 interface Monitor extends MonitorView {
   /** The agents it watches, by id. */
   ids: string[]
 }
+
+/** A command that writes a file: an agent trying to save its work itself. */
+const SAVES_FILE = /(?:^|[^<>2&])>\s*[~\/\w$"']|\btee\b|open\([^)]*['"][wa]['"]|write_text|Set-Content|Out-File|New-Item|\bcp\s|\bmv\s|<<\s*['"]?EOF/i
 
 /** A command that prints a file: its output is kept whole, up to a point. */
 const READS_FILE = /^\s*(?:cat|Get-Content|gc|type|bat|nl|head|tail|sed\s+-n)\b/i
@@ -155,7 +162,7 @@ export class Agents {
   /** The file an agent handed back, exactly as it wrote it: see fileIn. */
   fileOf(id: string): string | null {
     const agent = this.agents.find((a) => a.id === id)
-    return agent?.status === 'done' && agent.report ? (fileIn(agent.report)?.text ?? null) : null
+    return agent?.status === 'done' && agent.report && !agent.stillBroken ? (fileIn(agent.report)?.text ?? null) : null
   }
 
   forChat(chatId: string): AgentView[] {
@@ -326,6 +333,7 @@ export class Agents {
        or whose program compiled. */
     let lastGood = ''
     let missingSaid = false
+    let badEdits = 0
     /* The page as it looked mid-game, for a reviewer that can see. */
     let shot: string | undefined
     for (;;) {
@@ -339,7 +347,25 @@ export class Agents {
         return
       }
       messages.push({ role: 'assistant', content: reply })
-      const step = stepOf(reply, world.platform)
+      let step = stepOf(reply, world.platform)
+
+      /* Edits to the file in its last report: made, and the result goes on
+         as its report. A FIND that matches nowhere goes back to it. */
+      if (step.kind === 'edit') {
+        const file = lastReport ? fileIn(lastReport) : null
+        const made = file ? applyEdits(file.text, step.edits) : ({ ok: false, why: 'There is no file in a report of yours to change yet: give your whole REPORT first.' } as const)
+        this.deps.log(`[agents] ${agent.number} sent ${step.edits.length} edit(s): ${made.ok ? 'made' : made.why.slice(0, 120)}`)
+        if (!made.ok) {
+          badEdits++
+          messages.push({
+            role: 'user',
+            content: `NOT MADE: ${made.why}${badEdits >= 3 ? ' Give your whole REPORT again instead.' : ' Nothing was changed.'}`
+          })
+          continue
+        }
+        agent.steps.push({ kind: 'code', what: `changed ${step.edits.length} place${step.edits.length === 1 ? '' : 's'} in its file`, ok: true })
+        step = { kind: 'report', text: withFile(lastReport, made.text) }
+      }
 
       if (step.kind !== 'report') {
         if (lastCall) {
@@ -423,7 +449,7 @@ export class Agents {
           sendBacks++
           messages.push({
             role: 'user',
-            content: `Wumpy loaded the page in your report. ${r.output}\n\nFix the cause - read your code, do not guess - and give your whole REPORT again.`
+            content: `Wumpy loaded the page in your report. ${r.output}\n\nFix the cause - read your code, do not guess - with wumpy-edit blocks, or your whole REPORT again.`
           })
           continue
         }
@@ -464,7 +490,7 @@ export class Agents {
                 sendBacks++
                 messages.push({
                   role: 'user',
-                  content: `Wumpy compiled the ${name} in your report, then ran it out of sight and pressed keys.\n${played.output}\n\nFix the cause - read your code, do not guess - and give your whole REPORT again.`
+                  content: `Wumpy compiled the ${name} in your report, then ran it out of sight and pressed keys.\n${played.output}\n\nFix the cause - read your code, do not guess - with wumpy-edit blocks, or your whole REPORT again.`
                 })
                 continue
               }
@@ -476,7 +502,7 @@ export class Agents {
           sendBacks++
           messages.push({
             role: 'user',
-            content: `Wumpy checked the ${name} in your report.\n${r.output}\n\nFix the cause - read your code, do not guess - and give your whole REPORT again.`
+            content: `Wumpy checked the ${name} in your report.\n${r.output}\n\nFix the cause - read your code, do not guess - with wumpy-edit blocks, or your whole REPORT again.`
           })
           continue
         }
@@ -504,6 +530,7 @@ export class Agents {
       if (broken && sendBacks >= 3) {
         const last = agent.records[agent.records.length - 1]?.outcome ?? ''
         agent.review = `${agent.review ? `${agent.review}; ` : ''}it still breaks when Wumpy tests it`
+        agent.stillBroken = true
         this.finishReport(agent, `${step.text}${LF}${LF}WUMPY'S TEST OF THIS FINAL VERSION FOUND IT STILL BROKEN - do not tell the user it works:${LF}${clip(last, 1500)}`, true)
         return
       }
@@ -527,7 +554,7 @@ export class Agents {
               'Another agent reviewed your report against the brief and the steps, and found:',
               review.notes,
               '',
-              `Fix what it found - with tool uses if you need them (${Math.max(0, AGENT_STEPS - used)} left) - and give your whole REPORT again.`,
+              `Fix what it found - with tool uses if you need them (${Math.max(0, AGENT_STEPS - used)} left) - with wumpy-edit blocks, or your whole REPORT again.`,
               /* A reviewer that misread the brief once had a working hop
                  slowed to eight seconds a tile, and the agent obliged. */
               'A note can be wrong. If one contradicts the brief or misreads your code, do not follow it: say why, in one line, in your report.'
@@ -632,11 +659,21 @@ export class Agents {
     return text.trim()
   }
 
-  private async act(agent: Agent, step: Exclude<ReturnType<typeof stepOf>, { kind: 'report' }>): Promise<string> {
+  private async act(agent: Agent, step: Exclude<ReturnType<typeof stepOf>, { kind: 'report' } | { kind: 'edit' }>): Promise<string> {
     if (step.kind === 'run') {
       agent.doing = `running: ${step.command.split('\n')[0].slice(0, 60)}`
       this.deps.changed()
-      const r = await this.deps.run(step.command, step.shell)
+      let r = await this.deps.run(step.command, step.shell)
+      /* An agent trying to save its file itself: told, plainly, that it
+         never does - a Snake's agent spent four steps hunting for where its
+         blocked write had gone, then reported the file "never saved", and
+         the chat asked the user for the source. */
+      if (!r.ran && SAVES_FILE.test(step.command)) {
+        r = {
+          ...r,
+          output: 'NOT RUN: you never save files - not with cat, tee, python, or anything. Put the whole file in your REPORT; Wumpy saves it from there, every time. Do not mention saving in your report.'
+        }
+      }
       agent.records.push({ kind: 'run', what: step.command, why: step.why, outcome: r.output })
       agent.steps.push({ kind: 'run', what: step.command.split('\n')[0].slice(0, 120), ok: r.ran && r.ok })
       this.deps.log(`[agents] ${agent.number} ${r.ran ? 'ran' : 'was refused'}: ${step.command.replace(/\s+/g, ' ').slice(0, 120)}`)
@@ -713,6 +750,7 @@ export class Agents {
     agent.finished = {
       id: agent.id,
       ...(file ? { file: { lines: file.text.split(LF).length - 1, kind: file.kind } } : {}),
+      ...(agent.stillBroken ? { broken: true } : {}),
       number: agent.number,
       title: agent.title,
       ok: status === 'done',

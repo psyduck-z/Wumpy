@@ -308,8 +308,25 @@ the file when the agent's report comes back. On the way:
   JavaScript gets `node --check` and shell scripts `bash -n`. An `#include`
   reaching outside the program is refused. With no Python or compiler on the
   computer, the check says so rather than passing.
+- **A terminal game is played, in a sandbox.** On Linux, a C, C++ or Python
+  program that reads the keyboard (curses, termios, pygame...) runs for six
+  seconds inside bubblewrap — no network, no home folder, the system
+  read-only, killed after — with Space, Enter and the arrows pressed. A
+  crash, a traceback, a program that never draws, or one that quits by
+  itself at its own "play again?" comes back as a bug. On Windows it is
+  compiled and not run.
 - **Errors come back with the lines they point at,** to the agent before any
   review, and to the chat when it writes a file itself.
+- **Fixes are edits, not rewrites.** An agent changes the file in its last
+  report with `wumpy-edit` blocks — FIND the lines as they are, REPLACE with
+  the new ones — instead of writing twenty thousand characters again and
+  breaking what the last version fixed. All the edits are made or none.
+- **The file is saved as the agent wrote it.** The chat's write block says
+  `from: agent-3` and Wumpy copies the agent's tested file itself; the
+  hand-back does not even show the chat the file, so it cannot retype it
+  (and a slip in nine thousand characters once broke a working page). A
+  build that never passed is not offered for saving at all: the chat is
+  told to say so and try again with what broke.
 - **The reviewer can see.** When the model takes pictures, the agent that
   reviews a built page is shown it mid-game, as a player would see it — a
   Pac-Man maze typed in rows of different lengths passed every other check.

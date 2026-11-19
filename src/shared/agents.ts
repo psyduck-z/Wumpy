@@ -158,7 +158,8 @@ export const BUILDING = [
   '  failed five times on rows of 19, 21 and 22 characters. Build it in code - fill a grid from',
   '  a list of wall rectangles [x, y, w, h], mirror it left to right, build lanes in a loop -',
   '  and check it as it starts: flood-fill from the player, and throw an Error naming any dot',
-  '  or exit it cannot reach. Wumpy\'s test shows that error.',
+  '  or exit it cannot reach. Wumpy\'s test shows that error. Sizes come from the data -',
+  '  ROWS = MAZE.length - never a second number typed beside it.',
   '- Enemies move from the first seconds: ghosts leave their pen, cars drive.',
   '- Every speed and timer is per second, times the time since the last frame - capped, so a',
   '  tab coming back does not jump everything. requestAnimationFrame gives milliseconds:',
@@ -228,6 +229,10 @@ export function agentPrompt(world: AgentWorld): string {
     `- You have at most ${world.steps} tool uses. Spend them on what the task needs; a task`,
     '  that needs none - writing, reviewing, working something out - needs none.',
     '- Never ask for the same thing twice: its answer is already above.',
+    `- To fix the file in your last report, send ${BT}wumpy-edit blocks instead of all of it again:`,
+    '  a line FIND:, the lines to change copied exactly from the file (enough to be in one place),',
+    '  a line REPLACE:, the new lines; as many pairs as it needs. Wumpy makes the changes and tests',
+    '  the result as your new report.',
     '- You change nothing on this computer: you look, and you hand back. To write something - a',
     '  script, a document, a file - is to give that text, in full, in your report; Wumpy saves',
     '  it. A brief that says to save a file at a path means: hand back its whole content, and',
@@ -315,6 +320,8 @@ export type Step =
   | { kind: 'search'; query: string; why: string }
   /* A whole web page to load out of sight: see main/pagecheck.ts. */
   | { kind: 'page'; html: string; why: string }
+  /* Changes to the file in its last report: see applyEdits. */
+  | { kind: 'edit'; edits: Array<{ find: string; replace: string }> }
   | { kind: 'report'; text: string }
 
 /**
@@ -323,6 +330,8 @@ export type Step =
  * the rule, and a reply that proposes three has only been heard once.
  */
 export function stepOf(reply: string, platform: AgentWorld['platform']): Step {
+  const edits = editsIn(reply)
+  if (edits.length) return { kind: 'edit', edits }
   /* A page to test: everything up to the block's own closing fence, which
      is the last one - a page's script may hold backticks of its own. */
   const page = new RegExp(`${BT}[ \\t]*(?:\\n[ \\t]*)?wumpy-check-page\\b[^\\n]*\\n([\\s\\S]*)${BT}`).exec(reply)
@@ -424,6 +433,89 @@ export function withoutFile(report: string, id: string): string {
   return `${report.slice(0, span.start)}[${span.kind}, ${lines} lines - not shown here; it is saved as written with from: ${id}]${report.slice(span.end)}`
 }
 
+/**
+ * The changes in a reply's wumpy-edit blocks: FIND: then the lines as they
+ * are, REPLACE: then the lines as they should be, as many pairs as it needs.
+ *
+ * A fix used to mean writing the whole file again, and a Pac-Man is twenty
+ * thousand characters - three cut-off replies stitched together - so every
+ * revision could break what the last one fixed, and did: its maze check
+ * failed on five versions running.
+ */
+export function editsIn(reply: string): Array<{ find: string; replace: string }> {
+  const out: Array<{ find: string; replace: string }> = []
+  const lines = reply.split(LF)
+  for (let i = 0; i < lines.length; i++) {
+    const open = /^\s{0,3}(`{3,})[ \t]*wumpy-edit\b/.exec(lines[i])
+    if (!open) continue
+    let j = i + 1
+    while (j < lines.length && !new RegExp(`^\\s{0,3}${open[1]}\x60*\\s*$`).test(lines[j])) j++
+    const body = lines.slice(i + 1, j)
+    let mode: 'none' | 'find' | 'replace' = 'none'
+    let find: string[] = []
+    let replace: string[] = []
+    const flush = (): void => {
+      if (mode === 'replace' && find.join('').trim()) out.push({ find: find.join(LF), replace: replace.join(LF) })
+      find = []
+      replace = []
+    }
+    for (const l of body) {
+      if (/^\s*FIND:\s*$/.test(l)) {
+        flush()
+        mode = 'find'
+      } else if (/^\s*REPLACE:\s*$/.test(l) && mode === 'find') mode = 'replace'
+      else if (mode === 'find') find.push(l)
+      else if (mode === 'replace') replace.push(l)
+    }
+    flush()
+    i = j
+  }
+  return out
+}
+
+/**
+ * The edits, made to a file - all of them or none. Each FIND must match one
+ * place: exactly, or else line for line with the spaces at each end ignored,
+ * since a model copying code back tends to lose indentation.
+ */
+export function applyEdits(file: string, edits: ReadonlyArray<{ find: string; replace: string }>): { ok: true; text: string } | { ok: false; why: string } {
+  let text = file
+  for (const [n, e] of edits.entries()) {
+    const first = e.find.split(LF).find((l) => l.trim())?.trim().slice(0, 80) ?? ''
+    const exact = text.split(e.find).length - 1
+    if (exact === 1) {
+      text = text.replace(e.find, () => e.replace)
+      continue
+    }
+    if (exact > 1) return { ok: false, why: `FIND number ${n + 1} (starting "${first}") is in your file ${exact} times: give more lines around it, so it is in one place only.` }
+    const have = text.split(LF)
+    const want = e.find.split(LF).map((l) => l.trim())
+    while (want.length && !want[0]) want.shift()
+    while (want.length && !want[want.length - 1]) want.pop()
+    const at: number[] = []
+    for (let i = 0; i + want.length <= have.length; i++) {
+      if (want.every((w, k) => have[i + k].trim() === w)) at.push(i)
+    }
+    if (at.length !== 1) {
+      return {
+        ok: false,
+        why: at.length
+          ? `FIND number ${n + 1} (starting "${first}") matches ${at.length} places: give more lines around it.`
+          : `FIND number ${n + 1} (starting "${first}") is not in your file. Copy the lines exactly as they are in the file in your last report.`
+      }
+    }
+    text = [...have.slice(0, at[0]), ...e.replace.split(LF), ...have.slice(at[0] + want.length)].join(LF)
+  }
+  return { ok: true, text }
+}
+
+/** The report with its file swapped for a new one: an edited version. */
+export function withFile(report: string, file: string): string {
+  const span = fileSpan(report)
+  if (!span) return report
+  return `${report.slice(0, span.start)}${file.replace(/\n$/, '')}${report.slice(span.end)}`
+}
+
 /** Output handed back to the agent, trimmed to what a model can use. */
 export function clip(text: string, max = 6000): string {
   if (text.length <= max) return text
@@ -466,6 +558,8 @@ export interface Finished {
   id?: string
   /** Its report holds a file - a page or a program - Wumpy can save as it is. */
   file?: { lines: number; kind: string }
+  /** What it built never passed Wumpy's test. */
+  broken?: boolean
   number: number
   title: string
   ok: boolean
@@ -511,11 +605,21 @@ export function deliveryText(done: readonly Finished[], note: string | null): st
      * and twenty seconds spent typing them.
      */
     const file =
-      d.ok && d.file && d.id
-        ? `${LF}ITS FILE (${d.file.kind}, ${d.file.lines} lines) is saved exactly as the agent wrote it: a wumpy-write block with \x60path:\x60 and then \x60from: ${d.id}\x60, and nothing after - never retype it.`
-        : ''
+      d.ok && d.file && d.id && !d.broken
+        ? [
+            '',
+            `ITS FILE (${d.file.kind}, ${d.file.lines} lines) is tested and kept by Wumpy. Whatever the report says about saving, this is how it is saved: your reply holds this block, with the path they asked for, and nothing below the from: line - never retype the file.`,
+            `${BT}wumpy-write`,
+            `# Save ${d.title.replace(/^(?:build|write|make|create)\s+/i, '')}`,
+            'path: <the path they asked for>',
+            `from: ${d.id}`,
+            BT
+          ].join(LF)
+        : d.broken
+          ? `${LF}IT DOES NOT WORK YET: every version failed Wumpy's test (below). Say so plainly, and start one more agent with the same brief plus what the test found. Never save this file, and never write one of your own instead.`
+          : ''
     return d.ok
-      ? `AGENT ${d.number}: ${d.title} (${how})${LF}${ran}${file}${LF}${file ? withoutFile(d.text, d.id!) : d.text}`
+      ? `AGENT ${d.number}: ${d.title} (${how})${LF}${ran}${file}${LF}${d.file && d.id ? withoutFile(d.text, d.id) : d.text}`
       : `AGENT ${d.number}: ${d.title} - FAILED (${how}): ${d.text}`
   })
   const rule =
@@ -545,19 +649,19 @@ export function agentsPrompt(slots: number): string {
     'and a search of your own is for one quick fact. What a few lines or one command answers, do',
     'yourself.',
     '',
-    'MAKING A GAME, A WEB PAGE, AN APP OR ANY REAL PROGRAM IS ALWAYS AN AGENT\'S JOB, in any',
-    'language - never write one in your own reply, not even a draft. Wumpy plays or compiles',
-    'the agent\'s work, it fixes what breaks, and another agent reviews it. Say it is being',
-    'built; when the report comes, write the file where they asked with a wumpy-write block,',
-    'naming it yourself - never ask what to call it.',
+    'MAKING OR CHANGING A GAME, A WEB PAGE, AN APP OR ANY REAL PROGRAM IS ALWAYS AN AGENT\'S',
+    'JOB, in any language - never write one in your own reply, not even a draft. Wumpy plays or',
+    'compiles the agent\'s work, it fixes what breaks, and another agent reviews it. For a change,',
+    'the brief names the file\'s full path: the agent reads it. Say it is being built; when the',
+    'report comes, write the file where they asked, naming it yourself - never ask.',
     '',
     'make me a snake game in my downloads',
     'I have an agent building it - it gets played and fixed before you get it.',
     `${BT}wumpy-agent`,
     '# Build a Snake game in one HTML file',
-    'Write a complete Snake game as one HTML file - inline CSS and JavaScript, no libraries: arrow',
-    'keys and WASD, food, growing, score; it waits for a key to start, and game over shows the',
-    'score, with Space or a button to play again. Hand back the whole file.',
+    'Write a complete Snake game as one HTML file, no libraries: arrows and WASD, food, growing,',
+    'score; it waits for a key to start; game over shows the score, and Space plays again. Hand',
+    'back the whole file.',
     BT,
     '',
     'The brief is ALL it gets: it sees nothing of this chat. Put in the goal, every fact, name',
