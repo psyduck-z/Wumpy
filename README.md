@@ -293,7 +293,11 @@ Asked for a game, a page, an app or a program — in any language — or a chang
 to one ("now make it look like a neon arcade"), the chat hands it to a
 background agent instead of writing it in its reply, and writes the file when
 the agent's report comes back. The rule is in its instructions and, because
-that alone was not enough, said again beside the message that asks. On the way:
+that alone was not enough, said again beside the message that asks — and if
+the chat writes a game itself anyway, that write is held and the request goes
+to an agent. A change to something built ("make it so I die when a car hits
+me") goes to an agent too, which reads the saved file and edits it in place
+rather than typing it out again. On the way:
 
 - **A page is played, not just loaded.** Out of sight, in a sandboxed window
   with no network, Wumpy loads it, finds its player (a `player`, `chicken`,
