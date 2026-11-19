@@ -555,6 +555,8 @@ check('and a life lost is a hit', PC.standInTraffic(drive([3, 3.5, 4, 4.5], { li
 check('a car in the next lane is not one in the player\'s', PC.inLane({ player: { col: 5, row: 12 }, harm: [[3, 11, 1], [4, 15, 1]] }).length, 0)
 check('nor is a car wrapping round the edge a crossing', PC.standInTraffic([road(0, 11.8), road(100, -3.4), road(200, -3), road(900, -2.5)]).verdict, null)
 check('a hop measures pixels per tile', PC.tileScale({ player: { row: 14, y: 524 } }, { player: { row: 13, y: 484 } }), 40)
+check('a drift of a twentieth of a tile is not a move', PC.playFrom({ player: { row: 14, col: 3.44 } }, { player: { row: 14, col: 3.4 } }).moved, false)
+check('a hop of a tile is', PC.playFrom({ player: { row: 14, col: 3 } }, { player: { row: 13, col: 3 } }).moved, true)
 check('cars stacked on one another in a lane are said', PC.bunched({ t: 0, harm: [[3, 1, 1], [3, 1, 1], [7, 3, 1]] }, { t: 1500, harm: [[5, 1, 1], [5, 1, 1], [8, 3, 1]] }) !== '', true)
 check('cars spread along a lane are not', PC.bunched({ t: 0, harm: [[1, 1, 1], [5, 1, 1], [9, 1, 1]] }, { t: 1500, harm: [[2, 1, 1], [6, 1, 1], [10, 1, 1]] }), '')
 check('builds get a third review, since the reviewer sees them', /isBuild\(agent\.brief\) \? BUILD_REVIEW_ROUNDS : REVIEW_ROUNDS/.test(read('src/main/agents.ts')), true)

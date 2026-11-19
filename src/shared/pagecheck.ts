@@ -588,7 +588,16 @@ export function playFrom(before: Seen, after: Seen, key = 'ArrowUp'): { moved: b
   const POSITION = /^(?:player|chicken|frog|hero|pacman|pac)?(?:x|y|row|col|column|lane|tx|ty|gx|gy|px|py|tilex|tiley|gridx|gridy|posx|posy|cellx|celly)$/i
   const watched = Object.keys(b).filter((k) => typeof b[k] === 'number')
   const where = watched.filter((k) => POSITION.test(k))
-  const changed = (where.length ? where : watched).filter((k) => b[k] !== a[k])
+  /* By half a tile, or a few pixels: a player drifting with a log by a
+     twentieth of a tile - "col 3.44 became col 3.4" - had not moved, and
+     a game whose player never hopped passed for one that did. */
+  const far = (k: string): boolean => {
+    const x = b[k] as number
+    const y = a[k] as number
+    if (typeof x !== 'number' || typeof y !== 'number') return b[k] !== a[k]
+    return Math.abs(x - y) >= (Math.abs(x) < 64 && Math.abs(y) < 64 ? 0.5 : 4)
+  }
+  const changed = (where.length ? where : watched).filter(far)
   const said = (o: Record<string, number | boolean>): string =>
     Object.entries(o)
       .filter(([, v]) => typeof v === 'number')
