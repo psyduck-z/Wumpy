@@ -612,6 +612,8 @@ check('a game written beside the agent building it is held', A.heldForAgent('I h
 check('but not a save of the agent\'s own file, nor a note', [A.heldForAgent('```wumpy-agent\n# B\nb\n```', { path: '~/a.html', from: 'agent-1' }), A.heldForAgent('```wumpy-agent\n# B\nb\n```', { path: '~/notes.txt' })], [false, false])
 check('agents are told they can fix by edits, on a file Wumpy keeps', /Wumpy keeps it; it is on no disk/.test(linux) && /wumpy-edit blocks:/.test(linux), true)
 check('and can see it as it is now', A.stepOf('```wumpy-show\n```', 'linux').kind === 'show' && /wumpy-show block/.test(linux), true)
+check('and look inside its page before changing it', A.stepOf('```wumpy-probe\npress: Space\nshow: pacman\n```', 'linux'), { kind: 'probe', script: 'press: Space\nshow: pacman\n' })
+check('build agents are told to look before they change code', /wumpy-probe block plays your page and reads values back/.test(A.BUILDING.join(' ')), true)
 check('a missed FIND is shown the closest place as it reads now', (() => { const r = A.applyEdits('a\nlet speed = 4;\nb', [{ find: 'let speed = 5', replace: 'x' }]); return !r.ok && /let speed = 4;/.test(r.why) })(), true)
 check('a runaway reply is not carried on for ever', /text\.length > 45_000/.test(read('src/main/agents.ts')), true)
 check('nor a reply of many tool blocks taken as a step', /that reply held \$\{blocks\} tool blocks/.test(read('src/main/agents.ts')), true)

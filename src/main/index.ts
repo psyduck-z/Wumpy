@@ -117,7 +117,7 @@ import { withSentTimes } from '@shared/sent'
 import { agentAsks, agentSlots, heldForAgent, monitorAsks, withoutRetypedCode } from '@shared/agents'
 import { Agents } from './agents'
 import { LimitTester } from './limits'
-import { checkHtml, checkPage } from './pagecheck'
+import { checkHtml, checkPage, probePage } from './pagecheck'
 import { checkCodeFile, checkCodeText, isInteractive, runProgram } from './codecheck'
 import { codeErrorText, codeVerdictText } from '@shared/codecheck'
 import { PAGE_ROUNDS, excerpts, pageErrorText } from '@shared/pagecheck'
@@ -2331,6 +2331,7 @@ function registerIpc(): void {
     checkPage: (html) => checkHtml(html),
     checkCode: (code, lang) => checkCodeText(code, lang),
     runCode: (code, lang) => (isInteractive(code) ? runProgram(code, lang) : Promise.resolve(null)),
+    probePage: (html, script) => probePage(html, script),
     sees: (model) => seesMedia(model),
     changed: () => panel.send(IPC.agentsChanged, agents?.list()),
     ready: (delivery) => panel.send(IPC.agentsReady, delivery),
@@ -3307,6 +3308,7 @@ function agentRunner(ready: (d: AgentDelivery) => void, say: (line: string) => v
     checkPage: (html) => checkHtml(html),
     checkCode: (code, lang) => checkCodeText(code, lang),
     runCode: (code, lang) => (isInteractive(code) ? runProgram(code, lang) : Promise.resolve(null)),
+    probePage: (html, script) => probePage(html, script),
     sees: (model) => seesMedia(model),
     changed: () => {},
     ready: (d) => ready(d),

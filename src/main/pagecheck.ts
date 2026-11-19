@@ -358,3 +358,77 @@ export async function checkHtml(html: string): Promise<{ ran: boolean; ok: boole
     rmSync(dir, { recursive: true, force: true })
   }
 }
+
+/**
+ * A page played the way an agent asks, and the values it asks about read
+ * back: a debugger for a game it cannot see. "Holding each arrow did not
+ * move the player" sent Pac-Man agents rewriting their movement code blind,
+ * version after version; asked to look first - where is Pac-Man, what does
+ * canMove say - the cause is a line or two away.
+ *
+ *   press: Space, ArrowLeft, ArrowLeft
+ *   wait: 800
+ *   show: pacman
+ *   show: canMove(pacman.tx, pacman.ty, 'left')
+ */
+export async function probePage(html: string, script: string): Promise<{ ran: boolean; ok: boolean; output: string }> {
+  const dir = mkdtempSync(join(tmpdir(), 'wumpy-probe-'))
+  const file = join(dir, 'page.html')
+  writeFileSync(file, html)
+  const win = new BrowserWindow({
+    show: false,
+    width: 900,
+    height: 1000,
+    webPreferences: { offscreen: true, sandbox: true, contextIsolation: true, nodeIntegration: false, session: checkSession(), backgroundThrottling: false }
+  })
+  const contents = win.webContents
+  contents.setFrameRate(30)
+  const errors: string[] = []
+  contents.on('console-message', (details) => {
+    if (details.level !== 'error') return
+    const said = `${details.message}${details.lineNumber ? ` (line ${details.lineNumber})` : ''}`
+    if (!errors.includes(said) && errors.length < 6) errors.push(said)
+  })
+  contents.setWindowOpenHandler(() => ({ action: 'deny' }))
+  contents.on('will-navigate', (e) => e.preventDefault())
+  const run = async (js: string): Promise<unknown> =>
+    Promise.race([contents.executeJavaScript(js, true).catch((e: Error) => `Error: ${e.message}`), sleep(2500).then(() => 'TIMED OUT: the page stopped answering')])
+  const out: string[] = []
+  try {
+    const loaded = await Promise.race([win.loadFile(file).then(() => true).catch(() => false), sleep(8000).then(() => false)])
+    if (!loaded) return { ran: false, ok: false, output: 'NOT RUN: the page did not load.' }
+    await sleep(700)
+    for (const raw of script.split('\n').slice(0, 30)) {
+      const line = raw.trim()
+      if (!line || line.startsWith('#')) continue
+      const m = /^(press|wait|show)\s*:\s*(.+)$/i.exec(line)
+      if (!m) {
+        out.push(`? ${line} - not understood: use press:, wait: or show:`)
+        continue
+      }
+      const what = m[2].trim()
+      if (m[1].toLowerCase() === 'press') {
+        for (const key of what.split(',').map((k) => k.trim()).filter(Boolean).slice(0, 12)) {
+          const name = key === ' ' || /^space$/i.test(key) ? 'Space' : /^enter$/i.test(key) ? 'Enter' : key
+          await run(keyJs(name, 'keydown'))
+          await sleep(180)
+          await run(keyJs(name, 'keyup'))
+          await sleep(150)
+        }
+        out.push(`pressed ${what}`)
+      } else if (m[1].toLowerCase() === 'wait') {
+        const ms = Math.min(5000, Math.max(0, Number(what) || 0))
+        await sleep(ms)
+        out.push(`waited ${ms}ms`)
+      } else {
+        const value = await run(`(() => { try { const v = (0, eval)(${JSON.stringify(`(${what})`)}); const s = JSON.stringify(v, (k, x) => typeof x === 'number' ? Math.round(x * 100) / 100 : x); return s === undefined ? String(v) : s.slice(0, 900) } catch (e) { return 'Error: ' + e.message } })()`)
+        out.push(`${what} = ${String(value)}`)
+      }
+    }
+    if (errors.length) out.push(`Its console showed:\n${errors.map((e) => `- ${e}`).join('\n')}`)
+    return { ran: true, ok: true, output: out.join('\n') }
+  } finally {
+    if (!win.isDestroyed()) win.destroy()
+    rmSync(dir, { recursive: true, force: true })
+  }
+}

@@ -183,6 +183,9 @@ export const BUILDING = [
   '  Pac-Man lost all three lives in four seconds. Every timer in seconds, never in frames.',
   '- Overlays - title, game over - are a centred column: heading, score, how to play again.',
   '- Compact: a basic game is 300 to 600 lines. Short comments; no essays in the code.',
+  '- When Wumpy says something does not work, look before you change code: a',
+  `  ${BT}wumpy-probe block plays your page and reads values back - lines \`press: Space, ArrowLeft\`,`,
+  '  `wait: 500`, `show: pacman` or `show: canMove(3, 4, \'left\')` - any expression on the page.',
   '- Before you report, play it in your head: the first second, each key once, losing, the',
   '  restart, and the score.'
 ]
@@ -336,6 +339,8 @@ export type Step =
   | { kind: 'edit'; edits: Array<{ find: string; replace: string }> }
   /* The file in its last report, as it is now. */
   | { kind: 'show' }
+  /* Its page played as it says, and values read back: see probePage. */
+  | { kind: 'probe'; script: string }
   | { kind: 'report'; text: string }
 
 /**
@@ -347,6 +352,8 @@ export function stepOf(reply: string, platform: AgentWorld['platform']): Step {
   const edits = editsIn(reply)
   if (edits.length) return { kind: 'edit', edits }
   if (/^\s{0,3}`{3,}[ \t]*wumpy-show\b/m.test(reply)) return { kind: 'show' }
+  const probe = new RegExp(`^\\s{0,3}${BT}[ \\t]*wumpy-probe\\b[^\\n]*\\n([\\s\\S]*?)^\\s{0,3}${BT}`, 'm').exec(reply)
+  if (probe) return { kind: 'probe', script: probe[1] }
   /* A page to test: everything up to the block's own closing fence, which
      is the last one - a page's script may hold backticks of its own. */
   const page = new RegExp(`${BT}[ \\t]*(?:\\n[ \\t]*)?wumpy-check-page\\b[^\\n]*\\n([\\s\\S]*)${BT}`).exec(reply)

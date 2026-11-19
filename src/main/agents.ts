@@ -82,6 +82,8 @@ export interface AgentDeps {
   checkCode(code: string, lang: CodeLang): Promise<{ ran: boolean; ok: boolean; output: string; missing: string[] }>
   /** Plays a terminal program in a sandbox for a few seconds; null where it cannot. */
   runCode(code: string, lang: CodeLang): Promise<{ ok: boolean; output: string } | null>
+  /** Plays a page as asked and reads values back: see main/pagecheck.ts. */
+  probePage(html: string, script: string): Promise<{ ran: boolean; ok: boolean; output: string }>
   /** The list changed: tell the panel. */
   changed(): void
   /** A report is ready for a chat. */
@@ -403,6 +405,25 @@ export class Agents {
       messages.push({ role: 'assistant', content: reply })
       let step = stepOf(reply, world.platform)
 
+      /* Its page, played as it asks, values read back - a tool use. */
+      if (step.kind === 'probe') {
+        const file = lastReport ? fileIn(lastReport) : null
+        if (!file || file.kind !== 'a web page') {
+          messages.push({ role: 'user', content: 'There is no page in a report of yours yet to probe: give your whole REPORT first.' })
+          continue
+        }
+        used++
+        agent.doing = 'looking inside its page'
+        this.deps.changed()
+        const r = await this.deps.probePage(file.text, step.script)
+        if (agent.controller.signal.aborted) return
+        agent.records.push({ kind: 'page', what: 'probed its page', why: 'to see why', outcome: r.output })
+        agent.steps.push({ kind: 'page', what: 'looked inside its page', ok: r.ran })
+        this.deps.log(`[agents] ${agent.number} probed its page: ${r.output.replace(/\s+/g, ' ').slice(0, 200)}`)
+        messages.push({ role: 'user', content: clip(r.output, 6000) })
+        if (used >= AGENT_STEPS) lastCall = true
+        continue
+      }
       /* Its file as it is now, after edits: it is on no disk, and agents
          went looking for it with cat and find. */
       if (step.kind === 'show') {
@@ -783,7 +804,7 @@ export class Agents {
     return text.trim()
   }
 
-  private async act(agent: Agent, step: Exclude<ReturnType<typeof stepOf>, { kind: 'report' } | { kind: 'edit' } | { kind: 'show' }>): Promise<string> {
+  private async act(agent: Agent, step: Exclude<ReturnType<typeof stepOf>, { kind: 'report' } | { kind: 'edit' } | { kind: 'show' } | { kind: 'probe' }>): Promise<string> {
     if (step.kind === 'run') {
       agent.doing = `running: ${step.command.split('\n')[0].slice(0, 60)}`
       this.deps.changed()
