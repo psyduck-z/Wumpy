@@ -408,7 +408,7 @@ export class CloudClient {
    */
   async agentTurn(
     model: string,
-    messages: Array<{ role: 'system' | 'user' | 'assistant'; content: string }>,
+    messages: WireMessage[],
     index: number,
     opts: { numPredict: number; timeoutMs: number; signal?: AbortSignal }
   ): Promise<{ text: string | null; status: number; error?: string; promptTokens: number; completionTokens: number; ms: number; cutOff?: boolean }> {

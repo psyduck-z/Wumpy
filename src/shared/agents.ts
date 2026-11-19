@@ -132,10 +132,51 @@ export interface AgentWorld {
   /** "Thursday 19 November 2026, 7:26 am". */
   now: string
   steps: number
+  /** The brief is for something built: BUILDING is sent. */
+  building?: boolean
 }
 
 /** The most tool uses one agent gets before it is told to report. */
 export const AGENT_STEPS = 10
+
+/**
+ * What a built thing must do, sent when the brief is for one. Each line is
+ * a way a game came back broken: a Snake whose Play Again hid the message
+ * and left the snake standing for ever, its loop stopped at the game over;
+ * one that ran into the wall a second and a half after loading, before
+ * anyone touched a key; a Crossy Road whose cars crossed the road in a
+ * twentieth of a second, moved per frame.
+ */
+export const BUILDING = [
+  'BUILDING A GAME, A PAGE OR A PROGRAM',
+  '- One file, whole: every function it calls written out, every name defined where it is',
+  '  used. Nothing left out, shortened or "similar to above".',
+  '- A game starts the way a player expects: a title or "press a key to start", and nothing',
+  '  can kill the player before they have pressed one.',
+  '- Controls: arrow keys and WASD (Space where it fits). The arrows must not scroll the page.',
+  '- Generate what you would type by hand: mirror a maze from its left half, build lanes in a',
+  '  loop. What you do type - a map in rows of text - the code checks as it starts (every row',
+  '  the same length, or throw an Error saying which row): Wumpy\'s test shows that error. A',
+  '  Pac-Man came back with rows of 21 and 23 and its walls drawn across the dots.',
+  '- Enemies move from the first seconds: ghosts leave their pen, cars drive.',
+  '- Every speed and timer is per second, times the time since the last frame - capped, so a',
+  '  tab coming back does not jump everything. requestAnimationFrame gives milliseconds:',
+  '  divide by 1000 once, in one place. One unit for every position and size - tiles or',
+  '  pixels, never both: a car 30 wide meant pixels, was drawn in tiles, and covered the road.',
+  '- Game over shows the score, and Space, Enter or a button starts a new game that really',
+  '  runs: every piece of state reset, and one game loop that never stops - a loop stopped',
+  '  at game over and never started again is the commonest bug there is.',
+  '- Outside the browser, write for what is installed here, and give the exact command that',
+  '  runs it. Wumpy\'s check of your code says what is installed; so does `pip show <package>`.',
+  '  `python -c` never runs here: it runs code.',
+  '- Before you report, play it in your head: the first second, each key once, losing, the',
+  '  restart, and the score.'
+]
+
+/** Whether a brief is for something built: a game, a page, an app, a program. */
+export function isBuild(brief: string): boolean {
+  return /\b(games?|play(?:able)?|html|web ?page|website|app|application|program|canvas|tetris|snake|pac-?man|pong|breakout|platformer|crossy|frogger|asteroids|invaders|minesweeper|sudoku|chess|2048|flappy|python|c\+\+|cpp|javascript)\b|c\+\+/i.test(brief)
+}
 
 /**
  * The instructions, built for the machine and the mode it runs under.
@@ -178,18 +219,20 @@ export function agentPrompt(world: AgentWorld): string {
     '  If something comes back NOT RUN, do not try a variant of it: say in your report what',
     '  should be run and why.',
     `- ${search}`,
-    `- To test a web page you are writing: a ${BT}wumpy-check-page block holding the whole page.`,
-    '  Wumpy loads it out of sight for 3 seconds and tells you what its console showed. Do it',
-    '  before you report any page, game or app, and fix what it finds. It catches crashes, not',
-    '  logic: check that yourself - every name defined where used, speeds per second scaled by',
-    '  the frame time, every part the brief asked for really there.',
+    '- Wumpy tests what you build, before anyone reviews it: a web page in your report is',
+    '  loaded out of sight and played - arrow keys held, the game lost, restarted - and a',
+    '  program in Python, C, C++, JavaScript or bash is compiled or parsed, never run. What',
+    '  breaks comes back to you to fix. To test a page part-way, send a',
+    `  ${BT}wumpy-check-page block holding the whole page. None of it proves the logic: that is yours.`,
     `- You have at most ${world.steps} tool uses. Spend them on what the task needs; a task`,
     '  that needs none - writing, reviewing, working something out - needs none.',
     '- Never ask for the same thing twice: its answer is already above.',
     '- You change nothing on this computer: you look, and you hand back. To write something - a',
     '  script, a document, a file - is to give that text, in full, in your report; Wumpy saves',
-    '  it. For a change, give the exact command, and Wumpy runs it. Never say you saved, created',
-    '  or ran anything that the steps do not show.',
+    '  it. A brief that says to save a file at a path means: hand back its whole content, and',
+    '  Wumpy saves it there - never try to write it yourself. For a change, give the exact',
+    '  command, and Wumpy runs it. Never say you saved, created or ran anything that the steps',
+    '  do not show.',
     '',
     'TRUTH',
     '- Every fact about this computer comes from output you were shown in this task. A check',
@@ -198,6 +241,7 @@ export function agentPrompt(world: AgentWorld): string {
     '- Never invent a path, a version, a flag, a file or a source.',
     '- Wumpy will rely on your report. A confident wrong report is worse than an honest',
     '  "could not find out".',
+    ...(world.building ? ['', ...BUILDING] : []),
     '',
     'THE REPORT',
     'When you are done, reply with no tool block, starting with the line REPORT:, then:',
@@ -226,11 +270,14 @@ export const REVIEW_PROMPT = [
   '  used, speeds per second scaled by frame time, every part the brief asked for really there.',
   '  A page loaded with errors left in is a REVISE.',
   '- For anything built - a game, a page, an app: list EVERY requirement in the brief and find',
-  '  the code that does each. One with no code doing it is a REVISE, by name. Then play the',
-  '  start in your head: press each control once - does the player move the way it should,',
-  '  and can they see where they are going? A game stuck at its start is not a game.',
-  '- Agents hand work back as text. A script, letter or file given in full in the report IS',
-  '  delivered; never ask for it to be saved, created or run unless the brief said so.',
+  '  the code that does each. One with no code doing it is a REVISE, by name. Then play it in',
+  '  your head: the first second (can it kill the player before a key is pressed?), each',
+  '  control once, losing, and the restart - is every piece of state reset, and does the game',
+  '  loop run again? A game stuck at its start, or frozen after a restart, is not a game.',
+  "- Wumpy's own test of the page or program is in the steps: what it shows is fact.",
+  '- Agents hand work back as text, and cannot save or run anything. A script, letter or file',
+  '  given in full in the report IS delivered - also when the brief says to save it at a path:',
+  '  Wumpy saves it there. Never ask for it to be saved, created or run.',
   '',
   'Do not redo the work and do not write it yourself: say what must change, concretely',
   'enough to act on. A REVISE names something WRONG or MISSING for the brief. Not taste,',
@@ -250,6 +297,12 @@ export const REVIEW_PROMPT = [
 
 /** The most review rounds one report gets: a second REVISE is the last. */
 export const REVIEW_ROUNDS = 2
+/**
+ * A built thing gets a third: its reviewer is shown the page, and the last
+ * revision of a Pac-Man - the one that fixed the maze it had seen - went
+ * out with nobody looking at it.
+ */
+export const BUILD_REVIEW_ROUNDS = 3
 
 /* -------------------------------------------------- reading a reply */
 
@@ -320,6 +373,27 @@ export function stepOf(reply: string, platform: AgentWorld['platform']): Step {
   return { kind: 'report', text }
 }
 
+/**
+ * The file in a report, as it is to be saved: a whole web page, or else the
+ * longest fenced block of anything. Null when there is none worth saving.
+ */
+export function fileIn(report: string): { text: string; kind: string } | null {
+  const page = /(<!doctype html[\s\S]*?<\/html>|<html[\s\S]*?<\/html>)/i.exec(report)
+  if (page && /<script|<canvas|<body/i.test(page[1])) return { text: `${page[1]}${LF}`, kind: 'a web page' }
+  const lines = report.split(LF)
+  let best: { text: string; kind: string } | null = null
+  for (let i = 0; i < lines.length; i++) {
+    const open = /^\s{0,3}(`{3,})[ \t]*([\w+#.-]*)/.exec(lines[i])
+    if (!open) continue
+    let j = i + 1
+    while (j < lines.length && !new RegExp(`^\\s{0,3}${open[1]}\x60*\\s*$`).test(lines[j])) j++
+    const body = lines.slice(i + 1, j)
+    if (body.length >= 6 && (!best || body.join(LF).length > best.text.length)) best = { text: `${body.join(LF)}${LF}`, kind: open[2] ? `${open[2]} code` : 'a file' }
+    i = j
+  }
+  return best
+}
+
 /** Output handed back to the agent, trimmed to what a model can use. */
 export function clip(text: string, max = 6000): string {
   if (text.length <= max) return text
@@ -330,7 +404,7 @@ export function clip(text: string, max = 6000): string {
 
 /** One step, as the reviewer and the log see it. */
 export interface StepRecord {
-  kind: 'run' | 'search' | 'page'
+  kind: 'run' | 'search' | 'page' | 'code'
   what: string
   why: string
   outcome: string
@@ -346,7 +420,7 @@ export function reviewInput(
 ): string {
   const done = steps.length
     ? steps
-        .map((s, i) => `${i + 1}. ${s.kind === 'run' ? 'Ran' : s.kind === 'page' ? 'Loaded the page' : 'Searched'}: ${s.what}${LF}${clip(s.outcome, 1500)}`)
+        .map((s, i) => `${i + 1}. ${s.kind === 'run' ? 'Ran' : s.kind === 'page' ? 'Loaded the page' : s.kind === 'code' ? 'Checked' : 'Searched'}: ${s.what}${LF}${clip(s.outcome, 1500)}`)
         .join(LF + LF)
     : '(none - it worked from the brief alone)'
   const earlier = before.length
@@ -358,6 +432,10 @@ export function reviewInput(
 /* ------------------------------------------------ back to the chat */
 
 export interface Finished {
+  /** The agent's own id, "agent-7": unique across chats. */
+  id?: string
+  /** Its report holds a file - a page or a program - Wumpy can save as it is. */
+  file?: { lines: number; kind: string }
   number: number
   title: string
   ok: boolean
@@ -396,15 +474,25 @@ export function deliveryText(done: readonly Finished[], note: string | null): st
     const ran = d.ran?.length
       ? `It ran: ${d.ran.map((r) => `\x60${r.replace(/\s+/g, ' ').slice(0, 100)}\x60`).join('; ')}.`
       : 'It ran no commands and no searches.'
+    /*
+     * Its file is saved from the report itself, not retyped: a Crossy
+     * Road that loaded clean for its agent came back from the chat's copy
+     * with `fillRect is not defined` - one slip in nine thousand characters,
+     * and twenty seconds spent typing them.
+     */
+    const file =
+      d.ok && d.file && d.id
+        ? `${LF}ITS FILE (${d.file.kind}, ${d.file.lines} lines) is saved exactly as the agent wrote it: a wumpy-write block with \x60path:\x60 and then \x60from: ${d.id}\x60, and nothing after - never retype it.`
+        : ''
     return d.ok
-      ? `AGENT ${d.number}: ${d.title} (${how})${LF}${ran}${LF}${d.text}`
+      ? `AGENT ${d.number}: ${d.title} (${how})${LF}${ran}${file}${LF}${d.text}`
       : `AGENT ${d.number}: ${d.title} - FAILED (${how}): ${d.text}`
   })
   const rule =
     'A fact about this computer in a report is only as good as what it ran, above: what no output shows, you do not know - say so, or check. Never fill it in. And if a report is not what was asked for, say so plainly: never pass off what you know yourself as what an agent found.'
   const then = note
     ? `You set a monitor for this, saying what to do now: ${note}`
-    : 'Check the report like any claim, then tell the user what it means for them - briefly. A file it hands back that was meant to be saved, write with a wumpy-write block exactly as given, every line.'
+    : 'Check the report like any claim, then tell the user what it means for them - briefly. A file it hands back that was meant to be saved, write with a wumpy-write block - by its `from:` line where it has one, or else exactly as given, every line.'
   return [head, ...parts, rule, then].join(LF + LF)
 }
 
@@ -427,24 +515,25 @@ export function agentsPrompt(slots: number): string {
     'and a search of your own is for one quick fact. What a few lines or one command answers, do',
     'yourself.',
     '',
-    'MAKING A GAME, A WEB PAGE OR AN APP IS ALWAYS AN AGENT\'S JOB - never write one in your own',
-    'reply. The agent loads its page, plays it, fixes what breaks, and another agent reviews the',
-    'code; written straight off, a game crashed on its first frame. Start one with the whole',
-    'request in the brief and "hand back the complete file", say it is being built, and when the',
-    'report comes back, write that file where they asked with a wumpy-write block.',
+    'MAKING A GAME, A WEB PAGE, AN APP OR ANY REAL PROGRAM IS ALWAYS AN AGENT\'S JOB, in any',
+    'language - never write one in your own reply, not even a draft. Wumpy plays or compiles',
+    'the agent\'s work, it fixes what breaks, and another agent reviews it. Say it is being',
+    'built; when the report comes, write the file where they asked with a wumpy-write block,',
+    'naming it yourself - never ask what to call it.',
     '',
-    'while I am in this meeting, draft a cover letter for that junior developer job',
-    'I have an agent drafting it - you will have it when it is done.',
+    'make me a snake game in my downloads',
+    'I have an agent building it - it gets played and fixed before you get it.',
     `${BT}wumpy-agent`,
-    '# Draft a cover letter for the junior developer job',
-    'Draft a one-page cover letter from <their name> for the junior developer job at <the company>,',
-    'drawing on <the skills they named>. Hand back the whole letter.',
+    '# Build a Snake game in one HTML file',
+    'Write a complete Snake game as one HTML file - inline CSS and JavaScript, no libraries: arrow',
+    'keys and WASD, food, growing, score; it waits for a key to start, and game over shows the',
+    'score, with Space or a button to play again. Hand back the whole file.',
     BT,
     '',
-    'The brief is ALL it gets: it sees nothing of this chat. Put in the goal, every fact, name,',
-    'path and output it needs, and exactly what to hand back. It only reads: it hands back text and',
-    'commands, and any change - a file written, a command run - is yours, the usual way. It never',
-    'asks anyone anything. Its report comes back to you by',
+    'The brief is ALL it gets: it sees nothing of this chat. Put in the goal, every fact, name',
+    'and detail they asked for, and exactly what to hand back. It only reads: it cannot save a',
+    'file or change anything, so never ask it to - "hand back the whole file", and you write it.',
+    'It never asks anyone anything. Its report comes back to you by',
     'itself: do not wait, check or poll. When you will combine several, add a wumpy-monitor block',
     '- it needs no permission - and you are woken once, when all are done, with your note:',
     '',

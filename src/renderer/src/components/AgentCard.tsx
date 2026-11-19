@@ -76,7 +76,7 @@ export function AgentCard({
         <ol className="agent-steps">
           {agent.steps.map((s, i) => (
             <li key={i} className={s.ok ? '' : 'is-refused'}>
-              {s.kind === 'page' ? (
+              {s.kind === 'page' || s.kind === 'code' ? (
                 s.what
               ) : (
                 <>

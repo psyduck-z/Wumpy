@@ -289,22 +289,49 @@ a report never had. All fixed, and in `npm run check:agents`.
 
 ### Building things
 
-A page, a game or a script is not done when it is written. Whenever Wumpy writes
-an `.html` file it loads it once out of sight — Chromium, or Edge on Windows,
-with a throwaway profile, for three seconds of the page's own time — and any
-error in its console goes straight back to the model, which fixes it before you
-find it (twice at most; after that you are told). The rules say the rest: run
-the code in your head before handing it over — every name defined where it is
-used, speeds per second rather than per frame, everything asked for actually
-there — and when you say it does not work, read the file before answering.
-Background agents get the same page check as a tool (`wumpy-check-page`), and
-their reviewer sends back a page that was never loaded. /reflect's mentor checks
-running code the same way.
+Asked for a game, a page, an app or a program — in any language — the chat
+hands it to a background agent instead of writing it in its reply, and writes
+the file when the agent's report comes back. On the way:
+
+- **A page is played, not just loaded.** Out of sight, in a sandboxed window
+  with no network, Wumpy loads it, finds its player (a `player`, `chicken`,
+  `frog`, the head of a `snake`, a `pacman`...), holds each arrow key in turn
+  — and Space, Enter and a click for a title screen — and checks the player
+  moved. Then it plays on until the game is over, tries Space, Enter, R and
+  the page's own restart button, and checks a new game really runs. It
+  watches the ghosts, cars and aliens too: ones that never leave where they
+  started, or that cross the screen in under a second, are reported.
+- **A program is compiled, never run.** Python is parsed, every name it uses
+  is looked up and every import checked against what is installed (and which
+  of tkinter, pygame and curses this Python can draw with); C and C++ are
+  compiled and linked with every warning on, into a folder deleted after;
+  JavaScript gets `node --check` and shell scripts `bash -n`. An `#include`
+  reaching outside the program is refused. With no Python or compiler on the
+  computer, the check says so rather than passing.
+- **Errors come back with the lines they point at,** to the agent before any
+  review, and to the chat when it writes a file itself.
+- **The reviewer can see.** When the model takes pictures, the agent that
+  reviews a built page is shown it mid-game, as a player would see it — a
+  Pac-Man maze typed in rows of different lengths passed every other check.
+  A build gets three reviews rather than two.
+- **The rules for building** are sent to an agent whose brief is for one: a
+  game starts on a key press and never kills the player first; game over
+  restarts a game that runs; speeds are per second, and
+  `requestAnimationFrame` time is milliseconds; one unit for every size and
+  position; mazes generated or checked in code, never trusted as typed.
+
+`wumpy --build-check=<request or spec.json>` plays a request through all of it
+— the chat's real instructions, model and keys, its agents, their reviews, the
+file written and checked — writing only into `~/Downloads/wumpy-tests` and
+running only commands that read, and saves the exchange beside the log.
 
 It came from a retro Crossy Road written in one go and called playable: it
 crashed on its first frame (`car is not defined`), the cars crossed the screen
 in a twentieth of a second, and the score never went up — and three "fixes"
 later most of that was still true, because the model never ran or reread it.
+Then a Snake whose Play Again hid the message and left the snake frozen for
+ever, a Pac-Man whose ghosts never left their pen, and a Crossy Road whose
+cars were thirty tiles wide: each is now something the check finds.
 
 ### Each key's real limit
 

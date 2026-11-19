@@ -1,9 +1,12 @@
 import {
   AGENT_STEPS,
+  BUILD_REVIEW_ROUNDS,
   REVIEW_PROMPT,
   REVIEW_ROUNDS,
   agentPrompt,
   clip,
+  fileIn,
+  isBuild,
   deliveryText,
   reviewInput,
   stepOf,
@@ -13,8 +16,10 @@ import {
   type MonitorAsk,
   type StepRecord
 } from '@shared/agents'
+import { codeIn, LANG_NAME, type CodeLang } from '@shared/codecheck'
 import { parseReview } from '@shared/reflect'
 import type { AgentDelivery, AgentView, MonitorView } from '@shared/types'
+import type { WireMessage } from '@shared/cloud'
 
 /**
  * Background agents, running: the hands for @shared/agents.
@@ -56,7 +61,7 @@ export interface AgentDeps {
   keyReady(model: string, key: number): boolean
   turn(
     model: string,
-    messages: Array<{ role: 'system' | 'user' | 'assistant'; content: string }>,
+    messages: WireMessage[],
     key: number,
     opts: { numPredict: number; timeoutMs: number; signal?: AbortSignal }
   ): Promise<TurnResult>
@@ -64,8 +69,15 @@ export interface AgentDeps {
   /** Runs a command if the approval mode runs it without a click. */
   run(command: string, shell: Shell): Promise<{ ran: boolean; ok: boolean; output: string }>
   search(query: string): Promise<{ ran: boolean; ok: boolean; output: string }>
-  /** Loads a page out of sight; ok when its console showed no errors. */
-  checkPage(html: string): Promise<{ ran: boolean; ok: boolean; output: string }>
+  /** Loads a page out of sight; ok when its console showed no errors. A
+      picture of it mid-game, as a data URL, when one was taken. */
+  checkPage(html: string): Promise<{ ran: boolean; ok: boolean; output: string; shot?: string }>
+  /** Whether the model can be shown a picture. */
+  sees(model: string): boolean
+  /** Compiles or parses a program without running it: see main/codecheck.ts. */
+  checkCode(code: string, lang: CodeLang): Promise<{ ran: boolean; ok: boolean; output: string; missing: string[] }>
+  /** Plays a terminal program in a sandbox for a few seconds; null where it cannot. */
+  runCode(code: string, lang: CodeLang): Promise<{ ok: boolean; output: string } | null>
   /** The list changed: tell the panel. */
   changed(): void
   /** A report is ready for a chat. */
@@ -90,6 +102,9 @@ interface Monitor extends MonitorView {
   ids: string[]
 }
 
+/** A command that prints a file: its output is kept whole, up to a point. */
+const READS_FILE = /^\s*(?:cat|Get-Content|gc|type|bat|nl|head|tail|sed\s+-n)\b/i
+
 /** How long a single turn may take before it counts as stalled. */
 const TURN_TIMEOUT_MS = 240_000
 /**
@@ -109,6 +124,15 @@ const KEY_WAIT_MS = 120_000
 const QUEUE_GIVE_UP_MS = 10 * 60_000
 
 const sleep = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms))
+const LF = String.fromCharCode(10)
+
+/** Said with the picture of the page the reviewer is shown. */
+const SEEN_NOTE = [
+  'THE PICTURE is the page as Wumpy saw it after playing it for a few seconds. Look at it as a',
+  'player would: is it the thing the brief asked for, and is it drawn right? Walls, tiles or',
+  'paths out of line, shapes overlapping that should not, things missing, text cut off, a blank',
+  'or black screen - each is a REVISE, said plainly. Judge only what it shows.'
+].join(LF)
 
 export class Agents {
   private agents: Agent[] = []
@@ -126,6 +150,12 @@ export class Agents {
 
   list(): { agents: AgentView[]; monitors: MonitorView[] } {
     return { agents: this.agents.map(view), monitors: this.monitors.map(monitorView) }
+  }
+
+  /** The file an agent handed back, exactly as it wrote it: see fileIn. */
+  fileOf(id: string): string | null {
+    const agent = this.agents.find((a) => a.id === id)
+    return agent?.status === 'done' && agent.report ? (fileIn(agent.report)?.text ?? null) : null
   }
 
   forChat(chatId: string): AgentView[] {
@@ -276,8 +306,8 @@ export class Agents {
 
   private async work(agent: Agent): Promise<void> {
     const world = this.deps.world()
-    const messages: Array<{ role: 'system' | 'user' | 'assistant'; content: string }> = [
-      { role: 'system', content: agentPrompt({ ...world, steps: AGENT_STEPS }) },
+    const messages: WireMessage[] = [
+      { role: 'system', content: agentPrompt({ ...world, steps: AGENT_STEPS, building: isBuild(agent.brief) }) },
       { role: 'user', content: agent.brief }
     ]
     let used = 0
@@ -291,9 +321,13 @@ export class Agents {
     let lastReport = ''
     /* What earlier reviews asked for, so a later one does not undo it. */
     const asked: string[] = []
-    let pageSendBacks = 0
-    /* The last report whose page loaded clean, with a player that moved. */
-    let lastGoodPage = ''
+    let sendBacks = 0
+    /* The last report whose page loaded clean, with a player that moved -
+       or whose program compiled. */
+    let lastGood = ''
+    let missingSaid = false
+    /* The page as it looked mid-game, for a reviewer that can see. */
+    let shot: string | undefined
     for (;;) {
       if (agent.controller.signal.aborted) return
       agent.doing = used ? `thinking, after ${used} step${used === 1 ? '' : 's'}` : 'working on it'
@@ -372,7 +406,8 @@ export class Agents {
        * later one breaks.
        */
       const page = pageIn(step.text)
-      let pageBroken = false
+      const program = page ? null : codeIn(step.text)
+      let broken = false
       if (page) {
         agent.doing = 'loading the page it wrote'
         this.deps.changed()
@@ -381,30 +416,95 @@ export class Agents {
         agent.records.push({ kind: 'page', what: `the page in its report (${page.length} characters)`, why: 'checked before review', outcome: r.output })
         agent.steps.push({ kind: 'page', what: r.ok ? 'its page loaded: no errors' : 'its page loaded with errors', ok: r.ran && r.ok })
         this.deps.log(`[agents] ${agent.number} its page: ${r.output.replace(/\s+/g, ' ').slice(0, 160)}`)
-        pageBroken = r.ran && !r.ok
-        if (!pageBroken && r.ran) lastGoodPage = step.text
-        if (pageBroken && pageSendBacks < 3) {
-          pageSendBacks++
+        broken = r.ran && !r.ok
+        shot = r.shot
+        if (!broken && r.ran) lastGood = step.text
+        if (broken && sendBacks < 3) {
+          sendBacks++
           messages.push({
             role: 'user',
             content: `Wumpy loaded the page in your report. ${r.output}\n\nFix the cause - read your code, do not guess - and give your whole REPORT again.`
           })
           continue
         }
+      } else if (program) {
+        /*
+         * A program in another language, compiled or parsed the same way:
+         * "test its other languages too, not just HTML". Never run - it
+         * would run with all the user's rights - but a name used and never
+         * defined, a missing header, a module that is not installed, all
+         * show without running it.
+         */
+        const name = LANG_NAME[program.lang]
+        agent.doing = `checking the ${name} it wrote`
+        this.deps.changed()
+        const r = await this.deps.checkCode(program.code, program.lang)
+        if (agent.controller.signal.aborted) return
+        agent.records.push({ kind: 'code', what: `the ${name} in its report (${program.code.split('\n').length} lines)`, why: 'checked before review', outcome: r.output })
+        agent.steps.push({
+          kind: 'code',
+          what: !r.ran ? `its ${name} could not be checked here` : r.ok ? `its ${name} checked: no errors` : `its ${name} had errors`,
+          ok: r.ran && r.ok
+        })
+        this.deps.log(`[agents] ${agent.number} its ${name}: ${r.output.replace(/\s+/g, ' ').slice(0, 200)}`)
+        broken = r.ran && !r.ok
+        /* Compiled clean, and a game: played, in a sandbox, where it can be. */
+        if (!broken && r.ran && isBuild(agent.brief)) {
+          agent.doing = `playing the ${name} it wrote`
+          this.deps.changed()
+          const played = await this.deps.runCode(program.code, program.lang)
+          if (agent.controller.signal.aborted) return
+          if (played) {
+            agent.records.push({ kind: 'code', what: `the ${name} in its report, run`, why: 'played before review', outcome: played.output })
+            agent.steps.push({ kind: 'code', what: played.ok ? `its ${name} ran: still going after 6 seconds` : `its ${name} ran: it broke`, ok: played.ok })
+            this.deps.log(`[agents] ${agent.number} its ${name}, run: ${played.output.replace(/\s+/g, ' ').slice(0, 200)}`)
+            if (!played.ok) {
+              broken = true
+              if (sendBacks < 3) {
+                sendBacks++
+                messages.push({
+                  role: 'user',
+                  content: `Wumpy compiled the ${name} in your report, then ran it out of sight and pressed keys.\n${played.output}\n\nFix the cause - read your code, do not guess - and give your whole REPORT again.`
+                })
+                continue
+              }
+            }
+          }
+        }
+        if (!broken && r.ran) lastGood = step.text
+        if (broken && sendBacks < 3) {
+          sendBacks++
+          messages.push({
+            role: 'user',
+            content: `Wumpy checked the ${name} in your report.\n${r.output}\n\nFix the cause - read your code, do not guess - and give your whole REPORT again.`
+          })
+          continue
+        }
+        /* Something it imports is not here: said once, so it can choose
+           something that is - or keep what the brief asked for and say
+           how to install it. */
+        if (!broken && r.missing.length && !missingSaid) {
+          missingSaid = true
+          messages.push({
+            role: 'user',
+            content: `Wumpy checked the ${name} in your report.\n${r.output}\n\nGive your whole REPORT again: on what is installed here, or with the brief's library and the exact command that installs it.`
+          })
+          continue
+        }
       }
-      /* Out of chances with a broken page: the last one that worked. */
-      if (pageBroken && lastGoodPage) {
-        agent.review = `${agent.review ? `${agent.review}; ` : ''}its last version broke the page, so the one before it stands`
-        this.finishReport(agent, lastGoodPage, true)
+      /* Out of chances with a broken page or program: the last that worked. */
+      if (broken && lastGood) {
+        agent.review = `${agent.review ? `${agent.review}; ` : ''}its last version broke, so the one before it stands`
+        this.finishReport(agent, lastGood, true)
         return
       }
       /* Feedback from another agent before the report goes anywhere: up to
          REVIEW_ROUNDS reviews, and the answer to the last one stands. */
-      if (rounds < REVIEW_ROUNDS) {
+      if (rounds < (isBuild(agent.brief) ? BUILD_REVIEW_ROUNDS : REVIEW_ROUNDS)) {
         agent.status = 'reviewing'
         agent.doing = 'being reviewed by another agent'
         this.deps.changed()
-        const review = await this.review(agent, step.text, asked)
+        const review = await this.review(agent, step.text, asked, page ? shot : undefined)
         if (agent.controller.signal.aborted) return
         agent.status = 'working'
         if (review?.verdict === 'revise') {
@@ -438,7 +538,7 @@ export class Agents {
   /** One model turn on the agent's key, waiting out a rest and retrying a hiccup. */
   private async ask(
     agent: Agent,
-    messages: Array<{ role: 'system' | 'user' | 'assistant'; content: string }>,
+    messages: WireMessage[],
     numPredict: number
   ): Promise<string | null> {
     for (let attempt = 0; attempt < 4; attempt++) {
@@ -495,7 +595,7 @@ export class Agents {
    */
   private async carryOn(
     agent: Agent,
-    messages: Array<{ role: 'system' | 'user' | 'assistant'; content: string }>,
+    messages: WireMessage[],
     numPredict: number,
     begun: string
   ): Promise<string> {
@@ -531,7 +631,10 @@ export class Agents {
       agent.records.push({ kind: 'run', what: step.command, why: step.why, outcome: r.output })
       agent.steps.push({ kind: 'run', what: step.command.split('\n')[0].slice(0, 120), ok: r.ran && r.ok })
       this.deps.log(`[agents] ${agent.number} ${r.ran ? 'ran' : 'was refused'}: ${step.command.replace(/\s+/g, ' ').slice(0, 120)}`)
-      return clip(r.output)
+      /* A file read whole: an agent asked to restyle a game has to see all
+         of it, and 6,000 characters cut a 14,000-character Pac-Man in two
+         with its middle left out. */
+      return clip(r.output, READS_FILE.test(step.command) ? 60_000 : 6000)
     }
     if (step.kind === 'page') {
       agent.doing = 'loading its page to see what breaks'
@@ -556,16 +659,28 @@ export class Agents {
   private async review(
     agent: Agent,
     report: string,
-    before: readonly string[]
+    before: readonly string[],
+    shot?: string
   ): Promise<{ verdict: 'accept' | 'revise'; notes: string } | null> {
+    const text = reviewInput(agent.brief, agent.records, report, before)
+    /*
+     * What it looks like, to a reviewer that can see. A Pac-Man passed
+     * every check - no errors, the player moved - with a maze typed in rows
+     * of different lengths, walls drawn across the dots, and its ghosts
+     * shut in their pen. One look shows it; no reading of the code did.
+     */
+    const seeing = Boolean(shot) && this.deps.sees(agent.model)
     const raw = await this.ask(
       agent,
       [
         { role: 'system', content: REVIEW_PROMPT },
-        { role: 'user', content: reviewInput(agent.brief, agent.records, report, before) }
+        seeing
+          ? { role: 'user', content: [{ type: 'text', text: `${text}${LF}${LF}${SEEN_NOTE}` }, { type: 'image_url', image_url: { url: shot! } }] }
+          : { role: 'user', content: text }
       ],
       REVIEW_TOKENS
     )
+    if (seeing) this.deps.log(`[agents] ${agent.number} its reviewer was shown the page`)
     const review = raw ? parseReview(raw) : null
     this.deps.log(`[agents] ${agent.number} reviewed: ${review ? review.verdict : 'no verdict'}`)
     return review
@@ -585,7 +700,10 @@ export class Agents {
     agent.doing = status === 'done' ? 'done' : status === 'stopped' ? 'stopped' : `failed: ${why}`
     if (agent.heldKey !== null) this.deps.release(agent.model, agent.heldKey)
     agent.heldKey = null
+    const file = status === 'done' ? fileIn(agent.report ?? '') : null
     agent.finished = {
+      id: agent.id,
+      ...(file ? { file: { lines: file.text.split(LF).length - 1, kind: file.kind } } : {}),
       number: agent.number,
       title: agent.title,
       ok: status === 'done',
@@ -595,7 +713,7 @@ export class Agents {
       steps: agent.steps.length,
       ran: agent.records
         .filter((_r, i) => agent.steps[i]?.ok)
-        .map((r) => (r.kind === 'run' ? r.what : r.kind === 'page' ? 'loaded its page: no errors' : `search: ${r.what}`))
+        .map((r) => (r.kind === 'run' ? r.what : r.kind === 'page' ? 'loaded its page: no errors' : r.kind === 'code' ? `checked ${r.what.replace(/^the /, 'its ').replace(/ in its report/, '')}: no errors` : `search: ${r.what}`))
     }
     this.deps.log(`[agents] ${agent.number} "${agent.title}" ${status} in ${Math.round((agent.endedAt - agent.startedAt) / 1000)}s${why ? `: ${why}` : ''}`)
     this.settle(agent)

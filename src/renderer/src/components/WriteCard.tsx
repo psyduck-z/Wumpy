@@ -38,7 +38,30 @@ export function WriteCard({
   onWritten(result: WriteResult, messageId: string): void
   messageId: string
 }): React.JSX.Element {
-  const { reason, path, content } = readWriteRequest(raw)
+  const { reason, path, content: written_, from } = readWriteRequest(raw)
+  /*
+   * A file a background agent wrote, saved from its report as it is rather
+   * than retyped by the model: `from: agent-7`. Until it arrives there is
+   * nothing to write; if the agent has none, the card says so.
+   */
+  const [fromFile, setFromFile] = useState<string | null | undefined>(from ? undefined : null)
+  useEffect(() => {
+    if (!from || !complete) return
+    let live = true
+    void window.wumpy.agents
+      .file(from)
+      .then((text) => {
+        if (live) setFromFile(text)
+      })
+      .catch(() => {
+        if (live) setFromFile(null)
+      })
+    return () => {
+      live = false
+    }
+  }, [from, complete])
+  const content = from ? (fromFile ?? '') : written_
+  const missingFrom = Boolean(from) && fromFile === null
 
   const [target, setTarget] = useState<WriteTarget | null>(null)
   const [state, setState] = useState<'idle' | 'writing' | 'done' | 'skipped' | 'failed'>('idle')
@@ -50,15 +73,15 @@ export function WriteCard({
   // path is a different path and checking it would show the user a refusal for
   // something the model had not finished saying.
   useEffect(() => {
-    if (!complete || !path) return
+    if (!complete || !path || (from && fromFile === undefined)) return
     let live = true
     void onCheck(path).then((t) => {
-      if (live) setTarget(t)
+      if (live) setTarget(missingFrom ? { ...t, ok: false, why: `There is no file from ${from} to save: its report held none, or Wumpy restarted since.` } : t)
     })
     return () => {
       live = false
     }
-  }, [complete, path])
+  }, [complete, path, fromFile])
 
   const go = async (): Promise<void> => {
     // Claimed outside React, so a remount cannot hand this card a fresh ref
@@ -154,7 +177,7 @@ export function WriteCard({
       {content && (
         <>
           <button type="button" className="write-toggle" onClick={() => setOpen((o) => !o)}>
-            {open ? 'Hide' : 'Show'} contents · {lines} line{lines === 1 ? '' : 's'} ·{' '}
+            {open ? 'Hide' : 'Show'} contents{from ? ` · as ${from.replace('-', ' ')} wrote it` : ''} · {lines} line{lines === 1 ? '' : 's'} ·{' '}
             {bytes < 1024 ? `${bytes} bytes` : `${(bytes / 1024).toFixed(1)} KB`}
             {target?.exists && !open ? ' · replaces what is there' : ''}
           </button>

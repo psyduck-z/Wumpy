@@ -785,7 +785,7 @@ export interface AgentView {
   status: 'queued' | 'working' | 'reviewing' | 'done' | 'failed' | 'stopped'
   /** What it is doing, or did last: "ran df -h", "waiting for its key". */
   doing: string
-  steps: Array<{ kind: 'run' | 'search' | 'page'; what: string; ok: boolean }>
+  steps: Array<{ kind: 'run' | 'search' | 'page' | 'code'; what: string; ok: boolean }>
   startedAt: number
   endedAt?: number
   model: string
@@ -967,6 +967,7 @@ export const IPC = {
   /** Reports waiting to be handed to a chat, and the panel saying one was. */
   agentsPending: 'agents:pending',
   agentsDelivered: 'agents:delivered',
+  agentsFile: 'agents:file',
   /** Main tells the panel a report is ready for a chat. */
   agentsReady: 'agents:ready',
   musicHold: 'music:hold',
@@ -1232,7 +1233,13 @@ export interface WriteResult {
    * its console said went wrong. Absent when it is not a page, or no
    * browser could load it.
    */
-  page?: { errors: string[] }
+  page?: { errors: string[]; context?: string }
+  /**
+   * A program - Python, C or C++, JavaScript, a shell script - checked
+   * without running it (main/codecheck.ts). Absent when nothing could check
+   * it here.
+   */
+  code?: { lang: import('./codecheck').CodeLang; errors: string[]; missing: string[]; how: string; context?: string }
 }
 
 /** What the card needs to describe a destination before anything is written. */

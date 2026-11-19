@@ -1,7 +1,7 @@
 import { app, clipboard, dialog, ipcMain, nativeImage, session, Tray } from 'electron'
 import { cpus, homedir } from 'node:os'
-import { existsSync, mkdirSync, unlinkSync, writeFileSync } from 'node:fs'
-import { dirname, join } from 'node:path'
+import { existsSync, mkdirSync, readFileSync, unlinkSync, writeFileSync } from 'node:fs'
+import { basename, dirname, join, resolve } from 'node:path'
 import { IPC } from '@shared/types'
 import type {
   AgentDelivery,
@@ -118,6 +118,10 @@ import { agentAsks, agentSlots, monitorAsks } from '@shared/agents'
 import { Agents } from './agents'
 import { LimitTester } from './limits'
 import { checkHtml, checkPage } from './pagecheck'
+import { checkCodeFile, checkCodeText, isInteractive, runProgram } from './codecheck'
+import { codeErrorText, codeVerdictText } from '@shared/codecheck'
+import { PAGE_ROUNDS, excerpts, pageErrorText } from '@shared/pagecheck'
+import { readWriteRequest } from '@shared/writefile'
 import { gapFor, limitLine } from '@shared/limits'
 import { mayBeInvented } from '@shared/heard'
 import { speakable } from '@shared/spoken'
@@ -1574,9 +1578,25 @@ function registerIpc(): void {
       if (page.checked) {
         /* A player that did not move for the arrow keys is as broken as a
            crash, and reads the same to the model. */
-        const errors = [...page.errors, ...(page.play?.moved === false ? [page.play.line] : [])]
-        console.log(`[wumpy] loaded ${result.path} to check it: ${errors.length ? errors.join(' | ') : 'no errors'}${page.play?.moved ? ' (the player moved)' : ''}`)
-        return { ...result, page: { errors } }
+        const errors = [...page.errors, ...(page.play?.moved === false ? [page.play.line] : []), ...(page.restart?.ok === false ? [page.restart.line] : [])]
+        console.log(
+          `[wumpy] loaded ${result.path} to check it: ${errors.length ? errors.join(' | ') : 'no errors'}${page.play?.moved ? ' (the player moved)' : ''}${page.restart?.ok ? ' (it restarts)' : ''}`
+        )
+        return { ...result, page: { errors, context: excerpts(req.content, page.errors) } }
+      }
+    }
+    /* A program, compiled or parsed without being run: main/codecheck.ts. */
+    if (result.written) {
+      const checked = await checkCodeFile(result.path)
+      if (checked?.verdict.ran) {
+        const v = checked.verdict
+        /* A game that compiled is played too, in a sandbox, as an agent's is. */
+        if (v.ok && isInteractive(req.content)) {
+          const played = await runProgram(req.content, checked.lang)
+          if (played && !played.ok) v.errors.push(played.output)
+        }
+        console.log(`[wumpy] checked ${result.path}: ${v.errors.length ? v.errors.join(' | ') : 'no errors'}${v.missing.length ? `; missing ${v.missing.join(', ')}` : ''}`)
+        return { ...result, code: { lang: checked.lang, errors: v.errors, missing: v.missing, how: v.how.split('\n')[0], context: excerpts(req.content, v.errors) } }
       }
     }
     return result
@@ -2270,6 +2290,9 @@ function registerIpc(): void {
           }
     },
     checkPage: (html) => checkHtml(html),
+    checkCode: (code, lang) => checkCodeText(code, lang),
+    runCode: (code, lang) => (isInteractive(code) ? runProgram(code, lang) : Promise.resolve(null)),
+    sees: (model) => seesMedia(model),
     changed: () => panel.send(IPC.agentsChanged, agents?.list()),
     ready: (delivery) => panel.send(IPC.agentsReady, delivery),
     spent: (r) =>
@@ -2299,6 +2322,7 @@ function registerIpc(): void {
   ipcMain.handle(IPC.agentsStop, (_e, id: string) => agents?.stop(String(id)))
   ipcMain.handle(IPC.agentsPending, (_e, chatId: string) => agents?.pendingFor(String(chatId)) ?? [])
   ipcMain.handle(IPC.agentsDelivered, (_e, id: string) => agents?.delivered(String(id)))
+  ipcMain.handle(IPC.agentsFile, (_e, id: string) => agents?.fileOf(String(id)) ?? null)
 
   /**
    * Runs a command the user approved in the panel.
@@ -2964,8 +2988,10 @@ app.on('second-instance', (_event, argv) => {
     void agentsCheck()
     return
   }
-  if (argv.includes('--build-check')) {
-    void agentsCheck('build')
+  /* `wumpy --build-check[=<request or spec.json>]`: see buildCheck. */
+  const buildArg = argv.find((a) => a === '--build-check' || a.startsWith('--build-check='))
+  if (buildArg) {
+    void buildCheck(buildArg.slice('--build-check='.length))
     return
   }
   if (argv.includes('--delegate-check')) {
@@ -3027,7 +3053,7 @@ let launchChat: string | null =
 if (launchChat && !/^[\w-]{1,80}$/.test(launchChat)) launchChat = null
 
 /** Wumpy's own launch flags, which describe one start and are not carried over. */
-const OWN_FLAGS = /^--(?:hidden|voice|toggle|restart|speech-check|voice-samples|compare-voices|hearing-check|memory-check|agents-check|build-check|delegate-check|page-check=.*|compare-hearing|resume-chat=.*)$/
+const OWN_FLAGS = /^--(?:hidden|voice|toggle|restart|speech-check|voice-samples|compare-voices|hearing-check|memory-check|agents-check|build-check(?:=.*)?|delegate-check|page-check=.*|compare-hearing|resume-chat=.*)$/
 
 async function restartWumpy(why: string, chatId: string | null): Promise<void> {
   if (restarting) return
@@ -3240,6 +3266,9 @@ function agentRunner(ready: (d: AgentDelivery) => void, say: (line: string) => v
         : { ran: true, ok: true, output: r.results.map((x, i) => `${i + 1}. ${x.title}\n   ${x.url}\n   ${x.snippet}`).join('\n') }
     },
     checkPage: (html) => checkHtml(html),
+    checkCode: (code, lang) => checkCodeText(code, lang),
+    runCode: (code, lang) => (isInteractive(code) ? runProgram(code, lang) : Promise.resolve(null)),
+    sees: (model) => seesMedia(model),
     changed: () => {},
     ready: (d) => ready(d),
     spent: () => {},
@@ -3270,36 +3299,7 @@ async function agentsCheck(only?: 'build' | 'delegate'): Promise<void> {
   const model = resolveModel()
   say(`on ${model ?? 'no model'}, ${agentSlotsNow()} agent slot(s)`)
   if (!model) return
-  /*
-   * `wumpy --build-check`: one agent builds the game that failed in the
-   * chat - "a basic retro crossy road" - with its page tool and its
-   * reviewer, and what it hands back is saved beside the log, to be played
-   * and probed. The measure of "creating things" is whether that works.
-   */
-  if (only === 'build') {
-    const built: string[] = []
-    const builder = agentRunner((d) => built.push(d.text), say)
-    const began = Date.now()
-    builder.start('build-check', `build-${began}`, [
-      {
-        title: 'Retro Crossy Road in one HTML file',
-        brief:
-          'Write a complete single-file HTML page (inline CSS and JavaScript, no libraries, no network) where the player can play a basic retro Crossy Road: a chicken hops one tile per arrow-key or WASD press - a quick hop, about a fifth of a second - across grass, roads with cars and rivers with logs; it dies when hit by a car or when it lands in the water off a log; the world scrolls so the game keeps going until you die; the score is the furthest row reached; game over shows the score and Space or a button restarts. Every speed is in pixels per second, scaled by the time since the last frame. Hand back the whole file in your report.'
-      }
-    ])
-    while (!built.length && Date.now() - began < 15 * 60_000) await new Promise((r) => setTimeout(r, 2000))
-    const a = builder.forChat('build-check')[0]
-    say(`built: ${a?.status}, ${a?.review || 'not reviewed'}, ${a?.steps.length} step(s): ${a?.steps.map((s) => s.what).join(' | ')}`)
-    const html = /```(?:html)?\s*\n(<!doctype html[\s\S]*?<\/html>)\s*```/i.exec(a?.report ?? '')?.[1] ?? /(<!doctype html[\s\S]*<\/html>)/i.exec(a?.report ?? '')?.[1]
-    if (html) {
-      const out = join(app.getPath('userData'), 'build-check.html')
-      writeFileSync(out, html)
-      say(`saved the page to ${out} (${html.length} characters)`)
-    } else say(`no page in the report: ${one(a?.report ?? a?.doing ?? '', 600)}`)
-    say(`done in ${Math.round((Date.now() - began) / 1000)}s`)
-    return
-  }
-
+  if (only === 'build') return
   /* 1. Handing off, or not. */
   const asks: Array<{ said: string; want: string }> = [
     { said: 'what is 17 times 23?', want: 'an answer, no agent' },
@@ -3315,6 +3315,19 @@ async function agentsCheck(only?: 'build' | 'delegate'): Promise<void> {
       want: 'one agent, building it'
     }
   ]
+  /* `--delegate-check`: building, every way it is asked, twice each. */
+  if (only === 'delegate') {
+    asks.splice(0, asks.length)
+    for (const said of [
+      'create a html file in ~/Downloads/wumpy-tests that opens a page where i can play a basic retro crossy road',
+      'create a html file in my downloads folder that opens a page where i can play a basic retro crossy road',
+      'can you make me a pac-man game in html, save it in ~/Downloads/wumpy-tests',
+      'write a tetris game in python, save it in ~/Downloads/wumpy-tests',
+      'write a snake game in C++ that i can play in the terminal, put it in ~/Downloads/wumpy-tests',
+      'make a snake game as an html file in ~/Downloads/wumpy-tests'
+    ])
+      asks.push({ said, want: 'one agent, building it' }, { said, want: 'one agent, building it (again)' })
+  }
   let handedOff: { said: string; reply: string } | null = null
   for (const ask of asks) {
     const reply = await modelSays([{ role: 'user', content: ask.said, sentAt: Date.now() }], false)
@@ -3378,6 +3391,183 @@ async function agentsCheck(only?: 'build' | 'delegate'): Promise<void> {
     say(`given its agent's report back, the chat said: ${one(answer, 700)}`)
   }
   say(`done in ${Math.round((Date.now() - began) / 1000)}s`)
+}
+
+/**
+ * `wumpy --build-check[=<request>|=<spec.json>]`: something built, the whole
+ * way the user would get it.
+ *
+ * "keep crunching until like on the first or second try it's able to create
+ * a fully working retro crossy road HTML. Also test for Pac-Man and other
+ * basic games ... its other languages too ... CPP ... Tetris in Python". So
+ * this is the chat as it is - its real instructions, model and keys - given
+ * the request word for word, and then everything it asks for, done: agents
+ * started and their reports handed back, files written, commands run, and
+ * what a written file's check finds sent back, as the panel does. A spec
+ * file may hold several turns, for "now change the graphics".
+ *
+ * Fenced off from the machine: files go only into ~/Downloads/wumpy-tests
+ * (any other path is moved there, and logged), and only commands that read
+ * run. The whole exchange is saved as Markdown beside the log, to be read
+ * and the files played.
+ */
+async function buildCheck(arg: string): Promise<void> {
+  const DEFAULT = 'create a html file in ~/Downloads/wumpy-tests that opens a page where i can play a basic retro crossy road'
+  let spec: { name: string; turns: string[] }
+  try {
+    spec = /\.json$/i.test(arg) ? JSON.parse(readFileSync(arg, 'utf8')) : { name: 'request', turns: [arg || DEFAULT] }
+  } catch (err) {
+    console.log(`[wumpy] build check: could not read ${arg}: ${String(err)}`)
+    return
+  }
+  const say = (line: string): void => console.log(`[wumpy] build check ${spec.name}: ${line}`)
+  const model = resolveModel()
+  say(`on ${model ?? 'no model'}, ${agentSlotsNow()} agent slot(s)`)
+  if (!model) return
+  const dir = join(homedir(), 'Downloads', 'wumpy-tests')
+  mkdirSync(dir, { recursive: true })
+  const began = Date.now()
+  const transcript: string[] = [`# Build check: ${spec.name}`, `${new Date().toString()} on ${model}`]
+  const history: ChatRequest['messages'] = []
+  const deliveries: string[] = []
+  const runner = agentRunner((d) => deliveries.push(d.text), say)
+  const chatId = `build-${began}`
+  const BT3 = '\x60\x60\x60'
+  /* Fenced blocks as the panel's Markdown reads them: closed by a fence at
+     least as long as the one that opened. */
+  const blocks = (text: string): Array<{ tag: string; body: string }> => {
+    const out: Array<{ tag: string; body: string }> = []
+    const lines = text.split('\n')
+    for (let i = 0; i < lines.length; i++) {
+      const open = /^\s{0,3}(\x60{3,})[ \t]*([\w-]*)/.exec(lines[i])
+      if (!open) continue
+      let j = i + 1
+      while (j < lines.length && !new RegExp(`^\\s{0,3}${open[1]}\x60*\\s*$`).test(lines[j])) j++
+      out.push({ tag: open[2], body: lines.slice(i + 1, j).join('\n') })
+      i = j
+    }
+    return out
+  }
+  const inDir = (raw: string | null): string => {
+    const name = basename((raw ?? 'unnamed.txt').replace(/[\\/]+$/, '')) || 'unnamed.txt'
+    const resolved = raw ? resolve(raw.replace(/^~(?=$|[\\/])/, homedir())) : ''
+    return resolved && dirname(resolved) === dir ? resolved : join(dir, name)
+  }
+  let turnNo = 0
+  for (const said of spec.turns) {
+    turnNo++
+    history.push({ role: 'user', content: said, sentAt: Date.now() })
+    transcript.push(`## ${turnNo}. The user\n\n${said}`)
+    say(`turn ${turnNo}: ${JSON.stringify(said.slice(0, 120))}`)
+    let checkRounds = 0
+    for (let step = 1; step <= 10; step++) {
+      const t0 = Date.now()
+      const reply = await modelSays(history, false)
+      history.push({ role: 'assistant', content: reply })
+      transcript.push(`### Wumpy (${Math.round((Date.now() - t0) / 1000)}s)\n\n${reply}`)
+      const found = blocks(reply)
+      say(`  reply ${step}: ${reply.length} characters, blocks: ${found.map((b) => b.tag || 'plain').join(', ') || 'none'}`)
+      const back: string[] = []
+      for (const b of found.filter((x) => x.tag === 'wumpy-write')) {
+        const req = readWriteRequest(b.body)
+        if (req.from) {
+          const file = runner.fileOf(req.from)
+          say(`  the write asks for ${req.from}'s file: ${file ? `${file.length} characters` : 'there is none'}`)
+          transcript.push(`> from ${req.from}: ${file ? `${file.length} characters, copied as written` : 'no such file'}`)
+          req.content = file ?? ''
+        }
+        const target = inDir(req.path)
+        if (req.path && resolve(req.path.replace(/^~(?=$|[\\/])/, homedir())) !== target) say(`  it asked to write ${req.path}; written to ${target} instead`)
+        const r = writeProposedFile(target, req.content, dir)
+        say(`  wrote ${target}: ${r.written ? `${r.bytes} bytes` : `refused: ${r.error}`}`)
+        transcript.push(`> wrote ${target}: ${r.written ? `${r.bytes} bytes` : `refused: ${r.error}`}`)
+        if (!r.written) continue
+        let errors: string[] = []
+        let text = ''
+        if (/\.html?$/i.test(target)) {
+          const page = await checkPage(target)
+          errors = [...page.errors, ...(page.play?.moved === false ? [page.play.line] : []), ...(page.restart?.ok === false ? [page.restart.line] : [])]
+          const how = `${page.play ? ` - ${page.play.line}` : ' - no player found to move'}${page.restart ? ` - ${page.restart.line}` : ' - never saw it end'}`
+          say(`  page check: ${page.errors.length ? page.errors.join(' | ') : 'no errors'}${how}`)
+          transcript.push(`> page check: ${page.errors.length ? page.errors.join(' | ') : 'no errors'}${how}`)
+          if (errors.length) text = pageErrorText(target, errors, excerpts(req.content, page.errors))
+        } else {
+          const checked = await checkCodeFile(target)
+          if (checked) {
+            const v = checked.verdict
+            if (v.ran && v.ok && isInteractive(req.content)) {
+              const played = await runProgram(req.content, checked.lang)
+              say(`  run: ${played ? played.output.replace(/\s+/g, ' ').slice(0, 300) : 'not run here'}`)
+              if (played) transcript.push(`> run: ${played.output}`)
+              if (played && !played.ok) v.errors.push(played.output)
+            }
+            errors = v.errors
+            say(`  code check: ${v.ran ? (errors.length ? errors.join(' | ') : 'no errors') : `not run: ${v.how}`}${v.missing.length ? `; missing: ${v.missing.join('; ')}` : ''}`)
+            transcript.push(`> code check: ${codeVerdictText(checked.lang, v)}`)
+            if (errors.length) text = codeErrorText(target, checked.lang, errors, excerpts(req.content, errors))
+          }
+        }
+        if (text && checkRounds < PAGE_ROUNDS) {
+          checkRounds++
+          back.push(text)
+        }
+      }
+      for (const b of found.filter((x) => /^wumpy-run(?:-bash|-cmd)?$/.test(x.tag))) {
+        const command = b.body
+          .split('\n')
+          .filter((l) => !l.trim().startsWith('#'))
+          .join('\n')
+          .trim()
+        if (!command) continue
+        /* Compiling into the test folder is what accept-all would do, and
+           harmless: anything else that writes is not run. */
+        const compiles =
+          /^\s*(?:g\+\+|gcc|clang\+\+|clang|c\+\+|cc)\s/.test(command) &&
+          !/[;&|`$<>]/.test(command) &&
+          command.split(/\s+/).filter((w) => /[\\/]/.test(w)).every((w) => resolve(w.replace(/^~(?=\/)/, homedir())).startsWith(`${dir}/`))
+        if (!compiles && (!isReadOnly(command) || AGENT_SECRETS.test(command))) {
+          say(`  did not run (it changes something): ${command.slice(0, 160)}`)
+          transcript.push(`> not run in the check: ${command}`)
+          back.push(`That command was not run: this is a check, and it only runs commands that read. Carry on without it.`)
+          continue
+        }
+        const r = await runCommand(command, process.platform === 'win32' ? 'powershell' : 'bash', dir)
+        const out = `${r.stdout}${r.stderr ? `\n${r.stderr}` : ''}`.trim().slice(0, 4000)
+        say(`  ran: ${command.slice(0, 120)} -> exit ${r.exitCode}`)
+        transcript.push(`> ran: ${command}\n\n${BT3}\n${out}\n${BT3}`)
+        back.push(`I ran that command. Exit code ${r.exitCode}.\n\n${out ? `${BT3}\n${out}\n${BT3}` : '(no output)'}`)
+      }
+      const asks = agentAsks(reply)
+      if (asks.length) {
+        const had = deliveries.length
+        runner.start(chatId, `reply-${turnNo}-${step}`, asks)
+        const watching = monitorAsks(reply)
+        if (watching.length) runner.monitor(chatId, `reply-${turnNo}-${step}`, watching)
+        for (const a of asks) transcript.push(`> agent asked for: ${a.title}\n\n${a.brief}`)
+        const waitFrom = Date.now()
+        while (Date.now() - waitFrom < 25 * 60_000) {
+          const mine = runner.forChat(chatId)
+          if (mine.every((a) => a.status === 'done' || a.status === 'failed' || a.status === 'stopped') && deliveries.length > had) break
+          await new Promise((r) => setTimeout(r, 2000))
+        }
+        await new Promise((r) => setTimeout(r, 500))
+        for (const a of runner.forChat(chatId).filter((x) => x.key.startsWith(`reply-${turnNo}-${step}:`))) {
+          say(`  agent ${a.number} "${a.title}": ${a.status}, ${a.review || 'not reviewed'}, ${Math.round(((a.endedAt ?? Date.now()) - a.startedAt) / 1000)}s, steps: ${a.steps.map((x) => x.what).join(' | ') || 'none'}`)
+          transcript.push(`> agent ${a.number} "${a.title}": ${a.status}, ${a.review || 'not reviewed'}; steps: ${a.steps.map((x) => x.what).join(' | ') || 'none'}`)
+        }
+        back.push(...deliveries.slice(had))
+      }
+      if (!back.length) break
+      const auto = back.join('\n\n')
+      history.push({ role: 'user', content: auto, sentAt: Date.now() })
+      transcript.push(`### (sent by Wumpy)\n\n${auto}`)
+    }
+  }
+  const out = join(app.getPath('userData'), 'build-checks')
+  mkdirSync(out, { recursive: true })
+  const file = join(out, `${spec.name}-${new Date().toISOString().replace(/[:.]/g, '-')}.md`)
+  writeFileSync(file, transcript.join('\n\n'))
+  say(`done in ${Math.round((Date.now() - began) / 1000)}s; the exchange is in ${file}`)
 }
 
 async function memoryCheck(): Promise<void> {

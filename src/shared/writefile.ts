@@ -29,6 +29,8 @@ export interface WriteRequest {
   path: string | null
   /** Exactly what should end up in the file. */
   content: string
+  /** "agent-7": the file is that background agent's, saved as it wrote it. */
+  from?: string | null
 }
 
 /** A file this size is a mistake, not a script. */
@@ -53,6 +55,7 @@ export function readWriteRequest(raw: string): WriteRequest {
   const reason: string[] = []
   let path: string | null = null
   let start = -1
+  let fromAgent: string | null = null
 
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i]
@@ -72,6 +75,13 @@ export function readWriteRequest(raw: string): WriteRequest {
       if (trimmed) continue
       continue
     }
+    /* A file a background agent wrote is saved from its report, not
+       retyped: `from: agent-7` straight after the path. */
+    const from = start === -1 ? /^from:\s*(agent-\d+)\s*$/i.exec(trimmed) : null
+    if (from) {
+      fromAgent = from[1].toLowerCase()
+      continue
+    }
     // Past the path. A separator line is consumed; anything else starts the file.
     if (start === -1) {
       if (/^-{3,}$/.test(trimmed)) {
@@ -84,10 +94,13 @@ export function readWriteRequest(raw: string): WriteRequest {
     }
   }
 
+  const content = start === -1 ? '' : lines.slice(start).join('\n')
   return {
     reason: reason.join(' ').trim() || null,
     path,
-    content: start === -1 ? '' : lines.slice(start).join('\n')
+    /* With a from: line, what follows is not the file: the agent's is. */
+    content: fromAgent ? '' : content,
+    from: fromAgent
   }
 }
 
@@ -263,13 +276,12 @@ export const WRITE_PROMPT = [
   'print(sum(os.path.getsize(f) for f in os.listdir(".") if os.path.isfile(f)))',
   '```',
   '',
-  'CODE THAT RUNS - a page, a game, a script - IS NOT DONE WHEN IT IS WRITTEN. Before the',
-  'block, run it in your head once: every name defined where it is used; every speed and',
-  'timer per second, scaled by the frame time - never per frame; every part they asked for',
-  'really there (score, lanes, losing, "keeps going"). Wumpy loads a page you write and',
-  'hands you its errors. Say what you could not test. When they say it does not work, READ',
-  'THE FILE before you answer - never guess a cause - and fix everything wrong in it, not',
-  'only what they named.',
+  'A GAME, PAGE, APP OR WHOLE PROGRAM is a background agent\'s job when you have them (see',
+  'there): you write its file when the report comes. CODE THAT RUNS IS NOT DONE WHEN IT IS',
+  'WRITTEN: run it in your head first - every name defined where used, every speed per second',
+  'times the frame time, every part they asked for there. Wumpy loads a page and compiles a',
+  'program you write, and hands you the errors. When they say it does not work, READ THE FILE',
+  'before you answer - never guess a cause - and fix all that is wrong, not only what they named.',
   '',
   'The contents are written exactly as given, so write plain code: no escaping, no',
   'quoting, no here-string. Never put file contents inside New-Item, Set-Content or',
