@@ -724,6 +724,7 @@ check('agents are started when an answer finishes, not when a card draws', /wind
   const v = h.agents.forChat('c')[0]
   check('edits change the file it read, when it wrote none', [v.status, /let hit = true/.test(v.report ?? ''), /<!doctype html>/.test(v.report ?? '')], ['done', true, true])
 }
+check('an edit whose FIND drops a blank line or a double space still lands', A.applyEdits('a();\n\nlet  x = 1;\nb();\n', [{ find: 'a();\nlet x = 1;', replace: 'a();\nlet x = 2;' }]), { ok: true, text: 'a();\nlet x = 2;\nb();\n' })
 check('an agent is named after the file its brief names', [A.fileNamed('Restyle ~/Downloads/wumpy-tests/pacman.html with neon walls.'), A.fileNamed('Make snake.cpp faster'), A.fileNamed('Build a Pac-Man game in one HTML file. Hand back the whole file.')], ['pacman.html', 'snake.cpp', undefined])
 check('a retry of a broken build is the same thing, a new game is not', [A.sameWork('Build a Pac-Man game in one HTML file', 'Rebuild the Pac-Man game so the player moves'), A.sameWork('Build a Pac-Man game in one HTML file', 'Build a Snake game in one HTML file')], [true, false])
 check('the card shows the file, not a number', /<span className="cmd-shell">\{name\}<\/span>/.test(read('src/renderer/src/components/AgentCard.tsx')), true)

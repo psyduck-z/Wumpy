@@ -566,6 +566,21 @@ export function applyEdits(file: string, edits: ReadonlyArray<{ find: string; re
     for (let i = 0; i + want.length <= have.length; i++) {
       if (want.every((w, k) => have[i + k].trim() === w)) at.push(i)
     }
+    /* Or with blank lines and runs of spaces not counted: a model copying
+       its own lines back drops a blank line or a double space. */
+    if (!at.length) {
+      const squash = (l: string): string => l.replace(/\s+/g, ' ').trim()
+      const wanted = want.map(squash).filter(Boolean)
+      const lines = have.map((l, i) => [squash(l), i] as const).filter(([l]) => l)
+      const found: Array<[number, number]> = []
+      for (let i = 0; wanted.length && i + wanted.length <= lines.length; i++) {
+        if (wanted.every((w, k) => lines[i + k][0] === w)) found.push([lines[i][1], lines[i + wanted.length - 1][1]])
+      }
+      if (found.length === 1) {
+        text = [...have.slice(0, found[0][0]), ...e.replace.split(LF), ...have.slice(found[0][1] + 1)].join(LF)
+        continue
+      }
+    }
     if (at.length !== 1) {
       return {
         ok: false,

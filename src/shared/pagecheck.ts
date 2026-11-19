@@ -166,14 +166,17 @@ export const LOOK_JS = `(() => {
   for (const n of ['lanes', 'rows', 'roads', 'lines', 'strips']) {
     const v = arrayOf(n)
     if (!v) continue
-    for (const lane of v.slice(0, 80)) {
+    for (const [i, lane] of v.slice(0, 80).entries()) {
       if (!lane || typeof lane !== 'object' || /water|river|lake|sea|log/i.test(String(lane.type || lane.kind || ''))) continue
-      const ly = num(lane.y) ?? num(lane.row)
-      for (const k of ['cars', 'vehicles', 'entities', 'objects', 'obstacles', 'items', 'movers', 'things'])
+      /* A lane with no y of its own is the row it is in the list. */
+      const ly = num(lane.y) ?? num(lane.row) ?? num(lane.index) ?? i
+      for (const k of ['cars', 'vehicles', 'entities', 'objects', 'objs', 'obstacles', 'items', 'movers', 'things', 'list'])
         if (Array.isArray(lane[k])) for (const o of lane[k].slice(0, 20)) add(o, ly)
     }
   }
   if (harm.length) seen.harm = harm.slice(0, 120)
+  /* How big a tile is, where it says. */
+  for (const n of ['TILE', 'TILE_SIZE', 'CELL', 'CELL_SIZE', 'GRID', 'GRID_SIZE', 'TS', 'BLOCK', 'SIZE']) { const t = num(get(n)); if (t && t >= 8 && t <= 200) { seen.tile = t; break } }
   /* Lives, wherever it keeps them: one lost is a death. */
   let lives = num(get('lives'))
   for (const box of boxes) { if (lives !== undefined) break; const b = get(box); if (b && typeof b === 'object') lives = num(b.lives) }
@@ -253,6 +256,8 @@ export type Seen = {
   /** What can hit the player: [x, y, width], the lane's y for a car kept in a lane. */
   harm?: Array<[number, number, number]>
   lives?: number
+  /** Pixels per tile, from a TILE or GRID_SIZE the page keeps. */
+  tile?: number
   /** The page's own clock at the look, in milliseconds. */
   t?: number
   /** Its canvas's width, when it has one. */
@@ -315,26 +320,51 @@ export function tooFast(a: Seen, b: Seen): Array<{ name: string; speed: number; 
   return out
 }
 
+type Harm = ReadonlyArray<readonly [number, number, number]>
+
+/**
+ * Whether its cars' x, and their y, are counted in tiles - no coordinate
+ * past 64 - each on its own: a Crossy Road's cars had x in pixels and y as
+ * the number of their lane.
+ */
+export function axes(harm: Harm): { xTiles: boolean; yTiles: boolean } {
+  return { xTiles: harm.every(([x, , w]) => Math.abs(x) < 64 && w < 8), yTiles: harm.every(([, y]) => Math.abs(y) < 64) }
+}
+
+/* The player's fields for each axis: 't' in tiles, 'p' in pixels, '?' by size. */
+const X_FIELDS: Array<[string, string]> = [['x', '?'], ['px', 'p'], ['col', 't'], ['gx', 't'], ['tx', 't'], ['tileX', 't'], ['gridX', 't'], ['cx', '?'], ['c', 't'], ['column', 't'], ['playerX', '?'], ['playerCol', 't'], ['screenX', 'p'], ['drawX', 'p']]
+const Y_FIELDS: Array<[string, string]> = [['y', '?'], ['py', 'p'], ['row', 't'], ['gy', 't'], ['ty', 't'], ['tileY', 't'], ['gridY', 't'], ['cy', '?'], ['r', 't'], ['playerY', '?'], ['playerRow', 't'], ['screenY', 'p'], ['drawY', 'p']]
+
+function onAxis(p: Record<string, number | boolean>, fields: Array<[string, string]>, tiles: boolean, unit: number): number | null {
+  const kind = (v: number, said: string): 't' | 'p' => (said === '?' ? (Math.abs(v) >= 64 ? 'p' : 't') : (said as 't' | 'p'))
+  for (const [k, said] of fields) {
+    const v = p[k]
+    if (typeof v === 'number' && kind(v, said) === (tiles ? 't' : 'p')) return v
+  }
+  /* None in the cars' units: the other kind, turned, where a tile's size is known. */
+  if (!unit) return null
+  for (const [k] of fields) {
+    const v = p[k]
+    if (typeof v !== 'number') continue
+    return tiles ? v / unit : v * unit + unit / 2
+  }
+  return null
+}
+
 /**
  * Where the player stands, in the units its cars use: [x, y]. A Crossy
  * Road's player kept col and row in tiles and px and py in pixels; its
- * cars were in pixels.
+ * cars were in pixels. `scale` is pixels per tile, when known.
  */
-export function standing(seen: Seen): [number, number] | null {
+export function standing(seen: Seen, scale = 0): [number, number] | null {
   const p = seen?.player
   const harm = seen?.harm
   if (!p || !harm?.length) return null
-  const tiles = harm.every(([x, y]) => Math.abs(x) < 64 && Math.abs(y) < 64)
-  const pairs: Array<[string, string]> = [
-    ['x', 'y'], ['px', 'py'], ['col', 'row'], ['gx', 'gy'], ['tx', 'ty'], ['tileX', 'tileY'], ['gridX', 'gridY'], ['cx', 'cy'], ['c', 'r'], ['column', 'row'], ['playerX', 'playerY']
-  ]
-  for (const [a, b] of pairs) {
-    const x = p[a]
-    const y = p[b]
-    if (typeof x !== 'number' || typeof y !== 'number') continue
-    if ((Math.abs(x) < 64 && Math.abs(y) < 64) === tiles) return [x, y]
-  }
-  return null
+  const { xTiles, yTiles } = axes(harm)
+  const unit = scale || seen?.tile || 0
+  const x = onAxis(p, X_FIELDS, xTiles, unit)
+  const y = onAxis(p, Y_FIELDS, yTiles, unit)
+  return x === null || y === null ? null : [x, y]
 }
 
 /** How far apart its lanes are: the smallest gap between the y's its cars are on. */
@@ -351,17 +381,18 @@ export function laneGap(harm: ReadonlyArray<readonly [number, number, number]>):
  * Road's roads were four rows apart, and a player on the grass next to one
  * was taken to be standing in it.
  */
-export function tileOf(harm: ReadonlyArray<readonly [number, number, number]>, scale = 0): number {
-  if (harm.every(([x, y]) => Math.abs(x) < 64 && Math.abs(y) < 64)) return 1
+export function tileOf(harm: Harm, scale = 0, axis: 'x' | 'y' = 'y'): number {
+  const { xTiles, yTiles } = axes(harm)
+  if (axis === 'y' ? yTiles : xTiles) return 1
   return scale || laneGap(harm)
 }
 
 /** The cars in the lane the player stands in: the nearest lane, if it is within half a tile. */
 export function inLane(seen: Seen, scale = 0): Array<readonly [number, number, number]> {
-  const me = standing(seen)
+  const me = standing(seen, scale)
   const harm = seen?.harm
   if (!me || !harm?.length) return []
-  const tile = tileOf(harm, scale)
+  const tile = tileOf(harm, scale || seen?.tile)
   const nearest = Math.min(...harm.map(([, y]) => Math.abs(y - me[1])))
   if (nearest > tile * 0.6) return []
   return harm.filter(([, y]) => Math.abs(Math.abs(y - me[1]) - nearest) < tile * 0.25)
@@ -393,12 +424,12 @@ export function tileScale(a: Seen, b: Seen): number {
  * landed with its row in one lane and its y in another.
  */
 export function teleportJs(seen: Seen, scale = 0): string | null {
-  const me = standing(seen)
+  const me = standing(seen, scale)
   const p = seen?.player
   const harm = seen?.harm
   if (!me || !p || !harm?.length) return null
   const gap = laneGap(harm)
-  const tiles = harm.every(([x, y]) => Math.abs(x) < 64 && Math.abs(y) < 64)
+  const tiles = axes(harm).yTiles
   const lanes = [...new Set(harm.map(([, y]) => y))].filter((y) => Math.abs(y - me[1]) > gap * 0.4)
   if (!lanes.length) return null
   const to = lanes.reduce((a, b) => (Math.abs(b - me[1]) < Math.abs(a - me[1]) ? b : a))
@@ -406,7 +437,7 @@ export function teleportJs(seen: Seen, scale = 0): string | null {
      else the gap between lanes, near enough. */
   const tileField = Object.keys(p).find((k) => /^(?:row|gy|ty|r|tileY|gridY)$/.test(k) && typeof p[k] === 'number' && p[k] !== 0)
   const pixelField = Object.keys(p).find((k) => /^(?:y|py|cy|screenY|drawY)$/.test(k) && typeof p[k] === 'number' && Math.abs(p[k] as number) >= 64)
-  const ratio = scale || (tileField && pixelField ? (p[pixelField] as number) / (p[tileField] as number) : 0)
+  const ratio = scale || seen?.tile || (tileField && pixelField ? (p[pixelField] as number) / (p[tileField] as number) : 0)
   /* Whole tiles, as a grid game's rows are whole. */
   const dTile = tiles ? Math.round(to - me[1]) : Math.round((to - me[1]) / (ratio || gap))
   const dPixel = tiles ? dTile * ratio : to - me[1]
@@ -426,6 +457,8 @@ export function teleportJs(seen: Seen, scale = 0): string | null {
   let p
   for (const n of names) { const v = get(n); if (v && typeof v === 'object') { p = v; break } }
   for (const box of ['state', 'game', 'world', 'gameState', 'G']) { if (p) break; const b = get(box); if (b && typeof b === 'object') for (const n of names) if (b[n] && typeof b[n] === 'object') { p = b[n]; break } }
+  /* Or kept loose in the object it keeps its state in: playerX, playerY. */
+  for (const box of ['state', 'game', 'world', 'gameState', 'G']) { if (p) break; const b = get(box); if (b && typeof b === 'object' && Object.keys(b).some((k) => /^(?:player|chicken|frog|hero|pacman|pac)(?:x|y|row|col)$/i.test(k))) p = b }
   if (!p) return false
   const moves = ${JSON.stringify(moves)}
   for (const k in moves) if (typeof p[k] === 'number') p[k] += moves[k]
@@ -442,7 +475,8 @@ export function teleportJs(seen: Seen, scale = 0): string | null {
  */
 export function bunched(a: Seen, b: Seen, scale = 0): string {
   if (!a?.harm?.length || !b?.harm?.length || (b.t ?? 0) - (a.t ?? 0) < 1000) return ''
-  const tile = tileOf(a.harm, scale)
+  const tile = tileOf(a.harm, scale || a.tile)
+  const across = tileOf(a.harm, scale || a.tile, 'x')
   const stacks = (seen: Seen): Map<number, number> => {
     const lanes = new Map<number, Array<readonly [number, number, number]>>()
     for (const h of seen!.harm!) {
@@ -453,7 +487,7 @@ export function bunched(a: Seen, b: Seen, scale = 0): string {
     for (const [y, cars] of lanes) {
       const xs = cars.map(([x, , w]) => x + w / 2).sort((m, n) => m - n)
       let on = 0
-      for (let i = 1; i < xs.length; i++) if (xs[i] - xs[i - 1] < tile * 0.5) on++
+      for (let i = 1; i < xs.length; i++) if (xs[i] - xs[i - 1] < across * 0.5) on++
       if (on) out.set(y, on)
     }
     return out
@@ -485,21 +519,24 @@ function spared(seen: Seen): boolean {
  */
 export function standInTraffic(looks: readonly Seen[], scale = 0): { verdict: 'hit' | 'missed' | null; line: string } {
   const first = looks[0]
-  const me = standing(first)
+  const unit = scale || first?.tile || 0
+  const me = standing(first, unit)
   if (!me || !first?.harm?.length) return { verdict: null, line: '' }
-  const gap = tileOf(first.harm, scale)
+  const gap = tileOf(first.harm, unit)
+  const across = tileOf(first.harm, unit, 'x')
+  const { xTiles } = axes(first.harm)
   const lives = first.lives
   let crossedAt = -1
   let crossing = ''
   for (let i = 1; i < looks.length; i++) {
     const s = looks[i]
-    const now = standing(s)
+    const now = standing(s, unit)
     const happened =
       !s ||
       s.over === true ||
       (typeof lives === 'number' && typeof s.lives === 'number' && s.lives < lives) ||
       !now ||
-      Math.abs(now[0] - me[0]) > gap * 0.5 ||
+      Math.abs(now[0] - me[0]) > across * 0.5 ||
       Math.abs(now[1] - me[1]) > gap * 0.5
     if (happened) return { verdict: 'hit', line: 'Standing still in a lane with cars, the player was hit, and that ended its run.' }
     if (crossedAt >= 0) {
@@ -517,8 +554,8 @@ export function standInTraffic(looks: readonly Seen[], scale = 0): { verdict: 'h
     }
     if (spared(s)) continue
     const prev = looks[i - 1]
-    const a = inLane(prev, scale)
-    const b = inLane(s, scale)
+    const a = inLane(prev, unit)
+    const b = inLane(s, unit)
     if (!a.length || a.length !== b.length) continue
     for (let k = 0; k < a.length; k++) {
       const [x0, , w0] = a[k]
@@ -526,8 +563,7 @@ export function standInTraffic(looks: readonly Seen[], scale = 0): { verdict: 'h
       /* Faster than ten tiles a second is one going off one side and
          coming back on the other, not a crossing. */
       const seconds = Math.max(0.05, ((s?.t ?? 0) - (prev?.t ?? 0)) / 1000)
-      const tiles = first.harm.every(([x, y]) => Math.abs(x) < 64 && Math.abs(y) < 64)
-      if (Math.abs(x1 - x0) / seconds > (tiles ? 10 : Math.max(600, (s?.width ?? 0) * 1.2))) continue
+      if (Math.abs(x1 - x0) / seconds > (xTiles ? 10 : Math.max(600, (s?.width ?? 0) * 1.2))) continue
       const c0 = x0 + w0 / 2 - me[0]
       const c1 = x1 + w1 / 2 - me[0]
       if (c0 === 0 || c1 === 0 || Math.sign(c0) !== Math.sign(c1)) {
