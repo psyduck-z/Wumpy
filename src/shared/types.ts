@@ -999,6 +999,7 @@ export const IPC = {
   linkCheck: 'link:check',
   linkSearch: 'link:search',
   writeFile: 'write:file',
+  writtenCheck: 'write:checked',
   writeCheck: 'write:check',
   usageGet: 'usage:get',
   /**

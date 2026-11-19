@@ -498,6 +498,15 @@ export class Agents {
         this.finishReport(agent, lastGood, true)
         return
       }
+      /* None ever worked: it goes back saying so, with what Wumpy saw, so
+         the chat does not call it done. A Pac-Man whose maze check failed
+         on every version was handed over as if it played. */
+      if (broken && sendBacks >= 3) {
+        const last = agent.records[agent.records.length - 1]?.outcome ?? ''
+        agent.review = `${agent.review ? `${agent.review}; ` : ''}it still breaks when Wumpy tests it`
+        this.finishReport(agent, `${step.text}${LF}${LF}WUMPY'S TEST OF THIS FINAL VERSION FOUND IT STILL BROKEN - do not tell the user it works:${LF}${clip(last, 1500)}`, true)
+        return
+      }
       /* Feedback from another agent before the report goes anywhere: up to
          REVIEW_ROUNDS reviews, and the answer to the last one stands. */
       if (rounds < (isBuild(agent.brief) ? BUILD_REVIEW_ROUNDS : REVIEW_ROUNDS)) {

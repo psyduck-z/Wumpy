@@ -154,10 +154,11 @@ export const BUILDING = [
   '- A game starts the way a player expects: a title or "press a key to start", and nothing',
   '  can kill the player before they have pressed one.',
   '- Controls: arrow keys and WASD (Space where it fits). The arrows must not scroll the page.',
-  '- Generate what you would type by hand: mirror a maze from its left half, build lanes in a',
-  '  loop. What you do type - a map in rows of text - the code checks as it starts (every row',
-  '  the same length, or throw an Error saying which row): Wumpy\'s test shows that error. A',
-  '  Pac-Man came back with rows of 21 and 23 and its walls drawn across the dots.',
+  '- Never type a map as rows of text that must line up: models miscount them, and a Pac-Man',
+  '  failed five times on rows of 19, 21 and 22 characters. Build it in code - fill a grid from',
+  '  a list of wall rectangles [x, y, w, h], mirror it left to right, build lanes in a loop -',
+  '  and check it as it starts: flood-fill from the player, and throw an Error naming any dot',
+  '  or exit it cannot reach. Wumpy\'s test shows that error.',
   '- Enemies move from the first seconds: ghosts leave their pen, cars drive.',
   '- Every speed and timer is per second, times the time since the last frame - capped, so a',
   '  tab coming back does not jump everything. requestAnimationFrame gives milliseconds:',
@@ -275,6 +276,9 @@ export const REVIEW_PROMPT = [
   '  control once, losing, and the restart - is every piece of state reset, and does the game',
   '  loop run again? A game stuck at its start, or frozen after a restart, is not a game.',
   "- Wumpy's own test of the page or program is in the steps: what it shows is fact.",
+  '- A REVISE about logic works one case through with real numbers first - "row 12 to row',
+  '  11: score 0 to 1". If the numbers come out right, it is not a REVISE. If the report says',
+  '  why an earlier note was wrong, check that; if it holds, drop the note - never repeat it.',
   '- Agents hand work back as text, and cannot save or run anything. A script, letter or file',
   '  given in full in the report IS delivered - also when the brief says to save it at a path:',
   '  Wumpy saves it there. Never ask for it to be saved, created or run.',
@@ -375,23 +379,49 @@ export function stepOf(reply: string, platform: AgentWorld['platform']): Step {
 
 /**
  * The file in a report, as it is to be saved: a whole web page, or else the
- * longest fenced block of anything. Null when there is none worth saving.
+ * longest fenced block of anything - and where it sits in the report. Null
+ * when there is none worth saving.
  */
-export function fileIn(report: string): { text: string; kind: string } | null {
+export function fileSpan(report: string): { text: string; kind: string; start: number; end: number } | null {
   const page = /(<!doctype html[\s\S]*?<\/html>|<html[\s\S]*?<\/html>)/i.exec(report)
-  if (page && /<script|<canvas|<body/i.test(page[1])) return { text: `${page[1]}${LF}`, kind: 'a web page' }
+  if (page && /<script|<canvas|<body/i.test(page[1])) return { text: `${page[1]}${LF}`, kind: 'a web page', start: page.index, end: page.index + page[1].length }
   const lines = report.split(LF)
-  let best: { text: string; kind: string } | null = null
+  const offsets: number[] = []
+  let at = 0
+  for (const l of lines) {
+    offsets.push(at)
+    at += l.length + 1
+  }
+  let best: { text: string; kind: string; start: number; end: number } | null = null
   for (let i = 0; i < lines.length; i++) {
     const open = /^\s{0,3}(`{3,})[ \t]*([\w+#.-]*)/.exec(lines[i])
     if (!open) continue
     let j = i + 1
     while (j < lines.length && !new RegExp(`^\\s{0,3}${open[1]}\x60*\\s*$`).test(lines[j])) j++
     const body = lines.slice(i + 1, j)
-    if (body.length >= 6 && (!best || body.join(LF).length > best.text.length)) best = { text: `${body.join(LF)}${LF}`, kind: open[2] ? `${open[2]} code` : 'a file' }
+    if (body.length >= 6 && (!best || body.join(LF).length > best.text.length)) {
+      best = { text: `${body.join(LF)}${LF}`, kind: open[2] ? `${open[2]} code` : 'a file', start: offsets[i + 1], end: offsets[i + 1] + body.join(LF).length }
+    }
     i = j
   }
   return best
+}
+
+export function fileIn(report: string): { text: string; kind: string } | null {
+  const span = fileSpan(report)
+  return span ? { text: span.text, kind: span.kind } : null
+}
+
+/**
+ * The report as the chat is shown it when the file in it is saved by
+ * reference: the file itself left out. Shown it, the chat wrote `from:` and
+ * then typed all nine thousand characters out anyway, for nothing.
+ */
+export function withoutFile(report: string, id: string): string {
+  const span = fileSpan(report)
+  if (!span) return report
+  const lines = span.text.split(LF).length - 1
+  return `${report.slice(0, span.start)}[${span.kind}, ${lines} lines - not shown here; it is saved as written with from: ${id}]${report.slice(span.end)}`
 }
 
 /** Output handed back to the agent, trimmed to what a model can use. */
@@ -485,7 +515,7 @@ export function deliveryText(done: readonly Finished[], note: string | null): st
         ? `${LF}ITS FILE (${d.file.kind}, ${d.file.lines} lines) is saved exactly as the agent wrote it: a wumpy-write block with \x60path:\x60 and then \x60from: ${d.id}\x60, and nothing after - never retype it.`
         : ''
     return d.ok
-      ? `AGENT ${d.number}: ${d.title} (${how})${LF}${ran}${file}${LF}${d.text}`
+      ? `AGENT ${d.number}: ${d.title} (${how})${LF}${ran}${file}${LF}${file ? withoutFile(d.text, d.id!) : d.text}`
       : `AGENT ${d.number}: ${d.title} - FAILED (${how}): ${d.text}`
   })
   const rule =

@@ -548,7 +548,7 @@ check('nor one wrapping round the screen', PC.tooFast(fastLook(0, [[9.9, 3], [5,
 check('builds get a third review, since the reviewer sees them', /isBuild\(agent\.brief\) \? BUILD_REVIEW_ROUNDS : REVIEW_ROUNDS/.test(read('src/main/agents.ts')), true)
 check('a reviewer that can see is shown the page', /this\.deps\.sees\(agent\.model\)/.test(read('src/main/agents.ts')) && /image_url: \{ url: shot! \}/.test(read('src/main/agents.ts')), true)
 check('a guarded import is optional, not missing', /optional\.add\(n\.lineno\)/.test(CC.PY_CHECK), true)
-check('build agents generate mazes and check what they typed', /mirror a maze from its left half/.test(A.BUILDING.join(' ')) && /throw an Error saying which row/.test(A.BUILDING.join(' ')), true)
+check('build agents build maps in code and check them as they start', /fill a grid from\s+a list of wall rectangles/.test(A.BUILDING.join(' ')) && /flood-fill from the player/.test(A.BUILDING.join(' ')), true)
 check('keys are held, not tapped', /keyJs\(key, 'keydown'\)[\s\S]{0,80}await sleep\(ms\)[\s\S]{0,80}keyJs\(key, 'keyup'\)/.test(read('src/main/pagecheck.ts')), true)
 
 /* ------------------------------------------- files saved, not retyped */
@@ -557,11 +557,15 @@ const W = await load('src/shared/writefile.ts', 'writefile')
 const asWritten = W.readWriteRequest('# Save the game\npath: ~/Downloads/snake.html\nfrom: agent-7\n')
 check('a write block can name an agent\'s file instead of holding it', [asWritten.path, asWritten.from, asWritten.content], ['~/Downloads/snake.html', 'agent-7', ''])
 check('and an ordinary one is as it was', W.readWriteRequest('path: a.py\n---\nprint(1)\n').from, null)
+check('content after a from: line is the model\'s own fix, and wins', W.readWriteRequest('path: a.html\nfrom: agent-1\n---\n<html>fixed</html>\n').content, '<html>fixed</html>\n')
+check('a build that never passed goes back saying so', /WUMPY'S TEST OF THIS FINAL VERSION FOUND IT STILL BROKEN/.test(read('src/main/agents.ts')), true)
 const pageReport = 'REPORT:\n```html\n<!DOCTYPE html>\n<html><body><canvas></canvas><script>let a = 1</script></body></html>\n```\nChecked: loaded.'
 check('the file in a report is its page, exactly', A.fileIn(pageReport)?.text, '<!DOCTYPE html>\n<html><body><canvas></canvas><script>let a = 1</script></body></html>\n')
 check('or its longest block', A.fileIn('REPORT:\n```cpp\n' + 'int x;\n'.repeat(7) + '```\nRun:\n```bash\ng++ a.cpp\n```')?.kind, 'cpp code')
 const handed = A.deliveryText([{ id: 'agent-7', file: { lines: 180, kind: 'a web page' }, number: 1, title: 'Snake', ok: true, text: 'the page', tookMs: 60000, review: 'accepted', steps: 2, ran: [] }], null)
 check('the hand-back says to save it by reference, never retyped', /from: agent-7/.test(handed) && /never retype it/.test(handed), true)
+const handedPage = A.deliveryText([{ id: 'agent-7', file: { lines: 2, kind: 'a web page' }, number: 1, title: 'Snake', ok: true, text: pageReport, tookMs: 60000, review: 'accepted', steps: 2, ran: [] }], null)
+check('and does not show the file, so it cannot be retyped', !/<canvas>/.test(handedPage) && /not shown here; it is saved as written with from: agent-7/.test(handedPage) && /Checked: loaded/.test(handedPage), true)
 check('the write card fetches an agent\'s file itself', /window\.wumpy\.agents\s*\.file\(from\)/.test(read('src/renderer/src/components/WriteCard.tsx')), true)
 check('a terminal game is played in a sandbox, without the home folder or network', /'--unshare-all'/.test(read('src/main/codecheck.ts')) && !/--bind', homedir|ro-bind', '\/home/.test(read('src/main/codecheck.ts')), true)
 

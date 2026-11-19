@@ -1098,7 +1098,7 @@ function namedControls(shot: Attachment): string[] {
    * A chip rather than a note since the receipts were unified: the same file
    * written twice in a row is now one line with a two on it.
    */
-  const onWritten = useCallback((result: WriteResult) => {
+  const onWritten = useCallback((result: WriteResult, _messageId?: string, content?: string) => {
     if (result.written) record('write', result.path)
     chatRef.current.notify(wroteLine(result))
     /*
@@ -1106,32 +1106,44 @@ function namedControls(shot: Attachment): string[] {
      * errors, never the file. "Open that file and you can play" was said of
      * a game that crashed on its first frame, and the user found out. Twice
      * per request at most: past that, a person should see it.
+     *
+     * After the write, not inside it: playing a page through takes up to
+     * fifteen seconds, and the card should say "saved" when it is.
      */
-    if (!result.written || (!result.page && !result.code)) return
-    /* A program in another language, the same way: compiled or parsed,
-       never run, and its errors handed back. What it needs that is not
-       installed is said, not sent back - the model says how to get it. */
-    const code = result.code
-    const errors = result.page?.errors ?? code?.errors ?? []
-    const what = result.page ? 'page' : 'code'
-    if (!errors.length) {
-      chatRef.current.notify(result.page ? 'Loaded the page: no errors' : `Checked the ${LANG_NAME[code!.lang]}: no errors`)
-      if (code?.missing.length) chatRef.current.notify(`Not installed here: ${code.missing.map((m) => m.split(' ')[0]).join(', ')}`)
-      return
-    }
-    const history = chatRef.current.messages
-    const lastAsked = history.findLastIndex((m) => m.role === 'user' && !m.automatic)
-    const rounds = history
-      .slice(lastAsked + 1)
-      .filter((m) => m.automatic && (m.content.startsWith('Wumpy loaded ') || m.content.startsWith('Wumpy checked '))).length
-    if (rounds >= PAGE_ROUNDS) {
-      chatRef.current.note(`The ${what} still has errors: ${errors.slice(0, 3).join('; ')}`, true)
-      return
-    }
-    const text = code && !result.page ? codeErrorText(result.path, code.lang, errors, code.context) : pageErrorText(result.path, errors, result.page?.context)
-    if (!chatRef.current.send(text, `The ${what} had ${errors.length} error${errors.length === 1 ? '' : 's'}`, undefined, true)) {
-      chatRef.current.notice(text)
-    }
+    if (!result.written || content === undefined || !/\.(?:html?|py|pyw|cpp|cc|cxx|c|js|mjs|cjs|sh|bash)$/i.test(result.path)) return
+    const page = /\.html?$/i.test(result.path)
+    chatRef.current.notify(page ? 'Playing the page out of sight…' : 'Checking the code…')
+    void window.wumpy.files
+      .tested(result.path, content)
+      .then((tested) => {
+        if (!tested.page && !tested.code) return
+        /* A program in another language, the same way: compiled or parsed,
+           and a terminal game played in a sandbox; its errors handed back.
+           What it needs that is not installed is said, not sent back - the
+           model says how to get it. */
+        const code = tested.code
+        const errors = tested.page?.errors ?? code?.errors ?? []
+        const what = tested.page ? 'page' : 'code'
+        if (!errors.length) {
+          chatRef.current.notify(tested.page ? 'Played the page: no errors' : `Checked the ${LANG_NAME[code!.lang]}: no errors`)
+          if (code?.missing.length) chatRef.current.notify(`Not installed here: ${code.missing.map((m) => m.split(' ')[0]).join(', ')}`)
+          return
+        }
+        const history = chatRef.current.messages
+        const lastAsked = history.findLastIndex((m) => m.role === 'user' && !m.automatic)
+        const rounds = history
+          .slice(lastAsked + 1)
+          .filter((m) => m.automatic && (m.content.startsWith('Wumpy loaded ') || m.content.startsWith('Wumpy checked '))).length
+        if (rounds >= PAGE_ROUNDS) {
+          chatRef.current.note(`The ${what} still has errors: ${errors.slice(0, 3).join('; ')}`, true)
+          return
+        }
+        const text = code && !tested.page ? codeErrorText(result.path, code.lang, errors, code.context) : pageErrorText(result.path, errors, tested.page?.context)
+        if (!chatRef.current.send(text, `The ${what} had ${errors.length} error${errors.length === 1 ? '' : 's'}`, undefined, true)) {
+          chatRef.current.notice(text)
+        }
+      })
+      .catch(() => {})
   }, [])
 
   /* ----------------------------------------------------------------- browser */

@@ -35,7 +35,7 @@ export function WriteCard({
   autoWrite: boolean
   onCheck(path: string): Promise<WriteTarget>
   onWrite(path: string, content: string): Promise<WriteResult>
-  onWritten(result: WriteResult, messageId: string): void
+  onWritten(result: WriteResult, messageId: string, content?: string): void
   messageId: string
 }): React.JSX.Element {
   const { reason, path, content: written_, from } = readWriteRequest(raw)
@@ -97,7 +97,7 @@ export function WriteCard({
       setState('failed')
       setError(result.error ?? 'Could not write it.')
     }
-    onWritten(result, messageId)
+    onWritten(result, messageId, content)
   }
 
   // Accept-all writes it without asking, once the destination has checked out.

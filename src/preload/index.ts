@@ -294,7 +294,10 @@ const api = {
     write: (path: string, content: string): Promise<WriteResult> =>
       ipcRenderer.invoke(IPC.writeFile, { path, content }),
     /** Resolves a destination so the card can show where the file would land. */
-    check: (path: string): Promise<WriteTarget> => ipcRenderer.invoke(IPC.writeCheck, path)
+    check: (path: string): Promise<WriteTarget> => ipcRenderer.invoke(IPC.writeCheck, path),
+    /** A page played, or a program compiled, once it is written. */
+    tested: (path: string, content: string): Promise<Pick<WriteResult, 'page' | 'code'>> =>
+      ipcRenderer.invoke(IPC.writtenCheck, { path, content })
   },
   links: {
     /** Opens a page. The main process checks it again before anything happens. */

@@ -98,9 +98,12 @@ export function readWriteRequest(raw: string): WriteRequest {
   return {
     reason: reason.join(' ').trim() || null,
     path,
-    /* With a from: line, what follows is not the file: the agent's is. */
-    content: fromAgent ? '' : content,
-    from: fromAgent
+    /* With a from: line, the file is the agent's - unless the model wrote
+       one of its own after it, which is then the one it means: a chat fixing
+       an agent's broken page kept its from: line, and its fix was thrown
+       away twice. */
+    content: fromAgent && !content.trim() ? '' : content,
+    from: content.trim() ? null : fromAgent
   }
 }
 

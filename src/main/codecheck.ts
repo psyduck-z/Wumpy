@@ -307,6 +307,19 @@ export async function runProgram(code: string, lang: CodeLang): Promise<{ ok: bo
         const secs = (ms: number): string => (ms / 1000).toFixed(1)
         const said = `${pressed.length ? `It was sent ${pressed.join(', ')}.` : 'No key was pressed.'}${screen ? `\nIts screen at the end:\n${screen}` : ''}`
         const crashed = /Traceback \(most recent call last\)|Segmentation fault|core dumped|terminate called after/.test(screen)
+        /* Keys echoed back as text - ^[[B - are the terminal's, not the
+           program's: one that shows nothing else never drew at all. A
+           Snake read the keyboard before it had set the terminal up, and
+           that read waited for ever. */
+        const echoed = /\^\[(?:\[|O)[A-D]/.test(screen)
+        const own = screen.replace(/\^\[(?:\[|O)[A-D]/g, '').trim()
+        if ((!exited || timedOut) && !own) {
+          resolve({
+            ok: false,
+            output: `Ran it out of sight for 6 seconds, in a sandbox: it drew nothing at all${echoed ? ', and the keys pressed came back as text (^[[B), so the terminal was never switched to raw input' : ''}. It is stuck before its first frame - a read of the keyboard that waits, most likely, before the terminal is set up. ${said}`
+          })
+          return
+        }
         if (!exited || timedOut) {
           resolve({ ok: !crashed, output: `Ran it out of sight for 6 seconds, in a sandbox: it was still running.${crashed ? ' But its screen shows an error.' : ''} ${said}` })
           return

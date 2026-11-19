@@ -21,7 +21,7 @@ import type {
 } from '@shared/types'
 import { DEFAULT_MODEL, assistantFor, assemblePrompt, type PromptShape } from '@shared/assistant'
 import type { Footprint } from '@shared/footprint'
-import type { RankView, Transcript, VoiceStatus } from '@shared/types'
+import type { RankView, Transcript, VoiceStatus, WriteResult } from '@shared/types'
 import { Ranker } from './ranker'
 import { SettingsStore } from './store'
 import { capDiskCache, reclaimCache } from './disk'
@@ -1571,6 +1571,18 @@ function registerIpc(): void {
        relative path was resolved, and the resolved one is the file that now
        exists. Only on success - a refused write left nothing behind. */
     if (result.written) journal.add('write', result.path)
+    return result
+  })
+
+  /**
+   * What a file just written turned out to be, checked after the write
+   * rather than inside it: playing a page through takes up to fifteen
+   * seconds, and the card said "writing..." for all of them over a file that
+   * was saved in a millisecond.
+   */
+  ipcMain.handle(IPC.writtenCheck, async (_e, req: { path: string; content: string }): Promise<Pick<WriteResult, 'page' | 'code'>> => {
+    const result = { path: String(req.path), written: true }
+    if (!existsSync(result.path)) return {}
     /* A page is loaded once, out of sight, and what broke goes back with
        the result: see main/pagecheck.ts. */
     if (result.written && /\.html?$/i.test(result.path)) {
@@ -1578,11 +1590,11 @@ function registerIpc(): void {
       if (page.checked) {
         /* A player that did not move for the arrow keys is as broken as a
            crash, and reads the same to the model. */
-        const errors = [...page.errors, ...(page.play?.moved === false ? [page.play.line] : []), ...(page.restart?.ok === false ? [page.restart.line] : [])]
+        const errors = [...page.errors, ...(page.play?.moved === false ? [page.play.line] : []), ...(page.restart?.ok === false ? [page.restart.line] : []), ...(page.stuck ? [page.stuck] : [])]
         console.log(
           `[wumpy] loaded ${result.path} to check it: ${errors.length ? errors.join(' | ') : 'no errors'}${page.play?.moved ? ' (the player moved)' : ''}${page.restart?.ok ? ' (it restarts)' : ''}`
         )
-        return { ...result, page: { errors, context: excerpts(req.content, page.errors) } }
+        return { page: { errors, context: excerpts(req.content, page.errors) } }
       }
     }
     /* A program, compiled or parsed without being run: main/codecheck.ts. */
@@ -1596,10 +1608,10 @@ function registerIpc(): void {
           if (played && !played.ok) v.errors.push(played.output)
         }
         console.log(`[wumpy] checked ${result.path}: ${v.errors.length ? v.errors.join(' | ') : 'no errors'}${v.missing.length ? `; missing ${v.missing.join(', ')}` : ''}`)
-        return { ...result, code: { lang: checked.lang, errors: v.errors, missing: v.missing, how: v.how.split('\n')[0], context: excerpts(req.content, v.errors) } }
+        return { code: { lang: checked.lang, errors: v.errors, missing: v.missing, how: v.how.split('\n')[0], context: excerpts(req.content, v.errors) } }
       }
     }
-    return result
+    return {}
   })
 
   ipcMain.handle(IPC.writeCheck, (_e, path: string) =>
@@ -3486,8 +3498,8 @@ async function buildCheck(arg: string): Promise<void> {
         let text = ''
         if (/\.html?$/i.test(target)) {
           const page = await checkPage(target)
-          errors = [...page.errors, ...(page.play?.moved === false ? [page.play.line] : []), ...(page.restart?.ok === false ? [page.restart.line] : [])]
-          const how = `${page.play ? ` - ${page.play.line}` : ' - no player found to move'}${page.restart ? ` - ${page.restart.line}` : ' - never saw it end'}`
+          errors = [...page.errors, ...(page.play?.moved === false ? [page.play.line] : []), ...(page.restart?.ok === false ? [page.restart.line] : []), ...(page.stuck ? [page.stuck] : [])]
+          const how = `${page.play ? ` - ${page.play.line}` : ' - no player found to move'}${page.restart ? ` - ${page.restart.line}` : ' - never saw it end'}${page.stuck ? ` - ${page.stuck}` : ''}`
           say(`  page check: ${page.errors.length ? page.errors.join(' | ') : 'no errors'}${how}`)
           transcript.push(`> page check: ${page.errors.length ? page.errors.join(' | ') : 'no errors'}${how}`)
           if (errors.length) text = pageErrorText(target, errors, excerpts(req.content, page.errors))
