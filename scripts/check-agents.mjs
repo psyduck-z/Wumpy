@@ -556,6 +556,7 @@ check('a tkinter game frozen after its restart is caught', TK.tkVerdict('KEY Lef
 check('and one that restarts and runs is not', TK.tkVerdict('KEY Left bound\nOVER 90000\nRESTARTED Return\nMOVING yes\nEND'), { ok: true, line: 'Played until it was over, and Enter started a new game that runs.' })
 check('nor one whose loop stops by itself', TK.tkVerdict('KEY Left bound\nSTOPPED 4000\nEND').ok, false)
 check('the stand-in runs the game on its own clock, never a real window', /def _run\(\)/.test(TK.FAKE_TK) && !/import _tkinter/.test(TK.FAKE_TK), true)
+check('a C or C++ game is played with the memory checks on', /-fsanitize=address,undefined/.test(read('src/main/codecheck.ts')) && /'ASAN_OPTIONS', 'detect_leaks=0'/.test(read('src/main/codecheck.ts')), true)
 check('tkinter games are played through it in the sandbox', /PYTHONPATH: '\/work\/faketk'/.test(read('src/main/codecheck.ts')), true)
 
 /* ------------------------------------------- files saved, not retyped */
@@ -605,6 +606,7 @@ check('an edit whose code sits in fences of its own is still read', A.editsIn('`
 check('and what is left of a broken one is never the file', A.fileIn('```wumpy-edit\nFIND:\nint a;\n```\nREPLACE:\nint b;\nint c;\nint d;\nint e;\nint f;\nint g;\n```\nmore'), null)
 check('a tool block is never the file in a report', A.fileIn('REPORT:\n```wumpy-edit\nFIND>\na\nb\nc\nd\ne\nf\n```'), null)
 check('a build report without its file is sent back, not saved', /Your report has no file in it/.test(read('src/main/agents.ts')), true)
+check('nor one with only part of it', /Your report has only part of the file/.test(read('src/main/agents.ts')) && /now\.text\.length < before\.text\.length \* 0\.4/.test(read('src/main/agents.ts')), true)
 check('a game written beside the agent building it is held', A.heldForAgent('I have an agent on it.\n```wumpy-agent\n# Build\nbrief\n```\n```wumpy-write\npath: ~/a.html\n---\n<html></html>\n```', { path: '~/a.html' }), true)
 check('but not a save of the agent\'s own file, nor a note', [A.heldForAgent('```wumpy-agent\n# B\nb\n```', { path: '~/a.html', from: 'agent-1' }), A.heldForAgent('```wumpy-agent\n# B\nb\n```', { path: '~/notes.txt' })], [false, false])
 check('agents are told they can fix by edits, on a file Wumpy keeps', /Wumpy keeps it; it is on no disk/.test(linux) && /wumpy-edit blocks:/.test(linux), true)

@@ -476,13 +476,20 @@ export class Agents {
          note about one - when the last report had it: the file is not
          thrown away for it. A Pac-Man's last word was a broken edit
          block, and that block was saved as pacman.html. */
-      if (isBuild(agent.brief) && lastReport && fileIn(lastReport) && !fileIn(step.text)) {
+      const before = isBuild(agent.brief) && lastReport ? fileIn(lastReport) : null
+      const now = before ? fileIn(step.text) : null
+      /* Or only a piece of it: a Pac-Man's last report held 1,300
+         characters of a 15,000-character game, and that was saved. */
+      const partial = Boolean(before && now && ((before.kind === 'a web page' && now.kind !== 'a web page') || now.text.length < before.text.length * 0.4))
+      if (before && (!now || partial)) {
         badEdits++
         messages.push({
           role: 'user',
-          content: /wumpy-edit/.test(step.text)
-            ? 'NOT MADE: that wumpy-edit block has no FIND: and REPLACE: lines Wumpy could read, so nothing was changed. Send it again in that form, or your whole REPORT with the whole file.'
-            : 'Your report has no file in it. Send the change as wumpy-edit blocks, or your whole REPORT with the whole file.'
+          content: partial
+            ? `Your report has only part of the file - ${now!.text.length} characters, where your last had ${before.text.length}. Send the change as wumpy-edit blocks, or your whole REPORT with the whole file.`
+            : /wumpy-edit/.test(step.text)
+              ? 'NOT MADE: that wumpy-edit block has no FIND: and REPLACE: lines Wumpy could read, so nothing was changed. Send it again in that form, or your whole REPORT with the whole file.'
+              : 'Your report has no file in it. Send the change as wumpy-edit blocks, or your whole REPORT with the whole file.'
         })
         if (badEdits >= 4) {
           this.finishReport(agent, lastGood || lastReport, true)

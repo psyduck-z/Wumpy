@@ -251,7 +251,16 @@ export async function runProgram(code: string, lang: CodeLang): Promise<{ ok: bo
       if (!cc) return null
       const file = lang === 'cpp' ? 'main.cpp' : 'main.c'
       writeFileSync(join(dir, file), code)
-      const built = await run(cc.cmd, [...cc.pre, lang === 'cpp' ? '-std=c++17' : '-std=c11', '-O1', file, '-o', 'main', ...librariesFor(code, 'linux')], dir, 90_000)
+      /*
+       * With the sanitizers, so a bad index or a read past an array stops
+       * the program at the line that did it, every time. A Snake placed its
+       * food outside the board now and then: it passed four runs, and
+       * crashed on the fifth, after it had been saved.
+       */
+      const std = lang === 'cpp' ? '-std=c++17' : '-std=c11'
+      const libs = librariesFor(code, 'linux')
+      let built = await run(cc.cmd, [...cc.pre, std, '-g', '-O1', '-fsanitize=address,undefined', '-fno-omit-frame-pointer', file, '-o', 'main', ...libs], dir, 90_000)
+      if (built.code !== 0) built = await run(cc.cmd, [...cc.pre, std, '-O1', file, '-o', 'main', ...libs], dir, 90_000)
       if (built.code !== 0) return null
       program = './main'
     }
@@ -300,7 +309,19 @@ export async function runProgram(code: string, lang: CodeLang): Promise<{ ok: bo
         const screen = lastScreen(raw)
         const secs = (ms: number): string => (ms / 1000).toFixed(1)
         const said = `${pressed.length ? `It was sent ${pressed.join(', ')}.` : 'No key was pressed.'}${screen ? `\nIts screen at the end:\n${screen}` : ''}`
-        const crashed = /Traceback \(most recent call last\)|Segmentation fault|core dumped|terminate called after/.test(screen)
+        /* What a sanitizer said, wherever it scrolled to: the line that broke. */
+        const plain = raw.replace(/\x1b\[[0-9;?]*[ -/]*[@-~]/g, '').replace(/\r/g, '')
+        const sanitizer = plain
+          .split('\n')
+          .filter((l) => /runtime error:|ERROR: AddressSanitizer|SUMMARY: (?:Address|Undefined)|^\s*#\d+ .* main\.c(?:pp)?:\d+/.test(l))
+          .slice(0, 6)
+          .map((l) => l.trim().replace(/^\/work\//, ''))
+        const crashed = sanitizer.length > 0 || /Traceback \(most recent call last\)|Segmentation fault|core dumped|terminate called after/.test(screen)
+        if (sanitizer.length) {
+          timers.forEach(clearTimeout)
+          resolve({ ok: false, output: `Ran it out of sight, in a sandbox, with the memory checks on: it broke.\n${sanitizer.join('\n')}\n${pressed.length ? `It was sent ${pressed.join(', ')}.` : 'No key was pressed.'}` })
+          return
+        }
         /* Keys echoed back as text - ^[[B - are the terminal's, not the
            program's: one that shows nothing else never drew at all. A
            Snake read the keyboard before it had set the terminal up, and
@@ -374,6 +395,8 @@ function sandbox(dir: string, env: Record<string, string> = {}): string[] {
     '--setenv', 'LANG', 'C.UTF-8',
     '--setenv', 'SDL_VIDEODRIVER', 'dummy',
     '--setenv', 'SDL_AUDIODRIVER', 'dummy',
+    '--setenv', 'ASAN_OPTIONS', 'detect_leaks=0',
+    '--setenv', 'UBSAN_OPTIONS', 'print_stacktrace=1:halt_on_error=1',
     ...Object.entries(env).flatMap(([k, v]) => ['--setenv', k, v])
   ]
 }
