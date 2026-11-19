@@ -321,8 +321,11 @@ that alone was not enough, said again beside the message that asks. On the way:
 - **A tkinter game is played too**, through a stand-in tkinter that needs no
   screen, in the same sandbox, on the game's own clock: minutes of play in
   a second — keys pressed, played to game over, restarted, and watched for
-  a loop that stopped (a Tetris whose restart left the piece hanging). What
-  the stand-in cannot follow is never blamed on the game.
+  a loop that stopped (a Tetris whose restart left the piece hanging) or a
+  canvas that stopped changing while the game was not over (one whose
+  second piece never came). The game's own clocks — `time.time()`, Tcl's
+  `clock milliseconds` — follow the stand-in's, and what the stand-in
+  cannot follow is never blamed on the game.
   On Windows, programs are compiled or parsed and not run.
 - **Errors come back with the lines they point at,** to the agent before any
   review, and to the chat when it writes a file itself.
@@ -344,7 +347,9 @@ that alone was not enough, said again beside the message that asks. On the way:
   thousand tokens a turn, so a whole game usually fits in one; when one is
   cut off and continued, whatever the continuation repeats of the cut line
   is dropped, since the seams were where code broke ("missing ) after
-  argument list"). A reply that runs past 45,000 characters is not carried on.
+  argument list"). A reply that runs past 45,000 characters is not carried on
+  but sent back to be written smaller, and no turn can hang: each has a
+  watchdog past its own timeout.
 - **The rules for building** are sent to an agent whose brief is for one: a
   game starts on a key press and never kills the player first; game over
   restarts a game that runs; speeds are per second, and
