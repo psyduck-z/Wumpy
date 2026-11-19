@@ -2,7 +2,7 @@ import { BrowserWindow, session } from 'electron'
 import { existsSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { CLICK_JS, HOOK_JS, LOOK_JS, excerpts, inLane, keyJs, playFrom, standInTraffic, stuckCrowds, teleportJs, tileScale, tooFast, type Seen } from '@shared/pagecheck'
+import { CLICK_JS, HOOK_JS, LOOK_JS, bunched, excerpts, inLane, keyJs, playFrom, standInTraffic, stuckCrowds, teleportJs, tileScale, tooFast, type Seen } from '@shared/pagecheck'
 
 /**
  * Loads a web page Wumpy just wrote, out of sight, and reports what broke.
@@ -277,6 +277,8 @@ export async function checkPage(path: string): Promise<PageCheck> {
         .join(' ')
     }
     const still = Date.now() - crowdAt >= 3000 ? stuckCrowds(crowdLooks) : []
+    /* Cars stacked on one another, from the first look and the last. */
+    let stacked = crowdLooks.length > 1 ? bunched(crowdLooks[0], crowdLooks[crowdLooks.length - 1], scale) : ''
     if (still.length) {
       stuck = `${stuck ? `${stuck} ` : ''}Its ${still.join(' and ')} never got anywhere in the ${Math.round((Date.now() - crowdAt) / 1000)} seconds it was played: none went more than a short way from where it was${still.includes('ghosts') ? ' - can they get out of their pen, and do they choose a way to go?' : '.'}`
     }
@@ -340,6 +342,7 @@ export async function checkPage(path: string): Promise<PageCheck> {
      * had played it, seen it move and seen it end - in the river.
      */
     let traffic: { ok: boolean; line: string } | undefined
+    let standLooks: Seen[] = []
     if (play?.moved && (!state?.over || restart?.ok)) {
       const glance = async (): Promise<Seen> => (await run(LOOK_JS)) as Seen
       let s = await glance()
@@ -367,6 +370,7 @@ export async function checkPage(path: string): Promise<PageCheck> {
       if (placed && s?.over) traffic = { ok: true, line: 'Put in a lane with cars, the player was hit, and that ended its run.' }
       if (s && !s.over && inLane(s, scale).length) {
         const looks: Seen[] = [s]
+        standLooks = looks
         /* Up to twelve seconds for a car to come by: a lane's cars spawned
            bunched together came round once in seven. */
         const end = Date.now() + 12000
@@ -384,6 +388,10 @@ export async function checkPage(path: string): Promise<PageCheck> {
       if (await frozen('while the player stood in the road')) return { checked: true, errors }
     }
     if (traffic && !traffic.ok) stuck = `${stuck ? `${stuck} ` : ''}${traffic.line}`
+    /* The play was over too soon to tell - drowned in the first river -
+       so from the seconds stood in the road. */
+    if (!stacked && standLooks.length > 1) stacked = bunched(standLooks[0], standLooks[standLooks.length - 1], scale)
+    if (stacked) stuck = `${stuck ? `${stuck} ` : ''}${stacked}`
     return {
       checked: true,
       errors,

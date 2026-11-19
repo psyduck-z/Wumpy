@@ -433,6 +433,39 @@ export function teleportJs(seen: Seen, scale = 0): string | null {
 })()`
 }
 
+/**
+ * Cars on top of one another in a lane, in two looks a second or more
+ * apart: they start in one place and move as one. A Crossy Road made each
+ * lane's cars at random places and then gave them all the same progress,
+ * so three cars drove as one, with the rest of the road empty - and the
+ * user asked for the cars to be spaced out.
+ */
+export function bunched(a: Seen, b: Seen, scale = 0): string {
+  if (!a?.harm?.length || !b?.harm?.length || (b.t ?? 0) - (a.t ?? 0) < 1000) return ''
+  const tile = tileOf(a.harm, scale)
+  const stacks = (seen: Seen): Map<number, number> => {
+    const lanes = new Map<number, Array<readonly [number, number, number]>>()
+    for (const h of seen!.harm!) {
+      const y = Math.round(h[1] / (tile / 2))
+      lanes.set(y, [...(lanes.get(y) ?? []), h])
+    }
+    const out = new Map<number, number>()
+    for (const [y, cars] of lanes) {
+      const xs = cars.map(([x, , w]) => x + w / 2).sort((m, n) => m - n)
+      let on = 0
+      for (let i = 1; i < xs.length; i++) if (xs[i] - xs[i - 1] < tile * 0.5) on++
+      if (on) out.set(y, on)
+    }
+    return out
+  }
+  const first = stacks(a)
+  const later = stacks(b)
+  const both = [...first.keys()].filter((y) => later.has(y))
+  if (!both.length) return ''
+  const n = both.reduce((sum, y) => sum + Math.min(first.get(y)!, later.get(y)!), 0)
+  return `In ${both.length} of its lanes, cars sit on top of one another and move as one (${n} car${n === 1 ? '' : 's'} hidden under another, the same a second later): they look like one car, with the rest of the lane empty. Space each lane's cars out along it when it is made, each at its own x - and give each its own position, not one shared progress.`
+}
+
 /** A sign the game itself gives that it is sparing the player for now. */
 function spared(seen: Seen): boolean {
   const p = seen?.player ?? {}
