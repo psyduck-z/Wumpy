@@ -766,6 +766,7 @@ check('a failed build goes back saying to start one more agent, never to write i
   check('a change taken over reads the file and edits it', /read it whole with a plain `cat ~\/a.html`/.test(A.takeOverAsk('make the cars kill me', '~/a.html', true).brief), true)
 }
 check('the panel holds a game the chat wrote itself while an agent takes it', /gameWritten\(message\.content\)/.test(read('src/renderer/src/hooks/useAgents.ts')) && /<HeldForTakeOver/.test(read('src/renderer/src/components/Markdown.tsx')), true)
+check('an edit mixing ======= and REPLACE: keeps the word out of the code', A.editsIn('```wumpy-edit\n<<<<<<< SEARCH\nlet a = 1\n=======\nREPLACE:\nlet a = 2\n>>>>>>> REPLACE\n```'), [{ find: 'let a = 1', replace: 'let a = 2' }])
 check('an agent is named after the file its brief names', [A.fileNamed('Restyle ~/Downloads/wumpy-tests/pacman.html with neon walls.'), A.fileNamed('Make snake.cpp faster'), A.fileNamed('Build a Pac-Man game in one HTML file. Hand back the whole file.')], ['pacman.html', 'snake.cpp', undefined])
 check('a retry of a broken build is the same thing, a new game is not', [A.sameWork('Build a Pac-Man game in one HTML file', 'Rebuild the Pac-Man game so the player moves'), A.sameWork('Build a Pac-Man game in one HTML file', 'Build a Snake game in one HTML file')], [true, false])
 check('the card shows the file, not a number', /<span className="cmd-shell">\{name\}<\/span>/.test(read('src/renderer/src/components/AgentCard.tsx')), true)

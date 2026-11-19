@@ -523,6 +523,9 @@ export function editsIn(reply: string): Array<{ find: string; replace: string }>
         mode = 'replace'
         continue
       }
+      /* The two forms mixed - ======= and then REPLACE: - put the word
+         itself into a Crossy Road's code, and broke it on load. */
+      if (mode === 'replace' && !replace.some((r) => r.trim()) && (MARK_REPLACE.test(l) || MARK_MID.test(l))) continue
       if (mode === 'replace' && MARK_END.test(l)) {
         flush()
         mode = 'none'
