@@ -727,12 +727,14 @@ function buildFacts(messages: ChatRequest['messages']): string[] {
   if (agentSlotsNow() <= 0) return []
   const text = (m: ChatRequest['messages'][number]): string => (typeof m.content === 'string' ? m.content : '')
   const recent = messages.slice(-4)
+  /* Something already built here by an agent: a change to it may name no game. */
+  const built = messages.some((m) => m.role === 'assistant' && /\x60\x60\x60\s*wumpy-agent/.test(text(m)))
   let ask: 'make' | 'change' | null = null
   for (let i = recent.length - 1; i >= 0 && !ask; i--) {
     const m = recent[i]
     if (m.role !== 'user') continue
     if (/^(?:I ran that command|That command|Wumpy (?:loaded|checked)|Background agents? )/.test(text(m))) continue
-    ask = asksToBuild(text(m))
+    ask = asksToBuild(text(m), built)
     if (ask && recent.slice(i + 1).some((later) => later.role === 'assistant' && /\x60\x60\x60\s*wumpy-agent/.test(text(later)))) return []
     break
   }

@@ -171,10 +171,22 @@ export function asksToKeep(text: string): boolean {
  * chat checked the folder existed, then wrote the game itself, with the up
  * arrow walking the chicken backwards.
  */
-export function asksToBuild(text: string): 'make' | 'change' | null {
+export function asksToBuild(text: string, built = false): 'make' | 'change' | null {
   const thing = /\b(games?|apps?|application|web ?page|website|html|program|script|tool|tetris|snake|pac-?man|pong|breakout|platformer|crossy|frogger|asteroids|invaders|minesweeper|sudoku|chess|2048|flappy)\b/i
   if (/\b(make|create|build|write|code|program|generate|develop|design)\b/i.test(text) && thing.test(text)) return 'make'
   if (/\b(change|restyle|redesign|update|improve|fix|add|make it|turn it)\b/i.test(text) && (thing.test(text) || /\b(graphics|colou?rs?|sprites?|high ?score|levels?|controls|sound|speed)\b/i.test(text))) return 'change'
+  /*
+   * Once something has been built in the chat, a change to how it plays
+   * names no game at all: "make it so I die when I get hit by the cars, and
+   * also space out the cars a little" went unnoticed, and the chat looked at
+   * the page instead of handing the change to an agent.
+   */
+  if (
+    built &&
+    /\b(make it|make the|make them|make my|change|fix|add|remove|space|spread|slow|speed up|faster|slower|bigger|smaller|harder|easier|so (?:that )?(?:i|it|the|they)|should|want|can you|could you|let me)\b/i.test(text) &&
+    /\b(cars?|trucks?|vehicles?|enemies|enemy|ghosts?|player|chicken|frog|snake|pieces?|blocks?|lanes?|logs?|rivers?|roads?|score|lives|life|die|dies|dying|death|dead|hit|crash|jump|levels?|maze|walls?|background|menu|title|game over|restart|food|apples?|dots?|pellets?|bullets?|shoot|wasd|arrows?|keys)\b/i.test(text)
+  )
+    return 'change'
   return null
 }
 
