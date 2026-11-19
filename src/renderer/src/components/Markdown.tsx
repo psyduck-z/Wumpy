@@ -2,6 +2,8 @@ import {
   createContext,
   memo,
   useContext,
+  useMemo,
+  useRef,
   useState,
   isValidElement,
   type ReactNode
@@ -16,7 +18,7 @@ import type {
   WriteResult,
   WriteTarget
 } from '@shared/types'
-import ReactMarkdown, { type Options } from 'react-markdown'
+import ReactMarkdown, { type Components, type Options } from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import rehypeHighlight from 'rehype-highlight'
 import { heldForAgent, withoutRetypedCode } from '@shared/agents'
@@ -545,11 +547,16 @@ export const Markdown = memo(function Markdown({
   // than when the model finally stops talking about it.
   const pending = openFenceBody(text)
   const settled = (code: string): boolean => complete || pending === null || code !== pending
-  return (
-    <ReactMarkdown
-      remarkPlugins={REMARK}
-      rehypePlugins={complete ? HIGHLIGHT : NO_HIGHLIGHT}
-      components={{
+  /*
+   * The tags drawn as cards, kept the same functions for the life of the
+   * message. Made afresh each render, every card was a new kind of
+   * component each time, so React threw it away and built a new one: a
+   * write card went back to "checking…" and came back as "Replace file" -
+   * the file it had just written now being there - and a command card lost
+   * what it had shown. They read this render's props through a ref.
+   */
+  const latest = useRef<Components>({})
+  latest.current = {
         pre: ({ children }) => {
           const file = onWriteFile ? readWrite(children) : null
           if (file && heldForAgent(text, readWriteRequest(file))) {
@@ -565,6 +572,7 @@ export const Markdown = memo(function Markdown({
                 onWrite={onWriteFile!}
                 onWritten={onWritten ?? (() => {})}
                 messageId={messageId ?? ''}
+                earlier={!canAutoRun}
               />
             )
           }
@@ -709,7 +717,21 @@ export const Markdown = memo(function Markdown({
           const chip = onCommand ? readCommandChip(plainText(children) ?? '') : null
           return <p>{chip ? <CommandChip command={chip} onRun={onCommand!} /> : children}</p>
         }
-      }}
+  }
+  const components = useMemo<Components>(
+    () => ({
+      pre: (props) => (latest.current.pre as (p: typeof props) => ReactNode)(props),
+      a: (props) => (latest.current.a as (p: typeof props) => ReactNode)(props),
+      code: (props) => (latest.current.code as (p: typeof props) => ReactNode)(props),
+      p: (props) => (latest.current.p as (p: typeof props) => ReactNode)(props)
+    }),
+    []
+  )
+  return (
+    <ReactMarkdown
+      remarkPlugins={REMARK}
+      rehypePlugins={complete ? HIGHLIGHT : NO_HIGHLIGHT}
+      components={components}
     >
       {/* Loose fences are promoted first, then the one-button rule applies
           to whatever that produced - in that order, or a promoted fence

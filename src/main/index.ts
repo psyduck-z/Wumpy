@@ -1619,7 +1619,7 @@ function registerIpc(): void {
            crash, and reads the same to the model. */
         const errors = [...page.errors, ...(page.play?.moved === false ? [page.play.line] : []), ...(page.restart?.ok === false ? [page.restart.line] : []), ...(page.stuck ? [page.stuck] : [])]
         console.log(
-          `[wumpy] loaded ${result.path} to check it: ${errors.length ? errors.join(' | ') : 'no errors'}${page.play?.moved ? ' (the player moved)' : ''}${page.restart?.ok ? ' (it restarts)' : ''}`
+          `[wumpy] loaded ${result.path} to check it: ${errors.length ? errors.join(' | ') : 'no errors'}${page.play?.moved ? ' (the player moved)' : ''}${page.restart?.ok ? ' (it restarts)' : ''}${page.traffic?.ok ? ' (a car hits the player)' : ''}`
         )
         return { page: { errors, context: excerpts(req.content, page.errors) } }
       }

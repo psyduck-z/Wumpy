@@ -26,7 +26,8 @@ export function WriteCard({
   onCheck,
   onWrite,
   onWritten,
-  messageId
+  messageId,
+  earlier = false
 }: {
   request: string
   /** False while the message is still arriving and the file half-written. */
@@ -37,6 +38,13 @@ export function WriteCard({
   onWrite(path: string, content: string): Promise<WriteResult>
   onWritten(result: WriteResult, messageId: string, content?: string): void
   messageId: string
+  /**
+   * In a message from before this session - a reopened chat, a restart.
+   * An agent's file is held only while Wumpy runs, so its write card,
+   * re-drawn after a restart, went red - "There is no file from agent-3 to
+   * save" - over a file that had been saved fine.
+   */
+  earlier?: boolean
 }): React.JSX.Element {
   const { reason, path, content: written_, from } = readWriteRequest(raw)
   /*
@@ -76,7 +84,7 @@ export function WriteCard({
     if (!complete || !path || (from && fromFile === undefined)) return
     let live = true
     void onCheck(path).then((t) => {
-      if (live) setTarget(missingFrom ? { ...t, ok: false, why: `There is no file from ${from} to save: its report held none, or Wumpy restarted since.` } : t)
+      if (live) setTarget(missingFrom && !earlier ? { ...t, ok: false, why: `There is no file from ${from} to save: its report held none.` } : t)
     })
     return () => {
       live = false
@@ -104,13 +112,14 @@ export function WriteCard({
 
   // Accept-all writes it without asking, once the destination has checked out.
   useEffect(() => {
-    if (!autoWrite || !target?.ok || state !== 'idle' || written.current) return
+    if (!autoWrite || !target?.ok || state !== 'idle' || written.current || missingFrom) return
     void go()
   }, [autoWrite, target, state])
 
   const lines = content ? content.split('\n').length : 0
   const bytes = new TextEncoder().encode(content).length
-  const waiting = state === 'idle' && complete && target?.ok && !autoWrite
+  /* Never offered with nothing to write: an earlier agent's file, gone. */
+  const waiting = state === 'idle' && complete && target?.ok && !autoWrite && !missingFrom
 
   /**
    * Registered so Ctrl+Enter reaches this too.
@@ -169,6 +178,7 @@ export function WriteCard({
       </p>
 
       {target && !target.ok && <p className="write-refused">{target.why}</p>}
+      {missingFrom && earlier && <p className="cmd-reason">From an agent in an earlier session: its file is no longer held here. If it was saved then, it is on disk.</p>}
       {error && <p className="write-refused">{error}</p>}
 
       {/*

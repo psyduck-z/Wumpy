@@ -70,7 +70,8 @@ export const LOOK_JS = `(() => {
     if (h && typeof h === 'object' && typeof h.x === 'number') return { x: h.x, y: h.y, length: cells.length }
     return undefined
   }
-  for (const name of names) { const v = get(name); if (v && typeof v === 'object') { seen.player = pick(v); break } }
+  let me
+  for (const name of names) { const v = get(name); if (v && typeof v === 'object') { seen.player = pick(v); me = v; break } }
   if (!seen.player) { const h = head(get('snake')); if (h) seen.player = h }
   const boxes = ['state', 'game', 'world', 'gameState', 'G']
   /* Or one level down, in the object a game keeps its state in. */
@@ -78,7 +79,7 @@ export const LOOK_JS = `(() => {
     if (seen.player) break
     const b = get(box)
     if (!b || typeof b !== 'object') continue
-    for (const name of names) { const v = b[name]; if (v && typeof v === 'object') { seen.player = pick(v); break } }
+    for (const name of names) { const v = b[name]; if (v && typeof v === 'object') { seen.player = pick(v); me = v; break } }
     if (!seen.player) { const h = head(b.snake); if (h) seen.player = h }
     /* Or flat in it: playerX, playerY, chickenRow. */
     if (!seen.player) {
@@ -139,6 +140,45 @@ export const LOOK_JS = `(() => {
     if (pts.length) crowd[n] = pts
   }
   seen.crowd = crowd
+  /* What can hit the player, where it can: in the arrays above, or in its
+     lanes, which is where a Crossy Road keeps its cars - with the lane's
+     y. Logs and lily pads carry it; they are left out. */
+  const num = (v) => (typeof v === 'number' && isFinite(v) ? v : undefined)
+  const harm = []
+  const safe = /log|turtle|lily|pad|coin|plank|boat|raft|platform|player|chicken|frog|hero|tree|rock|bush|grass|pickup|gem|power|bonus/i
+  const add = (o, ly) => {
+    if (!o || typeof o !== 'object' || o === me || safe.test(String(o.type || o.kind || o.name || ''))) return
+    const x = num(o.x) ?? num(o.col) ?? (o.pos ? num(o.pos.x) : undefined)
+    const y = num(o.y) ?? num(o.row) ?? (o.pos ? num(o.pos.y) : undefined) ?? ly
+    if (x === undefined || y === undefined) return
+    harm.push([Math.round(x * 100) / 100, Math.round(y * 100) / 100, num(o.w) ?? num(o.width) ?? num(o.len) ?? num(o.length) ?? 0])
+  }
+  const arrayOf = (n) => {
+    const v = get(n)
+    if (Array.isArray(v)) return v
+    for (const box of boxes) { const b = get(box); if (b && typeof b === 'object' && Array.isArray(b[n])) return b[n] }
+    return null
+  }
+  for (const n of ['cars', 'vehicles', 'trucks', 'enemies', 'obstacles', 'aliens', 'asteroids', 'monsters', 'zombies', 'entities', 'movers', 'traffic']) {
+    const v = arrayOf(n)
+    if (v) for (const o of v.slice(0, 60)) add(o)
+  }
+  for (const n of ['lanes', 'rows', 'roads', 'lines', 'strips']) {
+    const v = arrayOf(n)
+    if (!v) continue
+    for (const lane of v.slice(0, 80)) {
+      if (!lane || typeof lane !== 'object' || /water|river|lake|sea|log/i.test(String(lane.type || lane.kind || ''))) continue
+      const ly = num(lane.y) ?? num(lane.row)
+      for (const k of ['cars', 'vehicles', 'entities', 'objects', 'obstacles', 'items', 'movers', 'things'])
+        if (Array.isArray(lane[k])) for (const o of lane[k].slice(0, 20)) add(o, ly)
+    }
+  }
+  if (harm.length) seen.harm = harm.slice(0, 120)
+  /* Lives, wherever it keeps them: one lost is a death. */
+  let lives = num(get('lives'))
+  for (const box of boxes) { if (lives !== undefined) break; const b = get(box); if (b && typeof b === 'object') lives = num(b.lives) }
+  if (lives === undefined && seen.player) lives = num(seen.player.lives)
+  if (lives !== undefined) seen.lives = lives
   seen.t = performance.now()
   const cv = document.querySelector('canvas')
   if (cv) seen.width = cv.width
@@ -210,6 +250,9 @@ export type Seen = {
   frame?: number
   drawn?: string
   crowd?: Record<string, Array<[number, number]>>
+  /** What can hit the player: [x, y, width], the lane's y for a car kept in a lane. */
+  harm?: Array<[number, number, number]>
+  lives?: number
   /** The page's own clock at the look, in milliseconds. */
   t?: number
   /** Its canvas's width, when it has one. */
@@ -270,6 +313,198 @@ export function tooFast(a: Seen, b: Seen): Array<{ name: string; speed: number; 
     if (median > limit) out.push({ name, speed: Math.round(median), tiles })
   }
   return out
+}
+
+/**
+ * Where the player stands, in the units its cars use: [x, y]. A Crossy
+ * Road's player kept col and row in tiles and px and py in pixels; its
+ * cars were in pixels.
+ */
+export function standing(seen: Seen): [number, number] | null {
+  const p = seen?.player
+  const harm = seen?.harm
+  if (!p || !harm?.length) return null
+  const tiles = harm.every(([x, y]) => Math.abs(x) < 64 && Math.abs(y) < 64)
+  const pairs: Array<[string, string]> = [
+    ['x', 'y'], ['px', 'py'], ['col', 'row'], ['gx', 'gy'], ['tx', 'ty'], ['tileX', 'tileY'], ['gridX', 'gridY'], ['cx', 'cy'], ['c', 'r'], ['column', 'row'], ['playerX', 'playerY']
+  ]
+  for (const [a, b] of pairs) {
+    const x = p[a]
+    const y = p[b]
+    if (typeof x !== 'number' || typeof y !== 'number') continue
+    if ((Math.abs(x) < 64 && Math.abs(y) < 64) === tiles) return [x, y]
+  }
+  return null
+}
+
+/** How far apart its lanes are: the smallest gap between the y's its cars are on. */
+export function laneGap(harm: ReadonlyArray<readonly [number, number, number]>): number {
+  const ys = [...new Set(harm.map(([, y]) => Math.round(y * 10) / 10))].sort((a, b) => a - b)
+  const gaps = ys.slice(1).map((y, i) => y - ys[i]).filter((g) => g > 0.2)
+  if (gaps.length) return Math.min(...gaps)
+  return harm.every(([x, y]) => Math.abs(x) < 64 && Math.abs(y) < 64) ? 1 : 40
+}
+
+/**
+ * A tile, in the units its cars use: one, in a grid game; else the pixels
+ * a hop measured, or the gap between lanes. Not the gap alone: a Crossy
+ * Road's roads were four rows apart, and a player on the grass next to one
+ * was taken to be standing in it.
+ */
+export function tileOf(harm: ReadonlyArray<readonly [number, number, number]>, scale = 0): number {
+  if (harm.every(([x, y]) => Math.abs(x) < 64 && Math.abs(y) < 64)) return 1
+  return scale || laneGap(harm)
+}
+
+/** The cars in the lane the player stands in: the nearest lane, if it is within half a tile. */
+export function inLane(seen: Seen, scale = 0): Array<readonly [number, number, number]> {
+  const me = standing(seen)
+  const harm = seen?.harm
+  if (!me || !harm?.length) return []
+  const tile = tileOf(harm, scale)
+  const nearest = Math.min(...harm.map(([, y]) => Math.abs(y - me[1])))
+  if (nearest > tile * 0.6) return []
+  return harm.filter(([, y]) => Math.abs(Math.abs(y - me[1]) - nearest) < tile * 0.25)
+}
+
+/**
+ * Puts the player in the nearest lane with cars, where walking there would
+ * not do: a Crossy Road's first lane up was a river, and every walk ended
+ * in it. Every field that says how far down it is moves by the same lanes -
+ * row and targetRow in tiles, y and py in pixels - so the game draws it,
+ * and tests it, where it now is. Null when there is nowhere to put it.
+ */
+export function tileScale(a: Seen, b: Seen): number {
+  const p = a?.player
+  const q = b?.player
+  if (!p || !q) return 0
+  for (const [tile, pixel] of [['row', 'y'], ['tileY', 'y'], ['gy', 'y'], ['ty', 'y'], ['gridY', 'y'], ['row', 'py'], ['col', 'x'], ['tileX', 'x'], ['gx', 'x'], ['tx', 'x'], ['gridX', 'x'], ['col', 'px']]) {
+    const dt = (q[tile] as number) - (p[tile] as number)
+    const dp = (q[pixel] as number) - (p[pixel] as number)
+    if (typeof dt === 'number' && typeof dp === 'number' && Number.isFinite(dt / dp) && dt !== 0 && Math.abs(dp) > Math.abs(dt) * 4) return Math.round(Math.abs(dp / dt) * 100) / 100
+  }
+  return 0
+}
+
+/**
+ * Puts the player in the nearest lane with cars - see below. `scale` is
+ * pixels per tile, measured from a real hop: worked out from where the
+ * player stood, a camera's offset in its y made it wrong, and the player
+ * landed with its row in one lane and its y in another.
+ */
+export function teleportJs(seen: Seen, scale = 0): string | null {
+  const me = standing(seen)
+  const p = seen?.player
+  const harm = seen?.harm
+  if (!me || !p || !harm?.length) return null
+  const gap = laneGap(harm)
+  const tiles = harm.every(([x, y]) => Math.abs(x) < 64 && Math.abs(y) < 64)
+  const lanes = [...new Set(harm.map(([, y]) => y))].filter((y) => Math.abs(y - me[1]) > gap * 0.4)
+  if (!lanes.length) return null
+  const to = lanes.reduce((a, b) => (Math.abs(b - me[1]) < Math.abs(a - me[1]) ? b : a))
+  /* How many pixels a tile is, from the player's own two kinds of field;
+     else the gap between lanes, near enough. */
+  const tileField = Object.keys(p).find((k) => /^(?:row|gy|ty|r|tileY|gridY)$/.test(k) && typeof p[k] === 'number' && p[k] !== 0)
+  const pixelField = Object.keys(p).find((k) => /^(?:y|py|cy|screenY|drawY)$/.test(k) && typeof p[k] === 'number' && Math.abs(p[k] as number) >= 64)
+  const ratio = scale || (tileField && pixelField ? (p[pixelField] as number) / (p[tileField] as number) : 0)
+  /* Whole tiles, as a grid game's rows are whole. */
+  const dTile = tiles ? Math.round(to - me[1]) : Math.round((to - me[1]) / (ratio || gap))
+  const dPixel = tiles ? dTile * ratio : to - me[1]
+  if (!dTile && !dPixel) return null
+  const vertical = /^(?:y|py|gy|ty|cy|r|row)$|row$|Row$|Y$/
+  const moves: Record<string, number> = {}
+  for (const [k, v] of Object.entries(p)) {
+    if (typeof v !== 'number' || !vertical.test(k)) continue
+    const isTile = Math.abs(v) < 64 && /row|Row|^(?:gy|ty|r)$|tileY|gridY/.test(k)
+    const d = isTile ? dTile : Math.abs(v) >= 64 || !tiles ? dPixel : dTile
+    if (d) moves[k] = d
+  }
+  if (!Object.keys(moves).length) return null
+  return `(() => {
+  const names = ['player', 'chicken', 'frog', 'hero', 'character', 'avatar', 'me', 'pacman', 'pacMan', 'pac', 'ship', 'bird']
+  const get = (n) => { try { return (0, eval)('typeof ' + n + ' !== "undefined" ? ' + n + ' : undefined') } catch (e) { return undefined } }
+  let p
+  for (const n of names) { const v = get(n); if (v && typeof v === 'object') { p = v; break } }
+  for (const box of ['state', 'game', 'world', 'gameState', 'G']) { if (p) break; const b = get(box); if (b && typeof b === 'object') for (const n of names) if (b[n] && typeof b[n] === 'object') { p = b[n]; break } }
+  if (!p) return false
+  const moves = ${JSON.stringify(moves)}
+  for (const k in moves) if (typeof p[k] === 'number') p[k] += moves[k]
+  return true
+})()`
+}
+
+/** A sign the game itself gives that it is sparing the player for now. */
+function spared(seen: Seen): boolean {
+  const p = seen?.player ?? {}
+  return Object.entries(p).some(([k, v]) => /invinc|invuln|grace|shield|immun|safe|respawn|spawnTimer|flash|blink/i.test(k) && (v === true || (typeof v === 'number' && v > 0)))
+}
+
+/**
+ * The player stood still in a lane with cars, looked at every tenth of a
+ * second: did a car go right through where it stood, and nothing happen?
+ * "make it when I die, when I'm hit by the cars" came back said to be done,
+ * twice, and the cars still drove through the chicken: the test played it,
+ * it moved, it ended - in the river - and nothing ever stood in the road.
+ *
+ * "hit" when something happened - over, a life gone, the player moved or
+ * vanished; "missed" when a car crossed it and the game went on as if not;
+ * null when no car came by.
+ */
+export function standInTraffic(looks: readonly Seen[], scale = 0): { verdict: 'hit' | 'missed' | null; line: string } {
+  const first = looks[0]
+  const me = standing(first)
+  if (!me || !first?.harm?.length) return { verdict: null, line: '' }
+  const gap = tileOf(first.harm, scale)
+  const lives = first.lives
+  let crossedAt = -1
+  let crossing = ''
+  for (let i = 1; i < looks.length; i++) {
+    const s = looks[i]
+    const now = standing(s)
+    const happened =
+      !s ||
+      s.over === true ||
+      (typeof lives === 'number' && typeof s.lives === 'number' && s.lives < lives) ||
+      !now ||
+      Math.abs(now[0] - me[0]) > gap * 0.5 ||
+      Math.abs(now[1] - me[1]) > gap * 0.5
+    if (happened) return { verdict: 'hit', line: 'Standing still in a lane with cars, the player was hit, and that ended its run.' }
+    if (crossedAt >= 0) {
+      /* Two thirds of a second after a car went through: nothing came of it. */
+      if ((s?.t ?? 0) - (looks[crossedAt]?.t ?? 0) > 650) {
+        return {
+          verdict: 'missed',
+          line:
+            `Wumpy stood the player still in a lane with cars - at x ${me[0]}, y ${me[1]} - and ${crossing}, right through where it stood: nothing happened. ` +
+            'The game went on, no life lost, the player still there. Its cars do not hit the player. Check the collision test with these real numbers: ' +
+            "is it run every frame, does it compare the car's lane with the player's in the same units, and the car's x span with the player's?"
+        }
+      }
+      continue
+    }
+    if (spared(s)) continue
+    const prev = looks[i - 1]
+    const a = inLane(prev, scale)
+    const b = inLane(s, scale)
+    if (!a.length || a.length !== b.length) continue
+    for (let k = 0; k < a.length; k++) {
+      const [x0, , w0] = a[k]
+      const [x1, , w1] = b[k]
+      /* Faster than ten tiles a second is one going off one side and
+         coming back on the other, not a crossing. */
+      const seconds = Math.max(0.05, ((s?.t ?? 0) - (prev?.t ?? 0)) / 1000)
+      const tiles = first.harm.every(([x, y]) => Math.abs(x) < 64 && Math.abs(y) < 64)
+      if (Math.abs(x1 - x0) / seconds > (tiles ? 10 : Math.max(600, (s?.width ?? 0) * 1.2))) continue
+      const c0 = x0 + w0 / 2 - me[0]
+      const c1 = x1 + w1 / 2 - me[0]
+      if (c0 === 0 || c1 === 0 || Math.sign(c0) !== Math.sign(c1)) {
+        crossedAt = i
+        crossing = `a car went from x ${x0} to x ${x1}`
+        break
+      }
+    }
+  }
+  return { verdict: null, line: '' }
 }
 
 const KEY_NAMES: Record<string, string> = { ArrowUp: 'up', ArrowDown: 'down', ArrowLeft: 'left', ArrowRight: 'right' }

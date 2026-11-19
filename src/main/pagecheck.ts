@@ -2,7 +2,7 @@ import { BrowserWindow, session } from 'electron'
 import { existsSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { CLICK_JS, HOOK_JS, LOOK_JS, excerpts, keyJs, playFrom, stuckCrowds, tooFast, type Seen } from '@shared/pagecheck'
+import { CLICK_JS, HOOK_JS, LOOK_JS, excerpts, inLane, keyJs, playFrom, standInTraffic, stuckCrowds, teleportJs, tileScale, tooFast, type Seen } from '@shared/pagecheck'
 
 /**
  * Loads a web page Wumpy just wrote, out of sight, and reports what broke.
@@ -36,8 +36,11 @@ export interface PageCheck {
    * not restart, or it restarted frozen.
    */
   restart?: { ok: boolean; line: string }
-  /** Ghosts, cars, aliens that never moved while it was played. */
+  /** Ghosts, cars, aliens that never moved while it was played - or cars
+      that drove through the player and did nothing. */
   stuck?: string
+  /** Standing still in a lane with cars: hit, as it should be, or not. */
+  traffic?: { ok: boolean; line: string }
   /** What it looked like, mid-game: a PNG, for a model that can see. */
   shot?: Buffer
   /** And at game over, when it got there: a sideways game-over panel was
@@ -151,6 +154,8 @@ export async function checkPage(path: string): Promise<PageCheck> {
     let before = await look()
     let play: { moved: boolean; line: string } | undefined
     let lastKey = 'ArrowUp'
+    /* Pixels per tile, from the hop that moved it. */
+    let scale = 0
     let started = ''
     let startedBy = ''
     const tried: string[] = []
@@ -203,6 +208,7 @@ export async function checkPage(path: string): Promise<PageCheck> {
       tried.push(key.replace('Arrow', '').toLowerCase())
       lastKey = key
       play = { moved: p.moved, line: p.line }
+      if (p.moved) scale = tileScale(before, after)
       if (p.moved) break
       before = after
     }
@@ -232,6 +238,8 @@ export async function checkPage(path: string): Promise<PageCheck> {
      * a half with the up arrow pressed, in which something must move.
      */
     let restart: { ok: boolean; line: string } | undefined
+    /* What started a new game, to start one again. */
+    let again: (() => Promise<unknown>) | undefined
     /* How fast things go, from two looks a fifth of a second apart. */
     const quick = (await run(LOOK_JS)) as Seen
     await sleep(200)
@@ -298,6 +306,7 @@ export async function checkPage(path: string): Promise<PageCheck> {
         }
         if (s && !s.over) {
           how = label === 'button' ? String(r || 'a click') : label
+          again = act
           break
         }
       }
@@ -323,12 +332,65 @@ export async function checkPage(path: string): Promise<PageCheck> {
           : { ok: true, line: `After game over, ${how} started a new game, and it runs.` }
       }
     }
+    /*
+     * Standing in the road. Hopping on until the player is in a lane with
+     * cars, then standing still there, looked at every tenth of a second,
+     * until a car comes through. Twice a Crossy Road came back "fixed: cars
+     * now kill on contact", and they drove through the chicken: the test
+     * had played it, seen it move and seen it end - in the river.
+     */
+    let traffic: { ok: boolean; line: string } | undefined
+    if (play?.moved && (!state?.over || restart?.ok)) {
+      const glance = async (): Promise<Seen> => (await run(LOOK_JS)) as Seen
+      let s = await glance()
+      /* Over again - the restart test walked it into something - so a
+         new game, and past any time a new game spares the player. */
+      if (s?.over && again) {
+        await again()
+        await sleep(1500)
+        s = await glance()
+      } else if (restart?.ok) {
+        await sleep(1500)
+        s = await glance()
+      }
+      /* Not in a lane with cars: put there. It counts only if it stays:
+         a game that puts its player back where it was each frame is not
+         one whose cars miss. */
+      let placed = false
+      const jump = s && !s.over && s.harm?.length && !inLane(s, scale).length ? teleportJs(s, scale) : null
+      if (jump && (await run(jump)) === true) {
+        await sleep(150)
+        s = await glance()
+        placed = true
+      }
+      debug('stand', { placed, player: s?.player, harm: s?.harm?.slice(0, 8), over: s?.over, lane: inLane(s, scale) })
+      if (placed && s?.over) traffic = { ok: true, line: 'Put in a lane with cars, the player was hit, and that ended its run.' }
+      if (s && !s.over && inLane(s, scale).length) {
+        const looks: Seen[] = [s]
+        /* Up to twelve seconds for a car to come by: a lane's cars spawned
+           bunched together came round once in seven. */
+        const end = Date.now() + 12000
+        while (Date.now() < end) {
+          await sleep(100)
+          looks.push(await glance())
+          const v = standInTraffic(looks, scale)
+          if (v.verdict) {
+            traffic = { ok: v.verdict === 'hit', line: v.line }
+            break
+          }
+        }
+        debug('traffic', { traffic, looks: looks.length })
+      }
+      if (await frozen('while the player stood in the road')) return { checked: true, errors }
+    }
+    if (traffic && !traffic.ok) stuck = `${stuck ? `${stuck} ` : ''}${traffic.line}`
     return {
       checked: true,
       errors,
       ...(play ? { play } : {}),
       ...(restart ? { restart } : {}),
       ...(stuck ? { stuck } : {}),
+      ...(traffic ? { traffic } : {}),
       ...(shot ? { shot } : {}),
       ...(overShot ? { overShot } : {})
     }
@@ -351,7 +413,7 @@ export async function checkHtml(html: string): Promise<{ ran: boolean; ok: boole
     if (!result.checked) return { ran: false, ok: false, output: 'NOT RUN: the page could not be loaded.' }
     const pictures = [result.shot, result.overShot].filter((b): b is Buffer => Boolean(b)).map((b) => `data:image/png;base64,${b.toString('base64')}`)
     const shot = pictures.length ? { shots: pictures } : {}
-    const play = `${result.play ? `\n${result.play.line}` : ''}${result.restart ? `\n${result.restart.line}` : ''}${result.stuck ? `\n${result.stuck}` : ''}`
+    const play = `${result.play ? `\n${result.play.line}` : ''}${result.restart ? `\n${result.restart.line}` : ''}${result.traffic?.ok ? `\n${result.traffic.line}` : ''}${result.stuck ? `\n${result.stuck}` : ''}`
     const stuck = result.play?.moved === false || result.restart?.ok === false || Boolean(result.stuck)
     return result.errors.length || stuck
       ? {

@@ -122,6 +122,17 @@ check(
 )
 check('empty text is not a claim', F.claimsBeforeRunning(''), false)
 
+/* "it says it's done, but it's not, the command's not done": the claim
+   came first, or in plainer words than "installed". */
+const BASH = (cmd) => lines(`${F3}wumpy-run-bash`, cmd, F3)
+check('"Done." over the command is caught', F.claimsBeforeRunning(lines('Done.', '', BASH('rm ~/Downloads/crossy-road.html'))), true)
+check('and "Deleted crossy-road.html." over the rm', F.claimsBeforeRunning(lines('Deleted crossy-road.html.', BASH('rm ~/Downloads/crossy-road.html'))), true)
+check('and "I\'ve removed it" after it', F.claimsBeforeRunning(lines(BASH('rm ~/a.txt'), '', "I've removed it.")), true)
+check('and "It has been deleted"', F.claimsBeforeRunning(lines(BASH('rm ~/a.txt'), 'It has been deleted.')), true)
+check('but "I will delete it" is the future, and fine', F.claimsBeforeRunning(lines('I will delete crossy-road.html.', BASH('rm ~/Downloads/crossy-road.html'))), false)
+check('and a past fact about something else is fine', F.claimsBeforeRunning(lines('The old copy was deleted yesterday, so I will list what is left.', BASH('ls ~/Downloads'))), false)
+check('and "deleted when you close it" is not a claim', F.claimsBeforeRunning(lines(BASH('ls /tmp'), '', 'Those are deleted when you restart.')), false)
+
 /* --------------------------------------------------------------- the wiring */
 
 const message = readFileSync('src/renderer/src/components/Message.tsx', 'utf8')
