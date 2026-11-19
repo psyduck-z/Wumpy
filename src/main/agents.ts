@@ -7,6 +7,8 @@ import {
   applyEdits,
   clip,
   fileIn,
+  fileNamed,
+  sameWork,
   fileSpan,
   isBuild,
   joinContinuation,
@@ -105,6 +107,8 @@ interface Agent extends AgentView {
   stillBroken?: boolean
   /** Its last reply ran past the length it may have, by this many characters. */
   tooLong?: number
+  /** The agent before it whose build never worked, that it tries again. */
+  follows?: string
 }
 
 interface Monitor extends MonitorView {
@@ -181,6 +185,21 @@ export class Agents {
     return agent?.status === 'done' && agent.report && !agent.stillBroken ? (fileIn(agent.report)?.text ?? null) : null
   }
 
+  /**
+   * The panel saved an agent's file: its card takes the file's name, and so
+   * does the broken try it followed, which had none until now.
+   */
+  saved(id: string, path: string): void {
+    const name = path.split(/[\\/]/).pop()
+    if (!name) return
+    const seen = new Set<string>()
+    for (let a = this.agents.find((x) => x.id === id); a && !seen.has(a.id); a = this.agents.find((x) => x.id === a!.follows)) {
+      seen.add(a.id)
+      if (a.id === id || !a.thing) a.thing = name
+    }
+    this.deps.changed()
+  }
+
   forChat(chatId: string): AgentView[] {
     return this.agents.filter((a) => a.chatId === chatId).map(view)
   }
@@ -206,11 +225,19 @@ export class Agents {
         out.push(view(had))
         return
       }
+      const mine = this.agents.filter((a) => a.chatId === chatId)
+      /* Named after its file where the brief names one; a fresh try at a
+         build that never worked is the same thing, under the same name. */
+      const named = fileNamed(`${ask.title}\n${ask.brief}`)
+      const last = mine[mine.length - 1]
+      const follows = !named && last?.stillBroken && sameWork(last.title, ask.title) ? last : undefined
       const agent: Agent = {
         id: `agent-${++this.serial}`,
         key,
         chatId,
-        number: this.agents.filter((a) => a.chatId === chatId).length + 1,
+        number: mine.length + 1,
+        thing: named ?? follows?.thing,
+        follows: follows?.id,
         title: ask.title,
         brief: ask.brief,
         status: 'queued',
@@ -348,6 +375,8 @@ export class Agents {
     /* The last report whose page loaded clean, with a player that moved -
        or whose program compiled. */
     let lastGood = ''
+    /* Wumpy's test failed the file in lastReport. */
+    let lastBroken = false
     let missingSaid = false
     let badEdits = 0
     let shows = 0
@@ -404,6 +433,37 @@ export class Agents {
       }
       messages.push({ role: 'assistant', content: reply })
       let step = stepOf(reply, world.platform)
+      /* Told to report and asked for another tool anyway: the report it
+         gave before, if it gave one - an agent that found the answer at
+         its first step and was then asked for more must not end with
+         nothing - or else what it wrote around the block. */
+      const giveUp = (): void => {
+        const text = reply.replace(/```[\s\S]*?```/g, '').replace(/^\s*REPORT:\s*/i, '').trim()
+        /* Never one Wumpy's test failed, as if it worked: the last that
+           passed, or else said plainly that none did. */
+        if (lastReport && lastBroken && lastGood) {
+          agent.review = `${agent.review ? `${agent.review}; ` : ''}its last version broke, so the one before it stands`
+          this.finishReport(agent, lastGood, true)
+        } else if (lastReport && lastBroken) {
+          const last = [...agent.records].reverse().find((r) => /before review/.test(r.why))?.outcome ?? ''
+          agent.review = `${agent.review ? `${agent.review}; ` : ''}it still breaks when Wumpy tests it`
+          agent.stillBroken = true
+          this.finishReport(agent, `${lastReport}${LF}${LF}WUMPY'S TEST OF THIS FINAL VERSION FOUND IT STILL BROKEN - do not tell the user it works:${LF}${clip(last, 1500)}`, true)
+        } else if (lastReport) {
+          agent.review = `${agent.review}; its earlier report stands, as it could not finish the changes asked for`.replace(/^; /, '')
+          this.finishReport(agent, lastReport, true)
+        } else this.finishReport(agent, text || 'It ran out of steps before it could report.', text.length > 0)
+      }
+      /*
+       * A look inside its page, or at its file, once it was told to report:
+       * the end of it. Those two went round the step check below, and an
+       * agent out of steps probed its page the same way 28 times in seven
+       * minutes, a request on the user's keys each time, never to finish.
+       */
+      if (lastCall && (step.kind === 'probe' || step.kind === 'show')) {
+        giveUp()
+        return
+      }
 
       /* Its page, played as it asks, values read back - a tool use. */
       if (step.kind === 'probe') {
@@ -412,7 +472,22 @@ export class Agents {
           messages.push({ role: 'user', content: 'There is no page in a report of yours yet to probe: give your whole REPORT first.' })
           continue
         }
+        /* The same probe twice is answered from the first time. */
+        const said = `probe: ${step.script.replace(/\s+/g, ' ').trim()}`
+        const first = tried.get(said)
+        if (first !== undefined) {
+          repeats++
+          if (repeats >= 2) lastCall = true
+          messages.push({
+            role: 'user',
+            content:
+              `NOT RUN: you asked for exactly this probe at step ${first}, and its answer is above. ` +
+              (lastCall ? 'Write your REPORT now with what you have.' : 'Change something, probe something else, or write your REPORT.')
+          })
+          continue
+        }
         used++
+        tried.set(said, used)
         agent.doing = 'looking inside its page'
         this.deps.changed()
         const r = await this.deps.probePage(file.text, step.script)
@@ -420,8 +495,11 @@ export class Agents {
         agent.records.push({ kind: 'page', what: 'probed its page', why: 'to see why', outcome: r.output })
         agent.steps.push({ kind: 'page', what: 'looked inside its page', ok: r.ran })
         this.deps.log(`[agents] ${agent.number} probed its page: ${r.output.replace(/\s+/g, ' ').slice(0, 200)}`)
-        messages.push({ role: 'user', content: clip(r.output, 6000) })
         if (used >= AGENT_STEPS) lastCall = true
+        messages.push({
+          role: 'user',
+          content: `${clip(r.output, 6000)}${lastCall ? `${LF}${LF}That was your last tool use. Write your REPORT now with what you have, and say what is not checked.` : ''}`
+        })
         continue
       }
       /* Its file as it is now, after edits: it is on no disk, and agents
@@ -436,6 +514,7 @@ export class Agents {
             : 'There is no file in a report of yours yet.'
         })
         if (shows > 3) lastCall = true
+        if (lastCall) messages.push({ role: 'user', content: 'That was your last look. Write your REPORT now.' })
         continue
       }
       /* Edits to the file in its last report: made, and the result goes on
@@ -458,15 +537,7 @@ export class Agents {
 
       if (step.kind !== 'report') {
         if (lastCall) {
-          /* Told to report and asked for another tool anyway: the report it
-             gave before, if it gave one - an agent that found the answer at
-             its first step and was then asked for more must not end with
-             nothing - or else what it wrote around the block. */
-          const text = reply.replace(/```[\s\S]*?```/g, '').replace(/^\s*REPORT:\s*/i, '').trim()
-          if (lastReport) {
-            agent.review = `${agent.review}; its earlier report stands, as it could not finish the changes asked for`.replace(/^; /, '')
-            this.finishReport(agent, lastReport, true)
-          } else this.finishReport(agent, text || 'It ran out of steps before it could report.', text.length > 0)
+          giveUp()
           return
         }
         if (used >= AGENT_STEPS) {
@@ -537,6 +608,7 @@ export class Agents {
         continue
       }
       lastReport = step.text
+      lastBroken = false
       /*
        * A page in the report is loaded before anyone reviews it - every
        * report, not the first few: a revision made for a reviewer once
@@ -557,6 +629,7 @@ export class Agents {
         agent.steps.push({ kind: 'page', what: r.ok ? 'its page loaded: no errors' : 'its page loaded with errors', ok: r.ran && r.ok })
         this.deps.log(`[agents] ${agent.number} its page: ${r.output.replace(/\s+/g, ' ').slice(0, 160)}`)
         broken = r.ran && !r.ok
+        lastBroken = broken
         shots = r.shots
         if (!broken && r.ran) lastGood = step.text
         if (broken && sendBacks < 3) {
@@ -588,6 +661,7 @@ export class Agents {
         })
         this.deps.log(`[agents] ${agent.number} its ${name}: ${r.output.replace(/\s+/g, ' ').slice(0, 200)}`)
         broken = r.ran && !r.ok
+        lastBroken = broken
         /* Compiled clean, and a game: played, in a sandbox, where it can be. */
         if (!broken && r.ran && isBuild(agent.brief)) {
           agent.doing = `playing the ${name} it wrote`
@@ -600,6 +674,7 @@ export class Agents {
             this.deps.log(`[agents] ${agent.number} its ${name}, run: ${played.output.replace(/\s+/g, ' ').slice(0, 200)}`)
             if (!played.ok) {
               broken = true
+              lastBroken = true
               if (sendBacks < 3) {
                 sendBacks++
                 messages.push({
@@ -977,7 +1052,8 @@ function view(a: Agent): AgentView {
     endedAt: a.endedAt,
     model: a.model,
     review: a.review,
-    report: a.report
+    report: a.report,
+    thing: a.thing
   }
 }
 

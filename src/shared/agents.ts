@@ -630,6 +630,29 @@ export function joinContinuation(before: string, after: string): string {
  * `from:` save with a game of its own invention in an html block - fifteen
  * seconds spent, and shown to the user as though it were what was saved.
  */
+/**
+ * The file a piece of work is about, by its name: "pacman.html". An agent
+ * is named after it on its card, so every agent that works on the same
+ * file shows the same name - "Agent 1" built Pac-Man and "Agent 2" restyled
+ * it, and the user asked why the same job had changed hands.
+ */
+export function fileNamed(text: string): string | undefined {
+  const m = /(?:^|[\s"'`(\/\\])(\w[\w.-]*\.(?:html?|py|cpp|cc|cxx|c|h|hpp|js|mjs|ts|tsx|jsx|css|sh|rs|go|java|rb|lua|cs|kt|swift))(?=$|[\s"'`),.;:!?])/i.exec(text)
+  return m?.[1]
+}
+
+/** Words that say what is made, not which thing: "Build a Pac-Man game". */
+const PLAIN_WORDS = new Set(
+  'a an the and or of in on for to with from into one single build rebuild make remake write rewrite create fix fixed again retry try new another full complete working game html page file program code script version same that this its it so'.split(' ')
+)
+
+/** Two titles about the same thing: a retry of "Build a Pac-Man game" is "Pac-Man again, player moving". */
+export function sameWork(a: string, b: string): boolean {
+  const words = (t: string): string[] => t.toLowerCase().split(/[^a-z0-9+#-]+/).filter((w) => w.length > 2 && !PLAIN_WORDS.has(w))
+  const theirs = new Set(words(a))
+  return words(b).some((w) => theirs.has(w))
+}
+
 export function withoutRetypedCode(text: string): string {
   if (!/`{3,}[ \t]*wumpy-write[\s\S]*?\n[ \t]*from:\s*agent-\d+/i.test(text)) return text
   return text.replace(/^([ \t]{0,3})(`{3,})[ \t]*(html?|javascript|js|typescript|ts|python|py|cpp|c\+\+|c|css|bash|sh)?[ \t]*\n([\s\S]*?)\n[ \t]{0,3}\2`*[ \t]*$/gm, (whole, indent: string, _fence, _tag, body: string) =>

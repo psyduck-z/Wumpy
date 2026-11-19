@@ -227,6 +227,7 @@ function harness(script, opts = {}) {
     run: async (command) =>
       opts.refuse ? { ran: false, ok: false, output: 'NOT RUN: needs a click.' } : { ran: true, ok: true, output: `Exit code 0\nOutput:\n${command} says 41%` },
     search: async () => ({ ran: true, ok: true, output: '1. A result' }),
+    ...(opts.deps ?? {}),
     changed: () => {},
     ready: (d) => ready.push(d),
     spent: () => {},
@@ -643,6 +644,56 @@ check('a key limit is only measured on NVIDIA', /provider: \(\) => \(providerFor
 check('the chat is told about its agents', /\.\.\.agentFacts\(chatId\)/.test(main), true)
 check('a limit test stops when Wumpy is used', /if \(!this\.idle\(\)\) \{\s+controller\.abort\(\)/.test(read('src/main/limits.ts')), true)
 check('agents are started when an answer finishes, not when a card draws', /window\.wumpy\.agents\s+\.start\(d\.chatId, message\.id, message\.content\)/.test(read('src/renderer/src/hooks/useAgents.ts')), true)
+
+{
+  /* Out of steps and still probing its page: it ends. Observed live: an
+     agent probed its Crossy Road the same way 28 times in seven minutes. */
+  let probes = 0
+  const h = harness(
+    (messages, turn) => {
+      if (messages[0].content.startsWith('You are a reviewing agent')) return 'VERDICT: ACCEPT\nNOTES: Fine.'
+      if (turn === 1) return `REPORT:\nThe game.\n${BT}html\n<!doctype html><html><body><canvas></canvas><script>let x = 1</script></body></html>\n${BT}`
+      probes++
+      return `${BT}wumpy-probe\npress: ArrowUp\nwait: ${probes}\nshow: x\n${BT}`
+    },
+    {
+      deps: {
+        checkPage: async () => ({ ran: true, ok: false, output: 'Holding each arrow key did not move the player at all.' }),
+        probePage: async () => ({ ran: true, ok: true, output: 'x = 1' }),
+        sees: () => false
+      }
+    }
+  )
+  h.agents.start('c', 'm', [{ title: 'Build a game', brief: 'Build a Snake game in one HTML file.' }])
+  await until(() => h.ready.length > 0 || h.turns() > 40)
+  const v = h.agents.forChat('c')[0]
+  check('an agent out of steps that keeps probing is ended', [h.ready.length, probes <= 11], [1, true])
+  check('and a page that never passed goes back as broken, not as done', [v.review, /STILL BROKEN/.test(h.ready[0]?.text ?? '')], ['it still breaks when Wumpy tests it', true])
+}
+{
+  /* The same probe twice is answered from the first time. */
+  const h = harness(
+    (messages, turn) => {
+      if (messages[0].content.startsWith('You are a reviewing agent')) return 'VERDICT: ACCEPT\nNOTES: Fine.'
+      if (turn === 1) return `REPORT:\nThe game.\n${BT}html\n<!doctype html><html><body><script>let x = 1</script></body></html>\n${BT}`
+      return `${BT}wumpy-probe\npress: ArrowUp\nshow: x\n${BT}`
+    },
+    {
+      deps: {
+        checkPage: async () => ({ ran: true, ok: false, output: 'did not move' }),
+        probePage: async () => ({ ran: true, ok: true, output: 'x = 1' }),
+        sees: () => false
+      }
+    }
+  )
+  h.agents.start('c', 'm', [{ title: 'Build a game', brief: 'Build a Snake game in one HTML file.' }])
+  await until(() => h.ready.length > 0 || h.turns() > 40)
+  check('a repeated probe is not run again, and the agent ends', [h.ready.length, h.log.filter((l) => /probed its page/.test(l)).length], [1, 1])
+}
+check('an agent is named after the file its brief names', [A.fileNamed('Restyle ~/Downloads/wumpy-tests/pacman.html with neon walls.'), A.fileNamed('Make snake.cpp faster'), A.fileNamed('Build a Pac-Man game in one HTML file. Hand back the whole file.')], ['pacman.html', 'snake.cpp', undefined])
+check('a retry of a broken build is the same thing, a new game is not', [A.sameWork('Build a Pac-Man game in one HTML file', 'Rebuild the Pac-Man game so the player moves'), A.sameWork('Build a Pac-Man game in one HTML file', 'Build a Snake game in one HTML file')], [true, false])
+check('the card shows the file, not a number', /<span className="cmd-shell">\{name\}<\/span>/.test(read('src/renderer/src/components/AgentCard.tsx')), true)
+check('a saved agent file names its card', /agents\.saved\(from, result\.path\)/.test(read('src/renderer/src/components/WriteCard.tsx')), true)
 
 console.log(failed ? `\n${failed} FAILED of the agent checks` : '\nall agent checks correct')
 process.exit(failed ? 1 : 0)

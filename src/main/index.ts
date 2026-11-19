@@ -2363,6 +2363,7 @@ function registerIpc(): void {
   ipcMain.handle(IPC.agentsPending, (_e, chatId: string) => agents?.pendingFor(String(chatId)) ?? [])
   ipcMain.handle(IPC.agentsDelivered, (_e, id: string) => agents?.delivered(String(id)))
   ipcMain.handle(IPC.agentsFile, (_e, id: string) => agents?.fileOf(String(id)) ?? null)
+  ipcMain.handle(IPC.agentsSaved, (_e, id: string, path: string) => agents?.saved(String(id), String(path)))
 
   /**
    * Runs a command the user approved in the panel.

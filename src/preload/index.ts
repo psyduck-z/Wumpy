@@ -368,6 +368,8 @@ const api = {
     delivered: (id: string): Promise<void> => ipcRenderer.invoke(IPC.agentsDelivered, id),
     /** The file an agent handed back, as it wrote it - for a write block's `from:`. */
     file: (id: string): Promise<string | null> => ipcRenderer.invoke(IPC.agentsFile, id),
+    /** Its file was saved there: the card takes the file's name. */
+    saved: (id: string, path: string): Promise<void> => ipcRenderer.invoke(IPC.agentsSaved, id, path),
     onChanged: (cb: (list: { agents: AgentView[]; monitors: MonitorView[] }) => void) =>
       on<{ agents: AgentView[]; monitors: MonitorView[] }>(IPC.agentsChanged, cb),
     onReady: (cb: (delivery: AgentDelivery) => void) => on<AgentDelivery>(IPC.agentsReady, cb)

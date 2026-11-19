@@ -50,11 +50,21 @@ export function AgentCard({
   }, [live])
 
   const title = ask?.title ?? body.split('\n')[0].replace(/^#+\s*/, '')
+  /*
+   * Named after the file it works on, not its place in the chat: the agent
+   * that built pacman.html and the one that restyled it are both
+   * "pacman.html", where they were "Agent 1" and "Agent 2" - and the user
+   * asked why the same job had changed hands.
+   */
+  const name = agent?.thing ?? 'Agent'
+  const again =
+    agent?.thing &&
+    agents.some((a) => a.chatId === agent.chatId && a.id !== agent.id && a.thing === agent.thing && a.startedAt < agent.startedAt)
   return (
     <div data-family="runs" className={`cmd agent-card ${agent?.status === 'failed' ? 'is-failed' : ''}`}>
       <div className="cmd-head">
         <KindMark kind="run" />
-        <span className="cmd-shell">{agent ? `Agent ${agent.number}` : 'Agent'}</span>
+        <span className="cmd-shell">{name}</span>
         <span className={`cmd-status ${agent?.status === 'done' ? 'is-ok' : agent?.status === 'failed' ? 'is-failed' : ''}`}>
           {agent
             ? `${STATUS[agent.status]}${agent.review ? ` · ${agent.review}` : ''} · ${since(agent.startedAt, agent.endedAt ?? now)}`
@@ -69,7 +79,10 @@ export function AgentCard({
           </button>
         )}
       </div>
-      <p className="cmd-reason">{title}</p>
+      <p className="cmd-reason">
+        {title}
+        {again ? ' - carries on from the last one' : ''}
+      </p>
       {agent && live && <p className="agent-doing">{agent.doing}</p>}
       {agent && agent.status === 'failed' && <p className="agent-doing">{agent.doing}</p>}
       {agent && agent.steps.length > 0 && (
@@ -107,11 +120,19 @@ export function AgentCard({
 /** A monitor: which agents it waits on, and the note the chat left itself. */
 export function MonitorCard({ body, messageId }: { body: string; messageId: string }): React.JSX.Element {
   const ask = monitorAsks(`${BT}wumpy-monitor\n${body}${BT}`)[0]
-  const { monitors } = useAgentState()
+  const { monitors, agents } = useAgentState()
   const monitor = ask ? monitorFor(monitors, messageId, ask.note) : undefined
-  const which = monitor?.agents.length
-    ? `agent${monitor.agents.length === 1 ? '' : 's'} ${monitor.agents.join(', ')}`
-    : 'its agents'
+  /* By the names their cards show: the cards no longer carry numbers. */
+  const watched = monitor ? agents.filter((a) => a.chatId === monitor.chatId && monitor.agents.includes(a.number)) : []
+  const named = watched.map((a) => a.thing).filter((t): t is string => Boolean(t))
+  const which =
+    watched.length && named.length === watched.length
+      ? [...new Set(named)].join(', ')
+      : watched.length === 1
+        ? 'its agent'
+        : watched.length
+          ? `its ${watched.length} agents`
+          : 'its agents'
   return (
     <div className="agent-monitor">
       <span className="agent-monitor-mark" aria-hidden="true" />

@@ -793,6 +793,12 @@ export interface AgentView {
   review: string
   /** The report, once there is one. */
   report?: string
+  /**
+   * The file it works on, by name - "pacman.html" - from its brief or from
+   * where its file was saved. Its card is named after it, so the agents
+   * that build and then change one file show as one thing, not 1 and 2.
+   */
+  thing?: string
 }
 
 /** A monitor a chat set on its agents. */
@@ -968,6 +974,8 @@ export const IPC = {
   agentsPending: 'agents:pending',
   agentsDelivered: 'agents:delivered',
   agentsFile: 'agents:file',
+  /** The panel saved an agent's file: where, so its card can be named after it. */
+  agentsSaved: 'agents:saved',
   /** Main tells the panel a report is ready for a chat. */
   agentsReady: 'agents:ready',
   musicHold: 'music:hold',

@@ -93,6 +93,8 @@ export function WriteCard({
     const result = await onWrite(path, content)
     if (result.written) {
       setState('done')
+      /* The agent's card takes the saved file's name. */
+      if (from) void window.wumpy.agents.saved(from, result.path).catch(() => {})
     } else {
       setState('failed')
       setError(result.error ?? 'Could not write it.')
