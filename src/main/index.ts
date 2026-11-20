@@ -23,7 +23,7 @@ import type {
 import { DEFAULT_MODEL, assistantFor, assemblePrompt, type PromptShape } from '@shared/assistant'
 import type { Footprint } from '@shared/footprint'
 import type { RankView, Transcript, VoiceStatus, WriteResult } from '@shared/types'
-import { Ranker } from './ranker'
+import { Ranker, type SavedSweep } from './ranker'
 import { SettingsStore } from './store'
 import { capDiskCache, reclaimCache } from './disk'
 import { ChatStore } from './chats'
@@ -2893,7 +2893,14 @@ void app.whenReady().then(async () => {
     /* And the times it did not run. The reason is formatted here because
        only this side knows which model is answering, which is the cause
        nothing about the ranking mentions. */
-    stoodDown: (why) => journal.add('rank', rankNote(why, modelLabel(activeModel())))
+    stoodDown: (why) => journal.add('rank', rankNote(why, modelLabel(activeModel()))),
+    /* Its own small file rather than settings.json: it changes every few
+       minutes during a sweep, and settings is the user's. */
+    load: () => {
+      const file = join(app.getPath('userData'), 'ranking.json')
+      return existsSync(file) ? (JSON.parse(readFileSync(file, 'utf8')) as SavedSweep) : null
+    },
+    save: (saved) => writeFileSync(join(app.getPath('userData'), 'ranking.json'), JSON.stringify(saved))
   })
   ranker.start()
 

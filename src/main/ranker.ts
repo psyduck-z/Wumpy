@@ -73,6 +73,22 @@ export interface RankerDeps {
    * those would be a log of the feature working. See DURABLE.
    */
   stoodDown?(why: 'off' | 'onekey' | null): void
+  /**
+   * Where the ranking had got to, kept across a restart.
+   *
+   * Without it every start was a new sweep from the top: a restart at 16:24,
+   * another at 16:25 and one at 16:28 measured the first model three times
+   * and the last ones never, and `/rank` said "starting a sweep" about a
+   * ranking that had run an hour before. Optional, like the rest.
+   */
+  load?(): SavedSweep | null
+  save?(saved: SavedSweep): void
+}
+
+/** What load and save carry: when the last sweep finished, and what is left of this one. */
+export interface SavedSweep {
+  lastSweepAt: number
+  left: string[]
 }
 
 /**
@@ -115,8 +131,9 @@ export class Ranker {
     if (this.timer) return
     /* The catalogue is due the moment the app starts, but the first tick is
        a tick away: a sweep beginning during startup would compete with the
-       panel loading and the keys being read. */
-    this.begin()
+       panel loading and the keys being read. Unless a sweep was under way,
+       or finished within the hour - then it carries on from there. */
+    if (!this.resume()) this.begin()
     this.timer = setInterval(() => void this.tick(), TICK_MS)
     this.timer.unref?.()
   }
@@ -135,6 +152,51 @@ export class Ranker {
     this.measured = 0
     this.sweepStartedAt = 0
     this.sweepStartedTick = 0
+    this.keep()
+  }
+
+  /**
+   * Picks up the sweep a restart interrupted, or the hour since the last one.
+   *
+   * False when there is nothing worth resuming - no saved state, or the
+   * saved sweep finished more than an hour ago and the queue is empty, which
+   * is a new sweep anyway.
+   */
+  private resume(): boolean {
+    let saved: SavedSweep | null = null
+    try {
+      saved = this.deps.load?.() ?? null
+    } catch {
+      saved = null
+    }
+    if (!saved || !Array.isArray(saved.left) || !Number.isFinite(saved.lastSweepAt)) return false
+    const known = new Set(CLOUD_MODELS.map((m) => m.id))
+    const left = saved.left.filter((id) => typeof id === 'string' && known.has(id))
+    /* A clock that reads ahead of now (a machine that woke at 1970, then
+       corrected) would hold the next sweep off for ever; now is the most it can be. */
+    const lastSweepAt = Math.min(saved.lastSweepAt, Date.now())
+    if (!left.length && (lastSweepAt <= 0 || Date.now() - lastSweepAt >= EVERY_MS)) return false
+    this.left = left
+    this.asked = CLOUD_MODELS.length
+    this.measured = this.asked - left.length
+    this.lastSweepAt = lastSweepAt
+    this.sweepStartedAt = 0
+    this.sweepStartedTick = 0
+    console.log(
+      left.length
+        ? `[wumpy] ranking resumes its sweep after a restart: ${left.length} left`
+        : `[wumpy] ranking last swept ${Math.round((Date.now() - lastSweepAt) / 60_000)} min ago; next within the hour`
+    )
+    return true
+  }
+
+  /** Tells load where things are. Never fatal: losing it costs one sweep. */
+  private keep(): void {
+    try {
+      this.deps.save?.({ lastSweepAt: this.lastSweepAt, left: [...this.left] })
+    } catch {
+      /* nothing to do */
+    }
   }
 
   /**
@@ -160,6 +222,7 @@ export class Ranker {
   /** The queue is empty: the sweep is over, whether or not it all worked. */
   private finish(): void {
     this.lastSweepAt = Date.now()
+    this.keep()
     this.deps.swept?.({
       models: this.measured,
       asked: this.asked,
@@ -255,6 +318,7 @@ export class Ranker {
         this.deps.began?.({ asked: this.asked })
       }
       this.left = this.left.filter((m) => m !== id)
+      this.keep()
       if (result) {
         this.measured++
         this.deps.record(result)

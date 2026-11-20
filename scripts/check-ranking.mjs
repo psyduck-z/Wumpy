@@ -206,5 +206,59 @@ check(
   'on, paused — waiting for your turn to finish (9 to go)'
 )
 
+/* ------------------------------------------------- across a restart */
+/*
+ * The Ranker itself, with its saved place. A restart used to start every
+ * sweep from the top and forget when the last one finished.
+ */
+const rout = join(process.cwd(), '.ranker-check.mjs')
+await build({
+  entryPoints: ['src/main/ranker.ts'],
+  bundle: true,
+  platform: 'node',
+  format: 'esm',
+  outfile: rout,
+  logLevel: 'error',
+  alias: { '@shared': './src/shared' }
+})
+const { Ranker } = await import(pathToFileURL(rout).href)
+rmSync(rout, { force: true })
+const quiet = { busy: false, sinceTurnMs: Infinity, lastMinute: 0, perMinute: 40, sinceLimitedMs: Infinity }
+const log = console.log
+const ranker = (saved) => {
+  const kept = []
+  const r = new Ranker({
+    probe: async () => null,
+    preamble: () => '',
+    state: () => ({ on: true, keys: 3 }),
+    traffic: () => quiet,
+    record: () => {},
+    load: () => saved,
+    save: (s) => kept.push(s)
+  })
+  console.log = () => {}
+  r.start()
+  console.log = log
+  r.stop()
+  return { view: r.view(), kept }
+}
+const fresh = ranker(null)
+check('no saved place: a whole sweep to do', fresh.view.left > 3, true)
+check('and it says so to the file', fresh.kept.length, 1)
+const all = fresh.kept[0].left
+const midway = ranker({ lastSweepAt: Date.now() - 2 * 3600_000, left: all.slice(-2) })
+check('a sweep cut off by a restart: carries on', midway.view.left, 2)
+const recent = ranker({ lastSweepAt: Date.now() - 20 * 60_000, left: [] })
+check('swept 20 min ago: waits for the hour', recent.view.left, 0)
+check('and /rank says it was 20 minutes ago', Math.round(recent.view.sinceSweepMs / 60_000), 20)
+const stale = ranker({ lastSweepAt: Date.now() - 3 * 3600_000, left: [] })
+check('swept 3 hours ago: a new sweep', stale.view.left, all.length)
+const gone = ranker({ lastSweepAt: Date.now() - 2 * 3600_000, left: ['no/such-model', all[0]] })
+check('a model no longer listed is dropped', gone.view.left, 1)
+const ahead = ranker({ lastSweepAt: Date.now() + 5 * 3600_000, left: [] })
+check('a clock that read ahead does not hold it off', ahead.view.sinceSweepMs >= 0, true)
+const junk = ranker({ nonsense: true })
+check('a broken file is a fresh start', junk.view.left, all.length)
+
 console.log(failed === 0 ? '\nall ranking checks correct' : `\n${failed} ranking checks FAILED`)
 process.exit(failed === 0 ? 0 : 1)
