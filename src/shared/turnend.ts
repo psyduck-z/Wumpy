@@ -30,7 +30,7 @@ export interface TurnEndFacts {
   failedAgents: string[]
   /** Commands running in the panel right now. */
   running: number
-  /** Command cards waiting for the user to run or skip. */
+  /** Cards in the last answer waiting for a click: a command, a link, a search, an app. */
   waiting: number
   /** The last message is an error. */
   error: boolean
@@ -103,8 +103,8 @@ export function turnEnd(f: TurnEndFacts): TurnEnd {
   if (f.waiting) {
     return {
       tone: 'going',
-      label: f.waiting === 1 ? 'waiting for you - run or skip the command' : `waiting for you - ${f.waiting} commands to run or skip`,
-      detail: 'Nothing happens until the command above is run or skipped.'
+      label: f.waiting === 1 ? 'waiting for you - the card above' : `waiting for you - ${f.waiting} cards above`,
+      detail: 'Nothing happens until the card above is answered: run or skip a command, open a link, allow a search.'
     }
   }
   if (f.stopAt) {

@@ -787,5 +787,17 @@ check('a saved agent file names its card', /agents\.saved\(from, result\.path\)/
   check('and the runner uses it', /withoutNonBugs\(parsed\)/.test(read('src/main/agents.ts')), true)
 }
 
+/* A held game write always has a way out, and only the game is held. */
+{
+  const agents = read('src/renderer/src/hooks/useAgents.ts')
+  check('a game in an answer that errored is let go', /if \(message\.error\) \{\s*if \(written\) release\(message\.id\)/.test(agents), true)
+  check('a game after a command or a report is let go, not held for good', agents.includes('if (written && !game) release(message.id)'), true)
+  const md = read('src/renderer/src/components/Markdown.tsx')
+  check('only the game block is held, not a README beside it', md.includes('isGameBlock(text, file)') && md.includes('game !== null && game === readWriteRequest(block).path'), true)
+  const big = 'x'.repeat(1600)
+  check('a quoted path is the same path the card reads', A.gameWritten('```wumpy-write\npath: "~/Downloads/a.html"\n<canvas></canvas>' + big + '\n```'), '~/Downloads/a.html')
+  check('a from: card waits for its file instead of saying there is none', /if \(from\) setFromFile\(\(was\) => \(was === null \? undefined : was\)\)/.test(read('src/renderer/src/components/WriteCard.tsx')), true)
+}
+
 console.log(failed ? `\n${failed} FAILED of the agent checks` : '\nall agent checks correct')
 process.exit(failed ? 1 : 0)

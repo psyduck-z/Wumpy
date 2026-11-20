@@ -327,6 +327,22 @@ export function CommandCard({
     let res: Awaited<ReturnType<typeof onRun>>
     try {
       res = await onRun(command, shell, ranKey)
+    } catch (err) {
+      /* The call failed rather than the command: the card used to stay on
+         "running" for good, and nothing went back to the model. It is a
+         failed run, said as one. */
+      res = {
+        command,
+        shell,
+        cwd: '',
+        stdout: '',
+        stderr: `Wumpy could not run this: ${err instanceof Error ? err.message : String(err)}`,
+        exitCode: -1,
+        durationMs: Date.now() - now,
+        timedOut: false,
+        truncated: false,
+        readOnly: false
+      }
     } finally {
       ended()
     }

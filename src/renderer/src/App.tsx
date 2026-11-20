@@ -3086,8 +3086,18 @@ function namedControls(shot: Attachment): string[] {
     agents: agentState.agents
       .filter((a) => a.chatId === chatId && (a.status === 'queued' || a.status === 'working' || a.status === 'reviewing'))
       .map((a) => a.title),
+    /* Not one a later agent took over: a failed Tetris that the chat handed
+       to a second agent is that agent's job now, and red would outlast it. */
     failedAgents: agentState.agents
-      .filter((a) => a.chatId === chatId && a.status === 'failed' && (a.endedAt ?? 0) >= spokeAt)
+      .filter(
+        (a) =>
+          a.chatId === chatId &&
+          a.status === 'failed' &&
+          (a.endedAt ?? 0) >= spokeAt &&
+          !agentState.agents.some(
+            (b) => b.chatId === chatId && b.id !== a.id && b.startedAt > a.startedAt && (b.thing ?? b.title) === (a.thing ?? a.title)
+          )
+      )
       .map((a) => a.title),
     running: commandsRunning,
     waiting: commandsWaiting,
