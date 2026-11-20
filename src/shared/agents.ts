@@ -854,6 +854,11 @@ export interface Finished {
   /** What it built never passed Wumpy's test. */
   broken?: boolean
   /**
+   * What its reviewer still found wrong in the version handed back, after
+   * the last send-back. It is saved, but it is not called ready.
+   */
+  open?: string
+  /**
    * Not worth another try: an earlier agent in this chat already failed at
    * the same work, or this failure will not clear by trying again (no keys,
    * no model). The hand-back said "start one more agent" every time, and a
@@ -915,7 +920,9 @@ export function deliveryText(done: readonly Finished[], note: string | null): st
       d.ok && d.file && d.id && !d.broken
         ? [
             '',
-            `ITS FILE (${d.file.kind}, ${d.file.lines} lines) IS READY, tested and kept by Wumpy. Whatever the report says about saving, folders or what it could not check, save it now: your whole reply is a sentence or two for the user, then this block with the path they asked for - the write makes any missing folder - and no code of your own anywhere. Never retype the file.`,
+            d.open
+              ? `ITS FILE (${d.file.kind}, ${d.file.lines} lines) IS KEPT BY WUMPY BUT NOT RIGHT YET: its reviewer's last look at this version still found:${LF}${clip(d.open, 1500)}${LF}Save it now all the same - your whole reply is a sentence or two, then this block with the path they asked for, and no code of your own anywhere; never retype the file. In those sentences tell the user plainly it is saved with these problems still open, naming them briefly, and offer one more agent to fix them. Never call it ready, done or working, and do not start that agent unless they say so.`
+              : `ITS FILE (${d.file.kind}, ${d.file.lines} lines) IS READY, tested and kept by Wumpy. Whatever the report says about saving, folders or what it could not check, save it now: your whole reply is a sentence or two for the user, then this block with the path they asked for - the write makes any missing folder - and no code of your own anywhere. Never retype the file.`,
             `${BT}wumpy-write`,
             `# Save ${d.title.replace(/^(?:build|write|make|create)\s+/i, '')}`,
             'path: <the path they asked for>',
@@ -928,8 +935,13 @@ export function deliveryText(done: readonly Finished[], note: string | null): st
     /* The file's save block comes last, after the report: its own words
        about folders it could not check and writes it could not make once
        talked the chat out of saving a C++ game it had been handed. */
+    /* A report with no file to save, that its reviewer still found wrong. */
+    const open =
+      d.ok && d.open && !(d.file && d.id && !d.broken)
+        ? `${LF}NOT RIGHT YET: its reviewer's last look still found:${LF}${clip(d.open, 1500)}${LF}Pass the report on with these said plainly - never as if it were all correct.`
+        : ''
     return d.ok
-      ? `AGENT ${d.number}: ${d.title} (${how})${LF}${ran}${LF}${d.file && d.id ? withoutFile(d.text, d.id) : d.text}${file}`
+      ? `AGENT ${d.number}: ${d.title} (${how})${LF}${ran}${LF}${d.file && d.id ? withoutFile(d.text, d.id) : d.text}${file}${open}`
       : `AGENT ${d.number}: ${d.title} - FAILED (${how}): ${d.text}${d.noRetry ? `${LF}${retryStop(d.noRetry)}` : isBuild(d.title) ? `${LF}It was building or changing something. Say plainly it did not finish, and start one more agent with the same brief - never write the file yourself instead: a Crossy Road the chat wrote itself after a failed agent was four thousand characters, with cars that never killed.` : ''}`
   })
   const rule =

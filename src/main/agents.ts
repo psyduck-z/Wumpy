@@ -110,6 +110,8 @@ interface Agent extends AgentView {
   why?: string
   /** Every version it built failed Wumpy's test. */
   stillBroken?: boolean
+  /** What its reviewer still found wrong in the version handed back. */
+  openPoints?: string
   /** Its last reply ran past the length it may have, by this many characters. */
   tooLong?: number
   /** The agent before it whose build never worked, that it tries again. */
@@ -823,7 +825,27 @@ export class Agents {
         }
         if (review?.verdict === 'accept') agent.review = rounds ? `${agent.review}, then accepted` : 'accepted on review'
       } else {
-        agent.review = `${agent.review}; the last revision was not reviewed again`
+        /* Out of send-backs: one last look, so what is handed back is
+           known to be right or known not to be. Unlooked-at, a Tetris
+           whose next piece spilled off the page and whose game-over said
+           "Final score: 0" was handed over as ready - the agent had only
+           answered its reviewer that its code "already satisfies" both. */
+        agent.status = 'reviewing'
+        agent.doing = 'its last version, being reviewed'
+        this.deps.changed()
+        const last = await this.review(agent, step.text, asked, page ? shots : undefined)
+        if (agent.controller.signal.aborted) return
+        agent.status = 'working'
+        if (last?.verdict === 'accept') agent.review = `${agent.review}, then accepted`
+        else if (last?.verdict === 'revise') {
+          agent.openPoints = last.notes
+          agent.review = `${agent.review}; its reviewer still found problems in the last version`
+          this.deps.log(`[agents] ${agent.number} handed back with its reviewer's points open: ${last.notes.replace(/\s+/g, ' ').slice(0, 200)}`)
+        } else {
+          /* No review came: what it last asked for may still be open. */
+          if (asked.length) agent.openPoints = asked[asked.length - 1]
+          agent.review = `${agent.review}; the last revision was not reviewed again`
+        }
       }
       this.finishReport(agent, step.text, true)
       return
@@ -1053,6 +1075,7 @@ export class Agents {
       id: agent.id,
       ...(file ? { file: { lines: file.text.split(LF).length - 1, kind: file.kind } } : {}),
       ...(agent.stillBroken ? { broken: true } : {}),
+      ...(status === 'done' && agent.openPoints && !agent.stillBroken ? { open: agent.openPoints } : {}),
       ...(status !== 'stopped' && (status === 'failed' || agent.stillBroken) ? noRetry(agent, why, this.agents) : {}),
       number: agent.number,
       title: agent.title,

@@ -285,8 +285,11 @@ const until = async (f) => {
   h.agents.start('c', 'm', [{ title: 'T', brief: 'Something to do.' }])
   await until(() => h.ready.length > 0)
   const v = h.agents.forChat('c')[0]
-  check('two reviews at most, then the answer stands', [v.status, v.review], ['done', 'sent back 2 times by its reviewer; the last revision was not reviewed again'])
-  check('in five model turns', h.turns(), 5)
+  check('two send-backs at most, then the answer stands', [v.status, v.review], ['done', 'sent back 2 times by its reviewer; its reviewer still found problems in the last version'])
+  /* Three of its own, and three reviews: the last one a look at the
+     version handed back, so it is not called ready unchecked. */
+  check('in six model turns', h.turns(), 6)
+  check('and the reviewer\'s last points go back with it', /NOT RIGHT YET[\s\S]*Again\./.test(h.ready[0]?.text ?? ''), true)
 }
 
 {
@@ -800,6 +803,17 @@ check('a saved agent file names its card', /agents\.saved\(from, result\.path\)/
   check('a "3." inside a point does not split it', A.withoutNonBugs({ verdict: 'revise', notes: '1. Set lives to 3. Then reset.\n2. The board stays visible behind the game over screen.' }).notes, '1. Set lives to 3. Then reset.')
   check('an accept stays an accept', A.withoutNonBugs({ verdict: 'accept', notes: 'fine' }).verdict, 'accept')
   check('and the runner uses it', /withoutNonBugs\(parsed\)/.test(read('src/main/agents.ts')), true)
+}
+
+/* Out of send-backs with the reviewer still unhappy: saved, never called ready. */
+{
+  const d = { id: 'agent-1', number: 1, title: 'Build tetris.html', ok: true, file: { lines: 390, kind: 'a web page' }, text: 'REPORT', tookMs: 180000, review: 'sent back 3 times', steps: 4, open: '1. The next-piece preview spills off the page.' }
+  const text = A.deliveryText([d], null)
+  check('a build with open points is not called ready', [/IS READY/.test(text), /NOT RIGHT YET/.test(text), /spills off the page/.test(text), /from: agent-1/.test(text)], [false, true, true, true])
+  check('and the chat offers another agent rather than starting one', /offer one more agent/.test(text) && /do not start that agent unless they say so/.test(text), true)
+  check('one with none still is', /IS READY/.test(A.deliveryText([{ ...d, open: undefined }], null)), true)
+  const main = read('src/main/agents.ts')
+  check('the runner reviews the last revision once more', /const last = await this\.review\(agent, step\.text, asked/.test(main) && /agent\.openPoints = last\.notes/.test(main), true)
 }
 
 /* A failure that would only repeat does not ask for another agent. */
