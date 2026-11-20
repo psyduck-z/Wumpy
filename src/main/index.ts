@@ -1,4 +1,4 @@
-import { deadlineFact } from '@shared/deadline'
+import { deadlineFact, deadlineIn } from '@shared/deadline'
 import { app, clipboard, dialog, ipcMain, nativeImage, session, Tray } from 'electron'
 import { cpus, homedir } from 'node:os'
 import { existsSync, mkdirSync, readFileSync, statSync, unlinkSync, writeFileSync } from 'node:fs'
@@ -3259,13 +3259,13 @@ function earbudsLike(pcm: Buffer): Buffer {
  * next guess. Only reads the replies: nothing is saved to the notes or the
  * skills folder, which happens in the panel when a real answer finishes.
  */
-async function modelSays(messages: ChatRequest['messages'], handsFree: boolean): Promise<string> {
+async function modelSays(messages: ChatRequest['messages'], handsFree: boolean, deadline: number | null = null): Promise<string> {
   const model = resolveModel()
   if (!model) return '(no model can answer)'
   const req: ChatRequest = {
     requestId: `memory-check-${Date.now()}-${Math.random().toString(36).slice(2)}`,
     messages,
-    context: { chatTitle: null, messageCount: messages.length, actions: [], handsFree }
+    context: { chatTitle: null, messageCount: messages.length, actions: [], handsFree, deadline }
   }
   const sending = withContext(req)
   const assistant = currentAssistant()
@@ -3518,15 +3518,28 @@ async function buildCheck(arg: string): Promise<void> {
     return resolved && dirname(resolved) === dir ? resolved : join(dir, name)
   }
   let turnNo = 0
+  /* A stop time said in a turn, kept as the panel keeps it (see @shared/deadline). */
+  let stopAt: number | null = null
   for (const said of spec.turns) {
     turnNo++
+    const heard = deadlineIn(said, Date.now())
+    if (heard?.kind === 'at') {
+      stopAt = heard.at
+      say(`  stop time heard: ${new Date(stopAt).toTimeString().slice(0, 8)} ("${heard.said}")`)
+    }
+    if (stopAt !== null && Date.now() >= stopAt) break
     history.push({ role: 'user', content: said, sentAt: Date.now() })
     transcript.push(`## ${turnNo}. The user\n\n${said}`)
     say(`turn ${turnNo}: ${JSON.stringify(said.slice(0, 120))}`)
     let checkRounds = 0
     for (let step = 1; step <= 10; step++) {
+      if (stopAt !== null && Date.now() >= stopAt) {
+        say(`  stopped: it is ${new Date().toTimeString().slice(0, 8)}, past the stop time`)
+        transcript.push(`> stopped at the time limit`)
+        break
+      }
       const t0 = Date.now()
-      const reply = await modelSays(history, false)
+      const reply = await modelSays(history, false, stopAt)
       history.push({ role: 'assistant', content: reply })
       transcript.push(`### Wumpy (${Math.round((Date.now() - t0) / 1000)}s)\n\n${reply}`)
       const found = blocks(reply)
