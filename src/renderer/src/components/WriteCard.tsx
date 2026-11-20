@@ -68,6 +68,12 @@ export function WriteCard({
       live = false
     }
   }, [from, complete])
+  /* The card is mounted while the block streams in, before its `from:` line
+     has arrived - so it started as "no file", and showed a red "There is no
+     file from agent-7" until the file came. Waiting, once there is a from. */
+  useEffect(() => {
+    if (from) setFromFile((was) => (was === null ? undefined : was))
+  }, [from])
   const content = from ? (fromFile ?? '') : written_
   const missingFrom = Boolean(from) && fromFile === null
 
