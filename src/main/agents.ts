@@ -24,7 +24,8 @@ import {
   type AgentWorld,
   type Finished,
   type MonitorAsk,
-  type StepRecord
+  type StepRecord,
+  withoutNonBugs
 } from '@shared/agents'
 import { codeIn, LANG_NAME, type CodeLang } from '@shared/codecheck'
 import { parseReview } from '@shared/reflect'
@@ -1007,7 +1008,9 @@ export class Agents {
       REVIEW_TOKENS
     )
     if (seeing) this.deps.log(`[agents] ${agent.number} its reviewer was shown the page`)
-    const review = raw ? parseReview(raw) : null
+    const parsed = raw ? parseReview(raw) : null
+    const review = parsed ? withoutNonBugs(parsed) : null
+    if (review?.dropped) this.deps.log(`[agents] ${agent.number} its reviewer's ${review.dropped} point(s) about the game behind its overlay were dropped`)
     this.deps.log(`[agents] ${agent.number} reviewed: ${review ? review.verdict : 'no verdict'}`)
     return review
   }

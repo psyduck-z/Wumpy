@@ -775,5 +775,17 @@ check('a retry of a broken build is the same thing, a new game is not', [A.sameW
 check('the card shows the file, not a number', /<span className="cmd-shell">\{name\}<\/span>/.test(read('src/renderer/src/components/AgentCard.tsx')), true)
 check('a saved agent file names its card', /agents\.saved\(from, result\.path\)/.test(read('src/renderer/src/components/WriteCard.tsx')), true)
 
+/* A reviewer's point the prompt already rules out is dropped, not obeyed. */
+{
+  const r = (notes) => A.withoutNonBugs({ verdict: 'revise', notes })
+  check('the snake behind game over alone is an accept', r("1. The game-over overlay is drawn while the loop stops, but the snake and food remain drawn behind it - the brief's picture shows exactly this. Clear the canvas before drawing the overlay.").verdict, 'accept')
+  const both = r('1. The snake and food remain drawn behind the overlay; clear the canvas.\n2. Pressing Space after game over does not restart: the loop is never started again.')
+  check('with a real bug beside it, the real bug stays', [both.verdict, both.dropped, /Space/.test(both.notes), /canvas/.test(both.notes)], ['revise', 1, true, false])
+  check('a real bug alone is untouched', r('1. Pressing Space after game over does not restart.').dropped, 0)
+  check('so is a colour bug', r('1. Locked pieces are drawn in the wrong colour.').verdict, 'revise')
+  check('an accept stays an accept', A.withoutNonBugs({ verdict: 'accept', notes: 'fine' }).verdict, 'accept')
+  check('and the runner uses it', /withoutNonBugs\(parsed\)/.test(read('src/main/agents.ts')), true)
+}
+
 console.log(failed ? `\n${failed} FAILED of the agent checks` : '\nall agent checks correct')
 process.exit(failed ? 1 : 0)

@@ -982,3 +982,29 @@ export function agentsStub(slots: number): string {
     `with a ${BT}wumpy-agent block; the rules arrive when agents come up.`
   ].join(LF)
 }
+
+/**
+ * A review with the points the prompt already rules out taken away.
+ *
+ * REVIEW_PROMPT says the game drawn behind its title or game-over overlay is
+ * not a bug, and a reviewer sent a working Snake back for exactly that anyway
+ * ("the snake and food remain drawn behind it - clear the canvas"), costing a
+ * round. Saying it louder is no guarantee; dropping the point is. When nothing
+ * is left, the review is an accept.
+ */
+export function withoutNonBugs(review: { verdict: 'accept' | 'revise'; notes: string }): {
+  verdict: 'accept' | 'revise'
+  notes: string
+  dropped: number
+} {
+  if (review.verdict !== 'revise') return { ...review, dropped: 0 }
+  const points = review.notes.split(/\n?(?=(?:^|\s)\d+[.)]\s)/m).map((p) => p.trim()).filter(Boolean)
+  const behindOverlay = (p: string): boolean =>
+    /\b(?:behind|under(?:neath)?|beneath)\b[^.]{0,80}\b(?:overlay|game[- ]?over|title|start screen|menu)\b/i.test(p) ||
+    /\b(?:clear|blank|hide|wipe)\b[^.]{0,50}\b(?:canvas|board|screen|scene|snake|pieces?)\b[^.]{0,80}\b(?:game[- ]?over|overlay|title)\b/i.test(p)
+  const kept = points.filter((p) => !behindOverlay(p))
+  const dropped = points.length - kept.length
+  if (dropped === 0) return { ...review, dropped }
+  if (kept.length === 0) return { verdict: 'accept', notes: 'Only asked to hide the game behind its overlay, which is not a bug.', dropped }
+  return { verdict: 'revise', notes: kept.join('\n'), dropped }
+}
