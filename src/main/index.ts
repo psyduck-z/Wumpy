@@ -115,7 +115,7 @@ import { Stretcher } from '@shared/stretch'
 import { forMagpie } from '@shared/voicetext'
 import { cutsFor, piecesOf } from '@shared/pauses'
 import { withSentTimes } from '@shared/sent'
-import { agentAsks, agentSlots, fileIn, gameWritten, heldForAgent, monitorAsks, takeOverAsk, withoutRetypedCode } from '@shared/agents'
+import { agentAsks, agentSlots, fileIn, gameWritten, heldForAgent, isBuild, monitorAsks, takeOverAsk, withoutRetypedCode } from '@shared/agents'
 import { Agents } from './agents'
 import { LimitTester } from './limits'
 import { checkHtml, checkPage, probePage } from './pagecheck'
@@ -729,7 +729,11 @@ function buildFacts(messages: ChatRequest['messages']): string[] {
   const text = (m: ChatRequest['messages'][number]): string => (typeof m.content === 'string' ? m.content : '')
   const recent = messages.slice(-4)
   /* Something already built here by an agent: a change to it may name no game. */
-  const built = messages.some((m) => m.role === 'assistant' && /\x60\x60\x60\s*wumpy-agent/.test(text(m)))
+  /* A build agent only: after one that looked something up, "can you show
+     my ssh keys" was read as a change to a game. */
+  const built = messages.some(
+    (m) => m.role === 'assistant' && agentAsks(text(m)).some((a) => isBuild(`${a.title}\n${a.brief}`))
+  )
   let ask: 'make' | 'change' | null = null
   for (let i = recent.length - 1; i >= 0 && !ask; i--) {
     const m = recent[i]
@@ -2380,7 +2384,10 @@ function registerIpc(): void {
   ipcMain.handle(IPC.agentsSaved, (_e, id: string, path: string) => agents?.saved(String(id), String(path)))
   ipcMain.handle(IPC.agentsTakeOver, (_e, req: { chatId: string; messageId: string; request: string; path: string }) => {
     if (!agents || agentSlotsNow() === 0 || !req?.chatId || !req.messageId || typeof req.path !== 'string') return { started: false }
-    const full = req.path.replace(/^~(?=$|[\\/])/, homedir())
+    /* Against the folder a write card resolves it against, not this
+       process's: "games/crossy.html" that was there read as missing, and
+       a change to it became a build from nothing. */
+    const full = resolve(settings.get('shellCwd') || homedir(), req.path.replace(/^~(?=$|[\\/])/, homedir()))
     const ask = takeOverAsk(String(req.request ?? ''), req.path, existsSync(full))
     const started = agents.start(req.chatId, `${req.messageId}:take-over`, [ask])
     log(`[agents] took over a game the chat wrote itself: ${ask.title}`)

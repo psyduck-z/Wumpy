@@ -183,8 +183,12 @@ export function asksToBuild(text: string, built = false): 'make' | 'change' | nu
    */
   if (
     built &&
-    /\b(make it|make the|make them|make my|change|fix|add|remove|space|spread|slow|speed up|faster|slower|bigger|smaller|harder|easier|so (?:that )?(?:i|it|the|they)|should|want|can you|could you|let me)\b/i.test(text) &&
-    /\b(cars?|trucks?|vehicles?|enemies|enemy|ghosts?|player|chicken|frog|snake|pieces?|blocks?|lanes?|logs?|rivers?|roads?|score|lives|life|die|dies|dying|death|dead|hit|crash|jump|levels?|maze|walls?|background|menu|title|game over|restart|food|apples?|dots?|pellets?|bullets?|shoot|wasd|arrows?|keys)\b/i.test(text)
+    /* Words that ask for a change, and words about how a game plays. Not
+       "want", "can you", "keys", "restart", "score", "background": those
+       turned "I want to restart my computer" and "can you show my ssh
+       keys" into a change to the game. */
+    /\b(make it|make the|make them|make my|change|fix|add|remove|space|spread|slow|speed up|faster|slower|bigger|smaller|harder|easier|so (?:that )?(?:i|it|the|they))\b/i.test(text) &&
+    /\b(cars?|trucks?|vehicles?|enemies|enemy|ghosts?|player|chicken|frog|snake|pieces?|blocks?|lanes?|logs?|rivers?|lives|die|dies|dying|death|dead|hit|crash|jump|levels?|maze|walls?|game over|food|apples?|dots?|pellets?|bullets?|shoot|wasd|arrow keys)\b/i.test(text)
   )
     return 'change'
   return null
