@@ -1,3 +1,4 @@
+import { deadline } from '../deadline'
 import { keepSaves } from '../saves'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { actionFacts } from '../ledger'
@@ -282,6 +283,9 @@ export function useChat(): ChatState {
     // An image on its own is a message: "what is this" is implied by having
     // attached it, so an empty line with a picture still goes.
     if ((!trimmed && !images?.length) || activeRequest.current) return false
+    // The user's stop time has come: nothing goes out on its own until they
+    // say something. See ../deadline.
+    if (automatic && deadline.halted()) return false
 
     const userMessage: ChatMessage = {
       id: nextId(),
@@ -350,7 +354,8 @@ export function useChat(): ChatState {
         chatId: context.current.chatId,
         messageCount: history.length,
         actions: actionFacts(),
-        handsFree: handsFree()
+        handsFree: handsFree(),
+        deadline: deadline.get()
       }
     })
     return true

@@ -770,6 +770,8 @@ export interface ChatRequest {
      * answer will be read aloud. See renderer/src/handsfree.ts.
      */
     handsFree?: boolean
+    /** When the user said to stop (see @shared/deadline), if they did and it is still ahead. */
+    deadline?: number | null
   }
 }
 

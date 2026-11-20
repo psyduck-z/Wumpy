@@ -1,3 +1,4 @@
+import { deadlineFact } from '@shared/deadline'
 import { app, clipboard, dialog, ipcMain, nativeImage, session, Tray } from 'electron'
 import { cpus, homedir } from 'node:os'
 import { existsSync, mkdirSync, readFileSync, statSync, unlinkSync, writeFileSync } from 'node:fs'
@@ -751,7 +752,8 @@ function factsFor(
   actions: string[] = [],
   handsFree = false,
   messages: ChatRequest['messages'] = [],
-  chatId: string | null = null
+  chatId: string | null = null,
+  stopAt: number | null = null
 ): string {
   /* Everything they have said in this chat, for the skills that came up. */
   const said = messages.filter((m) => m.role === 'user').map((m) => (typeof m.content === 'string' ? m.content : ''))
@@ -785,6 +787,7 @@ function factsFor(
     ...folderFacts(),
     ...channelFacts(handsFree),
     ...agentFacts(chatId),
+    ...(stopAt ? deadlineFact(stopAt, now.getTime()) : []),
     // One file the user owns, carried from chat to chat. See context.ts.
     ...notes.forPrompt(),
     /* "Remember that I prefer celsius" was answered "Got it - celsius it
@@ -4245,7 +4248,8 @@ function withContext(req: ChatRequest): Array<Pick<ChatMessage, 'role' | 'conten
     req.context.actions ?? [],
     req.context.handsFree === true,
     req.messages,
-    req.context.chatId ?? null
+    req.context.chatId ?? null,
+    typeof req.context.deadline === 'number' ? req.context.deadline : null
   )
 
   /*

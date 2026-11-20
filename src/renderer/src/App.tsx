@@ -1,3 +1,5 @@
+import { deadline } from './deadline'
+import { DEADLINE_CLEARED_TEXT, deadlineDueText, deadlineIn, deadlineSetText } from '@shared/deadline'
 import { useVoiceTurn } from './hooks/useVoiceTurn'
 import { useReflect } from './hooks/useReflect'
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
@@ -2740,6 +2742,10 @@ function namedControls(shot: Attachment): string[] {
          circles is stopped until they say something, so this is the way out
          of it. "Carry on" is a fresh chain. See @shared/circling. */
       trailRef.current = []
+      // Anything they say starts things again after a stop time came - and
+      // may itself set one, or take one back. See @shared/deadline.
+      deadline.halt(false)
+      heardDeadline(text)
 
       // Something said while the model is still writing. /also is for when the
       // answer is going the right way and you have one more fact to add: the
@@ -2960,6 +2966,60 @@ function namedControls(shot: Attachment): string[] {
     [messages, revealed]
   )
   const revealMore = useCallback(() => setRevealed((r) => r + REVEAL_STEP), [])
+
+  /* ------------------------------------------------------- the stop time */
+
+  /**
+   * "Do not continue past 10:30": the time is read out of what they said,
+   * said back, and kept here. When it comes, the answer is stopped, the agents
+   * are stopped, and nothing goes out on its own until they speak again.
+   *
+   * Checked every few seconds against the clock rather than one long timeout:
+   * a laptop asleep across 10:30 wakes to a timeout that still has hours to
+   * run, and the stop must happen the moment it wakes.
+   */
+  const [stopAt, setStopAt] = useState<number | null>(null)
+  const heardDeadline = useCallback((text: string) => {
+    const now = Date.now()
+    const heard = deadlineIn(text, now)
+    if (!heard) return
+    if (heard.kind === 'clear') {
+      if (deadline.get() === null) return
+      deadline.set(null)
+      setStopAt(null)
+      setTimeout(() => chatRef.current.note(DEADLINE_CLEARED_TEXT))
+      return
+    }
+    deadline.set(heard.at)
+    setStopAt(heard.at)
+    // A moment later, so it is said under their message rather than above it.
+    setTimeout(() => chatRef.current.note(deadlineSetText(heard.at, now)))
+  }, [])
+
+  useEffect(() => {
+    if (stopAt === null) return
+    const due = (): void => {
+      if (Date.now() < stopAt || deadline.get() !== stopAt) return
+      deadline.set(null)
+      deadline.halt(true)
+      setStopAt(null)
+      chatRef.current.stop()
+      void window.wumpy.agents
+        .list()
+        .then(({ agents }) => {
+          for (const a of agents) {
+            if (a.status === 'queued' || a.status === 'working' || a.status === 'reviewing') {
+              void window.wumpy.agents.stop(a.id)
+            }
+          }
+        })
+        .catch(() => undefined)
+      chatRef.current.notice(deadlineDueText(stopAt))
+    }
+    due()
+    const timer = setInterval(due, 2000)
+    return () => clearInterval(timer)
+  }, [stopAt])
 
   /**
    * Stop, and put the question back if it was withdrawn rather than cut off.
