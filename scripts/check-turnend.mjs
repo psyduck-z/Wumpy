@@ -39,6 +39,8 @@ check('an agent outranks a waiting card', t({ agents: ['x'], waiting: 1 }).label
 check('every bubble says not finished or waiting', [
   t({ agents: ['x'] }), t({ running: 2 }), t({ waiting: 2 }), t({ error: true }), t({ cutOff: true }), t({ failedAgents: ['x', 'y'] })
 ].every((e) => /^(not finished|waiting for you)/.test(e.label)))
+check('a stop time still ahead: yellow, says carry on', t({ stopAt: Date.now() + 3600_000 }).tone === 'going' && t({ stopAt: Date.now() + 3600_000 }).label.includes('carry on'), t({ stopAt: Date.now() + 3600_000 }).label)
+check('work still going outranks the stop time', t({ stopAt: Date.now() + 3600_000, agents: ['x'] }).label.includes('agent'))
 check('three names: two shown and a count', t({ agents: ['a', 'b', 'c'] }).detail.includes('a, b and 1 more'))
 
 const app = readFileSync('src/renderer/src/App.tsx', 'utf8')
@@ -51,6 +53,7 @@ check('Card: live panel waits for LIVE_AFTER_MS', card.includes("state === 'runn
 check('Card: start time kept across a remount', card.includes('STARTED.get(ranKey)') && card.includes('STARTED.set(ranKey, now)'))
 check('Card: start time dropped when it ends', card.includes('STARTED.delete(ranKey)'))
 const css = readFileSync('src/renderer/src/styles.css', 'utf8')
+check('Agent card: the doing line stays one line while it works', readFileSync('src/renderer/src/components/AgentCard.tsx', 'utf8').includes('agent-doing is-live') && css.includes('.agent-doing.is-live {'))
 check('CSS: yellow and red bubbles', css.includes('.turn-end.is-going {') && css.includes('.turn-end.is-stopped {'))
 check('CSS: bubble fades in late, so a blink never shows it', /\.turn-end-flag \{[\s\S]*?animation: turn-end-in 220ms ease-out 400ms both/.test(css))
 

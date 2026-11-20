@@ -12,10 +12,14 @@
  *            come back on its own (or on the click), so the turn is not over.
  *   stopped  red - the turn ended without doing it: an error, an answer cut
  *            off part-way, or an agent that failed.
+ *            Also yellow: a stop time the user set is still ahead and the
+ *            answer ended before it.
  *   done     the old grey line. Nothing is left.
  *
  * Pure, so it can be checked without an app: scripts/check-turnend.mjs.
  */
+
+import { clockText } from './deadline'
 
 export type TurnEndTone = 'done' | 'going' | 'stopped'
 
@@ -32,6 +36,12 @@ export interface TurnEndFacts {
   error: boolean
   /** The last answer stopped part-way (context full, provider filter). */
   cutOff: boolean
+  /**
+   * The stop time the user set, while it is still ahead. Asked to "keep
+   * refining until 10:30", the model finished a snake in 84 seconds and
+   * stopped: the work they asked for was not over, and the line said it was.
+   */
+  stopAt?: number | null
 }
 
 export interface TurnEnd {
@@ -95,6 +105,14 @@ export function turnEnd(f: TurnEndFacts): TurnEnd {
       tone: 'going',
       label: f.waiting === 1 ? 'waiting for you - run or skip the command' : `waiting for you - ${f.waiting} commands to run or skip`,
       detail: 'Nothing happens until the command above is run or skipped.'
+    }
+  }
+  if (f.stopAt) {
+    const at = clockText(f.stopAt)
+    return {
+      tone: 'going',
+      label: `ended before ${at} - say carry on`,
+      detail: `You asked for work until ${at}, and it stopped early. Say "carry on" to keep it going; Wumpy still stops everything at ${at}.`
     }
   }
   return { tone: 'done', label: '', detail: '' }

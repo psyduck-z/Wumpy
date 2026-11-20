@@ -3321,6 +3321,12 @@ body {
   color: rgb(var(--muted));
 }
 
+.agent-doing.is-live {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
 .agent-steps {
   margin: 6px 0 0;
   padding: 0 11px 0 28px;

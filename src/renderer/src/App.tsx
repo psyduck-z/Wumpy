@@ -3092,7 +3092,8 @@ function namedControls(shot: Attachment): string[] {
     running: commandsRunning,
     waiting: commandsWaiting,
     error: Boolean(lastMessage?.error),
-    cutOff: Boolean(lastMessage?.role === 'assistant' && lastMessage.cutOff && !lastMessage.error)
+    cutOff: Boolean(lastMessage?.role === 'assistant' && lastMessage.cutOff && !lastMessage.error),
+    stopAt
   })
   /* Going to done waits a moment: a command's output goes back to the
      model as soon as it ends, and without this the line went grey for the

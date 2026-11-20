@@ -83,7 +83,13 @@ export function AgentCard({
         {title}
         {again ? ' - carries on from the last one' : ''}
       </p>
-      {agent && live && <p className="agent-doing">{agent.doing}</p>}
+      {/* One line while it works: what it is doing changes every few seconds,
+          and a line that wrapped to two and back made the card jump each time. */}
+      {agent && live && (
+        <p className="agent-doing is-live" title={agent.doing}>
+          {agent.doing}
+        </p>
+      )}
       {agent && agent.status === 'failed' && <p className="agent-doing">{agent.doing}</p>}
       {agent && agent.steps.length > 0 && (
         <ol className="agent-steps">
