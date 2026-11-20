@@ -47,6 +47,19 @@ export function pendingCount(): number {
   return waiting.size
 }
 
+/**
+ * Cards waiting in one message. The line under the last answer asks this
+ * rather than pendingCount: an unclicked card in an old message of a reopened
+ * chat is not this turn waiting, and would have held "waiting for you" there
+ * for good. Keys are the message id and the command; see CommandCard.
+ */
+export function pendingIn(messageId: string | null): number {
+  if (!messageId) return 0
+  let n = 0
+  for (const key of waiting.keys()) if (key.startsWith(messageId)) n++
+  return n
+}
+
 export function onPendingChange(cb: () => void): () => void {
   listeners.add(cb)
   return () => listeners.delete(cb)

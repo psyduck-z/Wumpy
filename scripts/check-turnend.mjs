@@ -44,6 +44,7 @@ check('three names: two shown and a count', t({ agents: ['a', 'b', 'c'] }).detai
 const app = readFileSync('src/renderer/src/App.tsx', 'utf8')
 check('App: the line takes the tone as a class', app.includes('className={`turn-end is-${ended.tone}`}'))
 check('App: going to done waits END_GRACE_MS', /ending\.tone === 'done' && ended\.tone === 'going'[\s\S]{0,120}END_GRACE_MS/.test(app))
+check('App: only cards in the latest answer count as waiting', app.includes('pendingIn(lastAnswerId)'))
 check('App: only agents of this chat count', /a\.chatId === chatId && \(a\.status === 'queued'/.test(app))
 const card = readFileSync('src/renderer/src/components/CommandCard.tsx', 'utf8')
 check('Card: live panel waits for LIVE_AFTER_MS', card.includes("state === 'running' && liveShown &&"))

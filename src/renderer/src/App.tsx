@@ -112,7 +112,7 @@ import {
   REGION_SELECTOR,
   type Region
 } from './keyboard'
-import { newestPending, onPendingChange, pendingCount, runningCount } from './pending'
+import { newestPending, onPendingChange, pendingIn, runningCount } from './pending'
 import { useAgentState } from './agentstate'
 import { turnEnd } from '@shared/turnend'
 import { forgetClaims } from './once'
@@ -3078,9 +3078,10 @@ function namedControls(shot: Attachment): string[] {
      stopped short. See @shared/turnend. */
   const agentState = useAgentState()
   const commandsRunning = useSyncExternalStore(onPendingChange, runningCount)
-  const commandsWaiting = useSyncExternalStore(onPendingChange, pendingCount)
   const lastMessage = messages.length ? messages[messages.length - 1] : null
   const spokeAt = [...messages].reverse().find((m) => m.role === 'user' && !m.automatic)?.createdAt ?? 0
+  const lastAnswerId = [...messages].reverse().find((m) => m.role === 'assistant')?.id ?? null
+  const commandsWaiting = useSyncExternalStore(onPendingChange, () => pendingIn(lastAnswerId))
   const ending = turnEnd({
     agents: agentState.agents
       .filter((a) => a.chatId === chatId && (a.status === 'queued' || a.status === 'working' || a.status === 'reviewing'))
