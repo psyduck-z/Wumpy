@@ -146,8 +146,12 @@ export const LOOK_JS = `(() => {
   const num = (v) => (typeof v === 'number' && isFinite(v) ? v : undefined)
   const harm = []
   const safe = /log|turtle|lily|pad|coin|plank|boat|raft|platform|player|chicken|frog|hero|tree|rock|bush|grass|pickup|gem|power|bonus/i
+  /* Once each: a car kept in cars and in its lane's list as well was
+     counted twice, and two of it in one place read as cars stacked. */
+  const added = new Set()
   const add = (o, ly) => {
-    if (!o || typeof o !== 'object' || o === me || safe.test(String(o.type || o.kind || o.name || ''))) return
+    if (!o || typeof o !== 'object' || o === me || added.has(o) || safe.test(String(o.type || o.kind || o.name || ''))) return
+    added.add(o)
     const x = num(o.x) ?? num(o.col) ?? (o.pos ? num(o.pos.x) : undefined)
     const y = num(o.y) ?? num(o.row) ?? (o.pos ? num(o.pos.y) : undefined) ?? ly
     if (x === undefined || y === undefined) return
@@ -435,17 +439,23 @@ export function teleportJs(seen: Seen, scale = 0): string | null {
   const to = lanes.reduce((a, b) => (Math.abs(b - me[1]) < Math.abs(a - me[1]) ? b : a))
   /* How many pixels a tile is, from the player's own two kinds of field;
      else the gap between lanes, near enough. */
-  const tileField = Object.keys(p).find((k) => /^(?:row|gy|ty|r|tileY|gridY)$/.test(k) && typeof p[k] === 'number' && p[k] !== 0)
+  const tileField = Object.keys(p).find((k) => (/^(?:row|gy|ty|tileY|gridY)$/.test(k) || (k === 'r' && typeof p.c === 'number')) && typeof p[k] === 'number' && p[k] !== 0)
   const pixelField = Object.keys(p).find((k) => /^(?:y|py|cy|screenY|drawY)$/.test(k) && typeof p[k] === 'number' && Math.abs(p[k] as number) >= 64)
   const ratio = scale || seen?.tile || (tileField && pixelField ? (p[pixelField] as number) / (p[tileField] as number) : 0)
   /* Whole tiles, as a grid game's rows are whole. */
   const dTile = tiles ? Math.round(to - me[1]) : Math.round((to - me[1]) / (ratio || gap))
   const dPixel = tiles ? dTile * ratio : to - me[1]
   if (!dTile && !dPixel) return null
-  const vertical = /^(?:y|py|gy|ty|cy|r|row)$|row$|Row$|Y$/
+  /* Where it is, and where it is going or drawn - never how fast or which
+     way: "...Y$" moved velY and dirY too, the player flew out of the lane,
+     and that read as a hit from cars that never kill. `r` is a row only
+     beside a `c`; alone it is a radius. */
+  const vertical =
+    /^(?:y|py|gy|ty|cy|row|tileY|gridY|screenY|drawY|renderY|displayY|playerY|playerRow|(?:target|prev|last|from|to|dest|next|old)(?:Y|Row))$/
+  const rowR = typeof p.c === 'number'
   const moves: Record<string, number> = {}
   for (const [k, v] of Object.entries(p)) {
-    if (typeof v !== 'number' || !vertical.test(k)) continue
+    if (typeof v !== 'number' || !(vertical.test(k) || (k === 'r' && rowR))) continue
     const isTile = Math.abs(v) < 64 && /row|Row|^(?:gy|ty|r)$|tileY|gridY/.test(k)
     const d = isTile ? dTile : Math.abs(v) >= 64 || !tiles ? dPixel : dTile
     if (d) moves[k] = d
