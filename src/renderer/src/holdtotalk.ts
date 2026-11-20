@@ -28,19 +28,35 @@
  */
 export const HOLD_MS = 500
 
+/**
+ * How long a release may be followed by a press and still count as one hold.
+ *
+ * A held key does not always reach the page as one press and many repeats.
+ * With an input method in between - fcitx5 runs on the Omarchy desktop - it
+ * may come as press, release, press, release, one pair per repeat. Read
+ * literally, every repeat is a release: the half-second starts over thirty
+ * times a second and recording never begins, which is exactly "holding the
+ * spacebar does nothing". A repeat's release and its next press are a few
+ * milliseconds apart; no finger lets go and presses again that fast.
+ */
+export const BRIDGE_MS = 100
+
 /** What the box looked like before the spacebar was pressed. */
 export interface Snapshot {
   value: string
   caret: number
 }
 
-export type HoldState = 'idle' | 'armed' | 'listening'
+/** `releasing`: the key came up a moment ago, and may yet turn out to be a repeat. */
+export type HoldState = 'idle' | 'armed' | 'listening' | 'releasing'
 
 export type HoldAction =
   /** Nothing to do; the key event is none of our business. */
   | { kind: 'nothing'; swallow: boolean }
-  /** Start the timer. The component calls `tick` when it fires. */
-  | { kind: 'arm'; swallow: boolean }
+  /** Start the timer. The component calls `tick` when it fires, `wait` ms from now. */
+  | { kind: 'arm'; swallow: boolean; wait: number }
+  /** The key came up: call `settle` in BRIDGE_MS, to find out whether it really did. */
+  | { kind: 'wait'; swallow: boolean }
   /** The delay elapsed: put the text back as it was, then start recording. */
   | { kind: 'listen'; restore: Snapshot; swallow: boolean }
   /** Released while listening: stop and transcribe. */
@@ -54,6 +70,9 @@ export class HoldToTalk {
   private current: HoldState = 'idle'
   private snapshot: Snapshot | null = null
   private pressedAt = 0
+  /** What a release interrupted, and when: a press soon after picks it back up. */
+  private before: 'armed' | 'listening' = 'armed'
+  private releasedAt = 0
 
   get state(): HoldState {
     return this.current
@@ -68,6 +87,21 @@ export class HoldToTalk {
    * repeat after it in one go.
    */
   down(at: number, snapshot: Snapshot): HoldAction {
+    if (this.current === 'releasing') {
+      if (at - this.releasedAt <= BRIDGE_MS) {
+        // A repeat that came as a release and a press. Carry on as if the key
+        // never came up - the same press, the same snapshot, the same clock.
+        this.current = this.before
+        if (this.current === 'listening') return nothing(true)
+        return { kind: 'arm', swallow: false, wait: Math.max(0, HOLD_MS - (at - this.pressedAt)) }
+      }
+      // Too long after to be a repeat, and settle has not run yet - a timer
+      // late behind a busy frame. The release was real: finish it first.
+      const was = this.before
+      this.current = 'idle'
+      this.snapshot = null
+      if (was === 'listening') return { kind: 'send', swallow: true }
+    }
     if (this.current === 'armed') {
       // A repeat. The delay measures one continuous press, so it must not be
       // restarted - otherwise holding the key for ever never reaches the end of
@@ -84,7 +118,7 @@ export class HoldToTalk {
     this.pressedAt = at
     // Not swallowed: a space pressed and released has to appear at once, or
     // ordinary typing would stutter every time.
-    return { kind: 'arm', swallow: false }
+    return { kind: 'arm', swallow: false, wait: HOLD_MS }
   }
 
   /** The timer fired. Returns `listen` only if the key is genuinely still held. */
@@ -95,20 +129,30 @@ export class HoldToTalk {
     return { kind: 'listen', restore: this.snapshot, swallow: true }
   }
 
-  /** The spacebar came up. */
-  up(): HoldAction {
-    if (this.current === 'listening') {
-      this.current = 'idle'
-      this.snapshot = null
-      return { kind: 'send', swallow: true }
-    }
-    if (this.current === 'armed') {
-      this.current = 'idle'
-      this.snapshot = null
-      // It was a space. It is already in the box, which is where it belongs.
-      return { kind: 'cancel', swallow: false }
-    }
-    return nothing()
+  /**
+   * The spacebar came up - or seemed to.
+   *
+   * Nothing is decided yet: a press within BRIDGE_MS means it was a repeat
+   * (see BRIDGE_MS). `settle` decides, once that has had time not to happen.
+   */
+  up(at: number): HoldAction {
+    if (this.current !== 'armed' && this.current !== 'listening') return nothing()
+    this.before = this.current
+    this.current = 'releasing'
+    this.releasedAt = at
+    return { kind: 'wait', swallow: this.before === 'listening' }
+  }
+
+  /** BRIDGE_MS after a release with no press since: it was let go. */
+  settle(at: number): HoldAction {
+    if (this.current !== 'releasing' || at - this.releasedAt < BRIDGE_MS) return nothing()
+    this.current = 'idle'
+    this.snapshot = null
+    // Listening: send it. Armed: it was a space, already in the box, which is
+    // where it belongs.
+    return this.before === 'listening'
+      ? { kind: 'send', swallow: true }
+      : { kind: 'cancel', swallow: false }
   }
 
   /**
@@ -122,23 +166,40 @@ export class HoldToTalk {
     const was = this.current
     this.current = 'idle'
     this.snapshot = null
+    // Let go and then focus moved: the words were finished, so they are sent.
+    if (was === 'releasing' && this.before === 'listening') return { kind: 'send', swallow: false }
     return was === 'listening' ? { kind: 'cancel', swallow: false } : nothing()
   }
+}
+
+/**
+ * Whether a keyboard event is the spacebar, whatever its modifiers.
+ *
+ * With an input method in the way the key can arrive as "Process" (or
+ * "Unidentified") rather than " ", and only its code still says Space. While a
+ * composition is open, though, Space picks a candidate - that is the input
+ * method's key, not ours.
+ */
+export function isSpaceKey(e: { key: string; code?: string; isComposing?: boolean }): boolean {
+  if (e.isComposing) return false
+  if (e.key === ' ') return true
+  return e.code === 'Space' && (e.key === 'Process' || e.key === 'Unidentified')
 }
 
 /**
  * Whether a keyboard event is the plain spacebar.
  *
  * Any modifier means it is a shortcut, not a space - Ctrl+Space and Shift+Space
- * both have other jobs - and a repeat is reported here so the caller does not
- * have to track it twice.
+ * both have other jobs.
  */
 export function isPlainSpace(e: {
   key: string
+  code?: string
+  isComposing?: boolean
   ctrlKey: boolean
   altKey: boolean
   metaKey: boolean
   shiftKey: boolean
 }): boolean {
-  return e.key === ' ' && !e.ctrlKey && !e.altKey && !e.metaKey && !e.shiftKey
+  return isSpaceKey(e) && !e.ctrlKey && !e.altKey && !e.metaKey && !e.shiftKey
 }

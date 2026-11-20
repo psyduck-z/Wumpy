@@ -6,7 +6,7 @@ import { insistFocus } from '../focus'
 import { caretRows } from '../caret'
 import { adoptsKeystroke } from '../keyboard'
 import { useDictation } from '../hooks/useDictation'
-import { HOLD_MS, HoldToTalk, isPlainSpace, type HoldAction } from '../holdtotalk'
+import { BRIDGE_MS, HOLD_MS, HoldToTalk, isPlainSpace, type HoldAction } from '../holdtotalk'
 import { Mic } from './Mic'
 import { filesIn, readAnyFile, TOKENS_PER_SECOND } from '../media'
 import { attachmentTokens, sendsBytes, sizeLabel } from '@shared/attach'
@@ -232,22 +232,82 @@ export function Composer({
    */
   const hold = useRef(new HoldToTalk())
   const holdTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const settleTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   const stopTimer = (): void => {
+    if (settleTimer.current !== null) clearTimeout(settleTimer.current)
+    settleTimer.current = null
     if (holdTimer.current === null) return
     clearTimeout(holdTimer.current)
     holdTimer.current = null
+  }
+
+  /**
+   * What the spacebar did, for wumpy.log when a hold comes to nothing.
+   *
+   * "Holding the spacebar does not work" came back twice with nothing in the
+   * log to say why: the machine never got as far as starting, so nothing it
+   * logged was reached. This keeps the key events of one press - when each
+   * came, and what it said it was - and writes them out only when the key was
+   * held long enough to have meant "listen" and yet nothing listened.
+   */
+  const trace = useRef<{ from: number; events: string[]; listened: boolean } | null>(null)
+  const traceKey = (e: React.KeyboardEvent<HTMLTextAreaElement>, type: 'd' | 'u'): void => {
+    const now = performance.now()
+    if (type === 'd' && (!trace.current || hold.current.state === 'idle')) {
+      trace.current = { from: now, events: [], listened: false }
+    }
+    const t = trace.current
+    if (!t || t.events.length >= 24) return
+    const odd = e.key === ' ' && e.code === 'Space' ? '' : `[${e.key}/${e.code}]`
+    t.events.push(`${type}${e.repeat ? 'r' : ''}${Math.round(now - t.from)}${odd}`)
+  }
+  const traceEnd = (): void => {
+    const t = trace.current
+    trace.current = null
+    if (!t || t.listened) return
+    const held = performance.now() - t.from
+    if (held < HOLD_MS) return
+    window.wumpy.voice.log(
+      `dictation: Space held ${Math.round(held)}ms but recording never started - keys: ${t.events.join(' ')}`
+    )
+  }
+
+  /* And the one way the trace cannot catch: an input method that takes the
+     key and hands the page only the space it typed, with no key event at all.
+     Then nothing above runs, and this is the only sign of it. Once a run. */
+  const lastSpaceKey = useRef(0)
+  const toldNoKey = useRef(false)
+  const spaceWithoutKey = (e: React.ChangeEvent<HTMLTextAreaElement>): void => {
+    if (!dictation.enabled || toldNoKey.current) return
+    const typed = (e.nativeEvent as InputEvent).data
+    if (typed !== ' ' || performance.now() - lastSpaceKey.current < 250) return
+    toldNoKey.current = true
+    window.wumpy.voice.log('dictation: a space was typed with no Space key event - an input method is keeping the key from the app')
   }
 
   const applyHold = (action: HoldAction, e?: React.KeyboardEvent<HTMLTextAreaElement>): void => {
     if (action.swallow) e?.preventDefault()
 
     if (action.kind === 'arm') {
-      stopTimer()
+      if (holdTimer.current !== null) clearTimeout(holdTimer.current)
+      if (settleTimer.current !== null) clearTimeout(settleTimer.current)
+      settleTimer.current = null
       holdTimer.current = setTimeout(() => {
         holdTimer.current = null
         applyHold(hold.current.tick(performance.now()))
-      }, HOLD_MS + 16)
+      }, action.wait + 16)
+      return
+    }
+
+    if (action.kind === 'wait') {
+      // The hold timer keeps running: if this turns out to be a repeat, the
+      // press goes on, and if the timer fired meanwhile the press re-arms it.
+      if (settleTimer.current !== null) clearTimeout(settleTimer.current)
+      settleTimer.current = setTimeout(() => {
+        settleTimer.current = null
+        applyHold(hold.current.settle(performance.now()))
+      }, BRIDGE_MS + 8)
       return
     }
 
@@ -262,18 +322,21 @@ export function Composer({
         if (!el) return
         el.selectionStart = el.selectionEnd = caret
       })
+      if (trace.current) trace.current.listened = true
       dictation.beginHold()
       return
     }
 
     if (action.kind === 'send') {
       stopTimer()
+      traceEnd()
       dictation.finish()
       return
     }
 
     if (action.kind === 'cancel') {
       stopTimer()
+      traceEnd()
       dictation.cancel()
     }
   }
@@ -457,7 +520,9 @@ export function Composer({
      * point of the switch. A space pressed and released is still a space even
      * when it is on - nothing happens until half a second of holding.
      */
+    if (e.key === ' ' || e.code === 'Space') lastSpaceKey.current = performance.now()
     if (dictation.enabled && isPlainSpace(e)) {
+      traceKey(e, 'd')
       const el = e.currentTarget
       applyHold(
         hold.current.down(performance.now(), { value: el.value, caret: el.selectionStart }),
@@ -706,6 +771,7 @@ export function Composer({
             streaming ? 'Still answering — Enter queues, /also adds a note' : placeholder
           }
           onChange={(e) => {
+            spaceWithoutKey(e)
             setValue(e.target.value)
             // Editing a recalled line makes it the draft again, so Down stops
             // trying to put the old half-written one back.
@@ -717,8 +783,9 @@ export function Composer({
             // decided whether to start; by the time it comes up, Shift may have
             // been let go first, and a release that failed to match would leave
             // the machine listening with nothing to end it.
-            if (!dictation.enabled || e.key !== ' ') return
-            applyHold(hold.current.up(), e)
+            if (!dictation.enabled || (e.key !== ' ' && e.code !== 'Space')) return
+            traceKey(e, 'u')
+            applyHold(hold.current.up(performance.now()), e)
           }}
           onBlur={abandonHold}
           onPaste={(e) => {

@@ -26,7 +26,7 @@ await build({
   outfile: out,
   logLevel: 'error'
 })
-const { HoldToTalk, HOLD_MS, isPlainSpace } = await import(pathToFileURL(out).href)
+const { HoldToTalk, HOLD_MS, BRIDGE_MS, isPlainSpace } = await import(pathToFileURL(out).href)
 rmSync(out, { force: true })
 
 let failed = 0
@@ -39,6 +39,12 @@ const check = (what, got, want) => {
 }
 
 const snap = (value = 'hello', caret = 5) => ({ value, caret })
+/** Let go at `at`, and nothing pressed after: what the settle timer decides. */
+const release = (h, at = 0) => {
+  const first = h.up(at)
+  if (first.kind !== 'wait') return first
+  return { ...h.settle(at + BRIDGE_MS), up: first }
+}
 
 /* -------------------------------------------- a space is a space is a space */
 
@@ -50,7 +56,7 @@ const snap = (value = 'hello', caret = 5) => ({ value, caret })
 {
   const h = new HoldToTalk()
   h.down(0, snap())
-  const up = h.up()
+  const up = release(h, 50)
   check('releasing early is just a space', up.kind, 'cancel')
   check('and the space stays in the box', up.swallow, false)
   check('back to idle', h.state, 'idle')
@@ -61,7 +67,7 @@ const snap = (value = 'hello', caret = 5) => ({ value, caret })
   h.down(0, snap())
   check('a hold one ms short does not listen', h.tick(HOLD_MS - 1).kind, 'nothing')
   check('still armed, not listening', h.state, 'armed')
-  check('and then it is a space', h.up().kind, 'cancel')
+  check('and then it is a space', release(h, HOLD_MS - 1).kind, 'cancel')
 }
 
 /* ----------------------------------------------------------- a real hold */
@@ -78,9 +84,9 @@ const snap = (value = 'hello', caret = 5) => ({ value, caret })
   })
   check('state is listening', h.state, 'listening')
 
-  const send = h.up()
+  const send = release(h, 2000)
   check('releasing sends it', send.kind, 'send')
-  check('and that release is not a space', send.swallow, true)
+  check('and that release is not a space', send.up.swallow && send.swallow, true)
   check('idle again', h.state, 'idle')
 }
 
@@ -121,7 +127,7 @@ const snap = (value = 'hello', caret = 5) => ({ value, caret })
 {
   const h = new HoldToTalk()
   h.down(0, snap())
-  h.up()
+  release(h, 50)
   check('a timer that fires after the release does nothing', h.tick(HOLD_MS).kind, 'nothing')
   check('and nothing is listening', h.state, 'idle')
 }
@@ -133,10 +139,10 @@ const snap = (value = 'hello', caret = 5) => ({ value, caret })
   // Two taps in quick succession, the first timer still pending.
   const h = new HoldToTalk()
   h.down(0, snap('a', 1))
-  h.up()
-  h.down(100, snap('ab', 2))
+  release(h, 50)
+  h.down(300, snap('ab', 2))
   check('the stale timer cannot fire for the new press', h.tick(HOLD_MS).kind, 'nothing')
-  check('but the new press reaches its own delay', h.tick(100 + HOLD_MS).kind, 'listen')
+  check('but the new press reaches its own delay', h.tick(300 + HOLD_MS).kind, 'listen')
 }
 
 /* ------------------------------------------------------------- giving up */
@@ -165,6 +171,75 @@ const snap = (value = 'hello', caret = 5) => ({ value, caret })
   check('the next space starts over', h.down(2000, snap()).kind, 'arm')
 }
 
+/* ------------------------------------- repeats that come as release + press */
+
+/**
+ * With an input method in between, a held key can reach the page as press,
+ * release, press, release - a pair per repeat. Each release used to end the
+ * hold and each press start a new one, so half a second was never reached.
+ */
+{
+  const h = new HoldToTalk()
+  h.down(0, snap('say ', 4))
+  let restarted = 0
+  let ended = 0
+  for (let t = 250; t < HOLD_MS + 400; t += 25) {
+    const up = h.up(t)
+    if (up.kind !== 'wait') ended++
+    if (h.settle(t + 2).kind !== 'nothing') ended++
+    const down = h.down(t + 3, snap('WRONG', 0))
+    if (down.kind === 'arm' && down.wait === HOLD_MS) restarted++
+    if (t + 3 >= HOLD_MS && h.state === 'armed') {
+      const listen = h.tick(t + 3)
+      if (listen.kind === 'listen') {
+        check('paired repeats still reach the delay', t + 3 - HOLD_MS < 30, true)
+        check('with the snapshot from the first press', listen.restore, snap('say ', 4))
+      }
+    }
+  }
+  check('a pair never ends the hold', ended, 0)
+  check('nor starts the half-second again', restarted, 0)
+  check('and it is listening', h.state, 'listening')
+  check('a real release still sends', release(h, 5000).kind, 'send')
+  check('idle after', h.state, 'idle')
+}
+{
+  // The timer can fire in the gap between a repeat's release and its press;
+  // the press then has to set it going again for what is left.
+  const h = new HoldToTalk()
+  h.down(0, snap())
+  h.up(HOLD_MS - 2)
+  check('a tick inside the gap does nothing', h.tick(HOLD_MS + 16).kind, 'nothing')
+  const again = h.down(HOLD_MS + 20, snap('WRONG', 0))
+  check('the next press re-arms at once', [again.kind, again.wait], ['arm', 0])
+  check('and listens', h.tick(HOLD_MS + 20).kind, 'listen')
+}
+{
+  // A settle that comes early - a press may still be on its way - waits.
+  const h = new HoldToTalk()
+  h.down(0, snap())
+  h.up(100)
+  check('settle before the bridge is up does nothing', h.settle(100 + BRIDGE_MS - 1).kind, 'nothing')
+  check('a tap is still a space after it', h.settle(100 + BRIDGE_MS).kind, 'cancel')
+}
+{
+  // A settle timer late behind a busy frame: the next press finishes the old
+  // recording rather than carrying on with it.
+  const h = new HoldToTalk()
+  h.down(0, snap())
+  h.tick(HOLD_MS)
+  h.up(1000)
+  check('a press long after a release sends what was said', h.down(1000 + BRIDGE_MS + 500, snap()).kind, 'send')
+  check('and listens no more', h.state, 'idle')
+}
+{
+  const h = new HoldToTalk()
+  h.down(0, snap())
+  h.tick(HOLD_MS)
+  h.up(900)
+  check('let go, then focus left: it is sent, not thrown away', h.abort().kind, 'send')
+}
+
 /* ------------------------------------------------- what counts as a space */
 
 const key = (over = {}) => ({
@@ -180,6 +255,10 @@ check('Ctrl+Space is a shortcut', isPlainSpace(key({ ctrlKey: true })), false)
 check('Shift+Space is not a space', isPlainSpace(key({ shiftKey: true })), false)
 check('Alt+Space opens the window menu', isPlainSpace(key({ altKey: true })), false)
 check('and a letter is a letter', isPlainSpace(key({ key: 'a' })), false)
+check('Space through an input method', isPlainSpace(key({ key: 'Process', code: 'Space' })), true)
+check('or one that does not say', isPlainSpace(key({ key: 'Unidentified', code: 'Space' })), true)
+check('but not picking a candidate', isPlainSpace(key({ isComposing: true })), false)
+check('and Process on another key is not Space', isPlainSpace(key({ key: 'Process', code: 'KeyA' })), false)
 
 /* ------------------------------------------------------------- the wiring */
 
@@ -194,6 +273,8 @@ check(
 check('the timer is cleared, not left running', /clearTimeout/.test(composer), true)
 check('losing focus aborts', /onBlur/.test(composer), true)
 check('a swallowed key is prevented', /action\.swallow/.test(composer), true)
+check('a release waits to see if it was a repeat', /hold\.current\.settle\(/.test(composer), true)
+check('and a hold that never listened is logged', /recording never started/.test(composer), true)
 
 /**
  * "As accurate as possible" means there is no size to choose any more, so
