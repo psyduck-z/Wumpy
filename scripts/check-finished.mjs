@@ -55,6 +55,12 @@ const REPORTED = lines(
   'Spotify is now installed and ready to use.'
 )
 check('the reported shape is caught', F.claimsBeforeRunning(REPORTED), true)
+/* A redirect that throws the output away, and a command that only looks,
+   are not what "saved" and "installed" would be claiming. */
+check('"saved" over cat 2>/dev/null is not a claim', F.claimsBeforeRunning(lines("I've saved your notes to notes.txt.", '', RUN('cat notes.txt 2>/dev/null'))), false)
+check('"installed" over pip list is not a claim', F.claimsBeforeRunning(lines('Requests is installed already.', '', RUN('pip list'))), false)
+check('"saved" over a real redirect still is', F.claimsBeforeRunning(lines('Saved the list to files.txt.', '', RUN('ls > files.txt'))), true)
+check('"installed" over pip install still is', F.claimsBeforeRunning(lines('Requests is installed and ready to use.', '', RUN('pip install requests'))), true)
 
 /* The same claim in other words. The first version of the guard knew only
    the word "installed", and the claim simply moved. */

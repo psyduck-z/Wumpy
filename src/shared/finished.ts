@@ -96,10 +96,14 @@ function blockAt(lines: readonly string[], at: number): { kind: string; body: st
 /** What a block does, as the past tense a claim of it would use. */
 const DOES: Array<[RegExp, RegExp]> = [
   [/\b(?:rm|rmdir|del|erase|Remove-Item|unlink|trash|shred)\b/i, /\b(?:deleted|removed|gone|erased|cleared|trashed)\b/i],
-  [/\b(?:install|winget|choco|apt|pacman|yay|brew|npm\s+i|pip)\b/i, /\binstalled\b/i],
+  /* Installing, not looking: `pip list`, `apt list` and `winget list` are
+     not an install, so "installed" above them is a report, not a claim. */
+  [/\binstall\b|\b(?:pacman|yay|paru)\s+-S|\bnpm\s+i\b|\bInstall-(?:Package|Module)\b/i, /\binstalled\b/i],
   [/\b(?:kill|pkill|killall|taskkill|Stop-Process|Stop-Service|systemctl\s+stop)\b/i, /\b(?:killed|stopped|closed|ended)\b/i],
   [/\b(?:mv|move|Move-Item|Rename-Item|ren|rename)\b/i, /\b(?:moved|renamed)\b/i],
-  [/\b(?:mkdir|touch|New-Item|tee|cp|copy|Copy-Item)\b|>/i, /\b(?:created|made|saved|copied|written)\b/i]
+  /* A redirect into a file - not 2>/dev/null or >$null, which throw the
+     output away and write nothing anyone would call saved. */
+  [/\b(?:mkdir|touch|New-Item|tee|cp|copy|Copy-Item)\b|(?<![2&\-=<>])>>?(?!&)\s*(?!\/dev\/null|\$null\b|nul\b)[\w~."'\/\\$]/i, /\b(?:created|made|saved|copied|written)\b/i]
 ]
 
 /**
