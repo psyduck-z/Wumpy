@@ -17,6 +17,7 @@ const check = (what, ok) => {
 const flow = read('.github/workflows/windows.yml')
 check('the workflow may write a release', /permissions:\s*\n\s*contents: write/.test(flow))
 check('each build publishes, with a version of its own', /--publish always -c\.extraMetadata\.version=0\.1\.\$\{\{ github\.run_number \}\}/.test(flow))
+check('in bash, where the -c.flag survives', /--publish always[^\n]*\n\s*shell: bash/.test(flow))
 check('with the token to do it', /GH_TOKEN: \$\{\{ secrets\.GITHUB_TOKEN \}\}/.test(flow))
 const yml = read('electron-builder.yml')
 check('installers know where to look', /publish:\s*\n\s*provider: github\s*\n\s*owner: psyduck-z\s*\n\s*repo: Wumpy\s*\n\s*releaseType: release/.test(yml))
