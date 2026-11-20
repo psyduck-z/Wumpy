@@ -557,6 +557,16 @@ check('nor is a car wrapping round the edge a crossing', PC.standInTraffic([road
 check('a hop measures pixels per tile', PC.tileScale({ player: { row: 14, y: 524 } }, { player: { row: 13, y: 484 } }), 40)
 check('a drift of a twentieth of a tile is not a move', PC.playFrom({ player: { row: 14, col: 3.44 } }, { player: { row: 14, col: 3.4 } }).moved, false)
 check('a hop of a tile is', PC.playFrom({ player: { row: 14, col: 3 } }, { player: { row: 13, col: 3 } }).moved, true)
+{
+  /* Standing the player in a lane moves where it is, never how fast. */
+  const js = PC.teleportJs({ player: { col: 5, row: 12, targetRow: 12, velY: -2, dirY: 1, startY: 12, spawnRow: 12 }, harm: [[3, 11, 1], [4, 9, 1]], over: false })
+  check('the stand moves row and targetRow', /"row":-1/.test(js ?? '') && /"targetRow":-1/.test(js ?? ''), true)
+  check('but not velY, dirY, startY or spawnRow', /velY|dirY|startY|spawnRow/.test(js ?? ''), false)
+  const round = PC.teleportJs({ player: { x: 200, y: 400, r: 6 }, harm: [[150, 360, 40], [90, 320, 40]], over: false })
+  check('a radius r is not moved as a row', /"r":/.test(round ?? ''), false)
+  check('an r beside a c is a row', /"r":-1/.test(PC.teleportJs({ player: { c: 5, r: 12 }, harm: [[3, 11, 1], [4, 9, 1]], over: false }) ?? ''), true)
+}
+check('a car kept in two lists is one car', /const added = new Set\(\)/.test(read('src/shared/pagecheck.ts')) && /added\.has\(o\)/.test(read('src/shared/pagecheck.ts')), true)
 check('cars stacked on one another in a lane are said', PC.bunched({ t: 0, harm: [[3, 1, 1], [3, 1, 1], [7, 3, 1]] }, { t: 1500, harm: [[5, 1, 1], [5, 1, 1], [8, 3, 1]] }) !== '', true)
 check('cars spread along a lane are not', PC.bunched({ t: 0, harm: [[1, 1, 1], [5, 1, 1], [9, 1, 1]] }, { t: 1500, harm: [[2, 1, 1], [6, 1, 1], [10, 1, 1]] }), '')
 check('builds get a third review, since the reviewer sees them', /isBuild\(agent\.brief\) \? BUILD_REVIEW_ROUNDS : REVIEW_ROUNDS/.test(read('src/main/agents.ts')), true)
@@ -730,8 +740,10 @@ check('an edit whose FIND drops a blank line or a double space still lands', A.a
 check('a change to how a built game plays is a change, with no game named', N.asksToBuild('make it so I die when I get hit by the cars, and also space out the cars a little', true), 'change')
 check('and "the ghosts are too fast, slow them down"', N.asksToBuild('the ghosts should be slower, can you slow them down', true), 'change')
 check('but not before anything was built', N.asksToBuild('make it so I die when I get hit by the cars', false), null)
+check('nor an ordinary question after a build', ['I want to restart my computer', 'can you show my ssh keys', 'let me know the score of the match', 'change my desktop background'].map((t) => N.asksToBuild(t, true)), [null, null, null, null])
+check('only a build agent counts as something built', /agentAsks\(text\(m\)\)\.some\(\(a\) => isBuild\(/.test(read('src/main/index.ts')), true)
 check('nor a question after one', N.asksToBuild('what time is it in Tokyo', true), null)
-check('the chat knows when something was built here', /const built = messages\.some\(\(m\) => m\.role === 'assistant' && /.test(read('src/main/index.ts')), true)
+check('the chat knows when something was built here', /const built = messages\.some\(\s*\(m\) => m\.role === 'assistant' && agentAsks/.test(read('src/main/index.ts')), true)
 check('an earlier card whose file is there word for word says saved, with no buttons', /const already = earlier && target\?\.same === true/.test(read('src/renderer/src/components/WriteCard.tsx')) && /!missingFrom && !already/.test(read('src/renderer/src/components/WriteCard.tsx')), true)
 check('chat cards keep the same component functions across renders', /const components = useMemo<Components>/.test(read('src/renderer/src/components/Markdown.tsx')) && /components=\{components\}/.test(read('src/renderer/src/components/Markdown.tsx')), true)
 check('a failed build goes back saying to start one more agent, never to write it', /start one more agent with the same brief - never write the file yourself/.test(A.deliveryText([{ number: 1, title: 'Build a Crossy Road game in one HTML file', ok: false, text: 'its replies kept running far too long', tookMs: 1000, review: '', steps: 3 }], null)), true)
@@ -783,9 +795,26 @@ check('a saved agent file names its card', /agents\.saved\(from, result\.path\)/
   check('with a real bug beside it, the real bug stays', [both.verdict, both.dropped, /Space/.test(both.notes), /canvas/.test(both.notes)], ['revise', 1, true, false])
   check('a real bug alone is untouched', r('1. Pressing Space after game over does not restart.').dropped, 0)
   check('so is a colour bug', r('1. Locked pieces are drawn in the wrong colour.').verdict, 'revise')
+  check('prose is one review: a real bug beside the overlay is kept', A.withoutNonBugs({ verdict: 'revise', notes: 'The cars never kill the player. Also the snake stays drawn behind the game over overlay.' }).verdict, 'revise')
+  check('a game running under its overlay is a real bug', A.withoutNonBugs({ verdict: 'revise', notes: '1. The game keeps running underneath the title overlay, which never hides.' }).dropped, 0)
+  check('a "3." inside a point does not split it', A.withoutNonBugs({ verdict: 'revise', notes: '1. Set lives to 3. Then reset.\n2. The board stays visible behind the game over screen.' }).notes, '1. Set lives to 3. Then reset.')
   check('an accept stays an accept', A.withoutNonBugs({ verdict: 'accept', notes: 'fine' }).verdict, 'accept')
   check('and the runner uses it', /withoutNonBugs\(parsed\)/.test(read('src/main/agents.ts')), true)
 }
+
+/* A failure that would only repeat does not ask for another agent. */
+{
+  const base = { number: 2, title: 'Build snake.html', ok: false, text: 'its replies kept running on', tookMs: 4000, review: '', steps: 3 }
+  check('a first failure asks for one more agent', /start one more agent/.test(A.deliveryText([base], null)), true)
+  check('a second failure at the same work asks the user instead', [/start one more agent/.test(A.deliveryText([{ ...base, noRetry: 'again' }], null)), /Do NOT start another/.test(A.deliveryText([{ ...base, noRetry: 'again' }], null))], [false, true])
+  check('no keys: never another agent', /do NOT start one/.test(A.deliveryText([{ ...base, text: 'there are no keys to spare', noRetry: 'stuck' }], null)), true)
+  check('a broken build after a broken build asks the user', /Do NOT start another/.test(A.deliveryText([{ ...base, ok: true, broken: true, noRetry: 'again', text: 'report' }], null)), true)
+  const main = read('src/main/agents.ts')
+  check('the runner marks a repeat and a stuck failure', /no keys to spare\|no key came free\|no model can answer/.test(main) && /noRetry\(agent, why, this\.agents\)/.test(main), true)
+}
+
+check('a takeover finds a relative path where the write card would', /resolve\(settings\.get\('shellCwd'\) \|\| homedir\(\), req\.path/.test(read('src/main/index.ts')), true)
+check('four bad edits give up the way every other end does', /if \(badEdits >= 4\) \{\s*giveUp\(\)\s*return/.test(read('src/main/agents.ts')), true)
 
 /* A held game write always has a way out, and only the game is held. */
 {

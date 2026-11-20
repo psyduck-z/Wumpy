@@ -166,6 +166,23 @@ const SEEN_NOTE = [
   'black screen - each is a REVISE, said plainly. Judge only what it shows.'
 ].join(LF)
 
+/**
+ * Whether a failed or broken agent's hand-back may ask for another try.
+ * See Finished.noRetry.
+ */
+function noRetry(agent: Agent, why: string, all: readonly Agent[]): { noRetry?: 'again' | 'stuck' } {
+  if (/no keys to spare|no key came free|no model can answer/i.test(why)) return { noRetry: 'stuck' }
+  const before = all.some(
+    (a) =>
+      a.id !== agent.id &&
+      a.chatId === agent.chatId &&
+      a.startedAt <= agent.startedAt &&
+      (a.status === 'failed' || a.stillBroken) &&
+      ((a.thing && a.thing === agent.thing) || sameWork(a.title, agent.title))
+  )
+  return before ? { noRetry: 'again' } : {}
+}
+
 export class Agents {
   private agents: Agent[] = []
   private monitors: Monitor[] = []
@@ -652,8 +669,10 @@ export class Agents {
               ? 'NOT MADE: that wumpy-edit block has no FIND: and REPLACE: lines Wumpy could read, so nothing was changed. Send it again in that form, or your whole REPORT with the whole file.'
               : 'Your report has no file in it. Send the change as wumpy-edit blocks, or your whole REPORT with the whole file.'
         })
+        /* As every other way out: never a version Wumpy's test failed
+           handed back as if it worked. */
         if (badEdits >= 4) {
-          this.finishReport(agent, lastGood || lastReport, true)
+          giveUp()
           return
         }
         continue
@@ -1034,6 +1053,7 @@ export class Agents {
       id: agent.id,
       ...(file ? { file: { lines: file.text.split(LF).length - 1, kind: file.kind } } : {}),
       ...(agent.stillBroken ? { broken: true } : {}),
+      ...(status !== 'stopped' && (status === 'failed' || agent.stillBroken) ? noRetry(agent, why, this.agents) : {}),
       number: agent.number,
       title: agent.title,
       ok: status === 'done',

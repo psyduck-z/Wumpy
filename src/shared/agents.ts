@@ -853,6 +853,13 @@ export interface Finished {
   file?: { lines: number; kind: string }
   /** What it built never passed Wumpy's test. */
   broken?: boolean
+  /**
+   * Not worth another try: an earlier agent in this chat already failed at
+   * the same work, or this failure will not clear by trying again (no keys,
+   * no model). The hand-back said "start one more agent" every time, and a
+   * failure that repeats went round for ever, a chat request each round.
+   */
+  noRetry?: 'again' | 'stuck'
   number: number
   title: string
   ok: boolean
@@ -881,6 +888,13 @@ function took(ms: number): string {
  * monitor (or a lone agent) was waiting for. Said to be from the app, so the
  * model does not thank the user for writing it.
  */
+/** What the chat is told instead of "start one more agent". */
+function retryStop(why: 'again' | 'stuck'): string {
+  return why === 'again'
+    ? 'An agent already failed at this same work before this one. Do NOT start another: say plainly it did not finish and what went wrong, and ask the user how to go on. Never write the file yourself instead.'
+    : 'Another agent would fail the same way, so do NOT start one: say plainly it did not finish and why, and what the user can do about it. Never write the file yourself instead.'
+}
+
 export function deliveryText(done: readonly Finished[], note: string | null): string {
   const head =
     done.length === 1
@@ -909,14 +923,14 @@ export function deliveryText(done: readonly Finished[], note: string | null): st
             BT
           ].join(LF)
         : d.broken
-          ? `${LF}IT DOES NOT WORK YET: every version failed Wumpy's test (below). Say so plainly, and start one more agent with the same brief plus what the test found. Never save this file, and never write one of your own instead.`
+          ? `${LF}IT DOES NOT WORK YET: every version failed Wumpy's test (below). ${d.noRetry ? `${retryStop(d.noRetry)} Never save this file, and never write one of your own instead.` : "Say so plainly, and start one more agent with the same brief plus what the test found. Never save this file, and never write one of your own instead."}`
           : ''
     /* The file's save block comes last, after the report: its own words
        about folders it could not check and writes it could not make once
        talked the chat out of saving a C++ game it had been handed. */
     return d.ok
       ? `AGENT ${d.number}: ${d.title} (${how})${LF}${ran}${LF}${d.file && d.id ? withoutFile(d.text, d.id) : d.text}${file}`
-      : `AGENT ${d.number}: ${d.title} - FAILED (${how}): ${d.text}${isBuild(d.title) ? `${LF}It was building or changing something. Say plainly it did not finish, and start one more agent with the same brief - never write the file yourself instead: a Crossy Road the chat wrote itself after a failed agent was four thousand characters, with cars that never killed.` : ''}`
+      : `AGENT ${d.number}: ${d.title} - FAILED (${how}): ${d.text}${d.noRetry ? `${LF}${retryStop(d.noRetry)}` : isBuild(d.title) ? `${LF}It was building or changing something. Say plainly it did not finish, and start one more agent with the same brief - never write the file yourself instead: a Crossy Road the chat wrote itself after a failed agent was four thousand characters, with cars that never killed.` : ''}`
   })
   const rule =
     'A fact about this computer in a report is only as good as what it ran, above: what no output shows, you do not know - say so, or check. Never fill it in. And if a report is not what was asked for, say so plainly: never pass off what you know yourself as what an agent found.'
@@ -1000,9 +1014,16 @@ export function withoutNonBugs(review: { verdict: 'accept' | 'revise'; notes: st
   dropped: number
 } {
   if (review.verdict !== 'revise') return { ...review, dropped: 0 }
-  const points = review.notes.split(/\n?(?=(?:^|\s)\d+[.)]\s)/m).map((p) => p.trim()).filter(Boolean)
+  /* Points only when they are a numbered list, each at the start of a line.
+     Prose is one review that cannot be taken apart: dropping it whole for
+     one sentence about the overlay threw away "the cars never kill the
+     player" beside it, and a "3." inside a sentence split it in two. */
+  const points = review.notes.split(/\n(?=\s*\d+[.)]\s)/).map((p) => p.trim()).filter(Boolean)
+  if (!points.every((p) => /^\d+[.)]\s/.test(p))) return { ...review, dropped: 0 }
+  /* Drawn or visible behind it - not "keeps running underneath", which is
+     a game that never paused, and a real bug. */
   const behindOverlay = (p: string): boolean =>
-    /\b(?:behind|under(?:neath)?|beneath)\b[^.]{0,80}\b(?:overlay|game[- ]?over|title|start screen|menu)\b/i.test(p) ||
+    /\b(?:drawn|visible|shown|showing|displayed|remains?|still\s+(?:there|shows?|on\s+screen))\b[^.]{0,40}\b(?:behind|under(?:neath)?|beneath)\b[^.]{0,80}\b(?:overlay|game[- ]?over|title|start screen|menu|it)\b/i.test(p) ||
     /\b(?:clear|blank|hide|wipe)\b[^.]{0,50}\b(?:canvas|board|screen|scene|snake|pieces?)\b[^.]{0,80}\b(?:game[- ]?over|overlay|title)\b/i.test(p)
   const kept = points.filter((p) => !behindOverlay(p))
   const dropped = points.length - kept.length
