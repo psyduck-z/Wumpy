@@ -405,6 +405,12 @@ function readFence(children: ReactNode): { shell: ShellKind; code: string } | nu
 }
 
 /** A held game write: the card only once main has said no agent can take it. */
+/** Whether this write block is the game a reply wrote itself - that block only. */
+function isGameBlock(reply: string, block: string): boolean {
+  const game = gameWritten(reply)
+  return game !== null && game === readWriteRequest(block).path
+}
+
 function HeldForTakeOver({ messageId, children }: { messageId: string; children: ReactNode }): React.JSX.Element {
   const released = useReleased(messageId)
   const { agents } = useAgentState()
@@ -581,7 +587,10 @@ export const Markdown = memo(function Markdown({
           }
           /* A game the chat wrote itself, in this session: held while an
              agent takes the request over (see useAgents). */
-          if (file && canAutoRun && messageId && gameWritten(text)) {
+          /* Only the game's own block: a README or a requirements.txt beside
+             it is written as usual, and never held for an agent that will
+             not write it. */
+          if (file && canAutoRun && messageId && isGameBlock(text, file)) {
             return (
               <HeldForTakeOver messageId={messageId}>
                 <WriteCard

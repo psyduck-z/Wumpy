@@ -49,14 +49,24 @@ export function useAgents(deps: Deps): void {
     if (!id) return
     const d = depsRef.current
     const message = d.messages.find((m) => m.id === id)
-    if (!message || message.role !== 'assistant' || message.error) return
+    if (!message || message.role !== 'assistant') return
+    /* The panel holds every game the chat writes itself until this says
+       what happens to it (see Markdown's HeldForTakeOver). Each way out
+       below that does not take it over lets it go, or it was "Not written"
+       for good: after a command's output, or an answer that ended in an error. */
+    const written = gameWritten(message.content)
+    if (message.error) {
+      if (written) release(message.id)
+      return
+    }
     /* A game it wrote itself instead of starting an agent: the request
        goes to an agent, and the write is held - or let go, when main says
        no agent can take it. */
     /* Only in answer to the person: a game retyped from an agent's report
        taken over again would go round for ever. */
     const before = d.messages[d.messages.findIndex((m) => m.id === message.id) - 1]
-    const game = before?.role === 'user' && !before.automatic ? gameWritten(message.content) : null
+    const game = before?.role === 'user' && !before.automatic ? written : null
+    if (written && !game) release(message.id)
     if (game) {
       const request = [...d.messages].reverse().find((m) => m.role === 'user' && !m.automatic)?.content ?? ''
       void window.wumpy.agents

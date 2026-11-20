@@ -791,7 +791,9 @@ export function gameWritten(reply: string): string | null {
   if (/^\s{0,3}`{3,}[ \t]*wumpy-agent\b/m.test(reply)) return null
   const blocks = reply.split(/^\s{0,3}`{3,}[ \t]*wumpy-write[ \t]*$/m).slice(1)
   for (const block of blocks) {
-    const path = /^\s*path:\s*(.+)$/m.exec(block)?.[1]?.trim()
+    /* Quotes stripped the way readWriteRequest strips them, so the panel
+       can tell which block is the game by its path. */
+    const path = /^\s*path:\s*(.+)$/m.exec(block)?.[1]?.trim().replace(/^["'`]|["'`]$/g, '')
     if (!path || /^\s*from:/m.test(block) || !/\.(?:html?|py|pyw|cpp|cc|cxx|c|js)$/i.test(path)) continue
     if (block.length > 1500 && /<canvas|requestAnimationFrame|import curses|import pygame|tkinter|ncurses|getch\(|\bgame ?over\b/i.test(block)) return path
   }
