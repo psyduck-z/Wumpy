@@ -1,3 +1,4 @@
+import { clockText, spanText } from '@shared/deadline'
 import type { ApprovalMode, ContextUsage } from '@shared/types'
 import { MIDTASK_AT, SEND_AT, fullness } from '@shared/pressure'
 import type { PoolView } from '@shared/pool'
@@ -192,6 +193,8 @@ export function StatusBar({
   approvalMode,
   reflect,
   onReflectOff,
+  stopAt,
+  onStopAtOff,
   listening,
   onCycleApproval,
   onCompact,
@@ -216,6 +219,13 @@ export function StatusBar({
    */
   reflect: boolean
   onReflectOff(): void
+  /**
+   * The stop time the user gave ("do not continue past 10:30"), while one is
+   * running. Shown for the reason the reflect pill is: a clock that will stop
+   * the work should be seen to be kept, not taken on trust. Click to lift it.
+   */
+  stopAt: number | null
+  onStopAtOff(): void
   /**
    * A meeting being transcribed, when one is. Words, or null.
    *
@@ -299,6 +309,19 @@ export function StatusBar({
           title="Self-reflection: a mentor reviews each finished task. Click to turn off (/reflect off)."
         >
           reflect
+        </button>
+      )}
+
+      {stopAt !== null && (
+        <button
+          type="button"
+          className="approval is-deadline"
+          onClick={onStopAtOff}
+          title={`Wumpy stops the answer, any agents and any automatic steps at ${clockText(stopAt)}${
+            stopAt > Date.now() ? ` - ${spanText(stopAt - Date.now())} from now` : ''
+          }. Click to remove the time limit.`}
+        >
+          stops {clockText(stopAt)}
         </button>
       )}
 

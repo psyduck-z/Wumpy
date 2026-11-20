@@ -248,6 +248,19 @@ Each review shows as a note in the transcript — *Mentor reviewing…*, then
 A new message from you is a new task and starts the count again. Every review
 is one request, so it is off by default.
 
+## A time to stop
+
+Say when to stop, in your own words, and Wumpy keeps the clock:
+
+- "keep refining it and do not continue past 10:30"
+- "stop at 10:30pm"
+- "keep crunching for half an hour"
+- "stop after 2 hours"
+
+It says the time back, shows a **stops 10:30 PM** pill in the status bar, and tells the model each turn how long it has left, so it keeps working instead of stopping to ask. When the time comes it stops the answer and every running agent. Nothing goes out on its own after that, whether a command's output or an agent's report, until you say something. A time without am or pm means the next time the clock shows it, so at 4 pm "10:30" means tonight.
+
+Click the pill, or say "no time limit", to lift it. A time mentioned as a fact ("the meeting is at 10:30") or a timer ("set a timer for 5 minutes") is not a stop time. The phrasings are in `src/shared/deadline.ts` and tested by `scripts/check-deadline.mjs`.
+
 ## Background agents
 
 With two keys or more, Wumpy can hand work off and keep talking. Ask for

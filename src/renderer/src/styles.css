@@ -1943,7 +1943,8 @@ body {
   color: rgb(var(--text));
 }
 
-.approval.is-reflect {
+.approval.is-reflect,
+.approval.is-deadline {
   color: rgb(var(--accent));
   border-color: rgb(var(--accent) / 0.4);
 }

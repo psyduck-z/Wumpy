@@ -4131,6 +4131,12 @@ function namedControls(shot: Attachment): string[] {
         onCycleApproval={() => void runCommand({ kind: 'approve', mode: 'cycle' }, '/approve')}
         reflect={settings?.reflect ?? false}
         onReflectOff={() => void runCommand({ kind: 'reflect', on: false }, '/reflect off')}
+        stopAt={stopAt}
+        onStopAtOff={() => {
+          deadline.set(null)
+          setStopAt(null)
+          chatRef.current.note(DEADLINE_CLEARED_TEXT)
+        }}
         onCompact={() => void compactHistory()}
         onQuota={() => void runCommand({ kind: 'usage', reset: false }, '/usage')}
       />
