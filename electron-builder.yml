@@ -2,6 +2,15 @@ appId: dev.psyduckz.wumpy
 productName: Wumpy
 copyright: Copyright (c) 2026 psyduck-z
 
+# Where an installed Wumpy looks for updates (src/main/updater.ts): the
+# releases the Windows workflow publishes on every push. Built into each
+# installer as app-update.yml, so it is here even for a build made locally.
+publish:
+  provider: github
+  owner: psyduck-z
+  repo: Wumpy
+  releaseType: release
+
 directories:
   output: dist
   buildResources: resources

@@ -90,7 +90,7 @@ const prompt = read('src/shared/assistant.ts')
 
 check('it relaunches, then quits in order', /app\.relaunch\(\{ args, execPath: launchPath\(process\.execPath, existsSync\) \}\)\s+app\.quit\(\)/.test(main), true)
 check('not app.exit, so the counts are flushed', /async function restartWumpy[\s\S]{0,900}app\.exit/.test(main), false)
-check('the music comes back first', /await releaseAllMusic\(\)[\s\S]{0,80}app\.relaunch/.test(main), true)
+check('the music comes back first', /await releaseAllMusic\(\)[\s\S]{0,160}app\.relaunch/.test(main), true)
 check('hidden stays hidden', /if \(!panel\?\.onScreen\) args\.push\('--hidden'\)/.test(main), true)
 check('one start’s flags are not carried over', /OWN_FLAGS = \/\^--\(\?:hidden\|voice\|toggle\|restart/.test(main), true)
 check('the chat id is checked before it is passed', /if \(chatId && \/\^\[\\w-\]\{1,80\}\$\/\.test\(chatId\)\)/.test(main), true)

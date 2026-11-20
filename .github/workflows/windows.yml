@@ -16,6 +16,10 @@ on:
     paths-ignore: ["**.md"]
   workflow_dispatch:
 
+# Publishing a release needs to write to the repo.
+permissions:
+  contents: write
+
 jobs:
   installer:
     runs-on: windows-latest
@@ -35,7 +39,13 @@ jobs:
       - name: Win+Shift+D helper
         run: dotnet publish src/hook/WumpyHook.csproj -c Release -o resources/hook -p:SelfContained=true -p:IncludeNativeLibrariesForSelfExtract=true -p:EnableCompressionInSingleFile=true
       - run: npx electron-vite build
-      - run: npx electron-builder --win --x64 --publish never
+      # Each build its own version and its own release, so an installed
+      # Wumpy sees it is newer and updates itself (src/main/updater.ts).
+      # Releases are not artifacts: the storage that filled up does not
+      # hold them.
+      - run: npx electron-builder --win --x64 --publish always -c.extraMetadata.version=0.1.${{ github.run_number }}
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - uses: actions/upload-artifact@v4
         # Storage full is no reason to skip the Windows checks below.
         continue-on-error: true
