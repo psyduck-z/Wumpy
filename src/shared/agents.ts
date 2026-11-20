@@ -153,6 +153,8 @@ export const BUILDING = [
   '  used. Nothing left out, shortened or "similar to above".',
   '- A game starts the way a player expects: a title or "press a key to start" - Space and',
   '  Enter start it, as well as any button - and nothing can kill the player before then.',
+  '  Its title and game-over screens sit over the board itself, not over the score or the',
+  '  side panels beside it: put them inside the board\'s own box (position: relative on it).',
   '- Controls: arrow keys and WASD (Space where it fits). The arrows must not scroll the page.',
   '- Never type a map as rows of text that must line up: models miscount them, and a Pac-Man',
   '  failed five times on rows of 19, 21 and 22 characters. Build it in code - fill a grid from',
