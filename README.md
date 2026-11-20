@@ -63,9 +63,18 @@ npm run package           # -> dist/Wumpy-0.1.0-setup.exe
 
 Or from any computer: every push to `main` builds it on GitHub's Windows
 machines (`.github/workflows/windows.yml`), runs the checks there too, and
-keeps the installer with the run — `gh run download -n wumpy-windows`. That
-one bundles .NET into the Win+Shift+D helper, so it needs nothing else
-installed.
+publishes it as a numbered release, `0.1.<run>`, on the
+[releases page](https://github.com/psyduck-z/Wumpy/releases). That one
+bundles .NET into the Win+Shift+D helper, so it needs nothing else
+installed. On Linux without Windows, `npm run package` needs Wine
+(`pacman -S wine`): electron-builder runs the installer under it to make the
+uninstaller.
+
+**It keeps itself up to date.** An installed Wumpy on Windows looks for a
+newer release a minute after it starts and every hour after, downloads it
+quietly, and installs it the next time Wumpy restarts - starting the new
+version itself. Develop on one computer, push, and the Windows PC catches up
+on its own. `[update]` lines in `wumpy.log` say what it found.
 
 `npm run check:live` runs the voice for real in Electron, on a fake
 microphone playing a made-up voice, with no sound played: the recorder on a
