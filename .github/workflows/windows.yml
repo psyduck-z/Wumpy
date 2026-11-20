@@ -42,12 +42,22 @@ jobs:
       # Each build its own version and its own release, so an installed
       # Wumpy sees it is newer and updates itself (src/main/updater.ts).
       # Releases are not artifacts: the storage that filled up does not
-      # hold them.
-      # In bash: PowerShell splits -c.extraMetadata... into -c and a file name.
-      - run: npx electron-builder --win --x64 --publish always -c.extraMetadata.version=0.1.${{ github.run_number }}
+      # hold them. Built here, published by gh in one step: left to publish
+      # itself, electron-builder uploaded two files at once and both tried
+      # to create the release - one lost with a 422 and the release was
+      # left without its installer. In bash: PowerShell splits
+      # -c.extraMetadata... into -c and a file name.
+      - run: npx electron-builder --win --x64 --publish never -c.extraMetadata.version=0.1.${{ github.run_number }}
+        shell: bash
+      - name: Publish the release
         shell: bash
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          v=0.1.${{ github.run_number }}
+          gh release create "v$v" "dist/Wumpy-$v-setup.exe" "dist/Wumpy-$v-setup.exe.blockmap" dist/latest.yml \
+            --target "$GITHUB_SHA" --title "Wumpy $v" \
+            --notes "Built from $GITHUB_SHA: $(git log -1 --format=%s)"
       - uses: actions/upload-artifact@v4
         # Storage full is no reason to skip the Windows checks below.
         continue-on-error: true
