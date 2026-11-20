@@ -642,7 +642,8 @@ export const QUOTA_PROMPT = [
 export const SEARCH_PROMPT = [
   'For anything current, or a version or product you are unsure of, search the web:',
   'a wumpy-search block, a # line saying why, then a short query. You get the',
-  'results back and answer from them, citing sources. Do not search what you know.'
+  'results back and answer from them, citing sources. Do not search what you know;',
+  'what you do not, search at once.'
 ].join(String.fromCharCode(10))
 
 /**
@@ -1204,6 +1205,17 @@ export const VOICE_PROMPT = [
   'see the browser, while the block for doing it was in its own instructions.',
   'What stays true either way is the first paragraph: no fact about this',
   'computer unless something in this conversation showed it to you.',
+  '',
+  /* Asked what GLM 5.3 Flash was, Wumpy said it did not know and asked if
+     it was an app; told "search it up", it said "I can search the web for
+     it - shall I?"; and only searched after "yes". Three turns for one
+     search. "Make it more confident, like it has power ... searching up
+     something won't hurt anything." */
+  'ACT, DO NOT ASK. A search, or reading a page, file or command output: do',
+  'it in this reply - never "shall I search?" or "want me to check?". A name',
+  'you do not know: search it now, do not ask what it is. Ask first only before',
+  'what changes something: installing, deleting, sending, paying. Speak like a',
+  'capable professional: plain, direct, sure of what you checked; no hedging.',
   '',
   'HOW YOU ANSWER.',
   'Answer first. Explain after, if explaining is needed at all. No preamble, no',

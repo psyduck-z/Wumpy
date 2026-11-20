@@ -24,6 +24,7 @@ import { DEFAULT_MODEL, assistantFor, assemblePrompt, type PromptShape } from '@
 import type { Footprint } from '@shared/footprint'
 import type { RankView, Transcript, VoiceStatus, WriteResult } from '@shared/types'
 import { Ranker, type SavedSweep } from './ranker'
+import { restartIntoUpdate, startUpdates } from './updater'
 import { SettingsStore } from './store'
 import { capDiskCache, reclaimCache } from './disk'
 import { ChatStore } from './chats'
@@ -2276,6 +2277,7 @@ function registerIpc(): void {
    */
   agents = new Agents({
     model: () => resolveModel(),
+    fallback: (m) => quickerModel(m, settings.get('latencies') ?? {}, (id) => !spentToday.has(id) && cloud.ready(id).ok),
     slots: () => agentSlotsNow(),
     hold: (model) => cloud.holdKey(model),
     release: (model, key) => cloud.releaseKey(model, key),
@@ -2910,6 +2912,8 @@ void app.whenReady().then(async () => {
     save: (saved) => writeFileSync(join(app.getPath('userData'), 'ranking.json'), JSON.stringify(saved))
   })
   ranker.start()
+  /* Updates on Windows, from the releases each push publishes. See updater.ts. */
+  startUpdates((line) => console.log(line))
 
   /*
    * Each key's real limit, measured while nobody is using Wumpy (see
@@ -3142,6 +3146,7 @@ async function restartWumpy(why: string, chatId: string | null): Promise<void> {
   if (!panel?.onScreen) args.push('--hidden')
   if (chatId && /^[\w-]{1,80}$/.test(chatId)) args.push(`--resume-chat=${chatId}`)
   await releaseAllMusic().catch(() => undefined)
+  if (restartIntoUpdate((line) => console.log(line))) return
   app.relaunch({ args, execPath: launchPath(process.execPath, existsSync) })
   app.quit()
 }
@@ -3310,6 +3315,7 @@ async function modelSays(messages: ChatRequest['messages'], handsFree: boolean, 
 function agentRunner(ready: (d: AgentDelivery) => void, say: (line: string) => void): Agents {
   return new Agents({
     model: () => resolveModel(),
+    fallback: (m) => quickerModel(m, settings.get('latencies') ?? {}, (id) => !spentToday.has(id) && cloud.ready(id).ok),
     slots: () => Math.max(1, agentSlotsNow()),
     hold: (m) => cloud.holdKey(m),
     release: (m, key) => cloud.releaseKey(m, key),

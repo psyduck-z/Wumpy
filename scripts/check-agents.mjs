@@ -805,6 +805,13 @@ check('a saved agent file names its card', /agents\.saved\(from, result\.path\)/
   check('and the runner uses it', /withoutNonBugs\(parsed\)/.test(read('src/main/agents.ts')), true)
 }
 
+{
+  const main = read('src/main/agents.ts')
+  check('an agent whose model gives nothing moves to another, once', /if \(!r\.status && !r\.completionTokens && !agent\.movedOff\)/.test(main) && /agent\.model = next/.test(main), true)
+  check('both agent runners are given the quicker model', (read('src/main/index.ts').match(/fallback: \(m\) => quickerModel\(m,/g) ?? []).length, 2)
+  check('and the chat is told to act, not ask', /ACT, DO NOT ASK/.test(read('src/shared/assistant.ts')) && /never "shall I search\?"/.test(read('src/shared/assistant.ts')), true)
+}
+
 /* Out of send-backs with the reviewer still unhappy: saved, never called ready. */
 {
   const d = { id: 'agent-1', number: 1, title: 'Build tetris.html', ok: true, file: { lines: 390, kind: 'a web page' }, text: 'REPORT', tookMs: 180000, review: 'sent back 3 times', steps: 4, open: '1. The next-piece preview spills off the page.' }

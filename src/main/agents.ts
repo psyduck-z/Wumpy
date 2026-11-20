@@ -65,6 +65,11 @@ export interface TurnResult {
 export interface AgentDeps {
   /** The model agents use: the one the chat is on. Null when none can answer. */
   model(): string | null
+  /**
+   * A model to move to when this one gave nothing back - the quicker one a
+   * voice turn would hand over to. Optional; null when there is none.
+   */
+  fallback?(model: string): string | null
   /** How many may work at once, from the key count (agentSlots). */
   slots(): number
   hold(model: string): number | null
@@ -112,6 +117,8 @@ interface Agent extends AgentView {
   stillBroken?: boolean
   /** What its reviewer still found wrong in the version handed back. */
   openPoints?: string
+  /** The model it moved off because it gave nothing back. */
+  movedOff?: string
   /** Its last reply ran past the length it may have, by this many characters. */
   tooLong?: number
   /** The agent before it whose build never worked, that it tries again. */
@@ -895,6 +902,26 @@ export class Agents {
       if (r.status === 400 || r.status === 404 || r.status === 410) {
         agent.why = `the model refused the request (${r.status})`
         return null
+      }
+      /* Nothing at all, for the whole turn: once, another model. Two
+         Tetris agents on a GLM that never answered sat out four four-minute
+         timeouts each - 33 minutes - while the chat had already moved on
+         from it after five seconds. */
+      if (!r.status && !r.completionTokens && !agent.movedOff) {
+        const next = this.deps.fallback?.(agent.model) ?? null
+        if (next && next !== agent.model) {
+          this.deps.log(`[agents] ${agent.number}: ${agent.model} gave nothing in ${Math.round(r.ms / 1000)}s; moving to ${next}`)
+          this.deps.release(agent.model, agent.heldKey)
+          agent.movedOff = agent.model
+          agent.model = next
+          agent.heldKey = this.deps.hold(next)
+          if (agent.heldKey === null) {
+            agent.why = `${agent.movedOff} did not answer and no key was free for ${next}`
+            return null
+          }
+          this.deps.changed()
+          continue
+        }
       }
       await sleep(3000 * (attempt + 1))
     }

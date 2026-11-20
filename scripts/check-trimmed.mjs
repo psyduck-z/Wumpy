@@ -172,9 +172,9 @@ check('every combination is covered', COMBINATIONS.length, 64)
   /* +2 and +3 for /restart in the same list, which both forms send whole. */
   /* +11 and +14 for the <remember> tag: "nothing is saved without it"
      replaces "you cannot save anything" in both forms. See check-needs. */
-  check('the full instructions, plain turn', plain(false), 8693)
-  check('the short ones', plain(true), 5462)
-  check('which is about 3,200 a turn', plain(false) - plain(true), 3231)
+  check('the full instructions, plain turn', plain(false), 8795)
+  check('the short ones', plain(true), 5530)
+  check('which is about 3,200 a turn', plain(false) - plain(true), 3265)
   /* It only replaces the three always-sent sections; the gated ones still
      come and go on the same rules. */
   const withScreen = (lean) => A.preambleTokens({ ...FULL, lean, needs: ['desktop'] })
@@ -225,10 +225,10 @@ check('every combination is covered', COMBINATIONS.length, 64)
 {
   const whole = A.assemblePrompt(FULL)
   check('with every topic it is the original', A.assemblePrompt({ ...FULL, needs: TOPICS }) === whole, true)
-  check('and with none it is the shortest', A.preambleTokens({ ...FULL, needs: [] }), 8693)
+  check('and with none it is the shortest', A.preambleTokens({ ...FULL, needs: [] }), 8795)
   const sizes = COMBINATIONS.map((c) => A.preambleTokens({ ...FULL, needs: c }))
   check('nothing is longer than everything', Math.max(...sizes), A.preambleTokens(FULL))
-  check('and nothing is shorter than nothing', Math.min(...sizes), 8693)
+  check('and nothing is shorter than nothing', Math.min(...sizes), 8795)
   /* Adding a topic may never shorten the prompt. */
   const notMonotonic = []
   for (const combination of COMBINATIONS) {
@@ -250,8 +250,8 @@ check('every combination is covered', COMBINATIONS.length, 64)
  */
 {
   const turn = (content, images) => A.preambleTokens({ ...FULL, needs: N.needsFor([{ role: 'user', content, images }]) })
-  check('a question about the app', turn('what is my key percentage'), 8693)
-  check('an explanation', turn('why does this throw a TypeError'), 8693)
+  check('a question about the app', turn('what is my key percentage'), 8795)
+  check('an explanation', turn('why does this throw a TypeError'), 8795)
   check('a screenshot', turn('what is this', [1]) > 9000, true)
   check('a desktop request', turn('click the compose button') > 9000, true)
   check('and the whole thing is never sent by accident', turn('hello') < 13341, true)
