@@ -36,6 +36,24 @@ const MIN = 60_000
 
 /* ---------------------------------------------------------- what they said */
 
+/* Sentences with a time in them that are not a limit on the work. Each of
+   these used to set a stop time, and Wumpy would have halted at it. */
+for (const said of [
+  'I worked until 5pm yesterday, can you summarise my notes',
+  'the shop runs until 10:30 tonight, find me its address',
+  'the meeting runs till 3pm',
+  'fix the login bug, the build ran fine until 11:45',
+  'the script loops until 10:30 and then exits, why?',
+  'remind me to stop at 5pm',
+  'what time does the gym stop at 10pm on sundays',
+  'it took no more than 20 minutes',
+  'I keep forgetting things for an hour after waking',
+  'I do not work past 6pm, so plan my day'
+]) check(`not a limit: ${said.slice(0, 50)}`, when(said), null)
+check('said to it: please keep going until 10:30', when('please keep going until 10:30'), '22:30')
+check('said to it: can you work on it for half an hour', when('can you work on it for half an hour'), '16:40')
+check('said to it: spend no more than 20 minutes', when('spend no more than 20 minutes on it'), '16:30')
+check('said to it: I want you to stop at 5pm', when('I want you to stop at 5pm'), '17:00')
 check('the request itself', when('if I say do not continue past 10:30, it stops'), '22:30')
 check("don't go past 10:30", when("Don't go past 10:30 ok?"), '22:30')
 check('curly apostrophe', when('don’t continue past 10:30'), '22:30')

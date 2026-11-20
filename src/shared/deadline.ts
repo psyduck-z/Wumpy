@@ -37,16 +37,35 @@ const LONGEST = 24 * HOUR
 /** "10:30", "10.30", "10:30pm", "10 pm", "10 o'clock", "22:00". */
 const CLOCK = String.raw`(\d{1,2})(?:[:.](\d{2}))?\s*(a\.?m\.?|p\.?m\.?|o'?clock)?`
 
+/**
+ * What may come just before a lead: the start of a clause, or a word that
+ * makes it something said TO Wumpy - "please stop at", "and keep going
+ * until", "can you work on it for". Without it any sentence with the verb in
+ * it set a stop time: "I worked until 5pm yesterday", "the shop runs until
+ * 10:30", "the gym stops at 10pm", "remind me to stop at 5pm".
+ */
+const ASKED = String.raw`(?<=^|[,;:!?.\n(]\s*|\b(?:please|pls|just|and|then|but|so|now|also|only|ok|okay|you|you\s+to|should|must|gotta|can\s+you|could\s+you|will\s+you|would\s+you|let'?s|spend|take|use|for|say|said|told\s+you|tell\s+you)\s+)`
+
+/** The verbs of "keep at it", in the form an instruction uses. */
+const KEEP_AT = String.raw`(?:keep|continue|carry\s+on|work|crunch|grind|go\s+on|run|loop|iterate|refine|improve|fix|polish)`
+
+/**
+ * Between "keep crunching" and "until": the rest of the same clause. Not a
+ * new clause with its own subject - "fix the login bug, the build ran fine
+ * until 11:45" is a fact about the build.
+ */
+const SAME_CLAUSE = String.raw`(?:(?!,\s*(?:the|a|an|my|it|its|this|that|i|he|she|they|we|his|her|their|our)\b)[^.;?!\n]){0,60}?`
+
 /** Phrases that turn the clock time after them into a stop time. */
 const CLOCK_LEADS = [
   // do not continue past, don't go beyond, never work after
-  String.raw`(?:do\s+not|don'?t|dont|never|not)\s+(?:continue|go|work|run|keep\s+going|carry\s+on|crunch|keep\s+(?:at\s+it|working|crunching))(?:\s+on)?\s+(?:past|beyond|after|later\s+than)`,
+  String.raw`${ASKED}(?:do\s+not|don'?t|dont|never)\s+(?:continue|go|work|run|keep\s+going|carry\s+on|crunch|keep\s+(?:at\s+it|working|crunching))(?:\s+on)?\s+(?:past|beyond|after|later\s+than)`,
   // stop at / by / around / before
-  String.raw`(?:stop|halt|quit|pause)(?:\s+(?:everything|working|it|all))?\s+(?:at|by|around|before|no\s+later\s+than)`,
+  String.raw`${ASKED}(?:stop|halt|quit|pause)(?:\s+(?:everything|working|it|all))?\s+(?:at|by|around|before|no\s+later\s+than)`,
   // finish / wrap up / be done / end by
-  String.raw`(?:finish|wrap\s+(?:it\s+)?up|be\s+done)(?:\s+(?:everything|it|up|work))?\s+(?:at|by|before|no\s+later\s+than)`,
+  String.raw`${ASKED}(?:finish|wrap\s+(?:it\s+)?up|be\s+done)(?:\s+(?:everything|it|up|work))?\s+(?:at|by|before|no\s+later\s+than)`,
   // keep crunching until / work till / go on up to
-  String.raw`(?:keep|continue|carry\s+on|work|crunch|grind|go\s+on|run|loop|iterate|refin|improv|fix)\w*\b[^.?!\n]{0,60}?\b(?:until|till|til|up\s+(?:un)?til|up\s+to)`,
+  String.raw`${ASKED}${KEEP_AT}\b${SAME_CLAUSE}\b(?:until|till|til|up\s+(?:un)?til|up\s+to)`,
   // a deadline / time limit of / cut off at
   String.raw`(?:deadline|time\s+limit|cut-?\s?off)(?:\s+(?:is|of|at))?`
 ]
@@ -65,15 +84,15 @@ const SPAN = String.raw`(half\s+an?\s+hour|${AMOUNT}(\s+and\s+a\s+half)?\s*(hour
 
 const SPAN_LEADS = [
   // stop after / stop in / finish within
-  String.raw`(?:stop|halt|quit|finish|wrap\s+(?:it\s+)?up|be\s+done|end)(?:\s+(?:everything|working|it|up))?\s+(?:after|in|within)(?:\s+(?:about|around|roughly))?`,
+  String.raw`${ASKED}(?:stop|halt|quit|finish|wrap\s+(?:it\s+)?up|be\s+done|end)(?:\s+(?:everything|working|it|up))?\s+(?:after|in|within)(?:\s+(?:about|around|roughly))?`,
   // stop after you hit / once you've worked / when you've been going
-  String.raw`(?:stop|finish|wrap\s+(?:it\s+)?up)\s+(?:once|when|after)\s+(?:you(?:'ve|\s+have)?\s+)?(?:hit|reach(?:ed)?|done|worked|crunched|been\s+(?:going|working|crunching))(?:\s+(?:for|about|around))?`,
+  String.raw`${ASKED}(?:stop|finish|wrap\s+(?:it\s+)?up)\s+(?:once|when|after)\s+(?:you(?:'ve|\s+have)?\s+)?(?:hit|reach(?:ed)?|done|worked|crunched|been\s+(?:going|working|crunching))(?:\s+(?:for|about|around))?`,
   // keep crunching for, work on it for, keep going for like
-  String.raw`(?:keep|continue|carry\s+on|work|crunch|grind|go\s+on|run|loop|iterate|refin|improv|fix)\w*\b[^.?!\n]{0,60}?\bfor(?:\s+(?:about|around|roughly|like|maybe|just))*`,
-  // no more than / not longer than / at most / max
-  String.raw`(?:no|not)\s+(?:more|longer)\s+than|at\s+most|max(?:imum)?(?:\s+of)?`,
+  String.raw`${ASKED}${KEEP_AT}\b${SAME_CLAUSE}\bfor(?:\s+(?:about|around|roughly|like|maybe|just))*`,
+  // spend no more than / take at most / for max
+  String.raw`${ASKED}(?:(?:no|not)\s+(?:more|longer)\s+than|at\s+most|max(?:imum)?(?:\s+of)?)`,
   // a time limit of / you have / you've got
-  String.raw`(?:time\s+limit|limit)(?:\s+(?:is|of))?(?:\s+(?:about|around))?|you(?:'ve|\s+have)(?:\s+got)?`
+  String.raw`(?:time\s+limit|limit)(?:\s+(?:is|of))?(?:\s+(?:about|around))?|${ASKED}you(?:'ve|\s+have)(?:\s+got)?`
 ]
 
 /* ---------------------------------------------------------------- clearing */
