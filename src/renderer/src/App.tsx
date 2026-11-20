@@ -2,7 +2,7 @@ import { deadline } from './deadline'
 import { DEADLINE_CLEARED_TEXT, deadlineDueText, deadlineIn, deadlineSetText } from '@shared/deadline'
 import { useVoiceTurn } from './hooks/useVoiceTurn'
 import { useReflect } from './hooks/useReflect'
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react'
 import type {
   ChatSummary,
   ContextUsage,
@@ -112,7 +112,9 @@ import {
   REGION_SELECTOR,
   type Region
 } from './keyboard'
-import { newestPending } from './pending'
+import { newestPending, onPendingChange, pendingCount, runningCount } from './pending'
+import { useAgentState } from './agentstate'
+import { turnEnd } from '@shared/turnend'
 import { forgetClaims } from './once'
 import { forgetAllLive } from './live'
 import { poolLines } from './quota'
@@ -3072,6 +3074,40 @@ function namedControls(shot: Attachment): string[] {
     note: (content) => chatRef.current.note(content),
     notify: (content) => chatRef.current.notify(content)
   })
+  /* What the line under the last answer says: finished, still going, or
+     stopped short. See @shared/turnend. */
+  const agentState = useAgentState()
+  const commandsRunning = useSyncExternalStore(onPendingChange, runningCount)
+  const commandsWaiting = useSyncExternalStore(onPendingChange, pendingCount)
+  const lastMessage = messages.length ? messages[messages.length - 1] : null
+  const spokeAt = [...messages].reverse().find((m) => m.role === 'user' && !m.automatic)?.createdAt ?? 0
+  const ending = turnEnd({
+    agents: agentState.agents
+      .filter((a) => a.chatId === chatId && (a.status === 'queued' || a.status === 'working' || a.status === 'reviewing'))
+      .map((a) => a.title),
+    failedAgents: agentState.agents
+      .filter((a) => a.chatId === chatId && a.status === 'failed' && (a.endedAt ?? 0) >= spokeAt)
+      .map((a) => a.title),
+    running: commandsRunning,
+    waiting: commandsWaiting,
+    error: Boolean(lastMessage?.error),
+    cutOff: Boolean(lastMessage?.role === 'assistant' && lastMessage.cutOff && !lastMessage.error)
+  })
+  /* Going to done waits a moment: a command's output goes back to the
+     model as soon as it ends, and without this the line went grey for the
+     beat before the next answer started - a flicker of "finished" in the
+     middle of the work. Anything else changes at once. */
+  const [ended, setEnded] = useState(ending)
+  const endingKey = `${ending.tone}|${ending.label}|${ending.detail}`
+  useEffect(() => {
+    if (ending.tone === 'done' && ended.tone === 'going') {
+      const timer = setTimeout(() => setEnded(ending), END_GRACE_MS)
+      return () => clearTimeout(timer)
+    }
+    setEnded(ending)
+    return undefined
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [endingKey])
   useEffect(() => {
     if (streaming || queued.length === 0) return
     const [text] = queued
@@ -4065,7 +4101,13 @@ function namedControls(shot: Attachment): string[] {
               that left the transcript simply stopping, with no line and no
               runtime. Anything but a user message is the end of a turn. */}
           {!streaming && messages.length > 0 && messages[messages.length - 1].role !== 'user' && (
-            <div className="turn-end" aria-hidden="true">
+            <div className={`turn-end is-${ended.tone}`} role="status" title={ended.detail || undefined}>
+              {ended.tone !== 'done' && (
+                <b className="turn-end-flag">
+                  <i aria-hidden="true" />
+                  {ended.label}
+                </b>
+              )}
               <span>{endOfReplyLabel(stats)}</span>
             </div>
           )}
@@ -4244,6 +4286,9 @@ function clockOf(ms: number): string {
  * over 3" - because a total with no explanation invites the opposite
  * suspicion, that the model is slower than it is.
  */
+/** How long "still going" holds after the work ends. See `ended` in App. */
+const END_GRACE_MS = 1500
+
 function endOfReplyLabel(stats: ChatStats): string {
   const parts: string[] = []
   const task = stats.lastTaskMs

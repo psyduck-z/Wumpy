@@ -1222,6 +1222,91 @@ body {
   white-space: nowrap;
 }
 
+/* Not finished: a bubble before the runtime, yellow while something this
+   chat started is still working, red when the turn ended without doing it.
+   The rule either side takes the colour too, so it reads from the edge of
+   the panel. See @shared/turnend. */
+.turn-end.is-going {
+  --end: var(--kind-change);
+  --end-text: var(--kind-change-text);
+}
+
+.turn-end.is-stopped {
+  --end: var(--danger);
+  --end-text: var(--danger);
+}
+
+.turn-end.is-going::before,
+.turn-end.is-stopped::before {
+  background: linear-gradient(90deg, transparent, rgb(var(--end) / 0.45));
+}
+
+.turn-end.is-going::after,
+.turn-end.is-stopped::after {
+  background: linear-gradient(90deg, rgb(var(--end) / 0.45), transparent);
+}
+
+.turn-end-flag {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-left: 12px;
+  padding: 2px 9px 2px 8px;
+  border: 1px solid rgb(var(--end) / 0.5);
+  border-radius: 999px;
+  background: rgb(var(--end) / 0.14);
+  color: rgb(var(--end-text));
+  font-size: 11px;
+  font-weight: 600;
+  white-space: nowrap;
+  /* Fades in rather than popping: a command that ends in a blink should not
+     flash a bubble at all. */
+  animation: turn-end-in 220ms ease-out 400ms both;
+}
+
+.turn-end-flag i {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: rgb(var(--end));
+  flex: none;
+}
+
+.turn-end.is-going .turn-end-flag i {
+  animation: turn-end-breathe 1.6s ease-in-out infinite;
+}
+
+.turn-end.is-going span,
+.turn-end.is-stopped span {
+  padding-left: 8px;
+}
+
+@keyframes turn-end-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes turn-end-breathe {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.35;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .turn-end-flag,
+  .turn-end.is-going .turn-end-flag i {
+    animation: none;
+  }
+}
+
 /* ----------------------------------------------------------- app notices */
 
 .msg-notice {

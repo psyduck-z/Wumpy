@@ -72,6 +72,12 @@ function splitReason(raw: string): { reason: string | null; command: string } {
  * and the command are shown verbatim first, anything smuggled in through
  * something the model read is still visible before it runs.
  */
+/** When each running command started, by its run key, across remounts. */
+const STARTED = new Map<string, number>()
+
+/** How long a command runs before its live panel appears. See liveShown. */
+const LIVE_AFTER_MS = 400
+
 export function CommandCard({
   command: raw,
   shell,
@@ -245,12 +251,42 @@ export function CommandCard({
    * died, which was the question being asked - and the live output below
    * answers the rest of it.
    */
-  const [startedAt, setStartedAt] = useState<number | null>(null)
-  const [elapsed, setElapsed] = useState(0)
+  /* Kept outside the card, like the live output: a card remounted halfway
+     through a run started its clock at null, so the time vanished and the
+     card sat on a bare "running…" - which looks exactly like stuck. */
+  const [startedAt, setStartedAt] = useState<number | null>(() => STARTED.get(ranKey) ?? null)
+  const [elapsed, setElapsed] = useState(() =>
+    startedAt === null ? 0 : Math.floor((Date.now() - startedAt) / 1000)
+  )
   useEffect(() => {
     if (state !== 'running' || startedAt === null) return
     const tick = setInterval(() => setElapsed(Math.floor((Date.now() - startedAt) / 1000)), 1000)
     return () => clearInterval(tick)
+  }, [state, startedAt])
+
+  /**
+   * The live panel, once the command has been going long enough to need it.
+   *
+   * `ls` is done in 20ms, and the panel - "nothing printed yet" and a caret -
+   * mounted and unmounted in that time: the card grew a block and lost it
+   * again, a flicker on every quick command. It now waits LIVE_AFTER_MS, so a
+   * quick command goes straight from its head saying "running" to its output.
+   */
+  const [liveShown, setLiveShown] = useState(
+    () => startedAt !== null && Date.now() - startedAt >= LIVE_AFTER_MS
+  )
+  useEffect(() => {
+    if (state !== 'running') {
+      setLiveShown(false)
+      return
+    }
+    const since = startedAt === null ? LIVE_AFTER_MS : Date.now() - startedAt
+    if (since >= LIVE_AFTER_MS) {
+      setLiveShown(true)
+      return
+    }
+    const timer = setTimeout(() => setLiveShown(true), LIVE_AFTER_MS - since)
+    return () => clearTimeout(timer)
   }, [state, startedAt])
 
   /**
@@ -282,7 +318,9 @@ export function CommandCard({
   const run = async (byItself = false): Promise<void> => {
     // Claimed before the command leaves, so a remount mid-run also knows.
     claimOnce(ranKey)
-    setStartedAt(Date.now())
+    const now = Date.now()
+    STARTED.set(ranKey, now)
+    setStartedAt(now)
     setElapsed(0)
     setState('running')
     const ended = startedRunning()
@@ -292,6 +330,7 @@ export function CommandCard({
     } finally {
       ended()
     }
+    STARTED.delete(ranKey)
     forgetLive(ranKey)
     if (!res) {
       // Null means the native confirmation was declined.
@@ -382,7 +421,7 @@ export function CommandCard({
 
       <pre className="cmd-body">{command || raw.trim()}</pre>
 
-      {state === 'running' && (
+      {state === 'running' && liveShown && (
         <div className="cmd-live">
           <pre ref={liveRef} aria-live="off">
             {lines.join(String.fromCharCode(10))}
