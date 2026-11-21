@@ -3041,8 +3041,15 @@ void app.whenReady().then(async () => {
 
   // Launched by the login item, or by a restart during development: stay in
   // the tray instead of opening over whatever the user is doing.
+  //
+  // `wumpy --restart` too, when it found no Wumpy to restart and started one
+  // itself. That happens when the lock files point at a copy that is gone -
+  // a copy that quits deletes them, even when they have moved on to another -
+  // and the new copy opened its panel over the desktop twice in ten minutes
+  // during an install. A restart is asked for from a terminal or a script,
+  // never to look at Wumpy.
   if (process.argv.includes('--voice')) startVoiceTurn('started with --voice')
-  else if (!process.argv.includes('--hidden')) panel.show('launch')
+  else if (!process.argv.includes('--hidden') && !process.argv.includes('--restart')) panel.show('launch')
 
   /* Last, and not awaited by anything above it: reclaiming a cache is
      housekeeping, and the panel should not wait on a disk walk to open. */
