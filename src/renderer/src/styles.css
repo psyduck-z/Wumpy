@@ -409,15 +409,20 @@ body {
  * on hover - a layout that reflows when the pointer crosses it is a worse
  * answer than a slightly shorter first line.
  */
-.msg-assistant .msg-body > :first-child {
-  padding-right: 52px;
+/* The first block of the first segment: each segment of an answer is wrapped
+   in a plain div (Message.tsx), and the rule used to land on that wrapper -
+   which took 52px off the right of EVERY line of every answer, tables and
+   code included, in a panel 440px wide. A margin rather than padding, so a
+   card that comes first keeps its own insides and just stops short. */
+.msg-assistant .msg-body > div:first-child > :first-child {
+  margin-right: 52px;
 }
 
 /* A code fence has its own box and its own copy button; it does not want a
    bite taken out of its right-hand side as well. */
-.msg-assistant .msg-body > pre:first-child,
-.msg-assistant .msg-body > .code:first-child {
-  padding-right: 0;
+.msg-assistant .msg-body > div:first-child > pre:first-child,
+.msg-assistant .msg-body > div:first-child > .codeblock:first-child {
+  margin-right: 0;
 }
 
 .msg-copy {
@@ -1979,6 +1984,9 @@ body {
   overflow: hidden;
   text-overflow: ellipsis;
   max-width: 120px;
+  /* Enough to tell models apart when the bar is full - mid-answer it was cut
+     to "z.." while the live readout took the room. */
+  min-width: 72px;
 }
 .status-live {
   display: inline-flex;
@@ -3382,6 +3390,10 @@ body {
 }
 
 /* ------------------------------------------------------- wumpy's own update */
+
+.header.has-update .hint {
+  display: none;
+}
 
 /* In the header: "updating 40%" while it downloads, then a button that
    restarts into it (main/updater.ts). Wider than the icon buttons beside it. */

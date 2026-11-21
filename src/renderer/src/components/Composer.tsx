@@ -478,11 +478,19 @@ export function Composer({
   }, [prefill?.token])
 
   // Grow with the content up to a ceiling, then scroll.
+  //
+  // scrollHeight leaves out the border, and the box is border-box: set to it
+  // alone, an empty one-line box was 2px short of its own text and showed a
+  // scrollbar thumb the whole height of the box. And no scrollbar at all
+  // until the ceiling, where scrolling starts to mean something.
   useEffect(() => {
     const el = ref.current
     if (!el) return
     el.style.height = 'auto'
-    el.style.height = `${Math.min(el.scrollHeight, 150)}px`
+    const border = el.offsetHeight - el.clientHeight
+    const wanted = el.scrollHeight + border
+    el.style.height = `${Math.min(wanted, 150)}px`
+    el.style.overflowY = wanted > 150 ? 'auto' : 'hidden'
   }, [value])
 
   const submit = (): void => {
@@ -767,8 +775,11 @@ export function Composer({
           ref={ref}
           value={value}
           rows={1}
+          /* Short enough for one line of a 440px panel: "Still answering -
+             Enter queues, /also adds a note" wrapped and lost its end. The
+             Stop button beside it already says it is answering. */
           placeholder={
-            streaming ? 'Still answering — Enter queues, /also adds a note' : placeholder
+            streaming ? 'Enter queues · /also adds a note' : placeholder
           }
           onChange={(e) => {
             spaceWithoutKey(e)

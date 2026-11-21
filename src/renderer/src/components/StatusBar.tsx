@@ -374,7 +374,9 @@ export function StatusBar({
               <span className="status-num">{stats.liveTokens} tok</span>
             </>
           )}
-          {liveRate && (
+          {/* Not while waiting: "0.0 tok/s" beside "waiting for the model" says
+              the same thing twice, and squeezed the model's name to "z..". */}
+          {liveRate && stats.liveTokens > 0 && (
             <>
               <span className="status-sep">·</span>
               <span className="status-num">{liveRate} tok/s</span>

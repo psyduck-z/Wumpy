@@ -152,9 +152,14 @@ import { Picker, type PickerProps } from './components/Picker'
 import { firstShown, foldsTranscript, hiddenCount, REVEAL_STEP } from './transcript'
 import { activityFor } from '@shared/activity'
 
-/** Mirrors the main process's accelerator formatting for display. */
+/**
+ * Mirrors the main process's accelerator formatting for display: the key is
+ * Win on Windows and Super on Omarchy, which is what Hyprland and its own
+ * keybinding list call it.
+ */
 function prettify(accelerator: string): string {
-  return accelerator.replace(/Super|Meta|Cmd|CommandOrControl/g, 'Win').replace(/\+/g, ' + ')
+  const logo = window.wumpy.platform === 'win32' ? 'Win' : 'Super'
+  return accelerator.replace(/Super|Meta|Cmd|CommandOrControl/g, logo).replace(/\+/g, ' + ')
 }
 
 const NEWLINE = String.fromCharCode(10)
@@ -3245,6 +3250,30 @@ function namedControls(shot: Attachment): string[] {
   }, [])
 
   useLayoutEffect(pinToBottom, [messages, pinToBottom])
+
+  /**
+   * And when something already in the transcript grows: an agent card adding
+   * its steps, a command's output arriving, a card that resolves into its
+   * result. None of them change the messages, so the pin above never saw
+   * them - watching an agent work, its card grew down out of view while the
+   * panel sat still. Only while you are at the bottom, as above.
+   */
+  useEffect(() => {
+    const el = scroller.current
+    if (!el || typeof ResizeObserver === 'undefined') return
+    const sizes = new ResizeObserver(() => pinToBottom())
+    const watch = (): void => {
+      sizes.disconnect()
+      for (const child of Array.from(el.children)) sizes.observe(child)
+    }
+    watch()
+    const added = new MutationObserver(watch)
+    added.observe(el, { childList: true })
+    return () => {
+      added.disconnect()
+      sizes.disconnect()
+    }
+  }, [pinToBottom, picker])
 
   /**
    * A new answer brings you to it, wherever you had scrolled to.

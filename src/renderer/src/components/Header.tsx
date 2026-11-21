@@ -78,8 +78,13 @@ export function Header({
   const online = status?.ready ?? false
   const nextDock = DOCK_CYCLE[(DOCK_CYCLE.indexOf(dock) + 1) % DOCK_CYCLE.length]
 
+  /* The pill needs the room, and the shortcut hint is the thing worth least
+     while it is there: the title is cut to "Downloads cl..." and the hint to
+     "Sup..." otherwise, in a 440px panel. */
+  const updating = update?.stage === 'downloading' || update?.stage === 'ready'
+
   return (
-    <header className="header">
+    <header className={`header ${updating ? 'has-update' : ''}`}>
       <div className="brand">
         <span className="brand-mark">
           <img src={logo} alt="" width={18} height={18} />
