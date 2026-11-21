@@ -35,8 +35,8 @@ jobs:
       - run: npm ci
       # Self-contained here, unlike `npm run hook:build`: the installer is
       # for any Windows PC, and one without the .NET 10 runtime would
-      # otherwise have no Win+Shift+D and say nothing about why.
-      - name: Win+Shift+D helper
+      # otherwise have no Win+Shift+Z and say nothing about why.
+      - name: Win+Shift+Z helper
         run: dotnet publish src/hook/WumpyHook.csproj -c Release -o resources/hook -p:SelfContained=true -p:IncludeNativeLibrariesForSelfExtract=true -p:EnableCompressionInSingleFile=true
       - run: npx electron-vite build
       # Each build its own version and its own release, so an installed

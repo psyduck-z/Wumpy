@@ -23,7 +23,7 @@ import type { SettingsStore } from './store'
  * compositor places windows, a tiling layout is the point of the desktop, and
  * a window that floats over everything and vanishes on a click elsewhere is
  * the odd one out. So there it is a normal, resizable window: Hyprland tiles
- * it, it stays where it was put, and Super+Shift+D still shows and hides it.
+ * it, it stays where it was put, and Super+Shift+Z still shows and hides it.
  */
 export const REGULAR_WINDOW = process.platform === 'linux'
 
@@ -430,7 +430,7 @@ export class Panel {
       /*
        * Already open on another workspace: go to it, the way Omarchy's own
        * launch-or-focus does. focus() alone cannot - Wayland lets the
-       * compositor refuse, and Hyprland does - so Super+Shift+D from the
+       * compositor refuse, and Hyprland does - so Super+Shift+Z from the
        * wrong workspace did nothing you could see. A hidden window needs
        * none of this: it is mapped again on the workspace you are on.
        */

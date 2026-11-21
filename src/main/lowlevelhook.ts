@@ -23,7 +23,7 @@ export class LowLevelHook {
   constructor(
     private readonly key: string,
     private readonly onTrigger: () => void,
-    /** Shift must be held too: Win+Shift+D, the same shortcut as on Linux. */
+    /** Shift must be held too: Win+Shift+Z, the same shortcut as on Linux. */
     private readonly shift = false
   ) {}
 

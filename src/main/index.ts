@@ -964,7 +964,7 @@ function applyHotkeys(): void {
 }
 
 /**
- * Claims Win+Shift+D through the helper process - the same shortcut Omarchy
+ * Claims Win+Shift+Z through the helper process - the same shortcut Omarchy
  * gets through a Hyprland binding, so it is one combination on every machine.
  * The helper sits below the shell, so the keystroke never reaches anything
  * else (the dedicated Copilot key is still caught too).
@@ -973,15 +973,15 @@ async function startLowLevelHook(): Promise<void> {
   /* Linux has no keyboard hook to install: Hyprland owns the keys, and a
      binding there runs `wumpy --toggle` (see the README). */
   if (process.platform === 'linux') {
-    hotkeyState.intercepted = 'Super+Shift+D'
+    hotkeyState.intercepted = 'Super+Shift+Z'
     return
   }
-  lowLevelHook = new LowLevelHook('D', () => panel.toggle(), true)
+  lowLevelHook = new LowLevelHook('Z', () => panel.toggle(), true)
   const ok = await lowLevelHook.start()
-  hotkeyState.intercepted = ok ? 'Super+Shift+D' : null
+  hotkeyState.intercepted = ok ? 'Super+Shift+Z' : null
   if (!ok) {
     lowLevelHook = null
-    console.warn('[wumpy] Win+Shift+D interception unavailable; use the tray icon')
+    console.warn('[wumpy] Win+Shift+Z interception unavailable; use the tray icon')
   } else {
     /**
      * The helper takes the foreground, not Wumpy.
@@ -3122,7 +3122,7 @@ app.on('second-instance', (_event, argv) => {
     startVoiceTurn('wumpy --voice')
     return
   }
-  // The shortcut (Super+Shift+D through a Hyprland binding on Linux).
+  // The shortcut (Super+Shift+Z through a Hyprland binding on Linux).
   if (argv.includes('--toggle')) {
     panel?.toggle()
     return

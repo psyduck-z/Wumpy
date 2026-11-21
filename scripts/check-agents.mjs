@@ -57,7 +57,7 @@ const answer = [
   '',
   `${BT}wumpy-agent`,
   '# Draft the hotkeys section',
-  'Write the README section on hotkeys. Win+Shift+D opens the panel.',
+  'Write the README section on hotkeys. Win+Shift+Z opens the panel.',
   BT,
   '',
   `${BT}wumpy-agent`,
@@ -76,7 +76,7 @@ const answer = [
   BT
 ].join('\n')
 check('agents asked for, briefs whole', A.agentAsks(answer), [
-  { title: 'Draft the hotkeys section', brief: 'Write the README section on hotkeys. Win+Shift+D opens the panel.' },
+  { title: 'Draft the hotkeys section', brief: 'Write the README section on hotkeys. Win+Shift+Z opens the panel.' },
   /* No # line: the first line names it, and stays in the brief too. */
   { title: 'Check the disk', brief: 'Check the disk\nReport how full each drive is.' }
 ])
