@@ -24,7 +24,7 @@ import { DEFAULT_MODEL, assistantFor, assemblePrompt, type PromptShape } from '@
 import type { Footprint } from '@shared/footprint'
 import type { RankView, Transcript, VoiceStatus, WriteResult } from '@shared/types'
 import { Ranker, type SavedSweep } from './ranker'
-import { restartIntoUpdate, startUpdates } from './updater'
+import { checkForUpdate, restartIntoUpdate, startUpdates, updateState } from './updater'
 import { SettingsStore } from './store'
 import { capDiskCache, reclaimCache } from './disk'
 import { ChatStore } from './chats'
@@ -124,7 +124,7 @@ import { checkCodeFile, checkCodeText, isInteractive, runProgram } from './codec
 import { codeErrorText, codeVerdictText } from '@shared/codecheck'
 import { PAGE_ROUNDS, excerpts, pageErrorText } from '@shared/pagecheck'
 import { readWriteRequest } from '@shared/writefile'
-import { gapFor, limitLine } from '@shared/limits'
+import { QUIET_FOR_MS, gapFor, limitLine } from '@shared/limits'
 import { mayBeInvented } from '@shared/heard'
 import { speakable } from '@shared/spoken'
 import { savesIn, withoutKept } from '@shared/kept'
@@ -1806,13 +1806,26 @@ function registerIpc(): void {
     await releaseMusic()
   })
 
+  ipcMain.handle(IPC.updateState, () => updateState())
+  ipcMain.on(IPC.updateCheck, () => checkForUpdate())
   ipcMain.on(IPC.appRestart, (_e, req: { chatId?: string | null; why?: string }) => {
     void restartWumpy(String(req?.why ?? '/restart'), req?.chatId ?? null)
   })
   /* Once: a reload of the page later must not drag the user back to it. */
   ipcMain.handle(IPC.appLaunchChat, () => {
-    const id = launchChat
+    let id = launchChat
     launchChat = null
+    /* Left by a restart into an update (restartWumpy): fresh, and once. */
+    const left = join(app.getPath('userData'), 'resume-chat.txt')
+    if (existsSync(left)) {
+      try {
+        const kept = readFileSync(left, 'utf8').trim()
+        if (!id && Date.now() - statSync(left).mtimeMs < 10 * 60_000 && /^[\w-]{1,80}$/.test(kept)) id = kept
+        unlinkSync(left)
+      } catch {
+        /* Not worth a start that fails. */
+      }
+    }
     if (id) console.log(`[wumpy] back on chat ${id} after a restart`)
     return id
   })
@@ -2912,8 +2925,18 @@ void app.whenReady().then(async () => {
     save: (saved) => writeFileSync(join(app.getPath('userData'), 'ranking.json'), JSON.stringify(saved))
   })
   ranker.start()
-  /* Updates on Windows, from the releases each push publishes. See updater.ts. */
-  startUpdates((line) => console.log(line))
+  /* Updates on Windows, from the releases each push publishes, shown in the
+     panel's header and installed once nobody is using Wumpy. See updater.ts. */
+  startUpdates({
+    log: (line) => console.log(line),
+    changed: (state) => panel.send(IPC.updateState, state),
+    idle: () =>
+      turnStartedAt === null &&
+      (agents?.active() ?? 0) === 0 &&
+      !panel.onScreen &&
+      Date.now() - Math.max(startedAt, lastTurnEndedAt) >= QUIET_FOR_MS,
+    restart: (why) => askRestart(why)
+  })
 
   /*
    * Each key's real limit, measured while nobody is using Wumpy (see
@@ -3146,6 +3169,15 @@ async function restartWumpy(why: string, chatId: string | null): Promise<void> {
   if (!panel?.onScreen) args.push('--hidden')
   if (chatId && /^[\w-]{1,80}$/.test(chatId)) args.push(`--resume-chat=${chatId}`)
   await releaseAllMusic().catch(() => undefined)
+  /* The installer starts the new version without these flags, so the chat
+     to come back to waits in a file for it instead. */
+  if (updateState().stage === 'ready' && chatId && /^[\w-]{1,80}$/.test(chatId)) {
+    try {
+      writeFileSync(join(app.getPath('userData'), 'resume-chat.txt'), chatId)
+    } catch {
+      /* It opens on an empty chat instead. */
+    }
+  }
   if (restartIntoUpdate((line) => console.log(line))) return
   app.relaunch({ args, execPath: launchPath(process.execPath, existsSync) })
   app.quit()

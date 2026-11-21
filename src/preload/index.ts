@@ -26,6 +26,7 @@ import type {
   ProviderName,
   UsageReport,
   AssistantStatus,
+  UpdateState,
   SavedChat,
   Dictation,
   LinkResult,
@@ -385,6 +386,12 @@ const api = {
     onRestartAsked: (cb: (why: string) => void) => on<string>(IPC.appRestartAsked, cb),
     /** The chat the last restart left, once; null on an ordinary start. */
     launchChat: (): Promise<string | null> => ipcRenderer.invoke(IPC.appLaunchChat)
+  },
+  update: {
+    /** Wumpy's own update: 'off' on Linux and dev runs (main/updater.ts). */
+    state: (): Promise<UpdateState> => ipcRenderer.invoke(IPC.updateState),
+    onState: (cb: (s: UpdateState) => void) => on<UpdateState>(IPC.updateState, cb),
+    check: (): void => ipcRenderer.send(IPC.updateCheck)
   },
   music: {
     /** Pause what is playing while Wumpy listens or talks (main/music.ts). */

@@ -3380,3 +3380,42 @@ body {
   font-size: 12px;
   color: rgb(var(--muted));
 }
+
+/* ------------------------------------------------------- wumpy's own update */
+
+/* In the header: "updating 40%" while it downloads, then a button that
+   restarts into it (main/updater.ts). Wider than the icon buttons beside it. */
+.header-actions .update-pill {
+  display: inline-flex;
+  align-items: center;
+  width: auto;
+  height: 22px;
+  margin-right: 4px;
+  padding: 0 9px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.header-actions .update-pill.is-getting {
+  color: rgb(var(--muted));
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
+}
+
+.header-actions button.update-pill.is-ready {
+  background: rgb(var(--accent-soft));
+  color: rgb(var(--accent-text));
+}
+
+.header-actions button.update-pill.is-ready:hover {
+  background: rgb(var(--accent-soft));
+  filter: brightness(1.15);
+}
+
+.header-actions button.update-pill.is-ready:disabled {
+  opacity: 0.55;
+  cursor: default;
+  filter: none;
+}

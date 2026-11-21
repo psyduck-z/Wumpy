@@ -875,6 +875,20 @@ export interface HotkeyState {
   intercepted: string | null
 }
 
+/**
+ * Where Wumpy's own update stands (main/updater.ts). 'off' on Linux and dev
+ * runs, which update from the source instead.
+ */
+export interface UpdateState {
+  stage: 'off' | 'current' | 'checking' | 'downloading' | 'ready' | 'failed'
+  /** The version running. */
+  current: string
+  /** The version found: downloading, or ready to restart into. */
+  next?: string
+  percent?: number
+  checkedAt?: number
+}
+
 export const IPC = {
   settingsGet: 'settings:get',
   settingsSet: 'settings:set',
@@ -990,6 +1004,10 @@ export const IPC = {
   appRestartAsked: 'app:restart-asked',
   /** The chat a restart left, to open again: once, and null on an ordinary start. */
   appLaunchChat: 'app:launch-chat',
+  /** Wumpy's own updates (main/updater.ts): asked for, and pushed when they change. */
+  updateState: 'update:state',
+  /** The panel asks for a look now. */
+  updateCheck: 'update:check',
   /**
    * A line from a listening session, straight into wumpy.log.
    *

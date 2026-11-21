@@ -9,6 +9,7 @@ import type {
   Dock,
   HotkeyState,
   AssistantStatus,
+  UpdateState,
   ApprovalMode,
   ShellKind,
   ShellResult,
@@ -253,6 +254,12 @@ export default function App(): React.JSX.Element {
 
   const [settings, setSettings] = useState<WumpySettings | null>(null)
   const [assistant, setAssistant] = useState<AssistantStatus | null>(null)
+  /** Wumpy's own update, for the header's pill (main/updater.ts). */
+  const [update, setUpdate] = useState<UpdateState | null>(null)
+  useEffect(() => {
+    void window.wumpy.update.state().then(setUpdate)
+    return window.wumpy.update.onState(setUpdate)
+  }, [])
   /** Which providers have a key. Never the keys themselves. */
   const [keyStatus, setKeyStatus] = useState<KeyStatus | null>(null)
   const [hotkey, setHotkey] = useState<HotkeyState>({
@@ -4019,6 +4026,9 @@ function namedControls(shot: Attachment): string[] {
         onClose={close}
         hotkeyLabel={hotkeyLabel}
         title={chatTitle}
+        update={update}
+        busy={streaming}
+        onUpdate={() => void restartRef.current(`to install Wumpy ${update?.next ?? 'update'}`)}
       />
 
       {picker ? (

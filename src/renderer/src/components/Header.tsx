@@ -1,4 +1,4 @@
-import type { AssistantStatus, Dock } from '@shared/types'
+import type { AssistantStatus, Dock, UpdateState } from '@shared/types'
 import { APP_WINDOW } from '../appwindow'
 import logo from '../assets/logo.png'
 
@@ -51,7 +51,10 @@ export function Header({
   onRename,
   onClose,
   hotkeyLabel,
-  title
+  title,
+  update,
+  busy,
+  onUpdate
 }: {
   status: AssistantStatus | null
   dock: Dock
@@ -65,6 +68,12 @@ export function Header({
   onClose(): void
   hotkeyLabel: string
   title: string | null
+  /** Wumpy's own update: a pill while it downloads, and once it is ready. */
+  update: UpdateState | null
+  /** An answer is being written: the restart waits for it. */
+  busy: boolean
+  /** Restart into the downloaded update, saving the chat first. */
+  onUpdate(): void
 }): React.JSX.Element {
   const online = status?.ready ?? false
   const nextDock = DOCK_CYCLE[(DOCK_CYCLE.indexOf(dock) + 1) % DOCK_CYCLE.length]
@@ -90,6 +99,29 @@ export function Header({
       </div>
 
       <div className="header-actions">
+        {update?.stage === 'downloading' && (
+          <span
+            className="update-pill is-getting"
+            title={`Downloading Wumpy ${update.next} - it installs once it is ready`}
+          >
+            updating {update.percent ?? 0}%
+          </span>
+        )}
+        {update?.stage === 'ready' && (
+          <button
+            type="button"
+            className="update-pill is-ready"
+            onClick={onUpdate}
+            disabled={busy}
+            title={
+              busy
+                ? 'After this answer: restarts into the new version'
+                : `Wumpy ${update.next} is downloaded (this is ${update.current}). Restart into it now - this chat opens again. Otherwise it installs itself while nobody is using Wumpy.`
+            }
+          >
+            Update ready
+          </button>
+        )}
         <button type="button" onClick={onShowChats} title="Saved chats (/chats)">
           <svg viewBox="0 0 16 16" width="13" height="13" aria-hidden="true">
             <path
