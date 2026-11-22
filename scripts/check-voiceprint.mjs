@@ -89,6 +89,9 @@ const tone = (hz, seconds, amp = 0.3) =>
   const kept = V.voiced(clip).length / 16000
   check('the room around the talking is left out, word edges kept', kept > 1 && kept <= 1.25, true)
   check('a clip of only room is left as it is', V.voiced(room(1)).length, 16000)
+  /* A minute of talking is no better a voiceprint than eight seconds of it, and much slower. */
+  check('at most MAX_EMBED_MS of talking is made into a voiceprint', V.forPrint(tone(200, 30)).length, (V.MAX_EMBED_MS / 1000) * 16000)
+  check('a short clip is made into one whole', V.forPrint(tone(200, 2)).length, 32000)
 }
 
 /* ------------------------------------------------------------- learning */
@@ -124,6 +127,55 @@ check('turned off, nothing is learned', V.learn({ ...p, off: true }, mine(), 400
   check('a stranger is never learned once it is known', V.learn(q, theirs(), 5000, 'buds') === q, true)
 }
 
+/* ------------------------------------------------------- yes or no, out loud */
+
+check('an answer is judged however short: a stranger\'s "yes" is not theirs', V.judge(p, theirs(), 500, true).kind, 'someone else')
+check('and the person\'s own "yes" is', V.judge(p, mine(), 500, true).kind, 'theirs')
+check('an answer while still learning is heard, as everything is', V.judge(V.emptyVoiceprint('m'), theirs(), 500, true).kind, 'theirs')
+
+/* ---------------------------------------------------------- calibrating */
+
+{
+  const clip = (v) => ({ v, at: 0, ms: 3000, device: 'buds' })
+  check('a sentence read too short is not taken', V.enrolCheck([], mine(), 1200).ok, false)
+  check('the first sentence is taken', V.enrolCheck([], mine(), 3000).ok, true)
+  check('one like the first is taken', V.enrolCheck([clip(mine())], mine(), 3000).ok, true)
+  const two = V.enrolCheck([clip(mine())], theirs(), 3000)
+  check('a second unlike the first: neither can be trusted, start again', [two.ok, two.why, two.restart], [false, 'unlike', true])
+  const later = V.enrolCheck([clip(mine()), clip(mine()), clip(mine())], theirs(), 3000)
+  check('a later one unlike the rest is asked for again, the rest kept', [later.ok, later.restart], [false, false])
+  check('the sentences read agree with each other', V.steadiness([1, 2, 3, 4, 5].map(() => clip(mine()))) > V.ENROL_AGREE, true)
+
+  /* Learned passively first, with a visitor in it: two of the first clips
+     were someone else's, before the third-clip check could catch them. */
+  let passive = V.emptyVoiceprint('m')
+  passive = V.learn(passive, theirs(), 3000, 'buds')
+  passive = V.learn(passive, theirs(), 3000, 'buds')
+  for (let i = 0; i < 4; i++) passive = { ...passive, clips: [...passive.clips, clip(mine())] }
+  const read = [1, 2, 3, 4, 5].map(() => clip(mine()))
+  const cal = V.enrolled({ ...passive, off: true }, read)
+  check('calibrated, the voice is known at once', [V.calibrated(cal), V.known(cal)], [true, true])
+  check('what was learned before is kept only if it sounds like them', cal.clips.filter((c) => !c.enrolled).length, 4)
+  check('calibrating turns it on', Boolean(cal.off), false)
+
+  let after = cal
+  for (let i = 0; i < 60; i++) after = V.learn(after, mine(), 3000, 'laptop', 1000 + i)
+  check('the sentences read are never pushed out by learning', after.clips.filter((c) => c.enrolled).length, 5)
+  check('learned clips beside them are capped', after.clips.filter((c) => !c.enrolled).length, V.KEEP_LEARNED)
+
+  /* A voice close to theirs - a sibling - that gets learned now and then
+     cannot pull the voice over to it: the sentences read hold half of it. */
+  const close = voice(7, 0.15)
+  const sibling = () => close().map((x, i) => (i % 3 ? x : -x))
+  let pulled = cal
+  for (let i = 0; i < 60; i++) {
+    const v = sibling()
+    pulled = { ...pulled, clips: [...pulled.clips.filter((c) => c.enrolled), ...[...pulled.clips.filter((c) => !c.enrolled), clip(v)].slice(-V.KEEP_LEARNED)] }
+  }
+  check('learning can pull the voice at most halfway from the sentences read', V.likeness(pulled, mine()) >= 0.5 * V.likeness(cal, mine()), true)
+  check('the person is still theirs after it', V.judge(pulled, mine(), 3000).kind, 'theirs')
+}
+
 /* --------------------------------------------------------------- /voice me */
 
 const run = (text) => {
@@ -135,17 +187,25 @@ check('/voice me off', run('me off'), { kind: 'voiceprint', change: 'off' })
 check('/voice only me on', run('only me on'), { kind: 'voiceprint', change: 'on' })
 check('/voice me forget', run('me forget'), { kind: 'voiceprint', change: 'forget' })
 check('/voice on is still dictation', run('on'), { kind: 'voice', setting: 'on', on: true })
+check('/voice me calibrate', run('me calibrate'), { kind: 'voiceprint', change: 'calibrate' })
+check('/voice me train', run('me train'), { kind: 'voiceprint', change: 'calibrate' })
 
 /* --------------------------------------------------------------- wiring */
 
 const turn = read('src/renderer/src/hooks/useVoiceTurn.ts')
 check('each clip heard is checked while its words are heard', /const voice = whoseVoice\(clip\.blob/.test(turn), true)
-check('someone else is not answered, nor "sorry, I didn\'t catch that"', /who\?\.kind === 'someone else'\) \{\s*stopTicks\(\)\s*\} else if \(words\.heard\)/.test(turn), true)
+check('someone else is not answered, nor "sorry, I didn\'t catch that"', /who\?\.kind === 'someone else' \|\| \(answer && !who && words\.heard\)\) \{\s*stopTicks\(\)/.test(turn), true)
 check('learned from only when it was words', /who\.token && words\.heard\.split\(\/\\s\+\/\)\.length >= LEARN_WORDS/.test(turn), true)
-check('a slow voiceprint does not hold the answer', /Promise\.race\(\[voice, sleep\(VOICEPRINT_WAIT_MS\)/.test(turn), true)
+check('a slow voiceprint does not hold the answer', /Promise\.race\(\[voice, sleep\(answer \? ANSWER_VOICEPRINT_WAIT_MS : VOICEPRINT_WAIT_MS\)/.test(turn), true)
+check('a yes or no to run something is judged as an answer', (turn.match(/listen\(900, 8000, '[^']*', true\)/g) ?? []).length, 2)
+check('answered in another voice too often, it is left on the screen', /refused >= TURNED_AWAY_ASKS/.test(turn), true)
 const main = read('src/main/voiceprint.ts')
 check('the model is checked against its hash', /sha256\(got\) !== MODEL_SHA256/.test(main), true)
 check('no model, everyone is heard', /why: 'unavailable'/.test(main), true)
+check('...except an answer once the voice is known', /guarded \? \{ kind: 'someone else', score: null, why: 'unsure' \}/.test(main), true)
+check('the model runs in a process of its own, not the main one', /utilityProcess\.fork\(workerPath/.test(main), true)
+const work = read('src/main/voiceprintworker.ts')
+check('and is made from at most MAX_EMBED_MS of talking', /forPrint\(samples\)/.test(work), true)
 const builder = read('electron-builder.yml')
 check('only the wasm build that runs is packaged', builder.includes('!node_modules/onnxruntime-web/dist/*{jsep,jspi,asyncify,webgpu,webgl,bundle}*'), true)
 
@@ -168,7 +228,7 @@ if (model && clips) {
     }
   }
   const embed = async (s) => {
-    const { data, frames } = V.features(V.voiced(s))
+    const { data, frames } = V.features(V.forPrint(s))
     const out = await session.run({ [session.inputNames[0]]: new ort.Tensor('float32', data, [1, frames, 80]) })
     return out[session.outputNames[0]].data
   }

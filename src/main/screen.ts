@@ -1,4 +1,5 @@
-import { desktopCapturer, screen, type BrowserWindow } from 'electron'
+import { desktopCapturer, nativeImage, screen, type BrowserWindow } from 'electron'
+import { execFile } from 'node:child_process'
 import type { Attachment } from '@shared/types'
 import type { ShotFrame } from '@shared/steps'
 
@@ -81,7 +82,53 @@ function displayFor(panel: BrowserWindow | null): Electron.Display {
  * invisible to capture is one the user cannot screenshot either, and they
  * may well want to.
  */
+/*
+ * Linux on Wayland: grim, not the screen-share portal.
+ *
+ * Electron captures a Wayland screen through xdg-desktop-portal, which is a
+ * screen-share request - on Hyprland, a picker the person has to answer,
+ * every time. For a look now and then that is a nuisance; for a meeting
+ * whose screen is watched every twenty seconds it is unusable. grim reads the
+ * compositor directly, with no prompt, from the monitor hyprctl says is
+ * focused. One difference: Wumpy's own panel is in the picture if it is
+ * showing - content protection is a Windows and macOS thing.
+ */
+const run = (cmd: string, args: string[]): Promise<Buffer | null> =>
+  new Promise((resolve) =>
+    execFile(cmd, args, { encoding: 'buffer', maxBuffer: 96 * 1024 * 1024, timeout: 8000 }, (err, out) =>
+      resolve(err ? null : (out as Buffer))
+    )
+  )
+
+async function grimShot(): Promise<{ image: Electron.NativeImage; display: Electron.Display } | null> {
+  if (process.platform !== 'linux' || process.env.XDG_SESSION_TYPE !== 'wayland') return null
+  let output: string | undefined
+  let at: { x: number; y: number } | undefined
+  const monitors = await run('hyprctl', ['monitors', '-j'])
+  if (monitors) {
+    try {
+      const list = JSON.parse(monitors.toString()) as Array<{ name: string; x: number; y: number; focused: boolean }>
+      const focused = list.find((m) => m.focused) ?? list[0]
+      if (focused) {
+        output = focused.name
+        at = { x: focused.x, y: focused.y }
+      }
+    } catch {
+      /* Not Hyprland, or not its JSON: grim takes every output, below. */
+    }
+  }
+  const png = await run('grim', output ? ['-o', output, '-'] : ['-'])
+  if (!png?.length) return null
+  const image = nativeImage.createFromBuffer(png)
+  if (image.isEmpty()) return null
+  const display =
+    (at && screen.getAllDisplays().find((d) => d.bounds.x === at!.x && d.bounds.y === at!.y)) ?? screen.getPrimaryDisplay()
+  return { image, display }
+}
+
 export async function captureScreen(panel: BrowserWindow | null): Promise<Attachment> {
+  const grim = await grimShot()
+  if (grim) return encode(grim.image, grim.display)
   const display = displayFor(panel)
   const { width, height } = display.size
   const hidWumpy = Boolean(panel) && !panel!.isDestroyed()
@@ -100,41 +147,45 @@ export async function captureScreen(panel: BrowserWindow | null): Promise<Attach
       sources.find((s) => String(s.display_id) === String(display.id)) ?? sources[0]
     if (!source) throw new Error('no screen to capture')
 
-    const shot = source.thumbnail
-    const size = shot.getSize()
-    const longest = Math.max(size.width, size.height)
-    const scaled =
-      longest > MAX_EDGE
-        ? shot.resize(
-            size.width >= size.height
-              ? { width: MAX_EDGE }
-              : { height: MAX_EDGE }
-          )
-        : shot
-    const jpeg = scaled.toJPEG(JPEG_QUALITY)
-    const out = scaled.getSize()
-    /*
-     * bounds, not size: size is the display's dimensions and bounds carries
-     * its position in the virtual desktop too. SetCursorPos takes the latter.
-     */
-    const b = display.bounds
-    lastFrame = {
-      displayX: b.x,
-      displayY: b.y,
-      displayWidth: b.width,
-      displayHeight: b.height,
-      imageWidth: out.width,
-      imageHeight: out.height
-    }
-    return {
-      kind: 'image',
-      dataUrl: `data:image/jpeg;base64,${jpeg.toString('base64')}`,
-      name: 'screen.jpg',
-      width: out.width,
-      height: out.height,
-      bytes: jpeg.length
-    }
+    return encode(source.thumbnail, display)
   } finally {
     if (hidWumpy && !panel!.isDestroyed()) panel!.setContentProtection(false)
+  }
+}
+
+/** A capture, shrunk to MAX_EDGE, as the JPEG attachment every look hands on; and the frame a click is aimed by. */
+function encode(shot: Electron.NativeImage, display: Electron.Display): Attachment {
+  const size = shot.getSize()
+  const longest = Math.max(size.width, size.height)
+  const scaled =
+    longest > MAX_EDGE
+      ? shot.resize(
+          size.width >= size.height
+            ? { width: MAX_EDGE }
+            : { height: MAX_EDGE }
+        )
+      : shot
+  const jpeg = scaled.toJPEG(JPEG_QUALITY)
+  const out = scaled.getSize()
+  /*
+   * bounds, not size: size is the display's dimensions and bounds carries
+   * its position in the virtual desktop too. SetCursorPos takes the latter.
+   */
+  const b = display.bounds
+  lastFrame = {
+    displayX: b.x,
+    displayY: b.y,
+    displayWidth: b.width,
+    displayHeight: b.height,
+    imageWidth: out.width,
+    imageHeight: out.height
+  }
+  return {
+    kind: 'image',
+    dataUrl: `data:image/jpeg;base64,${jpeg.toString('base64')}`,
+    name: 'screen.jpg',
+    width: out.width,
+    height: out.height,
+    bytes: jpeg.length
   }
 }

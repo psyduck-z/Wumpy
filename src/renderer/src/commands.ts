@@ -50,12 +50,14 @@ export type CommandAction =
   | { kind: 'reasoning'; show: boolean | 'toggle' }
   | { kind: 'pin'; pinned: boolean | 'toggle' }
   | { kind: 'voice'; setting: 'on' | 'polish' | 'autostop' | 'music'; on: boolean | 'toggle' }
-  | { kind: 'voiceprint'; change: 'status' | 'on' | 'off' | 'forget' }
+  | { kind: 'voiceprint'; change: 'status' | 'on' | 'off' | 'forget' | 'calibrate' }
   /** `/startup on|off` — start in the background at login. */
   | { kind: 'startup'; on: boolean | 'toggle' }
   | { kind: 'reflect'; on: boolean | 'toggle'; rounds?: number; model?: string }
   /** Listening to the machine's own audio. See @shared/meeting. */
-  | { kind: 'listen'; what: 'toggle' | 'stop' | 'notes' | 'source'; ask: string }
+  /* watch: listen and watch the screen too (ask: the source, or 'meeting'
+     when the sentence named one); unwatch: stop watching, keep listening. */
+  | { kind: 'listen'; what: 'toggle' | 'stop' | 'notes' | 'source' | 'watch' | 'unwatch' | 'monitor'; ask: string }
   /** A plain boolean in the settings file, with no machinery behind it. */
   | { kind: 'setting'; setting: 'leanPrompt' | 'thinking'; on: boolean | 'toggle' }
   | { kind: 'open'; what: string }
@@ -111,6 +113,8 @@ export type CommandAction =
   | { kind: 'quit' }
   /** `/restart` — restart Wumpy and come back to this chat. */
   | { kind: 'restart' }
+  /** `/update` — update Wumpy now, if it has not updated itself (main/updater.ts). */
+  | { kind: 'update'; force: boolean }
   /** Send to the model, but wrapped in a prompt that shapes the answer. */
   | { kind: 'prompt'; text: string; label: string }
 
@@ -623,19 +627,22 @@ export const COMMANDS: CommandSpec[] = forThisWindow([
     name: 'voice',
     aliases: ['dictate', 'dictation', 'mic'],
     hint: 'Talk instead of typing — hold the spacebar',
-    arg: 'on|off|me',
+    arg: 'on|off|me [calibrate|off|forget]',
     /*
      * "me": the voiceprint, which keeps conversations to the person's own
      * voice (see shared/voiceprint.ts). Under /voice rather than a command
      * of its own: it is learned by itself, so all there is to do with it is
      * look, turn it off and on, or forget it - "/voice me", "/voice me
-     * off", "/voice me forget".
+     * off", "/voice me forget" - or calibrate it on purpose by reading a few
+     * sentences: "/voice me calibrate".
      */
     run: (arg) => {
       const me = /^(?:me|only me|my voice|voiceprint)\b\s*(.*)$/i.exec(arg.trim())
       if (me) {
         const rest = me[1].trim().toLowerCase()
         if (/^(forget|reset|clear|relearn)$/.test(rest)) return { kind: 'voiceprint', change: 'forget' }
+        if (/^(calibrate|calibration|train|setup|set up|enrol|enroll|learn)$/.test(rest))
+          return { kind: 'voiceprint', change: 'calibrate' }
         const on = bool(rest, 'toggle')
         return { kind: 'voiceprint', change: rest === '' ? 'status' : on === true ? 'on' : on === false ? 'off' : 'status' }
       }
@@ -813,6 +820,13 @@ export const COMMANDS: CommandSpec[] = forThisWindow([
     aliases: ['relaunch', 'reboot'],
     hint: 'Restart Wumpy and come back to this chat',
     run: () => ({ kind: 'restart' })
+  },
+  {
+    name: 'update',
+    aliases: ['upgrade'],
+    hint: 'Update Wumpy to the newest version now',
+    arg: 'force',
+    run: (arg) => ({ kind: 'update', force: /^(force|anyway|rebuild)$/i.test((arg ?? '').trim()) })
   },
 
   ...PROMPT_COMMANDS.map((p): CommandSpec => ({

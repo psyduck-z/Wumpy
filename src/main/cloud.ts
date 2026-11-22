@@ -400,8 +400,17 @@ export class CloudClient {
   }
 
   /**
-   * One turn of a background agent, on the key it holds: not streamed,
-   * nothing shown, and every outcome reported rather than thrown.
+   * One turn of a background agent, on the key it holds: nothing shown, and
+   * every outcome reported rather than thrown.
+   *
+   * Streamed, though nothing is shown, so that a model still writing is
+   * told from one that has stopped. Unstreamed, a whole game on GLM 5.3
+   * Flash - six thousand tokens at its pace - ran into the four-minute limit
+   * every time and came back as "0 tokens out": taken for a model that gave
+   * nothing, and moved to the smallest one, which could not write the game.
+   * Now the limit is on silence (`idleMs`: nothing new arriving), with
+   * `timeoutMs` only an outer bound - and what had arrived when either ran
+   * out comes back as cut off, to be carried on from, not thrown away.
    *
    * A refusal for the rate rests that key for a minute, as everywhere; the
    * agent waits it out rather than borrow the chat's.
@@ -410,7 +419,7 @@ export class CloudClient {
     model: string,
     messages: WireMessage[],
     index: number,
-    opts: { numPredict: number; timeoutMs: number; signal?: AbortSignal }
+    opts: { numPredict: number; timeoutMs: number; idleMs?: number; signal?: AbortSignal }
   ): Promise<{ text: string | null; status: number; error?: string; promptTokens: number; completionTokens: number; ms: number; cutOff?: boolean }> {
     const started = Date.now()
     const nothing = { text: null, promptTokens: 0, completionTokens: 0 }
@@ -421,15 +430,34 @@ export class CloudClient {
     rotation.spend(index, model)
     this.remember(provider, rotation)
     await pace(provider, index, 0, this.separate(provider))
+    const idleMs = opts.idleMs ?? 90_000
+    /* Reasoning with no words keeps a turn alive this long and no longer. */
+    const THINKING_MS = 300_000
+    /* Silence: nothing new for idleMs (twice that before the first word,
+       which a long prompt can take a while to reach). */
+    const quiet = new AbortController()
+    let idle: ReturnType<typeof setTimeout> | undefined
+    const heard = (first = false): void => {
+      clearTimeout(idle)
+      idle = setTimeout(() => quiet.abort(new Error(`nothing new for ${Math.round(idleMs / 1000)}s`)), first ? idleMs * 2 : idleMs)
+    }
+    const outer = AbortSignal.timeout(opts.timeoutMs)
+    const signal = AbortSignal.any([quiet.signal, outer, ...(opts.signal ? [opts.signal] : [])])
+    let text = ''
+    let promptTokens = 0
+    let completionTokens = 0
+    let finish = ''
+    let status = 0
     try {
-      const timeout = AbortSignal.timeout(opts.timeoutMs)
+      heard(true)
       const res = await fetch(`${PROVIDERS[provider].base}/chat/completions`, {
         method: 'POST',
         headers: this.headers(provider, index),
         body: JSON.stringify({
           model,
           messages: wireMessagesFor(provider, messages),
-          stream: false,
+          stream: true,
+          stream_options: { include_usage: true },
           temperature: 0.3,
           max_tokens: opts.numPredict,
           ...(() => {
@@ -437,8 +465,9 @@ export class CloudClient {
             return kwargs ? { chat_template_kwargs: kwargs } : {}
           })()
         }),
-        signal: opts.signal ? AbortSignal.any([timeout, opts.signal]) : timeout
+        signal
       })
+      status = res.status
       if (res.status === 429) {
         const until = Date.now() + 60_000
         if (this.separate(provider)) rotation.rest(index, until, 'per-minute')
@@ -449,28 +478,96 @@ export class CloudClient {
         rotation.reject(index)
         this.remember(provider, rotation)
       }
-      if (!res.ok) {
+      if (!res.ok || !res.body) {
         const body = await res.text().catch(() => '')
+        if (refusesPicture(body) && withPictures(messages)) return this.blindRetry(model, messages, index, opts)
         return { ...nothing, status: res.status, error: truncate(stripKey(body), 200), ms: Date.now() - started }
       }
-      const body = (await res.json()) as {
-        choices?: Array<{ message?: { content?: string }; finish_reason?: string }>
-        usage?: { prompt_tokens?: number; completion_tokens?: number }
+      const reader = res.body.getReader()
+      const decoder = new TextDecoder()
+      let buffer = ''
+      for (;;) {
+        const { done, value } = await reader.read()
+        if (done) break
+        buffer += decoder.decode(value, { stream: true })
+        const lines = buffer.split('\n')
+        buffer = lines.pop() ?? ''
+        for (const line of lines) {
+          const trimmed = line.trim()
+          if (!trimmed.startsWith('data:')) continue
+          const payload = trimmed.slice(5).trim()
+          if (!payload || payload === '[DONE]') continue
+          let chunk: Delta
+          try {
+            chunk = JSON.parse(payload) as Delta
+          } catch {
+            continue
+          }
+          if (chunk.error?.message) {
+            if (!text && refusesPicture(chunk.error.message) && withPictures(messages)) return this.blindRetry(model, messages, index, opts)
+            return { text: text || null, cutOff: Boolean(text), status: 0, error: truncate(stripKey(chunk.error.message), 200), promptTokens, completionTokens, ms: Date.now() - started }
+          }
+          if (chunk.usage) {
+            const counted = countTokens(chunk.usage)
+            recordSpend(provider, counted.billed)
+            promptTokens = counted.prompt
+            completionTokens = counted.completion
+          }
+          const why = chunk.choices?.[0]?.finish_reason
+          if (why) finish = why
+          /* Only words count as going on: a carry-on that sent keep-alives
+             and empty deltas for ten minutes, and no text, held its turn to
+             the outer bound. */
+          const delta = chunk.choices?.[0]?.delta
+          const content = delta?.content
+          if (content) {
+            text += content
+            heard()
+          } else if ((delta?.reasoning || delta?.reasoning_content) && Date.now() - started < THINKING_MS) {
+            /* Thinking is going on too - for so long. */
+            heard()
+          }
+        }
       }
       return {
         /* Untrimmed: a reply cut off mid-word is carried on from the very
            next character, and a trimmed join would weld two words. */
-        text: body.choices?.[0]?.message?.content || null,
+        text: text || null,
         /* Stopped by the length limit, not because it had finished. */
-        cutOff: body.choices?.[0]?.finish_reason === 'length',
-        status: res.status,
-        promptTokens: body.usage?.prompt_tokens ?? 0,
-        completionTokens: body.usage?.completion_tokens ?? 0,
+        cutOff: finish === 'length',
+        status,
+        promptTokens,
+        completionTokens: completionTokens || Math.ceil(text.length / 4),
         ms: Date.now() - started
       }
     } catch (err) {
-      return { ...nothing, status: 0, error: describe(err), ms: Date.now() - started }
+      /* Ran out - of quiet or of time - part-way: what came is kept, to be
+         carried on from. Stopped by the agent's own signal, it is not. */
+      const ours = opts.signal?.aborted
+      const why = quiet.signal.aborted ? String((quiet.signal.reason as Error)?.message ?? 'went quiet') : describe(err)
+      if (text && !ours) return { text, cutOff: true, status: status || 200, error: why, promptTokens, completionTokens: Math.ceil(text.length / 4), ms: Date.now() - started }
+      return { ...nothing, status: 0, error: why, ms: Date.now() - started }
+    } finally {
+      clearTimeout(idle)
     }
+  }
+
+  /**
+   * A picture refused by a model that cannot see - the reviewer of a build
+   * is shown the page, and a build moved to Nemotron Ultra had it refused
+   * four times over, "Received multimodal data but multimodal processing is
+   * not enabled", and was never reviewed. Remembered, as the chat does, and
+   * asked again at once without the pictures.
+   */
+  private blindRetry(
+    model: string,
+    messages: WireMessage[],
+    index: number,
+    opts: { numPredict: number; timeoutMs: number; idleMs?: number; signal?: AbortSignal }
+  ): ReturnType<CloudClient['agentTurn']> {
+    rememberBlind(model)
+    console.log(`[wumpy] ${model} refused the picture; it is text-only.`)
+    return this.agentTurn(model, textOnly(messages), index, opts)
   }
 
   abortAll(): void {
@@ -1807,6 +1904,25 @@ export class CloudClient {
  * instead, which has something better than a request with the picture
  * missing: a model that can see, to look at it and say what is there.
  */
+/** A provider's words for "this model cannot take a picture". */
+function refusesPicture(detail: string): boolean {
+  return /multimodal|image_url|images? (?:are|is) not supported|vision/i.test(detail)
+}
+
+/** Whether any message carries a part that is not text. */
+function withPictures(messages: WireMessage[]): boolean {
+  return messages.some((m) => Array.isArray(m.content) && m.content.some((p) => (p as { type?: string })?.type !== 'text'))
+}
+
+/** The messages with their pictures left out: only the text parts, joined. */
+function textOnly(messages: WireMessage[]): WireMessage[] {
+  return messages.map((m) =>
+    Array.isArray(m.content)
+      ? ({ ...m, content: m.content.filter((p) => (p as { type?: string })?.type === 'text').map((p) => (p as { text?: string }).text ?? '').join('\n') } as WireMessage)
+      : m
+  )
+}
+
 export function carryingPicture(body: unknown): boolean {
   const messages = (body as { messages?: Array<{ content?: unknown }> }).messages ?? []
   return messages.some(

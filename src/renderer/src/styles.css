@@ -3325,6 +3325,114 @@ body {
 }
 
 /*
+ * Calibrating the voiceprint (VoiceCalibration): where the voice bar sits,
+ * in the same frame, with the sentence to read large enough to read from a
+ * step back.
+ */
+.calibrate {
+  margin: 0 var(--gutter, 12px) 6px;
+  padding: 10px 12px;
+  border: 1px solid rgb(var(--border));
+  border-radius: 10px;
+  background: rgb(var(--raised, var(--surface)));
+  font-size: 12px;
+  color: rgb(var(--text));
+}
+
+.calibrate-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.calibrate-title {
+  font-weight: 600;
+  font-size: 11px;
+  letter-spacing: 0.2px;
+  color: rgb(var(--accent-text));
+}
+
+.calibrate-count {
+  font-size: 11px;
+  color: rgb(var(--muted));
+  font-variant-numeric: tabular-nums;
+}
+
+.calibrate-sentence {
+  margin: 8px 0;
+  font-size: 15px;
+  line-height: 1.45;
+  min-height: 1.45em;
+}
+
+.calibrate-sentence.is-plain {
+  font-size: 13px;
+}
+
+.calibrate-status {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: rgb(var(--muted));
+}
+
+.calibrate-status.is-heard {
+  color: rgb(var(--danger));
+}
+
+.calibrate-meter {
+  flex: none;
+  width: 48px;
+  height: 4px;
+  border-radius: 2px;
+  background: rgb(var(--danger) / 0.2);
+  overflow: hidden;
+}
+
+.calibrate-meter > span {
+  display: block;
+  width: 100%;
+  height: 100%;
+  background: rgb(var(--danger));
+  transform-origin: left center;
+  transition: transform 120ms ease-out;
+}
+
+.calibrate-hint {
+  margin: 8px 0 0;
+  color: rgb(var(--text));
+}
+
+.calibrate-foot {
+  margin: 8px 0 0;
+  font-size: 11px;
+  color: rgb(var(--muted));
+}
+
+.calibrate-actions {
+  display: flex;
+  gap: 6px;
+  margin-top: 10px;
+}
+
+.calibrate-actions > button {
+  padding: 2px 10px;
+  border: 1px solid rgb(var(--border));
+  border-radius: 20px;
+  background: none;
+  color: rgb(var(--text));
+  font: inherit;
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.calibrate-actions > button:hover {
+  border-color: rgb(var(--accent) / 0.6);
+  color: rgb(var(--accent-text));
+}
+
+/*
  * A background agent, in the answer that started it (AgentCard). The card
  * frame is the command card's: an agent runs what a command card would run
  * by itself, and nothing else.

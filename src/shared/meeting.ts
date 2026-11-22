@@ -35,6 +35,59 @@ export interface Listening {
   /** Wall-clock start, for "we have been going 40 minutes". */
   startedAt: number
   pieces: Heard[]
+  /**
+   * What was on the screen, when it was being watched: a vision model's
+   * note of each screen that looked different from the last - slides,
+   * a shared document, names on the call. Text only; no picture is kept.
+   */
+  seen?: Heard[]
+}
+
+/*
+ * WATCHING THE SCREEN, as well as listening.
+ *
+ * Asked for in these words: "when I'm doing meeting recordings, like when I
+ * tell it, listen to this meeting... can you allow it to look at my screen
+ * too to make it easier?" The transcript cannot spell a name it only heard,
+ * read a figure off a slide, or say what document was shared - the screen
+ * can. So, only when asked, the screen is looked at every WATCH_EVERY_MS;
+ * a screen that has not visibly changed is not sent anywhere, and one that
+ * has is described in a few lines by a model that can see. The picture is
+ * then dropped, as the audio is: what is kept is text and a time.
+ */
+
+/** How often the screen is looked at while it is being watched. */
+export const WATCH_EVERY_MS = 20_000
+
+/**
+ * How different a screen must look, on average per pixel of a 32x18
+ * grey thumbnail (0-255), to be described again. A cursor moving or a
+ * clock ticking is under it; a new slide, a different window or a shared
+ * screen appearing is far over it.
+ */
+export const CHANGED_ABOVE = 6
+
+/** Whether two thumbnails differ enough to be worth describing. No last one: yes. */
+export function screenChanged(last: readonly number[] | null, now: readonly number[]): boolean {
+  if (!last || last.length !== now.length || !now.length) return true
+  let sum = 0
+  for (let i = 0; i < now.length; i++) sum += Math.abs(now[i] - last[i])
+  return sum / now.length > CHANGED_ABOVE
+}
+
+/**
+ * Whether a new note says what the last one did, so it is not kept twice:
+ * a screen can change (a video playing, a speaker's tile lighting up) while
+ * what matters on it does not.
+ */
+export function sameNote(last: string | undefined, now: string): boolean {
+  if (!last) return false
+  const words = (t: string): string[] => t.toLowerCase().replace(/[^a-z0-9\s]/g, ' ').split(/\s+/).filter((w) => w.length > 2)
+  const a = new Set(words(last))
+  const b = words(now)
+  if (!b.length) return true
+  const shared = b.filter((w) => a.has(w)).length
+  return shared / Math.max(a.size, b.length) > 0.8
 }
 
 /** mm:ss, or h:mm:ss once there is an hour of it. */
@@ -93,8 +146,17 @@ export const ENOUGH_WORDS = 30
 export function transcriptText(session: Listening, everyMs = 60_000): string {
   const lines: string[] = []
   let marked = -Infinity
-  for (const piece of session.pieces) {
+  /* What was said and what was shown, in the order they happened. */
+  const events = [
+    ...session.pieces.map((p) => ({ ...p, shown: false })),
+    ...(session.seen ?? []).map((p) => ({ ...p, shown: true }))
+  ].sort((a, b) => a.at - b.at)
+  for (const piece of events) {
     if (!piece.text.trim()) continue
+    if (piece.shown) {
+      lines.push(`(on screen, ${stamp(piece.at)}: ${piece.text.trim().replace(/\s+/g, ' ')})`)
+      continue
+    }
     if (piece.at - marked >= everyMs) {
       lines.push(`[${stamp(piece.at)}]`)
       marked = piece.at
@@ -151,7 +213,11 @@ export const RULES = [
   '  them. The channels are mixed; you cannot tell who is speaking.',
   '- Never repair a name or a number into something more plausible. If it',
   '  sounds wrong, quote it as heard and say it was unclear.',
-  '- Do not invent detail to fill a heading. Leave the heading out.'
+  '- Do not invent detail to fill a heading. Leave the heading out.',
+  '- Lines "(on screen, mm:ss: ...)" are what was on my screen then, as a',
+  '  vision model described it. Use them for names, titles and figures the',
+  '  audio garbles - but they are second-hand, and a name on screen is not',
+  '  proof of who was speaking.'
 ].join('\n')
 
 /**
@@ -251,4 +317,98 @@ export function meetingTurn(session: Listening, ask = ''): string {
 export function elapsed(session: Listening): number {
   const last = session.pieces[session.pieces.length - 1]
   return last ? last.at : 0
+}
+
+/*
+ * LIVE NOTES, kept up to date while the meeting runs.
+ *
+ * Asked for as "live notes and updating, and also change things": notes that
+ * are on screen during the meeting rather than only at the end, and that
+ * CHANGE when the meeting does - the deadline that was Thursday at ten past
+ * and Friday at half past is Friday in the notes, with the Thursday struck
+ * through, not two deadlines side by side.
+ *
+ * Each update sends the notes so far plus only the transcript since the last
+ * update (with a minute of overlap, so a sentence cut at the seam is seen
+ * whole). The notes carry what came before, so an hour-long meeting costs
+ * the same per update as a five-minute one.
+ */
+
+/** How often the live notes are brought up to date, at most. */
+export const LIVE_NOTES_EVERY_MS = 60_000
+/** And only when this much more has been said - or the screen showed something new. */
+export const LIVE_NOTES_NEW_WORDS = 40
+/** How far back before the last update each update re-reads. */
+export const LIVE_NOTES_OVERLAP_MS = 60_000
+
+/** Whether the live notes are due an update. */
+export function liveNotesDue(
+  last: { words: number; seen: number; at: number },
+  now: { words: number; seen: number; at: number }
+): boolean {
+  if (now.at - last.at < LIVE_NOTES_EVERY_MS) return false
+  const firstTime = last.words === 0 && last.seen === 0
+  if (firstTime) return now.words >= ENOUGH_WORDS || now.seen > 0
+  return now.words - last.words >= LIVE_NOTES_NEW_WORDS || now.seen > last.seen
+}
+
+/** Where the session has got to, by the last thing heard or seen. */
+export function reached(session: Listening): number {
+  const seen = session.seen ?? []
+  return Math.max(elapsed(session), seen.length ? seen[seen.length - 1].at : 0)
+}
+
+export const LIVE_NOTES_PROMPT = [
+  'You keep running notes of a meeting that is still going on. You are given',
+  'your notes so far and what has been said and shown since. Return the notes',
+  'as they should stand NOW:',
+  '',
+  '- Add what is new.',
+  '- When the meeting changes something already in the notes - a date moved,',
+  '  a decision reversed, a figure corrected, an action handed to someone',
+  '  else - change that item where it is and show the change, like:',
+  '  "Due Friday ~~Thursday~~ (changed 12:30)". Never keep the old and the new',
+  '  side by side as if both were true.',
+  '- Something dropped is struck through: "~~Hire a contractor~~ (dropped 14:05)".',
+  '- Leave items that have not changed exactly as they were.',
+  '',
+  'Headings, in this order, leaving out any you have nothing for:',
+  '**Summary** (two or three sentences), **Decisions**, **Actions**,',
+  '**Details**, **Open questions**. Short bullets. No preamble, no sign-off.',
+  'Notes only.'
+].join('\n')
+
+/** The live-notes request: rules, the notes so far, and what is new since `since` ms. */
+export function liveNotesRequest(
+  session: Listening,
+  previous: string,
+  since: number
+): { system: string; user: string } {
+  const from = previous.trim() ? Math.max(0, since - LIVE_NOTES_OVERLAP_MS) : 0
+  const recent: Listening = {
+    startedAt: session.startedAt,
+    pieces: session.pieces.filter((p) => p.at >= from),
+    seen: (session.seen ?? []).filter((p) => p.at >= from)
+  }
+  const text = transcriptText(recent)
+  return {
+    system: `${RULES}\n\n${LIVE_NOTES_PROMPT}`,
+    user: [
+      previous.trim() ? `Your notes so far:\n\n${previous.trim()}` : 'There are no notes yet.',
+      '',
+      from > 0
+        ? `What was said and shown from ${stamp(from)} to ${stamp(reached(session))}:`
+        : `The meeting so far, ${stamp(reached(session))} in:`,
+      '',
+      text || '(nothing new)'
+    ].join('\n')
+  }
+}
+
+/** The card the live notes are shown in. */
+export function liveNotesCard(notes: string, session: Listening, live: boolean): string {
+  const head = live
+    ? `**Live notes** · ${stamp(reached(session))} in · updating as the meeting goes`
+    : `**Meeting notes** · final, ${stamp(reached(session))} · ask me anything about it`
+  return `${head}\n\n${notes.trim()}`
 }

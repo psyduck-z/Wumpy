@@ -150,6 +150,16 @@ const INTENTS: Intent[] = [
     build: () => ({ kind: 'restart' })
   },
   {
+    /*
+     * "update yourself", "update wumpy", "update 1P": /update. Wumpy or
+     * yourself is required, as for restart: "update my system" or "update
+     * the packages" is the user's work, for the model.
+     */
+    pattern:
+      /^(?:please\s+)?(?:can\s+you\s+)?(?:update|upgrade)\s+(?:wumpy|yourself|1p|one\s*p)(?:\s+(?:now|please))?\.?$/i,
+    build: () => ({ kind: 'update', force: false })
+  },
+  {
     /* "change the model", "switch models", "pick a model": the list. */
     pattern:
       /^(?:please\s+)?(?:can\s+you\s+)?(?:change|switch|pick|choose|select)\s+(?:the\s+|my\s+|a\s+|your\s+)?(?:ai\s+)?models?\.?$/i,
@@ -218,12 +228,52 @@ const INTENTS: Intent[] = [
        */
       const mic = /\b(?:microphone|mic)\b/i.test(said)
       const speakers = /\b(?:speakers?|system)\b/i.test(said)
+      /* "listen to this meeting and watch my screen": both, from the start
+         (see shared/meeting.ts WATCHING THE SCREEN). */
+      if (/\b(?:screen|display|monitor|slides?)\b/i.test(said))
+        return { kind: 'listen', what: 'watch', ask: mic && !speakers ? 'mic' : speakers && !mic ? 'system' : 'meeting' }
       if (mic && !speakers) return { kind: 'listen', what: 'source', ask: 'mic' }
       if (speakers && !mic) return { kind: 'listen', what: 'source', ask: 'system' }
       /* A meeting is both halves of a meeting, which is also what somebody
          who named neither is asking for. */
       return { kind: 'listen', what: 'toggle', ask: '' }
     }
+  },
+  {
+    /*
+     * "watch my screen too", "keep an eye on my screen", "look at my screen
+     * during the meeting": watching the screen while a meeting is heard.
+     * Watching and keeping an eye on are ongoing by their words; "look at"
+     * and "see" are a one-off screenshot unless something says otherwise -
+     * too, also, as well, during the meeting - so a bare "look at my screen"
+     * still goes to the model, as it always has.
+     */
+    pattern:
+      /^(?:please\s+)?(?:can\s+you\s+)?(?:also\s+)?(?:(?:watch|keep\s+(?:an\s+eye|watch)\s+on)\s+(?:my|the)\s+(?:screen|display|monitor)(?:\s+(?:too|also|as\s+well))?(?:\s+(?:during|in|for)\s+(?:the|this|my)\s+(?:meeting|call))?|(?:look\s+at|see)\s+(?:my|the)\s+(?:screen|display|monitor)\s+(?:too|also|as\s+well|(?:during|in|for)\s+(?:the|this|my)\s+(?:meeting|call)))\s*[.!]?$/i,
+    build: (m) => ({ kind: 'listen', what: 'watch', ask: /\b(?:meeting|call)\b/i.test(m.input ?? '') ? 'meeting' : '' })
+  },
+  {
+    /*
+     * "monitor my PC", "monitor my screen", "start monitoring my computer":
+     * one sentence for the whole thing - the meeting heard, the screen
+     * watched, live notes kept. Asked for in place of the two longer ones:
+     * "instead of just saying listen to this meeting or watch my screen, just
+     * say monitor my PC". The object is required and the sentence must end
+     * there, so "monitor my PC's temperature" still goes to the model.
+     */
+    pattern:
+      /^(?:please\s+)?(?:can\s+you\s+)?(?:start\s+)?monitor(?:ing)?\s+(?:my|the|this)\s+(?:pc|computer|laptop|desktop|screen|display|machine|meeting|call)(?:\s+(?:for\s+me|now|please))?\s*[.!]?$/i,
+    build: () => ({ kind: 'listen', what: 'monitor', ask: 'meeting' })
+  },
+  {
+    /* "stop monitoring" ends all of it, as "monitor my PC" started all of it. */
+    pattern:
+      /^(?:please\s+)?(?:stop|end|finish|quit)\s+monitoring(?:\s+(?:my|the|this)\s+(?:pc|computer|laptop|desktop|screen|display|machine|meeting|call))?\s*[.!]?$/i,
+    build: () => ({ kind: 'listen', what: 'stop', ask: '' })
+  },
+  {
+    pattern: /^(?:please\s+)?(?:stop|quit|don'?t\s+keep)\s+(?:watching|looking\s+at)\s+(?:my|the)\s+(?:screen|display|monitor)\s*[.!]?$/i,
+    build: () => ({ kind: 'listen', what: 'unwatch', ask: '' })
   },
   {
     /* And the other end of it, where a bare "stop listening" IS unambiguous:

@@ -162,7 +162,16 @@ export const BUILDING = [
   '  and check a maze as it starts: flood-fill from the player, and throw an Error naming any',
   '  dot it cannot reach. Only a maze: a Crossy Road\'s rivers are crossed on logs, and a flood',
   '  fill that threw "unreachable grass" broke it on load. Sizes come from the data -',
-  '  ROWS = MAZE.length - never a second number typed beside it.',
+  '  ROWS = MAZE.length - never a second number typed beside it. A maze, in code, like this:',
+  '    const COLS = 21, ROWS = 23, grid = [...Array(ROWS)].map(() => Array(COLS).fill(DOT))',
+  '    const wall = (x, y, w, h) => {',
+  '      for (let r = y; r < y + h; r++) for (let c = x; c < x + w; c++) grid[r][c] = grid[r][COLS - 1 - c] = WALL',
+  '    }',
+  '    wall(0, 0, COLS, 1); wall(0, ROWS - 1, COLS, 1); wall(0, 0, 1, ROWS); wall(2, 2, 3, 2)',
+  '  and the rest of the walls; then put the player and the pen on tiles you know are open, and',
+  '  flood-fill to check.',
+  '  Two maze games typed their rows anyway - 32 rows under ROWS = 31, rows of 20 to 23',
+  '  characters - and Wumpy now refuses a typed map whose rows do not line up.',
   '- Enemies move from the first seconds: ghosts leave their pen, cars drive. Lanes start',
   '  full - cars and logs already spread along them, not all entering from the edge, which',
   '  left a Crossy Road\'s rivers empty and uncrossable for its first seconds.',
@@ -175,6 +184,19 @@ export const BUILDING = [
   '  is on the new tile, takes any turn pressed early, and checks the wall one tile ahead.',
   '  Never test a moving x for landing exactly on a centre - it never does - and never nudge a',
   '  free x and y against walls: those Pac-Men stuck at the first corner, or never moved.',
+  '  Like this - the same for the player and every enemy:',
+  '    // e = { col, row, dir: [0, 0], want: [0, 0], t: 0 }; speed in tiles a second',
+  '    function step(e, dt, speed) {',
+  '      if (e.t === 0) {',
+  '        if (open(e.col + e.want[0], e.row + e.want[1])) e.dir = e.want',
+  '        if (!open(e.col + e.dir[0], e.row + e.dir[1])) { e.dir = [0, 0]; return }',
+  '      }',
+  '      e.t += speed * dt',
+  '      if (e.t >= 1) { e.col += e.dir[0]; e.row += e.dir[1]; e.t = 0 }',
+  '    }',
+  '  A key sets e.want; drawn at col + dir[0] * t, row + dir[1] * t. Standing still, t stays 0,',
+  '  so a key pressed then turns it at once. Two more maze games never moved: they took a turn',
+  '  only when x landed on a centre.',
   '- Every speed and timer is per second, times the time since the last frame - capped, so a',
   '  tab coming back does not jump everything. requestAnimationFrame gives milliseconds:',
   '  divide by 1000 once, in one place. One unit for every position and size - tiles or',
@@ -182,9 +204,12 @@ export const BUILDING = [
   '- Game over shows the score, and Space, Enter or a button starts a new game that really',
   '  runs: every piece of state reset, and one game loop that never stops - a loop stopped',
   '  at game over and never started again is the commonest bug there is.',
+  '- A web page needs nothing installed: never check for python, node, packages or versions',
+  '  before writing one - write the whole page in your first reply. Wumpy plays it in a browser.',
   '- Outside the browser, write for what is installed here, and give the exact command that',
   '  runs it. Wumpy\'s check of your code says what is installed; so does `pip show <package>`.',
   '  `python -c` never runs here: it runs code.',
+  '- A player on a grid moves 5 to 8 tiles a second - a maze game at 1 a second was a crawl.',
   '- Fair to play: enemies a little slower than the player (ghosts about 85% of Pac-Man\'s',
   '  speed), not all hunting the same way, and a second\'s grace after a life is lost - a',
   '  Pac-Man lost all three lives in four seconds. Every timer in seconds, never in frames.',
@@ -198,10 +223,14 @@ export const BUILDING = [
   '  and show it: a probe that sets the case up and reads the result, e.g. `show: (player.row =',
   '  cars[0].row, player.col = Math.round(cars[0].x), 1)`, `wait: 300`, `show: gameOver`.',
   '- Overlays - title, game over - are a centred column: heading, score, how to play again.',
-  '- Compact: a basic game is 300 to 600 lines. Short comments; no essays in the code.',
+  '- Compact: a basic game is 300 to 600 lines. Short comments; no essays in the code. But one',
+  '  statement to a line, never a whole function on one: a game written that way lost one `}`',
+  '  and its agent could not find it in a line nine hundred characters long.',
   '- When Wumpy says something does not work, look before you change code: a',
   `  ${BT}wumpy-probe block plays your page and reads values back - lines \`press: Space, ArrowLeft\`,`,
   '  `wait: 500`, `show: pacman` or `show: canMove(3, 4, \'left\')` - any expression on the page.',
+  '  A map in one look, never a few rows at a time: `show: maze.map(r => r.join(\'\')).join(\'\\n\')`.',
+  '  An agent read its maze three rows a probe, spent every step on it, and fixed nothing.',
   '- Before you report, play it in your head: the first second, each key once, losing, the',
   '  restart, and the score.'
 ]
@@ -210,6 +239,67 @@ export const BUILDING = [
 export function isBuild(brief: string): boolean {
   return /\b(games?|play(?:able)?|html|web ?page|website|app|application|program|canvas|tetris|snake|pac-?man|pong|breakout|platformer|crossy|frogger|asteroids|invaders|minesweeper|sudoku|chess|2048|flappy|python|c\+\+|cpp|javascript)\b|c\+\+/i.test(brief)
 }
+
+/**
+ * Whether a brief is for a web page alone: built and tested in the browser,
+ * needing nothing from this computer. A maze game's agent spent five of its
+ * ten steps on `which python3`, `python3 --version`, a check for pygame and
+ * `echo "test"` before writing a line of the page.
+ */
+export function isPageBuild(brief: string): boolean {
+  return (
+    isBuild(brief) &&
+    /\b(html|web ?page|website|browser|canvas)\b/i.test(brief) &&
+    !/\b(python|pygame|tkinter|c\+\+|cpp|node(?:\.js)?|rust|java|electron)\b|c\+\+/i.test(brief)
+  )
+}
+
+/**
+ * Where a build moves when its model gave nothing: the strongest that is up,
+ * not the quickest. A maze game's agent moved off GLM onto Lightning 30B,
+ * the quickest, which wrote a page that would not parse and then handed back
+ * a search query as the game. Writing a whole program wants the most
+ * capable model there is; the order is bench-ceiling's (Ultra 38 of 42, the
+ * most anything has posted). The small ones are left out on purpose.
+ */
+export const BUILD_MODELS = [
+  'nvidia/nemotron-3-ultra-550b-a55b',
+  'nvidia/nemotron-3.5-super-vl-120b-a12b',
+  'z-ai/glm-5.3-flash',
+  'stepfun-ai/step-5-preview'
+]
+
+/** The strongest model for a build other than `model`, that is usable and last answered; null if none. */
+export function buildFallback(
+  model: string,
+  latencies: Record<string, { ok: boolean }>,
+  usable: (id: string) => boolean
+): string | null {
+  return BUILD_MODELS.find((id) => id !== model && latencies[id]?.ok !== false && usable(id)) ?? null
+}
+
+/**
+ * Said beside the brief itself when the build has a maze in it. The rule
+ * and an example are in the building rules, and agents read past them: six
+ * maze games running, four typed their map as rows anyway - rows of 25 to
+ * 29 characters, 32 rows under ROWS = 31 - and each was refused for it and
+ * written again. Next to the task it is read.
+ */
+export function briefNotes(brief: string): string {
+  if (!/\b(maze|labyrinth|pac-?man|dungeon|corridors?)\b/i.test(brief)) return brief
+  return (
+    `${brief}\n\n` +
+    'Wumpy: build the maze in code - a grid filled from wall rectangles, mirrored left to right, as your ' +
+    'rules show - never typed as rows of text or numbers. A typed map whose rows do not all line up is ' +
+    'refused before it is played. Start the player and the enemies on open tiles, apart.'
+  )
+}
+
+/** The answer to a command run while building a web page: it needs nothing from this computer. */
+export const PAGE_NEEDS_NOTHING =
+  'NOT RUN: a web page needs nothing from this computer - no python, node, packages, versions or test ' +
+  'commands, and none of them tell you anything about it. Write the whole page now, in one html block in ' +
+  'your REPORT: Wumpy loads it in a browser and plays it for you. To try it part-way, a wumpy-check-page block.'
 
 /**
  * The instructions, built for the machine and the mode it runs under.
@@ -311,7 +401,8 @@ export const REVIEW_PROMPT = [
   '  your head: the first second (can it kill the player before a key is pressed?), each',
   '  control once, losing, and the restart - is every piece of state reset, and does the game',
   '  loop run again? A game stuck at its start, or frozen after a restart, is not a game.',
-  "- Wumpy's own test of the page or program is in the steps: what it shows is fact.",
+  "- Wumpy's own test of the page or program is in the steps: what it shows is fact. If it",
+  '  moved the player, the player does not start in a wall - never say it does.',
   '- A REVISE about logic works one case through with real numbers first - "row 12 to row',
   '  11: score 0 to 1". If the numbers come out right, it is not a REVISE. If the report says',
   '  why an earlier note was wrong, check that; if it holds, drop the note - never repeat it.',
@@ -986,6 +1077,9 @@ export function agentsPrompt(slots: number): string {
     'back the whole file.',
     BT,
     '',
+    'A game\'s brief is a few lines, as above: what they asked, plus controls, start, score, replay;',
+    'no extras (levels, high scores, sounds, sizes): long games break.',
+    '',
     'The brief is ALL it gets: it sees nothing of this chat. Put in the goal, every fact, name',
     'and detail they asked for, and exactly what to hand back. It only reads: it cannot save a',
     'file or change anything, so never ask it to - "hand back the whole file", and you write it.',
@@ -1020,7 +1114,11 @@ export function agentsStub(slots: number): string {
  * round. Saying it louder is no guarantee; dropping the point is. When nothing
  * is left, the review is an accept.
  */
-export function withoutNonBugs(review: { verdict: 'accept' | 'revise'; notes: string }): {
+export function withoutNonBugs(
+  review: { verdict: 'accept' | 'revise'; notes: string },
+  /** What Wumpy's own play of the page found, last; facts a review point cannot contradict. */
+  played = ''
+): {
   verdict: 'accept' | 'revise'
   notes: string
   dropped: number
@@ -1037,9 +1135,19 @@ export function withoutNonBugs(review: { verdict: 'accept' | 'revise'; notes: st
   const behindOverlay = (p: string): boolean =>
     /\b(?:drawn|visible|shown|showing|displayed|remains?|still\s+(?:there|shows?|on\s+screen))\b[^.]{0,40}\b(?:behind|under(?:neath)?|beneath)\b[^.]{0,80}\b(?:overlay|game[- ]?over|title|start screen|menu|it)\b/i.test(p) ||
     /\b(?:clear|blank|hide|wipe)\b[^.]{0,50}\b(?:canvas|board|screen|scene|snake|pieces?)\b[^.]{0,80}\b(?:game[- ]?over|overlay|title)\b/i.test(p)
-  const kept = points.filter((p) => !behindOverlay(p))
+  /* The player trapped, in a wall or unable to move - said of a page whose
+     player Wumpy has just watched move. A maze game's reviewer, reading the
+     wall rectangles instead of the test, said twice that the player
+     "spawns inside a wall" when it had walked from row 23 to row 22. */
+  const moved = /moved the player/.test(played) && !/did not move the player/.test(played)
+  const trappedPlayer = (p: string): boolean =>
+    moved &&
+    /\b(?:player|pac-?man|hero)\b/i.test(p) &&
+    /\b(?:inside|in|into|within)\s+(?:a\s+|the\s+)?(?:solid\s+)?walls?\b|\bcan(?:not|'t)\s+move\b|\bnever\s+moves?\b|\b(?:is|gets?)\s+stuck\b|\btrapped\b/i.test(p) &&
+    !/\b(?:ghosts?|enem(?:y|ies)|chasers?|monsters?)\b[^.]{0,40}\b(?:inside|trapped|stuck)\b/i.test(p)
+  const kept = points.filter((p) => !behindOverlay(p) && !trappedPlayer(p))
   const dropped = points.length - kept.length
   if (dropped === 0) return { ...review, dropped }
-  if (kept.length === 0) return { verdict: 'accept', notes: 'Only asked to hide the game behind its overlay, which is not a bug.', dropped }
+  if (kept.length === 0) return { verdict: 'accept', notes: 'Its points were contradicted by Wumpy\'s own test of the page, or only asked to hide the game behind its overlay.', dropped }
   return { verdict: 'revise', notes: kept.join('\n'), dropped }
 }

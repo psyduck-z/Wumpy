@@ -278,7 +278,7 @@ export const ORDERINGS: readonly OrderingSpec[] = [
        backticks showing. The sheet gets `summary` instead. */
     note:
       'Median time to a short answer at Wumpy’s real instructions, re-measured by ' +
-      '/model check and once an hour in the background. Quick is not the same as ' +
+      '/model check and every 30 minutes in the background. Quick is not the same as ' +
       'right — the score is in every badge.',
     summary: 'fastest first'
   }

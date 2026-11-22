@@ -152,10 +152,21 @@ export const VOICEPRINT_WAIT_MS = 1500
 /** A clip with fewer words than this is not learned from: "yes" is not much of a voice. */
 export const LEARN_WORDS = 3
 
+/**
+ * A yes or no to something about to run is waited for longer: it is short,
+ * so the voiceprint is quick, and unlike a question, an answer that could not
+ * be told to be theirs is not taken (see main/voiceprint.ts whose).
+ */
+export const ANSWER_VOICEPRINT_WAIT_MS = 6000
+
+/** Answers turned away as someone else's this many times, and it is left on the screen. */
+export const TURNED_AWAY_ASKS = 3
+
 /** For the log: whose voice, by how much, and why. */
 export function whoseLine(who: WhoseAnswer): string {
   const score = who.score === null ? '' : ` (${who.score.toFixed(2)})`
-  if (who.kind === 'someone else') return `someone else's voice${score}: not answered`
+  if (who.kind === 'someone else')
+    return who.why === 'unsure' ? 'whose voice could not be told, and it was an answer: not taken' : `someone else's voice${score}: not answered`
   if (who.why === 'match') return `their voice${score}`
   if (who.why === 'learning') return `learning their voice${score}`
   if (who.why === 'short') return 'too short to tell whose voice: heard'
@@ -709,11 +720,17 @@ export function useVoiceTurn(deps: Deps): void {
      * asked while its words are being heard so it costs no wait. Null when
      * it could not be told, which counts as theirs.
      */
-    async function whoseVoice(blob: Blob, extension: string, onsetMs: number, talkedMs: number): Promise<WhoseAnswer | null> {
+    async function whoseVoice(
+      blob: Blob,
+      extension: string,
+      onsetMs: number,
+      talkedMs: number,
+      answer: boolean
+    ): Promise<WhoseAnswer | null> {
       try {
         const ready = await clipForSpeech(blob, extension, Math.max(0, onsetMs - PRE_ROLL_MS))
         if (ready.extension !== 'wav') return null
-        return await window.wumpy.voice.whose(ready.audio, talkedMs, device)
+        return await window.wumpy.voice.whose(ready.audio, talkedMs, device, answer)
       } catch (err) {
         note(`whose voice it was could not be told: ${String(err)}`)
         return null
@@ -727,6 +744,9 @@ export function useVoiceTurn(deps: Deps): void {
      */
     let unheard: { talkedMs: number; failed: boolean } | null = null
 
+    /** The last thing listened for was said, but in someone else's voice. */
+    let turnedAway = false
+
     /*
      * The next thing said: waits up to `waitMs` for someone to start, then
      * until a pause of `pauseMs` ends it, and hears it. Null for silence,
@@ -736,10 +756,19 @@ export function useVoiceTurn(deps: Deps): void {
      * rest is waited for and put after it, rather than sent as half a
      * question. "When I'm just speaking halfway through... it actually cuts
      * me off."
+     *
+     * `answer`: a yes or no to something about to run, whose voice is judged
+     * however short it is (see shared/voiceprint.ts SAME_ABOVE_ANSWER).
      */
-    async function listen(pauseMs: number, waitMs: number, prompt = ''): Promise<{ text: string; heard: string } | null> {
+    async function listen(
+      pauseMs: number,
+      waitMs: number,
+      prompt = '',
+      answer = false
+    ): Promise<{ text: string; heard: string } | null> {
       idled = false
       unheard = null
+      turnedAway = false
       if (cancelled || !ear) return null
       await speaker?.drain()
       if (cancelled || !ear) return null
@@ -807,7 +836,7 @@ export function useVoiceTurn(deps: Deps): void {
         const faint = Boolean(clip) && talkedMs < FAINT_MS && stats.peak < stats.bar * FAINT_TIMES
         if (faint) note(`too short and faint to be words (${Math.max(0, talkedMs)}ms, loudest ${stats.peak.toFixed(3)}): not sent`)
         if (clip && !faint) {
-          const voice = whoseVoice(clip.blob, clip.extension, r.onsetMs(), Math.max(0, talkedMs))
+          const voice = whoseVoice(clip.blob, clip.extension, r.onsetMs(), Math.max(0, talkedMs), answer)
           showVoice({ stage: 'hearing', level: 0 })
           /* The typing is "got it": no chime for it. */
           startTicks()
@@ -828,10 +857,14 @@ export function useVoiceTurn(deps: Deps): void {
              sentence that went unheard either. Waited for no longer than
              VOICEPRINT_WAIT_MS past the words, after which it counts as
              theirs. */
-          const who = await Promise.race([voice, sleep(VOICEPRINT_WAIT_MS).then(() => null)])
+          const who = await Promise.race([voice, sleep(answer ? ANSWER_VOICEPRINT_WAIT_MS : VOICEPRINT_WAIT_MS).then(() => null)])
           if (who && whoseLine(who)) note(whoseLine(who))
-          if (who?.kind === 'someone else') {
+          /* An answer whose voice was not told in time is not taken: the
+             main process only takes that long when the voice is known. */
+          if (answer && !who && words.heard) note('whose voice it was took too long to tell, and it was an answer: not taken')
+          if (who?.kind === 'someone else' || (answer && !who && words.heard)) {
             stopTicks()
+            if (words.heard) turnedAway = true
           } else if (words.heard) {
             if (who?.kind === 'theirs' && who.token && words.heard.split(/\s+/).length >= LEARN_WORDS)
               void window.wumpy.voice.learn(who.token).then((learned) => {
@@ -864,9 +897,18 @@ export function useVoiceTurn(deps: Deps): void {
     async function approveNow(): Promise<void> {
       let asked = false
       let unanswered = 0
+      let refused = 0
       for (;;) {
         const entry = newestPending()
         if (!entry || cancelled || leftUnanswered.has(entry)) return
+        /* Answered, more than once, by a voice that is not theirs: whoever
+           it is does not get to run it, and asking on would only ask them. */
+        if (refused >= TURNED_AWAY_ASKS) {
+          leftUnanswered.add(entry)
+          note(`"${approvalQuestion(entry)}" was answered ${refused} times in a voice that is not theirs: left on the screen`)
+          await say('That doesn’t sound like you, so I’ll leave it on the screen.')
+          return
+        }
         /* Nobody answering at all: they have walked away. It stays on the
            screen, unrun, rather than being asked every eight seconds for as
            long as the conversation lasts. */
@@ -876,11 +918,14 @@ export function useVoiceTurn(deps: Deps): void {
           await say('I’ll leave that on the screen.')
           return
         }
-        await say(asked ? 'Yes or no?' : `${approvalQuestion(entry)} Say yes or no.`)
+        await say(
+          !asked ? `${approvalQuestion(entry)} Say yes or no.` : turnedAway ? 'That didn’t sound like you. Yes or no?' : 'Yes or no?'
+        )
         asked = true
         if (cancelled || newestPending() !== entry) continue
-        const answer = await listen(900, 8000, 'Say yes or no.')
+        const answer = await listen(900, 8000, 'Say yes or no.', true)
         unanswered = idled ? unanswered + 1 : 0
+        if (turnedAway) refused++
         // Clicked in the panel while it was listening: that is an answer too.
         if (newestPending() !== entry) continue
         const said = answer ? yesNo(answer.heard) : null
@@ -932,10 +977,12 @@ export function useVoiceTurn(deps: Deps): void {
       if (choice.confirm) {
         let asked = false
         while (open()) {
-          await say(asked ? 'Yes or no?' : `${choice.question} Say yes or no.`)
+          await say(
+            !asked ? `${choice.question} Say yes or no.` : turnedAway ? 'That didn’t sound like you. Yes or no?' : 'Yes or no?'
+          )
           asked = true
           if (!open()) break
-          const heard = await listen(900, 8000)
+          const heard = await listen(900, 8000, '', true)
           if (!open()) break
           const said = heard ? yesNo(heard.heard) : null
           if (said) {

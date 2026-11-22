@@ -86,6 +86,7 @@ import { afterTurn, handsFree, tell } from './handsfree'
 import { speakable } from '@shared/spoken'
 import { useChat, nextId, type ChatStats } from './hooks/useChat'
 import { useListening } from './hooks/useListening'
+import { useLiveNotes } from './hooks/useLiveNotes'
 import type { AudioSource } from './loopback'
 import {
   ENOUGH_WORDS,
@@ -146,12 +147,14 @@ import { LANG_NAME, codeErrorText } from '@shared/codecheck'
 import { Message } from './components/Message'
 import { Composer } from './components/Composer'
 import { VoiceTurnBar } from './components/VoiceTurnBar'
+import { FINISHED, voiceView } from './voiceview'
 import { StatusBar } from './components/StatusBar'
 import logo from './assets/logo.png'
 import { Picker, type PickerProps } from './components/Picker'
 import { firstShown, foldsTranscript, hiddenCount, REVEAL_STEP } from './transcript'
 import { activityFor } from '@shared/activity'
 import { voiceprintNote } from './voiceprintnote'
+import { VoiceCalibration } from './components/VoiceCalibration'
 
 /**
  * Mirrors the main process's accelerator formatting for display: the key is
@@ -204,6 +207,8 @@ export default function App(): React.JSX.Element {
    * and the only thing with that lifetime is App.
    */
   const listening = useListening(useCallback(() => allCommands().map((c) => c.name), []))
+  /** The live notes card that follows a meeting while it is heard. */
+  const liveNotes = useLiveNotes(listening, chat)
 
   /**
    * What the model is doing, read off the reply as it arrives.
@@ -310,6 +315,8 @@ export default function App(): React.JSX.Element {
 
   // Saved chats
   /** Which picker is open, if any. One list UI serves them all. */
+  /** Reading sentences for the voiceprint: see components/VoiceCalibration. */
+  const [calibrating, setCalibrating] = useState(false)
   const [picker, setPicker] = useState<
     null | 'command' | 'resume' | 'delete' | 'model' | 'dock' | 'engine'
   >(null)
@@ -496,7 +503,8 @@ export default function App(): React.JSX.Element {
        bounded to avoid. Stops the session too, if one is still running:
        nothing would be listening to, and nobody would know it was. */
     void listening.forget()
-  }, [chat, listening])
+    liveNotes.reset()
+  }, [chat, listening, liveNotes])
 
   /**
    * Renames the current chat.
@@ -1582,15 +1590,17 @@ function namedControls(shot: Attachment): string[] {
    * no lecture, and never again for the same session.
    */
   const startListening = useCallback(
-    async (want: AudioSource): Promise<void> => {
+    async (want: AudioSource, quiet = false): Promise<boolean> => {
       /* The reason comes back from the call. Reading `listening.error` here
          read the render that is still on screen, so it was always null and
          every failure printed the same six words. See start(). */
       const why = await listening.start(want)
       if (why) {
         chat.note(why, true)
-        return
+        return false
       }
+      liveNotes.reset()
+      if (quiet) return true
       const what =
         want === 'both'
           ? 'your speakers **and** your microphone'
@@ -1608,8 +1618,9 @@ function namedControls(shot: Attachment): string[] {
        */
       chat.note(
         [
-          `**Listening** to ${what}. Just talk to me — say **notes** for a write-up, ` +
-            'or ask anything about what was said.',
+          `**Listening** to ${what}. **Live notes** appear here once there is something to note, ` +
+            'and keep updating — and correcting themselves — as the meeting goes. Ask me anything ' +
+            'about what was said, or say **notes** for a full write-up.',
           '',
           'Say **stop listening** when you are done. Only the text is kept, ' +
             'no audio, and the channels are mixed so it cannot say who spoke.',
@@ -1617,8 +1628,9 @@ function namedControls(shot: Attachment): string[] {
           '_Recording others may need their consent where you are._'
         ].join(NEWLINE)
       )
+      return true
     },
-    [chat, listening]
+    [chat, listening, liveNotes]
   )
 
   /* ------------------------------------------------- choosing out loud */
@@ -2567,6 +2579,15 @@ function namedControls(shot: Attachment): string[] {
           return
         }
         case 'voiceprint': {
+          if (action.change === 'calibrate') {
+            /* A conversation holds the mic, and the voice read must be the person's alone. */
+            if (voiceView().stage !== 'idle' && !FINISHED.has(voiceView().stage)) {
+              chat.note('End the conversation first, then `/voice me calibrate`: calibrating needs the mic to itself.', false, 'voiceprint')
+              return
+            }
+            setCalibrating(true)
+            return
+          }
           const print =
             action.change === 'status'
               ? await window.wumpy.voice.print()
@@ -2646,6 +2667,74 @@ function namedControls(shot: Attachment): string[] {
             return
           }
 
+          if (action.what === 'unwatch') {
+            if (!listening.watching) {
+              chat.note('Not watching your screen.')
+              return
+            }
+            listening.unwatch()
+            chat.note('Stopped watching your screen. Still listening — say **stop listening** to end that too.')
+            return
+          }
+
+          if (action.what === 'watch' || action.what === 'monitor') {
+            /* "watch my screen" with no meeting running and none named is
+               not a reason to open a microphone: said, not guessed. */
+            if (!listening.on && action.ask === '') {
+              chat.note(
+                'I am not listening to a meeting. Say **monitor my PC** to listen and watch your screen together, ' +
+                  'or ask me to **look at my screen** for a one-off look.'
+              )
+              return
+            }
+            const monitor = action.what === 'monitor'
+            const starting = !listening.on
+            if (starting) {
+              const want: AudioSource = action.ask === 'mic' ? 'mic' : action.ask === 'system' ? 'system' : 'both'
+              /* Monitoring says what it is doing in one note, below. */
+              if (!(await startListening(want, monitor))) return
+            } else if (listening.watching) {
+              chat.note(monitor ? 'Already monitoring your PC. Say **stop monitoring** to end it.' : 'Already watching your screen.')
+              return
+            }
+            /* `listening` here is the render before it started; watch() reads
+               the live recording, so it is the one to ask. */
+            const why = await listening.watch()
+            if (monitor && starting) {
+              chat.note(
+                [
+                  '**Monitoring your PC** — listening to your speakers **and** your microphone' +
+                    (why ? '.' : ', and looking at your screen about every 20 seconds when it has changed.'),
+                  '',
+                  '**Live notes** appear here once there is something to note, and keep updating as the meeting ' +
+                    'goes — when something changes (a date moves, a decision is reversed) the note is changed, ' +
+                    'not repeated. Ask me anything about it, or say **notes** for a full write-up.',
+                  '',
+                  'Say **stop monitoring** when you are done. Only text is kept — no audio, no screenshots' +
+                    (why ? '.' : '; each changed screen is sent to a model that can see, to be read.'),
+                  ...(why ? ['', `Not watching your screen: ${why}`] : []),
+                  '',
+                  '_Recording others may need their consent where you are._'
+                ].join(NEWLINE),
+                Boolean(why)
+              )
+              return
+            }
+            if (why) {
+              /* Listening never started: that was already said. */
+              if (starting && /^Not listening/.test(why)) return
+              chat.note(`Listening, but not watching your screen: ${why}`, true)
+              return
+            }
+            chat.note(
+              '**Watching your screen** too. About every 20 seconds, when it has changed, a model that can see ' +
+                'notes what is on it — slides, shared documents, names in the call — and those notes join the ' +
+                'transcript. The screenshots are sent to that model and not kept. Say **stop watching my screen** ' +
+                'to stop.'
+            )
+            return
+          }
+
           if (action.what === 'notes') {
             const heard = listening.peek()
             if (!heard || wordCount(heard) < ENOUGH_WORDS) {
@@ -2669,10 +2758,12 @@ function namedControls(shot: Attachment): string[] {
             chat.note(
               words
                 ? `Stopped — ${words} words over ${stamp(elapsed(heard!))}. ` +
-                    'Ask me anything about it, or say **notes**. It stays with ' +
-                    'this chat until you start a new one.'
+                    'The live notes get one last update. Ask me anything about it, or say **notes**. ' +
+                    'It stays with this chat until you start a new one.'
                 : 'Stopped. Nothing was heard.'
             )
+            /* The last minute or so has not been noted yet. */
+            void liveNotes.finish(heard)
             return
           }
           await startListening('both')
@@ -2744,6 +2835,24 @@ function namedControls(shot: Attachment): string[] {
           await restartRef.current(why)
           return
         }
+        case 'update': {
+          if (update?.stage === 'installing') {
+            chat.note('Already updating. Wumpy restarts by itself when the build is done.')
+            tell('Already updating.')
+            return
+          }
+          /* On Linux this can be minutes of building, so say so first. */
+          if (update?.stage !== 'off') {
+            chat.note(
+              'Checking for an update. On Linux, if there is one, Wumpy builds it from the source folder and ' +
+                'restarts into it — a few minutes, and you can keep using it meanwhile.'
+            )
+          }
+          const result = await window.wumpy.update.now(action.force)
+          chat.note(result.message, !result.ok)
+          tell(result.ok ? result.message.replace(/\*\*/g, '') : 'The update did not work. The reason is in the panel.')
+          return
+        }
         case 'prompt':
           chat.send(action.text, raw)
           return
@@ -2751,7 +2860,7 @@ function namedControls(shot: Attachment): string[] {
           return
       }
     },
-    [chat, listening, newChat, openChat, patch, pinned, refreshChats, retitle, settings, startListening]
+    [chat, listening, liveNotes, newChat, openChat, patch, pinned, refreshChats, retitle, settings, startListening, update]
   )
 
   const onSend = useCallback(
@@ -4068,7 +4177,11 @@ function namedControls(shot: Attachment): string[] {
         title={chatTitle}
         update={update}
         busy={streaming}
-        onUpdate={() => void restartRef.current(`to install Wumpy ${update?.next ?? 'update'}`)}
+        onUpdate={() =>
+          update?.stage === 'available'
+            ? void runCommandRef.current({ kind: 'update', force: false }, '/update')
+            : void restartRef.current(`to install Wumpy ${update?.next ?? 'update'}`)
+        }
       />
 
       {picker ? (
@@ -4218,7 +4331,9 @@ function namedControls(shot: Attachment): string[] {
             ? {
                 words: wordCount(listening.session),
                 live: listening.on,
-                level: listening.level
+                level: listening.level,
+                watching: listening.watching,
+                seen: listening.session.seen?.length ?? 0
               }
             : null
         }
@@ -4248,6 +4363,14 @@ function namedControls(shot: Attachment): string[] {
       <Toast message={toast} onDone={() => setToast(null)} />
 
       <VoiceTurnBar />
+      {calibrating && (
+        <VoiceCalibration
+          onClose={(state) => {
+            setCalibrating(false)
+            if (state) chat.note(voiceprintNote(state, 'calibrate'), false, 'voiceprint')
+          }}
+        />
+      )}
 
       <Composer
         onSend={onSend}

@@ -876,10 +876,6 @@ export interface HotkeyState {
   intercepted: string | null
 }
 
-/**
- * Where Wumpy's own update stands (main/updater.ts). 'off' on Linux and dev
- * runs, which update from the source instead.
- */
 /** Whose voice a clip was: see shared/voiceprint.ts. */
 export type WhoseAnswer =
   | {
@@ -890,7 +886,8 @@ export type WhoseAnswer =
       /** For learning from it once it turns out to be words: see voice.learn. */
       token?: string
     }
-  | { kind: 'someone else'; score: number; ms?: number }
+  /** `unsure`: an answer to something about to run that could not be told to be theirs. */
+  | { kind: 'someone else'; score: number | null; ms?: number; why?: 'unsure' }
 
 /** How far the person's voiceprint has got. */
 export interface VoiceprintState {
@@ -899,14 +896,43 @@ export interface VoiceprintState {
   clips: number
   needed: number
   known: boolean
+  /** Read sentences for it on purpose (/voice me calibrate), rather than only learned. */
+  calibrated: boolean
+  /** The mic it was calibrated on, and when. */
+  calibratedOn: string | null
+  calibratedAt: number | null
   /** The microphones it has heard them on. */
   devices: string[]
+  /** Just calibrated: how alike the sentences read were (see shared/voiceprint.ts steadiness). */
+  steadiness?: number | null
 }
 
+/** One sentence read while calibrating: taken, or why not. */
+export interface EnrolAnswer {
+  ok: boolean
+  /** short: not enough talking; unlike: not like the others read; unavailable: no model. */
+  why?: 'short' | 'unlike' | 'unavailable'
+  /** The first two disagreed: both dropped, start again. */
+  restart?: boolean
+  count: number
+  needed: number
+  score: number | null
+}
+
+/**
+ * Where Wumpy's own update stands (main/updater.ts). 'off' on Linux and dev
+ * runs, which update from the source instead.
+ */
 export interface UpdateState {
-  stage: 'off' | 'current' | 'checking' | 'downloading' | 'ready' | 'failed'
+  /**
+   * 'available' and 'installing' are Linux's: something new in the source
+   * folder or on GitHub, and a build from it under way (main/sourceupdate.ts).
+   */
+  stage: 'off' | 'current' | 'checking' | 'downloading' | 'ready' | 'available' | 'installing' | 'failed'
   /** The version running. */
   current: string
+  /** Linux: what is new, in words ("2 new commits on GitHub"). */
+  about?: string
   /** The version found: downloading, or ready to restart into. */
   next?: string
   percent?: number
@@ -1004,6 +1030,14 @@ export const IPC = {
   voiceprintState: 'voiceprint:state',
   voiceprintSet: 'voiceprint:set',
   voiceprintLearn: 'voiceprint:learn',
+  /** A look at the screen while a meeting is watched: described if it changed. */
+  meetingLook: 'meeting:look',
+  meetingNotes: 'meeting:notes',
+  /** Calibrating: reading sentences so the voice is known on purpose. */
+  voiceprintEnrolStart: 'voiceprint:enrol-start',
+  voiceprintEnrolClip: 'voiceprint:enrol-clip',
+  voiceprintEnrolFinish: 'voiceprint:enrol-finish',
+  voiceprintEnrolCancel: 'voiceprint:enrol-cancel',
   /** One piece of streamed speech: { id, pcm } with 16-bit mono PCM. */
   voiceAudio: 'voice:audio',
   /** Main tells the panel to run a spoken turn (wumpy --voice). */
@@ -1038,6 +1072,7 @@ export const IPC = {
   updateState: 'update:state',
   /** The panel asks for a look now. */
   updateCheck: 'update:check',
+  updateNow: 'update:now',
   /**
    * A line from a listening session, straight into wumpy.log.
    *

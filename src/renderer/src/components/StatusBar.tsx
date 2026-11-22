@@ -237,7 +237,7 @@ export function StatusBar({
    * that nothing should have to be remembered; a thing you can see is the
    * other half of that.
    */
-  listening: { words: number; live: boolean; level: number } | null
+  listening: { words: number; live: boolean; level: number; watching?: boolean; seen?: number } | null
   onCycleApproval(): void
   onCompact(): void
   onQuota(): void
@@ -275,12 +275,12 @@ export function StatusBar({
                   listening.words
                     ? `${listening.words} words so far`
                     : 'nothing transcribed yet; the bar shows what it can hear'
-                }. Every message you send carries the transcript. Click to stop.`
+                }${listening.watching ? `, and watching your screen (${listening.seen ?? 0} notes of it)` : ''}. Every message you send carries the transcript. Click to stop.`
               : `${listening.words} words of transcript, kept with this chat. ` +
                 `Every message you send carries it. Click to write it up.`
           }
         >
-          {listening.live ? 'listening' : 'transcript'}
+          {listening.live ? (listening.watching ? 'listening · screen' : 'listening') : 'transcript'}
           {/*
             What it can hear, while it is listening.
 

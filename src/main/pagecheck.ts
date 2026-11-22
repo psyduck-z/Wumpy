@@ -2,7 +2,8 @@ import { BrowserWindow, session } from 'electron'
 import { existsSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { CLICK_JS, HOOK_JS, LOOK_JS, bunched, excerpts, inLane, keyJs, playFrom, standInTraffic, stuckCrowds, teleportJs, tileScale, tooFast, type Seen } from '@shared/pagecheck'
+import { Script } from 'node:vm'
+import { AROUND_JS, CLICK_JS, HOOK_JS, LOOK_JS, aroundLine, bunched, excerpts, leftBehind, nestedFunction, typedMapProblem, inLane, keyJs, playFrom, standInTraffic, stuckCrowds, teleportJs, tileScale, tooFast, type Seen } from '@shared/pagecheck'
 
 /**
  * Loads a web page Wumpy just wrote, out of sight, and reports what broke.
@@ -139,6 +140,20 @@ export async function checkPage(path: string): Promise<PageCheck> {
       await sleep(ms)
       await run(keyJs(key, 'keyup'))
     }
+    /*
+     * The game as a reviewer sees it: its board and what is above it (the
+     * score), at the size it is drawn, not the whole window shrunk to 640
+     * wide. Shrunk, a maze's dots came out a pixel each, and a reviewer read
+     * them as "dots drawn as a dense uniform grid over the walls" - three
+     * times - and held back a game that had no such bug.
+     */
+    const picture = async (): Promise<Buffer> => {
+      const r = (await run(
+        `(() => { const c = document.querySelector('canvas'); if (!c) return null; const b = c.getBoundingClientRect(); return { x: Math.max(0, Math.floor(b.left - 8)), y: 0, width: Math.ceil(b.width + 16), height: Math.ceil(b.bottom + 8) } })()`
+      )) as { x: number; y: number; width: number; height: number } | null
+      const image = r && r.width > 40 && r.height > 40 ? await contents.capturePage(r) : await contents.capturePage()
+      return (image.getSize().width > 800 ? image.resize({ width: 800 }) : image).toPNG()
+    }
     const frozen = async (when: string): Promise<boolean> => {
       if ((await run('1')) !== null) return false
       errors.push(`The page stopped responding ${when}: an endless loop, most likely, in what that starts.`)
@@ -158,6 +173,10 @@ export async function checkPage(path: string): Promise<PageCheck> {
     let scale = 0
     let started = ''
     let startedBy = ''
+    /* When it was started, and with how many lives: a game that ends itself at once is told apart. */
+    let startedAt = 0
+    let livesAtStart: number | undefined
+    let endedItself = false
     const tried: string[] = []
     const order = ['ArrowUp', 'ArrowLeft', 'ArrowRight', 'ArrowDown', 'start', 'ArrowUp', 'ArrowLeft']
     for (let k = 0; k < order.length; k++) {
@@ -178,8 +197,10 @@ export async function checkPage(path: string): Promise<PageCheck> {
           started = afterEnter?.frame !== was ? 'Enter' : String((await run(CLICK_JS)) || 'a click')
         }
         startedBy = started
+        startedAt = Date.now()
         await sleep(500)
         before = await look()
+        livesAtStart = before?.lives
         continue
       }
       for (let i = 0; i < 3; i++) {
@@ -189,6 +210,25 @@ export async function checkPage(path: string): Promise<PageCheck> {
       await sleep(700)
       if (await frozen(`after the ${key.replace('Arrow', '').toLowerCase()} arrow was pressed`)) return { checked: true, errors }
       const after = await look()
+      /* Started, and over - or its lives going - before the arrows could
+         matter: not a player that does not move, a game that ends itself.
+         A maze game lost all three lives 1.5s after Space, a chaser sitting
+         on the player killing it frame after frame, and was reported as
+         "did not move": its agent spent a whole round on its movement code. */
+      const lost = livesAtStart !== undefined && after?.lives !== undefined ? livesAtStart - after.lives : 0
+      if (started && startedAt && (after?.over || lost >= 2)) {
+        const secs = Math.max(1, Math.round((Date.now() - startedAt) / 1000))
+        endedItself = true
+        play = {
+          moved: false,
+          line:
+            `It started on ${started}, and ${after?.over ? 'was over' : `had lost ${lost} lives`} about ${secs} seconds later, ` +
+            `before the arrows could do anything${livesAtStart !== undefined && after?.lives !== undefined ? ` (lives ${livesAtStart} -> ${after.lives})` : ''}. ` +
+            'That is not the movement: something kills the player at once, over and over. Is there a second or two of grace ' +
+            'after a life is lost, with the enemies sent back to their start - and does the player start well away from them?'
+        }
+        break
+      }
       const p = playFrom(before, after, key)
       /* No player before the key, and one after: the key started the game.
          Its moves are measured from here. */
@@ -223,11 +263,19 @@ export async function checkPage(path: string): Promise<PageCheck> {
         errors.push(`Its title screen says to press Space or Enter (or any key), but neither started it - only ${startedBy} did.`)
       }
     }
-    if (play && !play.moved && tried.length > 1) {
+    if (play && !play.moved && tried.length > 1 && !endedItself) {
       play = {
         moved: false,
-        line: `${play.line.replace(/^Holding the \w+ arrow three times did not/, 'Holding each arrow key - ' + [...new Set(tried)].join(', ') + ' - three times did not')}${started ? ` Space, Enter and ${started} did not start it either.` : ''}`
+        /* "Space, Enter and Space did not start it either" was said of a
+           game Space had started: `started` is what was pressed, not proof
+           that nothing came of it. */
+        line: `${play.line.replace(/^Holding the \w+ arrow three times did not/, 'Holding each arrow key - ' + [...new Set(tried)].join(', ') + ' - three times did not')}${started ? ` That was before and after pressing ${started} to start it.` : ''}`
       }
+    }
+    /* Did not move: the map around it, in one look (see AROUND_JS). */
+    if (play && !play.moved && !endedItself) {
+      const around = aroundLine((await run(AROUND_JS)) as Parameters<typeof aroundLine>[0])
+      if (around) play = { ...play, line: `${play.line}${around}` }
     }
 
     /*
@@ -250,9 +298,7 @@ export async function checkPage(path: string): Promise<PageCheck> {
     /* What it looks like a few seconds in, before anything is lost. */
     let shot: Buffer | undefined
     try {
-      const image = await contents.capturePage()
-      const size = image.getSize()
-      shot = (size.width > 640 ? image.resize({ width: 640 }) : image).toPNG()
+      shot = await picture()
     } catch {
       shot = undefined
     }
@@ -282,11 +328,18 @@ export async function checkPage(path: string): Promise<PageCheck> {
     if (still.length) {
       stuck = `${stuck ? `${stuck} ` : ''}Its ${still.join(' and ')} never got anywhere in the ${Math.round((Date.now() - crowdAt) / 1000)} seconds it was played: none went more than a short way from where it was${still.includes('ghosts') ? ' - can they get out of their pen, and do they choose a way to go?' : '.'}`
     }
+    /* Some of them never moved while the rest did: one shut in for good. */
+    if (!still.length && Date.now() - crowdAt >= 3000) {
+      const behind = leftBehind(crowdLooks)
+      if (behind.length) {
+        const said = behind.map((b) => `${b.which.length === 1 ? `its ${b.name} number ${b.which[0]}` : `its ${b.name} numbers ${b.which.join(', ')}`} (counting from 1)`).join(' and ')
+        stuck = `${stuck ? `${stuck} ` : ''}${said[0].toUpperCase()}${said.slice(1)} never left where it started in the ${Math.round((Date.now() - crowdAt) / 1000)} seconds it was played, while the others moved - does it start inside a wall, or in a pen with no way out?`
+      }
+    }
     let overShot: Buffer | undefined
     if (state?.over) {
       try {
-        const image = await contents.capturePage()
-        overShot = (image.getSize().width > 640 ? image.resize({ width: 640 }) : image).toPNG()
+        overShot = await picture()
       } catch {
         overShot = undefined
       }
@@ -408,6 +461,59 @@ export async function checkPage(path: string): Promise<PageCheck> {
 }
 
 /**
+ * Exactly where a page's script will not parse: the line in the page, the
+ * column, and a caret under it. The browser says only "Unexpected token ']'
+ * (line 402)", and a maze game's line 402 was quoted back by the chat as
+ * valid JavaScript - `{x:0,y:-1]}` read as `{x:0,y:-1}]` - and the agent sent
+ * off to hunt an unbalanced bracket earlier in the file. Compiled with
+ * node's vm, never run. Null when every inline script parses.
+ */
+export function syntaxPlace(html: string): string | null {
+  const scripts = /<script\b([^>]*)>([\s\S]*?)<\/script>/gi
+  for (let m = scripts.exec(html); m; m = scripts.exec(html)) {
+    const attrs = m[1]
+    if (/\bsrc\s*=/i.test(attrs) || /\btype\s*=\s*["']?(?:module|importmap|application\/(?:ld\+)?json|text\/(?!javascript))/i.test(attrs)) continue
+    const code = m[2]
+    /* Line 1 of the script is the rest of the page's line its tag ends on. */
+    const first = html.slice(0, m.index + m[0].indexOf('>') + 1).split('\n').length
+    try {
+      new Script(code, { filename: 'page.js' })
+    } catch (err) {
+      if (!(err instanceof SyntaxError)) continue
+      const stack = String(err.stack ?? '')
+      const at = /page\.js:(\d+)/.exec(stack)
+      if (!at) return `Its script will not parse: ${err.message}.`
+      const line = Number(at[1])
+      const caret = stack.split('\n').find((l) => /^\s*\^+\s*$/.test(l))
+      const col = caret ? caret.indexOf('^') : -1
+      const n = first + line - 1
+      /* The stretch of the line around the column, not its first 200
+         characters: a game written a function to a line put its stray
+         brace at column 900, and nothing shown came near it. */
+      const whole = code.split('\n')[line - 1] ?? ''
+      const from = col > 120 ? col - 100 : 0
+      const text = `${from ? '...' : ''}${whole.slice(from, from + 200)}${whole.length > from + 200 ? '...' : ''}`
+      const caretAt = col >= 0 ? col - from + (from ? 3 : 0) : -1
+      const label = `${n} | `
+      return (
+        `Its script will not parse: ${err.message}, at line ${n}${col >= 0 ? `, column ${col + 1}` : ''}:\n` +
+        `${label}${text}${caretAt >= 0 ? `\n${' '.repeat(label.length + caretAt)}^ here` : ''}`
+      )
+    }
+  }
+  return null
+}
+
+/** syntaxPlace, set apart for an error list that has a SyntaxError in it; empty otherwise. */
+export function syntaxIn(html: string, errors: readonly string[]): string {
+  const nested = nestedFunction(html, errors)
+  if (nested) return `\n\n${nested}`
+  if (!errors.some((e) => /SyntaxError/.test(e))) return ''
+  const place = syntaxPlace(html)
+  return place ? `\n\n${place}` : ''
+}
+
+/**
  * A page that is only text so far - a background agent's, before anything is
  * saved - loaded the same way from a temporary file, which is then removed.
  * Said as the agent should read it.
@@ -422,13 +528,14 @@ export async function checkHtml(html: string): Promise<{ ran: boolean; ok: boole
     const pictures = [result.shot, result.overShot].filter((b): b is Buffer => Boolean(b)).map((b) => `data:image/png;base64,${b.toString('base64')}`)
     const shot = pictures.length ? { shots: pictures } : {}
     const play = `${result.play ? `\n${result.play.line}` : ''}${result.restart ? `\n${result.restart.line}` : ''}${result.traffic?.ok ? `\n${result.traffic.line}` : ''}${result.stuck ? `\n${result.stuck}` : ''}`
-    const stuck = result.play?.moved === false || result.restart?.ok === false || Boolean(result.stuck)
+    const map = typedMapProblem(html)
+    const stuck = result.play?.moved === false || result.restart?.ok === false || Boolean(result.stuck) || Boolean(map)
     return result.errors.length || stuck
       ? {
           ran: true,
           ok: false,
           ...shot,
-          output: `Loaded it and played it.${result.errors.length ? ` Its console showed:\n${result.errors.map((e) => `- ${e}`).join('\n')}${excerpts(html, result.errors) ? `\n\nWhere, in your page:\n${excerpts(html, result.errors)}` : ''}` : ' No errors in its console.'}${play}`
+          output: `${map ? `${map}\n\n` : ''}Loaded it and played it.${result.errors.length ? ` Its console showed:\n${result.errors.map((e) => `- ${e}`).join('\n')}${syntaxIn(html, result.errors)}${excerpts(html, result.errors) ? `\n\nWhere, in your page:\n${excerpts(html, result.errors)}` : ''}` : ' No errors in its console.'}${play}`
         }
       : { ran: true, ok: true, ...shot, output: `Loaded it and played it: no errors in its console.${play} (That rules out crashes and a dead start, not every wrong behaviour.)` }
   } finally {

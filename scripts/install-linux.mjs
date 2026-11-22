@@ -62,6 +62,9 @@ for (const name of readdirSync(root)) {
   if (/^app-\d+$/.test(name) && path !== fresh && path !== previous && !inUse.has(path)) rmSync(path, { recursive: true, force: true })
 }
 console.log(`app      -> ${appDir} (${fresh})`)
+/* Where it was built from, so the installed copy's /update can build again
+   from the same folder (src/main/sourceupdate.ts). */
+writeFileSync(join(root, 'source.txt'), process.cwd())
 
 function lstatExists(path) {
   try {

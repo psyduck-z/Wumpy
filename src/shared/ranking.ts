@@ -57,8 +57,11 @@ export interface RankerState {
   left: number
 }
 
-/** A sweep an hour, which is what was asked for. */
-export const EVERY_MS = 60 * 60 * 1000
+/**
+ * A sweep every 30 minutes. It was an hour, "which is what was asked for";
+ * then: "make the auto and model check happen every 30 minutes".
+ */
+export const EVERY_MS = 30 * 60 * 1000
 
 /**
  * Quiet after a turn before the ranker moves again.
@@ -262,7 +265,7 @@ export function rankLines(
       (traffic.perMinute > 0 ? ` of about ${traffic.perMinute}` : '') +
       ` (pauses at ${traffic.perMinute > 0 ? crowdedAt(traffic.perMinute) : '—'}) |`,
     '',
-    '_One model at a time, about once an hour, on the key the next question ' +
+    '_One model at a time, about every 30 minutes, on the key the next question ' +
       'is least likely to want. It stops mid-request the moment you send ' +
       'something and throws that measurement away._',
     '',

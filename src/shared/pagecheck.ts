@@ -290,6 +290,28 @@ export function stuckCrowds(looks: readonly Seen[]): string[] {
 }
 
 /**
+ * The ones left behind: members of a crowd that never moved while the rest
+ * did. A maze game's fourth chaser started inside the solid block in the
+ * middle and never left it, while the other three roamed - and "never got
+ * anywhere" is only said of a crowd that all stood still. Each as
+ * { name, which } (1-based), in the same looks and units as stuckCrowds.
+ */
+export function leftBehind(looks: readonly Seen[]): Array<{ name: string; which: number[] }> {
+  const out: Array<{ name: string; which: number[] }> = []
+  const first = looks[0]?.crowd ?? {}
+  for (const [name, a] of Object.entries(first)) {
+    const later = looks.slice(1).map((l) => l?.crowd?.[name]).filter((b): b is Array<[number, number]> => Boolean(b) && b!.length === a.length)
+    if (!later.length || a.length < 2) continue
+    const tiles = [a, ...later].every((pts) => pts.every(([x, y]) => Math.abs(x) < 64 && Math.abs(y) < 64))
+    const far = tiles ? 2 : 32
+    const still = a.map(([x, y], i) => later.every((b) => Math.abs(x - b[i][0]) < far && Math.abs(y - b[i][1]) < far))
+    const which = still.map((s, i) => (s ? i + 1 : 0)).filter(Boolean)
+    if (which.length && which.length < a.length) out.push({ name, which })
+  }
+  return out
+}
+
+/**
  * How fast its ghosts, cars, aliens go, from two looks a moment apart:
  * the ones that go faster than anyone could play against. The commonest
  * bug in a written game is a speed added once a frame, or a time in
@@ -658,3 +680,166 @@ export function pageErrorText(path: string, errors: readonly string[], context =
 
 /** How many times one request may be sent back for errors before a person decides. */
 export const PAGE_ROUNDS = 2
+
+/**
+ * A map typed as rows of text that cannot be right: rows of different
+ * lengths, or a different number of rows from the ROWS beside it. Models
+ * miscount them - a maze game typed 32 rows under `ROWS = 31`, built an
+ * empty maze from them, and crashed reading it - and the rules saying never
+ * to type one did not stop even the strongest model. Read from the source,
+ * so it is said before anything is played. Null when there is no such map,
+ * or it lines up.
+ */
+export function typedMapProblem(source: string): string | null {
+  /* Or typed as rows of numbers: [1,1,2,1,...], each row a line - a maze
+     game's rows ran to 28 and 29, and nothing said so. */
+  const numeric = source.match(/\[\s*(?:\[[\d\s,]{15,}\]\s*,\s*){7,}\[[\d\s,]{15,}\]\s*,?\s*\]/g) ?? []
+  for (const array of numeric) {
+    const rows = [...array.matchAll(/\[([\d\s,]+)\]/g)].map((m) => m[1].split(',').filter((x) => x.trim()).map((x) => x.trim()).join(''))
+    const problem = rowProblems(source, array, rows)
+    if (problem) return problem.replace('rows of text', 'rows of numbers')
+  }
+  const arrays = source.match(/\[\s*(?:(["'`])[^"'`\n]{3,}\1\s*,\s*){7,}(["'`])[^"'`\n]{3,}\2\s*,?\s*\]/g) ?? []
+  for (const array of arrays) {
+    const rows = [...array.matchAll(/(["'`])([^"'`\n]*)\1/g)].map((m) => m[2])
+    /* A map: walls, dots and spaces, a few letters for who starts where. */
+    const mapLike = rows.filter((r) => /^[#.\s=|oO*+PGXWEeSs0-9-]+$/.test(r) && /[#=|X0-9]/.test(r)).length
+    if (mapLike < rows.length * 0.8) continue
+    const problem = rowProblems(source, array, rows)
+    if (problem) return problem
+  }
+  return null
+}
+
+/** For typedMapProblem: what is wrong with one typed map's rows, or null. */
+function rowProblems(source: string, array: string, rows: string[]): string | null {
+  const counts = new Map<number, number>()
+  for (const r of rows) counts.set(r.length, (counts.get(r.length) ?? 0) + 1)
+  const common = [...counts.entries()].sort((a, b) => b[1] - a[1])[0][0]
+  const odd = rows.map((r, i) => ({ i, n: r.length })).filter((r) => r.n !== common)
+  const at = source.indexOf(array)
+  const before = source.slice(Math.max(0, at - 4000), at) + source.slice(at + array.length, at + array.length + 4000)
+  const declared = /\bROWS\s*=\s*(\d+)\b/.exec(before)
+  const rowsSaid = declared ? Number(declared[1]) : null
+  const problems: string[] = []
+  if (odd.length)
+    problems.push(
+      `its rows are not all one length: most are ${common} long, but ${odd
+        .slice(0, 6)
+        .map((r) => `row ${r.i} is ${r.n}`)
+        .join(', ')}${odd.length > 6 ? ` and ${odd.length - 6} more` : ''}`
+    )
+  if (rowsSaid !== null && rowsSaid !== rows.length) problems.push(`it has ${rows.length} rows, where ROWS = ${rowsSaid}`)
+  if (!problems.length) return null
+  return (
+    `The map is typed as ${rows.length} rows of text, and ${problems.join('; and ')}. ` +
+    'Do not count to fix it: build the map in code, as your rules say - fill a grid from a list of ' +
+    'wall rectangles, mirror it left to right - and take ROWS and COLS from the grid itself.'
+  )
+}
+
+/**
+ * The map around the player, for a player that did not move: the page's own
+ * grid, a few rows either side, the player marked @. A maze game's player
+ * stood inside a wall - its maze, built in code, had filled the middle
+ * columns solid - and its agent spent all ten of its steps reading the map
+ * three rows at a time, and never got to change anything. One look shows it.
+ * Returns { name, row, col, under, rows } or null when there is no grid or
+ * no player to place on it.
+ */
+export const AROUND_JS = `(() => {
+  const get = (n) => { try { return eval(n) } catch { return undefined } }
+  let grid, name
+  for (const n of ['maze', 'MAZE', 'grid', 'GRID', 'map', 'MAP', 'level', 'board', 'tiles', 'world', 'layout']) {
+    const v = get(n)
+    if (Array.isArray(v) && v.length >= 8 && v[0] && (Array.isArray(v[0]) || typeof v[0] === 'string') && v[0].length >= 8) { grid = v; name = n; break }
+  }
+  if (!grid) return null
+  let p
+  for (const n of ['player', 'pacman', 'pac', 'hero', 'you']) { const v = get(n); if (v && typeof v === 'object') { p = v; break } }
+  if (!p) return null
+  let x = [p.col, p.tx, p.gridX, p.tileX, p.x].find((v) => typeof v === 'number')
+  let y = [p.row, p.ty, p.gridY, p.tileY, p.y].find((v) => typeof v === 'number')
+  if (x === undefined || y === undefined) return null
+  const rowsN = grid.length, colsN = grid[0].length
+  if (x >= colsN || y >= rowsN) {
+    const t = [get('TILE'), get('TILE_SIZE'), get('CELL'), get('CELL_SIZE'), get('GRID'), get('SIZE'), get('tileSize')].find((v) => typeof v === 'number' && v > 1)
+    if (!t) return null
+    x /= t; y /= t
+  }
+  const c = Math.floor(x), r = Math.floor(y)
+  const cell = (i, j) => { const v = typeof grid[i] === 'string' ? grid[i][j] : grid[i] && grid[i][j]; return v === undefined ? ' ' : typeof v === 'object' ? '?' : String(v).slice(0, 1) || ' ' }
+  const rows = []
+  for (let i = Math.max(0, r - 3); i <= Math.min(rowsN - 1, r + 3); i++) {
+    let line = ''
+    for (let j = Math.max(0, c - 8); j <= Math.min(colsN - 1, c + 8); j++) line += i === r && j === c ? '@' : cell(i, j)
+    rows.push(line)
+  }
+  return { name, row: r, col: c, under: cell(r, c), rows }
+})()`
+
+/** AROUND_JS's answer, said: the lines of the map with the player on it. */
+export function aroundLine(a: { name: string; row: number; col: number; under: string; rows: string[] } | null): string {
+  if (!a || !Array.isArray(a.rows) || !a.rows.length) return ''
+  return (
+    `\nWhere the player stands, in its ${a.name} (row ${a.row}, col ${a.col}, on a "${a.under}"; @ is the player):\n` +
+    a.rows.map((l) => `  ${l}`).join('\n')
+  )
+}
+
+/**
+ * "init is not defined", of a page with `function init(` in it: the function
+ * is there, but inside another one whose closing brace is missing, so it is
+ * out of reach. A maze game written a function to a line lost the last `}`
+ * of checkCollisions; its agent added braces elsewhere, swapped a syntax
+ * error for this one, and never saw the cause. Read from the source with a
+ * plain brace count (strings and comments skipped): which function is still
+ * open where the missing one is declared. Null when it is not that.
+ */
+export function nestedFunction(source: string, errors: readonly string[]): string | null {
+  for (const e of errors) {
+    const m = /\b([A-Za-z_$][\w$]*) is not defined/.exec(e)
+    if (!m) continue
+    const name = m[1]
+    const decl = new RegExp(`\\bfunction\\s+${name.replace(/\$/g, '\\$')}\\s*\\(`).exec(source)
+    if (!decl) continue
+    /* Open braces, each with the function whose body it starts, if any. */
+    const stack: Array<string | null> = []
+    let pending: string | null = null
+    let parens = 0
+    const lineOf = (i: number): number => source.slice(0, i).split('\n').length
+    const opened = new Map<number, number>()
+    for (let i = 0; i < decl.index; i++) {
+      const ch = source[i]
+      const two = source.slice(i, i + 2)
+      if (two === '//') { const nl = source.indexOf('\n', i); i = nl < 0 ? source.length : nl; continue }
+      if (two === '/*') { const end = source.indexOf('*/', i + 2); i = end < 0 ? source.length : end + 1; continue }
+      if (ch === '"' || ch === "'" || ch === '`') {
+        let j = i + 1
+        while (j < source.length && source[j] !== ch) { if (source[j] === '\\') j++; j++ }
+        i = j
+        continue
+      }
+      if (ch === '<' && /^<script\b/i.test(source.slice(i, i + 7))) { stack.length = 0; pending = null; continue }
+      const fn = /^function\s+([A-Za-z_$][\w$]*)\s*\(/.exec(source.slice(i, i + 60))
+      if (fn && (i === 0 || !/[\w$]/.test(source[i - 1]))) { pending = fn[1]; parens = 0 }
+      if (ch === '(') parens++
+      if (ch === ')') parens--
+      if (ch === '{') {
+        const owner = pending && parens === 0 ? pending : null
+        if (owner) { opened.set(stack.length, i); pending = null }
+        stack.push(owner)
+      }
+      if (ch === '}') stack.pop()
+    }
+    const outer = stack.findIndex((owner) => owner !== null)
+    if (outer < 0) continue
+    const owner = stack[outer]!
+    return (
+      `\`${name}\` is written in the page (line ${lineOf(decl.index)}), yet not defined where it is called: it sits inside ` +
+      `\`${owner}\` (from line ${lineOf(opened.get(outer) ?? 0)}), whose braces never close before it. A \`}\` is missing ` +
+      `at the end of ${owner} - add exactly that one, and nothing elsewhere.`
+    )
+  }
+  return null
+}

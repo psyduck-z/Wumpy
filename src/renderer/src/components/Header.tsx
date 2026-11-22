@@ -81,7 +81,8 @@ export function Header({
   /* The pill needs the room, and the shortcut hint is the thing worth least
      while it is there: the title is cut to "Downloads cl..." and the hint to
      "Sup..." otherwise, in a 440px panel. */
-  const updating = update?.stage === 'downloading' || update?.stage === 'ready'
+  const updating =
+    update?.stage === 'downloading' || update?.stage === 'ready' || update?.stage === 'available' || update?.stage === 'installing'
 
   return (
     <header className={`header ${updating ? 'has-update' : ''}`}>
@@ -111,6 +112,29 @@ export function Header({
           >
             updating {update.percent ?? 0}%
           </span>
+        )}
+        {update?.stage === 'installing' && (
+          <span
+            className="update-pill is-getting"
+            title={`Building and installing ${update.about ?? 'the update'} - Wumpy restarts into it when it is done`}
+          >
+            updating…
+          </span>
+        )}
+        {update?.stage === 'available' && (
+          <button
+            type="button"
+            className="update-pill is-ready"
+            onClick={onUpdate}
+            disabled={busy}
+            title={
+              busy
+                ? 'After this answer: builds the update and restarts into it'
+                : `There is ${update.about ?? 'an update'}. Build and install it now (/update) - a few minutes, then Wumpy restarts into it and this chat opens again.`
+            }
+          >
+            Update available
+          </button>
         )}
         {update?.stage === 'ready' && (
           <button

@@ -2,7 +2,7 @@ import { clipForSpeech } from '../wav'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { listenTo, type AudioSource } from '../loopback'
 import { record, SPEECH_LEVEL, type Recording } from '../recorder'
-import type { Heard, Listening } from '@shared/meeting'
+import { sameNote, WATCH_EVERY_MS, type Heard, type Listening } from '@shared/meeting'
 
 /**
  * A long listen, from the panel's point of view.
@@ -56,6 +56,12 @@ export interface ListeningSession {
    * cannot be stale.
    */
   start(source: AudioSource): Promise<string | null>
+  /** Whether the screen is being watched as well (see shared/meeting.ts). */
+  watching: boolean
+  /** Starts watching the screen too, while listening; returns why not. */
+  watch(): Promise<string | null>
+  /** Stops watching the screen; listening goes on. */
+  unwatch(): void
   stop(): Promise<Listening | null>
   /** The transcript as it stands, without stopping. */
   peek(): Listening | null
@@ -116,6 +122,12 @@ export function useListening(commands: () => string[]): ListeningSession {
   const piecesRef = useRef<Heard[]>([])
   const startedAt = useRef(0)
   const chain = useRef<Promise<void>>(Promise.resolve())
+  /** What the screen showed, when it is watched: notes, in a ref like the pieces. */
+  const seenRef = useRef<Heard[]>([])
+  const [watching, setWatching] = useState(false)
+  const watchTimer = useRef<ReturnType<typeof setInterval> | null>(null)
+  /** A look still being described: the next tick waits rather than piling up. */
+  const looking = useRef(false)
 
   /*
    * What the heartbeat reports, all in refs: these are written from an
@@ -150,10 +162,65 @@ export function useListening(commands: () => string[]): ListeningSession {
   const snapshot = useCallback(
     (): Listening | null =>
       piecesRef.current.length || startedAt.current
-        ? { startedAt: startedAt.current, pieces: [...piecesRef.current] }
+        ? {
+            startedAt: startedAt.current,
+            pieces: [...piecesRef.current],
+            ...(seenRef.current.length ? { seen: [...seenRef.current] } : {})
+          }
         : null,
     []
   )
+
+  /* ------------------------------------------------ watching the screen */
+
+  const unwatch = useCallback((): void => {
+    if (watchTimer.current !== null) clearInterval(watchTimer.current)
+    watchTimer.current = null
+    setWatching(false)
+  }, [])
+
+  useEffect(() => unwatch, [unwatch])
+
+  /** One look: kept if the screen changed and says something new. Returns why it cannot look at all. */
+  const lookOnce = useCallback(
+    async (fresh: boolean): Promise<string | null> => {
+      if (looking.current) return null
+      looking.current = true
+      try {
+        const r = await window.wumpy.voice.meetingLook(fresh)
+        if (r.why) return r.why
+        if (r.text && !sameNote(seenRef.current[seenRef.current.length - 1]?.text, r.text)) {
+          seenRef.current.push({ at: Math.max(0, Date.now() - startedAt.current), text: r.text })
+          setSession(snapshot())
+          say(`on screen (${r.by ?? 'the eye'}): ${r.text.replace(/\s+/g, ' ').slice(0, 160)}`)
+        }
+        return null
+      } catch (err) {
+        return err instanceof Error ? err.message : String(err)
+      } finally {
+        looking.current = false
+      }
+    },
+    [say, snapshot]
+  )
+
+  const watch = useCallback(async (): Promise<string | null> => {
+    if (!live.current) return 'Not listening, so there is no meeting to watch the screen for.'
+    /* The first look at once, so a reason it cannot look is said now, not in twenty seconds. */
+    const why = await lookOnce(true)
+    if (why) return why
+    if (watchTimer.current !== null) clearInterval(watchTimer.current)
+    watchTimer.current = setInterval(() => {
+      void lookOnce(false).then((failed) => {
+        if (!failed) return
+        say(`stopped watching the screen: ${failed}`)
+        unwatch()
+      })
+    }, WATCH_EVERY_MS)
+    setWatching(true)
+    say('watching the screen as well')
+    return null
+  }, [lookOnce, say, unwatch])
 
   /** Remembered, handed back, and written down, so no failure is only on screen. */
   const failed = useCallback(
@@ -203,6 +270,7 @@ export function useListening(commands: () => string[]): ListeningSession {
       if (live.current) return failed('Already listening.')
       setError(null)
       piecesRef.current = []
+      seenRef.current = []
       startedAt.current = Date.now()
       chain.current = Promise.resolve()
       peakRef.current = 0
@@ -330,6 +398,7 @@ export function useListening(commands: () => string[]): ListeningSession {
     const recording = live.current
     live.current = null
     stopBeat()
+    unwatch()
     setLevel(0)
     if (!recording) return snapshot()
     recording.stop()
@@ -352,15 +421,16 @@ export function useListening(commands: () => string[]): ListeningSession {
         `${final?.pieces.length ?? 0} kept`
     )
     return final
-  }, [say, snapshot, stopBeat])
+  }, [say, snapshot, stopBeat, unwatch])
 
   const forget = useCallback(async (): Promise<void> => {
     if (live.current) await stop()
     piecesRef.current = []
+    seenRef.current = []
     startedAt.current = 0
     setSession(null)
     setError(null)
   }, [stop])
 
-  return { on, source, session, pending, level, error, start, stop, peek: snapshot, forget }
+  return { on, source, session, pending, level, error, start, stop, peek: snapshot, forget, watching, watch, unwatch }
 }

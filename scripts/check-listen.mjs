@@ -570,5 +570,90 @@ check('and that nothing is saved', /no audio/.test(app), true)
 check('and that it cannot say who spoke', /cannot say who spoke/.test(app), true)
 check('and whose permission is not Wumpy’s to give', /consent where you are/.test(app), true)
 
+/* --------------------------------------------- watching the screen too */
+/*
+ * "when I tell it, listen to this meeting... can you allow it to look at my
+ * screen too to make it easier?" Only when asked, in words; a screen that
+ * has not changed is not sent; and what is kept is a note, not a picture.
+ */
+check('"listen to this meeting and watch my screen" starts both', matchIntent('listen to this meeting and watch my screen'), { kind: 'listen', what: 'watch', ask: 'meeting' })
+check('"watch my screen too" watches', matchIntent('watch my screen too'), { kind: 'listen', what: 'watch', ask: '' })
+check('"keep an eye on my screen during the meeting"', matchIntent('keep an eye on my screen during the meeting'), { kind: 'listen', what: 'watch', ask: 'meeting' })
+check('"look at my screen too" watches', matchIntent('look at my screen too')?.what, 'watch')
+check('a bare "look at my screen" is still a one-off look, for the model', matchIntent('look at my screen'), null)
+check('"stop watching my screen" stops only that', matchIntent('stop watching my screen'), { kind: 'listen', what: 'unwatch', ask: '' })
+check('"stop listening" still stops everything', matchIntent('stop listening')?.what, 'stop')
+check('a listen with no screen named does not watch', matchIntent('listen to this meeting')?.what, 'toggle')
+
+const grey = (v) => Array(576).fill(v)
+check('the first look is always described', M.screenChanged(null, grey(10)), true)
+check('a screen that has not changed is not sent again', M.screenChanged(grey(10), grey(12)), false)
+check('a new slide is', M.screenChanged(grey(10), grey(90)), true)
+check('a note that says the same again is not kept twice', M.sameNote('Slide: Q3 roadmap, revenue 4.2M, owners Sam and Lee', 'Slide: Q3 roadmap - revenue 4.2M; owners Sam and Lee'), true)
+check('a different one is', M.sameNote('Slide: Q3 roadmap', 'Spreadsheet: hiring plan for January'), false)
+
+const seenSession = { startedAt: 0, pieces: [{ at: 1000, text: 'so the revenue is up' }, { at: 70000, text: 'next item' }], seen: [{ at: 30000, text: 'Slide: Q3 revenue 4.2M' }] }
+const text = M.transcriptText(seenSession)
+check('what was shown sits between what was said, in time', text.indexOf('so the revenue') < text.indexOf('(on screen, 0:30: Slide: Q3 revenue 4.2M)') && text.indexOf('(on screen') < text.indexOf('next item'), true)
+check('and the model is told it is second-hand', /\(on screen, mm:ss/.test(M.RULES) && /second-hand/.test(M.RULES), true)
+
+const index = read('src/main/index.ts')
+const hookNow = read('src/renderer/src/hooks/useListening.ts')
+check('it never looks unless screen looks are allowed in settings', /if \(!settings\.get\('screenEnabled'\)\) return \{ changed: false, why:/.test(index), true)
+check('an unchanged screen goes nowhere', /if \(!screenChanged\(meetingSig, sig\)\) return \{ changed: false \}/.test(index), true)
+check('watching stops when listening does', /live\.current = null\s*stopBeat\(\)\s*unwatch\(\)/.test(hookNow), true)
+check('and is forgotten with the chat', /piecesRef\.current = \[\]\s*seenRef\.current = \[\]\s*startedAt\.current = 0/.test(hookNow), true)
+check('starting to watch says the pictures go to a model and are not kept', /The screenshots are sent to that model and not kept/.test(app), true)
+check('"watch my screen" with no meeting opens no microphone', /if \(!listening\.on && action\.ask === ''\)/.test(app), true)
+
+/* "monitor my PC": one sentence for all of it. */
+for (const said of ['monitor my PC', 'monitor my screen', 'Monitor my computer.', 'start monitoring my pc', 'can you monitor my screen', 'please monitor this meeting']) {
+  check(`"${said}" monitors`, matchIntent(said), { kind: 'listen', what: 'monitor', ask: 'meeting' })
+}
+for (const said of ['stop monitoring', 'stop monitoring my PC', 'end monitoring the screen']) {
+  check(`"${said}" stops it all`, matchIntent(said)?.what, 'stop')
+}
+for (const said of ["monitor my PC's temperature", 'monitor the server logs', 'can you monitor my pc?']) {
+  check(`"${said}" is for the model`, matchIntent(said)?.kind ?? null, null)
+}
+check('monitoring starts quietly and says it in one note', /startListening\(want, monitor\)/.test(app) && /\*\*Monitoring your PC\*\*/.test(app), true)
+
+/* Live notes. */
+const at0 = { words: 0, seen: 0, at: 0 }
+check('no live notes before there is enough to note', M.liveNotesDue(at0, { words: 10, seen: 0, at: 120000 }), false)
+check('the first live notes once there is', M.liveNotesDue(at0, { words: 35, seen: 0, at: 120000 }), true)
+check('or once the screen showed something', M.liveNotesDue(at0, { words: 0, seen: 1, at: 120000 }), true)
+check('not more than once a minute', M.liveNotesDue({ words: 50, seen: 0, at: 100000 }, { words: 500, seen: 0, at: 130000 }), false)
+check('not for a handful of new words', M.liveNotesDue({ words: 50, seen: 0, at: 0 }, { words: 60, seen: 0, at: 120000 }), false)
+check('for a minute of talk', M.liveNotesDue({ words: 50, seen: 0, at: 0 }, { words: 120, seen: 0, at: 120000 }), true)
+check('for a new screen', M.liveNotesDue({ words: 50, seen: 1, at: 0 }, { words: 52, seen: 2, at: 120000 }), true)
+
+const longMeeting = {
+  startedAt: 5,
+  pieces: [
+    { at: 10000, text: 'the deadline is thursday' },
+    { at: 300000, text: 'budget is ten thousand' },
+    { at: 600000, text: 'actually move the deadline to friday' }
+  ],
+  seen: [{ at: 590000, text: 'Slide: Timeline' }]
+}
+const first = M.liveNotesRequest(longMeeting, '', 0)
+check('the first update reads the whole meeting', /deadline is thursday/.test(first.user) && /move the deadline to friday/.test(first.user), true)
+const later = M.liveNotesRequest(longMeeting, '**Decisions**\n- Deadline Thursday', 580000)
+check('a later one sends the notes so far', /Your notes so far:[\s\S]*Deadline Thursday/.test(later.user), true)
+check('and only what is new, with a minute of overlap', !/deadline is thursday/.test(later.user) && !/budget/.test(later.user) && /move the deadline to friday/.test(later.user) && /Slide: Timeline/.test(later.user), true)
+check('it says where the new part starts', /from 8:40 to 10:00/.test(later.user), true)
+check('changes are made in place, not repeated', /change that item where it is/.test(M.LIVE_NOTES_PROMPT) && /~~Thursday~~/.test(M.LIVE_NOTES_PROMPT) && /Never keep the old and the new/.test(M.LIVE_NOTES_PROMPT), true)
+check('with the meeting rules', later.system.startsWith(M.RULES), true)
+check('the live card says it is live', /^\*\*Live notes\*\* · 10:00 in/.test(M.liveNotesCard('x', longMeeting, true)), true)
+check('and the last one says it is final', /^\*\*Meeting notes\*\* · final, 10:00/.test(M.liveNotesCard('x', longMeeting, false)), true)
+
+const liveHook = read('src/renderer/src/hooks/useLiveNotes.ts')
+check('live notes rewrite one card in place', /chatRef\.current\.update\(card\.current, content\)/.test(liveHook) && /chatRef\.current\.liveNote\(content\)/.test(liveHook), true)
+check('one update at a time', /while \(busy\.current\) await busy\.current/.test(liveHook), true)
+check('stopping gives them a last update', /void liveNotes\.finish\(heard\)/.test(app), true)
+check('and a new chat drops them', /void listening\.forget\(\)\s*liveNotes\.reset\(\)/.test(app), true)
+check('main builds the request, on the background model', /IPC\.meetingNotes,[\s\S]{0,200}backgroundModel\(\)[\s\S]{0,200}liveNotesRequest\(/.test(index), true)
+
 console.log(`\n${failed === 0 ? `all ${0 + 1 ? '' : ''}listen checks correct` : `${failed} listen checks FAILED`}`)
 process.exit(failed === 0 ? 0 : 1)

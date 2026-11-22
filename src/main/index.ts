@@ -24,8 +24,19 @@ import { DEFAULT_MODEL, assistantFor, assemblePrompt, type PromptShape } from '@
 import type { Footprint } from '@shared/footprint'
 import type { RankView, Transcript, VoiceStatus, WriteResult } from '@shared/types'
 import { Ranker, type SavedSweep } from './ranker'
-import { checkForUpdate, restartIntoUpdate, startUpdates, updateState } from './updater'
-import { learnFrom, setVoiceprint, warmVoiceprint, setVoiceprintLog, voiceprintState, whose } from './voiceprint'
+import { checkForUpdate, restartIntoUpdate, startUpdates, updateNow, updateState } from './updater'
+import {
+  enrolCancel,
+  enrolClip,
+  enrolFinish,
+  enrolStart,
+  learnFrom,
+  setVoiceprint,
+  warmVoiceprint,
+  setVoiceprintLog,
+  voiceprintState,
+  whose
+} from './voiceprint'
 import { SettingsStore } from './store'
 import { capDiskCache, reclaimCache } from './disk'
 import { ChatStore } from './chats'
@@ -106,6 +117,7 @@ import {
   budgetsFor,
   providerFor,
   seesMedia,
+  CLOUD_MODELS,
   siblingModel
 } from '@shared/cloud'
 import type { CloudModel, ProviderId } from '@shared/cloud'
@@ -117,10 +129,11 @@ import { Stretcher } from '@shared/stretch'
 import { forMagpie } from '@shared/voicetext'
 import { cutsFor, piecesOf } from '@shared/pauses'
 import { withSentTimes } from '@shared/sent'
-import { agentAsks, agentSlots, fileIn, gameWritten, heldForAgent, isBuild, monitorAsks, takeOverAsk, withoutRetypedCode } from '@shared/agents'
+import { agentAsks, agentSlots, buildFallback, fileIn, gameWritten, heldForAgent, isBuild, monitorAsks, takeOverAsk, withoutRetypedCode } from '@shared/agents'
 import { Agents } from './agents'
 import { LimitTester } from './limits'
-import { checkHtml, checkPage, probePage } from './pagecheck'
+import { checkHtml, checkPage, probePage, syntaxIn } from './pagecheck'
+import { liveNotesRequest, screenChanged, type Listening } from '@shared/meeting'
 import { checkCodeFile, checkCodeText, isInteractive, runProgram } from './codecheck'
 import { codeErrorText, codeVerdictText } from '@shared/codecheck'
 import { PAGE_ROUNDS, excerpts, pageErrorText } from '@shared/pagecheck'
@@ -494,6 +507,26 @@ function agentSlotsNow(): number {
   const provider = providerFor(activeModel())
   if (!provider || PROVIDERS[provider].keyless || !keys.available()) return 0
   return agentSlots(keys.count(provider))
+}
+
+/**
+ * Where an agent goes when its model gave nothing: a build to the strongest
+ * model up (see buildFallback), anything else to the quicker one, as a voice
+ * turn would. Both agent runners - the panel's and the checks' - use it.
+ */
+function agentFallback(model: string, building: boolean): string | null {
+  const usable = (id: string): boolean => !spentToday.has(id) && cloud.ready(id).ok
+  const latencies = settings.get('latencies') ?? {}
+  return (building ? buildFallback(model, latencies, usable) : null) ?? quickerModel(model, latencies, usable)
+}
+
+/** The best-seeing model on the same provider as `model`, ready now; null if none (see AgentDeps.seer). */
+function agentSeer(model: string): string | null {
+  const provider = providerFor(model)
+  const seeing = CLOUD_MODELS.filter(
+    (m) => m.id !== model && m.provider === provider && m.vision && m.vision.clean > 0 && seesMedia(m.id) && !spentToday.has(m.id) && cloud.ready(m.id).ok
+  ).sort((a, b) => b.vision!.clean / b.vision!.of - a.vision!.clean / a.vision!.of)
+  return seeing[0]?.id ?? null
 }
 
 function resolveModel(): string | null {
@@ -1632,7 +1665,7 @@ function registerIpc(): void {
         console.log(
           `[wumpy] loaded ${result.path} to check it: ${errors.length ? errors.join(' | ') : 'no errors'}${page.play?.moved ? ' (the player moved)' : ''}${page.restart?.ok ? ' (it restarts)' : ''}${page.traffic?.ok ? ' (a car hits the player)' : ''}`
         )
-        return { page: { errors, context: excerpts(req.content, page.errors) } }
+        return { page: { errors, context: `${excerpts(req.content, page.errors)}${syntaxIn(req.content, page.errors)}`.trim() } }
       }
     }
     /* A program, compiled or parsed without being run: main/codecheck.ts. */
@@ -1705,9 +1738,15 @@ function registerIpc(): void {
 
   ipcMain.handle(IPC.voiceStatus, () => voiceStatus())
   ipcMain.handle(IPC.voiceMicState, () => micState())
-  ipcMain.handle(IPC.voiceWhose, (_e, req: { audio: ArrayBuffer; talkedMs: number; device: string }) =>
-    whose(req.audio, Number(req.talkedMs) || 0, String(req.device ?? '').slice(0, 200))
+  ipcMain.handle(IPC.voiceWhose, (_e, req: { audio: ArrayBuffer; talkedMs: number; device: string; answer?: boolean }) =>
+    whose(req?.audio, Number(req?.talkedMs) || 0, String(req?.device ?? '').slice(0, 200), req?.answer === true)
   )
+  ipcMain.handle(IPC.voiceprintEnrolStart, () => enrolStart())
+  ipcMain.handle(IPC.voiceprintEnrolClip, (_e, req: { audio: ArrayBuffer; device: string }) =>
+    enrolClip(req?.audio, String(req?.device ?? '').slice(0, 200))
+  )
+  ipcMain.handle(IPC.voiceprintEnrolFinish, () => enrolFinish())
+  ipcMain.handle(IPC.voiceprintEnrolCancel, () => enrolCancel())
   ipcMain.handle(IPC.voiceprintLearn, (_e, token: string) => learnFrom(String(token)))
   ipcMain.handle(IPC.voiceprintState, () => voiceprintState())
   ipcMain.handle(IPC.voiceprintSet, (_e, change: { on?: boolean; forget?: boolean }) =>
@@ -1820,6 +1859,7 @@ function registerIpc(): void {
 
   ipcMain.handle(IPC.updateState, () => updateState())
   ipcMain.on(IPC.updateCheck, () => checkForUpdate())
+  ipcMain.handle(IPC.updateNow, (_e, force: boolean) => updateNow(force === true))
   ipcMain.on(IPC.appRestart, (_e, req: { chatId?: string | null; why?: string }) => {
     void restartWumpy(String(req?.why ?? '/restart'), req?.chatId ?? null)
   })
@@ -1978,7 +2018,7 @@ function registerIpc(): void {
   async function readPicture(
     eye: CloudModel,
     picture: { dataUrl: string; bytes?: number },
-    about: 'screen' | 'file',
+    about: 'screen' | 'file' | 'meeting',
     ask?: string
   ): Promise<string | null> {
     if (!picture.dataUrl) return null
@@ -1991,16 +2031,31 @@ function registerIpc(): void {
             role: 'user',
             content: [
               'You are the eyes for another model, which cannot see pictures.',
-              ...(about === 'screen'
+              ...(about === 'meeting'
                 ? [
-                    'It is driving this Windows desktop and already has the list of',
-                    'control names, so describe what the names cannot say:'
+                    'This is the screen of someone in a meeting or call. It is taking notes',
+                    'from what is said, and needs what only the screen shows:',
+                    '- what is being shown: a slide, a shared document or screen, a web page',
+                    '- its title and headings, and figures, dates, names and links in view',
+                    '- names of people shown in the call, and who is marked as speaking',
+                    'At most 80 words, plain lines, no preamble. If it is not a meeting',
+                    '(an editor, a desktop), say in a few words what it is.'
                   ]
-                : ['A person attached this image to a question for it. Describe it:']),
-              '- what this is, and what state it is in',
-              '- any text that matters: errors, dialogs, headings, field contents',
-              '- anything visibly wrong, empty, loading or greyed out',
-              'At most 120 words. Report ONLY what is visible. If something is',
+                : about === 'screen'
+                  ? [
+                      'It is driving this Windows desktop and already has the list of',
+                      'control names, so describe what the names cannot say:'
+                    ]
+                  : ['A person attached this image to a question for it. Describe it:']),
+              ...(about === 'meeting'
+                ? []
+                : [
+                    '- what this is, and what state it is in',
+                    '- any text that matters: errors, dialogs, headings, field contents',
+                    '- anything visibly wrong, empty, loading or greyed out',
+                    'At most 120 words.'
+                  ]),
+              'Report ONLY what is visible. If something is',
               'unreadable, say so. Do not guess at what is cut off, do not give',
               'advice, and do not say what should be done next.',
               ...(ask ? ['', `Answer this in particular: ${ask.slice(0, 400)}`] : [])
@@ -2171,6 +2226,54 @@ function registerIpc(): void {
 
   ipcMain.handle(IPC.screenCapture, async () => shotWithNames())
 
+  /*
+   * The screen, during a meeting it was asked to watch (see shared/meeting.ts
+   * WATCHING THE SCREEN). Looked at, compared with the last look by a 32x18
+   * grey thumbnail, and only when it has changed described - by the chat's
+   * own model if it can see, or else the eye lent to it. The picture goes no
+   * further than that one call, and is not kept.
+   */
+  let meetingSig: number[] | null = null
+  ipcMain.handle(IPC.meetingLook, async (_e, fresh: boolean): Promise<{ changed: boolean; text?: string; why?: string; by?: string }> => {
+    if (fresh === true) meetingSig = null
+    if (!settings.get('screenEnabled')) return { changed: false, why: 'Looking at the screen is turned off in settings.' }
+    const own = activeModel()
+    const eye: CloudModel | null = seesMedia(own) ? (CLOUD_MODELS.find((m) => m.id === own) ?? null) : readyEye()
+    if (!eye) return { changed: false, why: 'No model that can see a picture is available, so the screen cannot be read.' }
+    let shot: Attachment
+    try {
+      shot = await captureScreen(panel.liveWindow())
+    } catch (err) {
+      return { changed: false, why: `The screen could not be captured (${String((err as Error)?.message ?? err).slice(0, 120)}).` }
+    }
+    const thumb = nativeImage.createFromDataURL(shot.dataUrl).resize({ width: 32, height: 18 }).toBitmap()
+    const sig: number[] = []
+    for (let i = 0; i + 3 < thumb.length; i += 4) sig.push(Math.round((thumb[i] + thumb[i + 1] + thumb[i + 2]) / 3))
+    if (!screenChanged(meetingSig, sig)) return { changed: false }
+    meetingSig = sig
+    const text = await readPicture(eye, shot, 'meeting')
+    return text ? { changed: true, text, by: eye.label } : { changed: true }
+  })
+
+  /* The live meeting notes, brought up to date (see shared/meeting.ts LIVE NOTES). */
+  ipcMain.handle(
+    IPC.meetingNotes,
+    async (_e, req: { session: Listening; previous: string; since: number }): Promise<string | null> => {
+      const model = backgroundModel()
+      if (!model || !req?.session) return null
+      const { system, user } = liveNotesRequest(req.session, String(req.previous ?? ''), Number(req.since) || 0)
+      const text = await cloud.complete(
+        model,
+        [
+          { role: 'system', content: system },
+          { role: 'user', content: user }
+        ],
+        { numPredict: 1200 }
+      )
+      return text?.trim() || null
+    }
+  )
+
   /**
    * Open a picture the model named, after the user pressed the card.
    *
@@ -2302,7 +2405,8 @@ function registerIpc(): void {
    */
   agents = new Agents({
     model: () => resolveModel(),
-    fallback: (m) => quickerModel(m, settings.get('latencies') ?? {}, (id) => !spentToday.has(id) && cloud.ready(id).ok),
+    fallback: agentFallback,
+    seer: agentSeer,
     slots: () => agentSlotsNow(),
     hold: (model) => cloud.holdKey(model),
     release: (model, key) => cloud.releaseKey(model, key),
@@ -2939,7 +3043,8 @@ void app.whenReady().then(async () => {
   ranker.start()
   setVoiceprintLog((line) => console.log(line))
   /* Updates on Windows, from the releases each push publishes, shown in the
-     panel's header and installed once nobody is using Wumpy. See updater.ts. */
+     panel's header and installed once nobody is using Wumpy; on Linux, from
+     the source folder it was built from, by /update. See updater.ts. */
   startUpdates({
     log: (line) => console.log(line),
     changed: (state) => panel.send(IPC.updateState, state),
@@ -3367,7 +3472,8 @@ async function modelSays(messages: ChatRequest['messages'], handsFree: boolean, 
 function agentRunner(ready: (d: AgentDelivery) => void, say: (line: string) => void): Agents {
   return new Agents({
     model: () => resolveModel(),
-    fallback: (m) => quickerModel(m, settings.get('latencies') ?? {}, (id) => !spentToday.has(id) && cloud.ready(id).ok),
+    fallback: agentFallback,
+    seer: agentSeer,
     slots: () => Math.max(1, agentSlotsNow()),
     hold: (m) => cloud.holdKey(m),
     release: (m, key) => cloud.releaseKey(m, key),
@@ -3651,7 +3757,7 @@ async function buildCheck(arg: string): Promise<void> {
           const how = `${page.play ? ` - ${page.play.line}` : ' - no player found to move'}${page.restart ? ` - ${page.restart.line}` : ' - never saw it end'}${page.stuck ? ` - ${page.stuck}` : ''}`
           say(`  page check: ${page.errors.length ? page.errors.join(' | ') : 'no errors'}${how}`)
           transcript.push(`> page check: ${page.errors.length ? page.errors.join(' | ') : 'no errors'}${how}`)
-          if (errors.length) text = pageErrorText(target, errors, excerpts(req.content, page.errors))
+          if (errors.length) text = pageErrorText(target, errors, `${excerpts(req.content, page.errors)}${syntaxIn(req.content, page.errors)}`.trim())
         } else {
           const checked = await checkCodeFile(target)
           if (checked) {
@@ -3704,7 +3810,10 @@ async function buildCheck(arg: string): Promise<void> {
         runner.start(chatId, `reply-${turnNo}-${step}`, asks)
         const watching = monitorAsks(reply)
         if (watching.length) runner.monitor(chatId, `reply-${turnNo}-${step}`, watching)
-        for (const a of asks) transcript.push(`> agent asked for: ${a.title}\n\n${a.brief}`)
+        for (const a of asks) {
+          transcript.push(`> agent asked for: ${a.title}\n\n${a.brief}`)
+          say(`  brief (${a.brief.length} characters): ${a.brief.replace(/\s+/g, ' ').slice(0, 600)}`)
+        }
         const waitFrom = Date.now()
         while (Date.now() - waitFrom < 25 * 60_000) {
           const mine = runner.forChat(chatId)

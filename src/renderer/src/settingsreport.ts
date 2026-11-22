@@ -107,7 +107,7 @@ export function settingsRows(
       change: '`/lean`'
     },
     {
-      what: 'hourly re-ranking',
+      what: 're-ranking every 30 minutes',
       /* The one thing in this sheet that spends a request by itself, so
          it says what it is doing rather than just on or off. */
       now: rank ?? 'off',

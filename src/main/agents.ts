@@ -15,6 +15,9 @@ import {
   sameWork,
   fileSpan,
   isBuild,
+  isPageBuild,
+  PAGE_NEEDS_NOTHING,
+  briefNotes,
   joinContinuation,
   withFile,
   deliveryText,
@@ -69,7 +72,12 @@ export interface AgentDeps {
    * A model to move to when this one gave nothing back - the quicker one a
    * voice turn would hand over to. Optional; null when there is none.
    */
-  fallback?(model: string): string | null
+  fallback?(model: string, building: boolean): string | null
+  /**
+   * A model on the same provider that can see, for reviewing a page by its
+   * pictures when the agent's own model cannot. Optional; null when none.
+   */
+  seer?(model: string): string | null
   /** How many may work at once, from the key count (agentSlots). */
   slots(): number
   hold(model: string): number | null
@@ -137,7 +145,12 @@ const SAVES_FILE = /(?:^|[^<>2&])>\s*[~\/\w$"']|\btee\b|open\([^)]*['"][wa]['"]|
 const READS_FILE = /^\s*(?:cat|Get-Content|gc|type|bat|nl|head|tail|sed\s+-n)\b/i
 
 /** How long a single turn may take before it counts as stalled. */
-const TURN_TIMEOUT_MS = 240_000
+/*
+ * A turn's outer bound. What ends a turn that has stopped is silence (the
+ * stream's idle limit, see cloud.agentTurn), so this only has to be longer
+ * than a whole game takes to write at a slow model's pace.
+ */
+const TURN_TIMEOUT_MS = 600_000
 /**
  * Room for a long deliverable: a file, a section, a full answer. It was
  * 4,096, and a whole game came back cut off mid-line three times running;
@@ -193,6 +206,24 @@ function noRetry(agent: Agent, why: string, all: readonly Agent[]): { noRetry?: 
 }
 
 export class Agents {
+  /**
+   * Models that gave nothing on a build this session. GLM 5.3 Flash wrote
+   * no word in its first three minutes on three maze games out of four, and
+   * each time the agent moved to Ultra only after the wait; from the second,
+   * a build starts where the first one ended up. Kept for the session only:
+   * a model that was slow today may not be tomorrow.
+   */
+  private readonly silentOnBuilds = new Set<string>()
+
+  /** The model an agent starts on: the chat's, unless it already went silent on a build. */
+  private buildModel(brief: string): string {
+    const model = this.deps.model() ?? ''
+    if (!model || !isBuild(brief) || !this.silentOnBuilds.has(model)) return model
+    const next = this.deps.fallback?.(model, true) ?? null
+    if (next) this.deps.log(`[agents] a build starts on ${next}: ${model} gave nothing on one before`)
+    return next ?? model
+  }
+
   private agents: Agent[] = []
   private monitors: Monitor[] = []
   private pending: AgentDelivery[] = []
@@ -275,7 +306,7 @@ export class Agents {
         doing: 'waiting for a free key',
         steps: [],
         startedAt: Date.now(),
-        model: this.deps.model() ?? '',
+        model: this.buildModel(ask.brief),
         review: '',
         heldKey: null,
         controller: new AbortController(),
@@ -389,9 +420,13 @@ export class Agents {
     const world = this.deps.world()
     const messages: WireMessage[] = [
       { role: 'system', content: agentPrompt({ ...world, steps: AGENT_STEPS, building: isBuild(agent.brief) }) },
-      { role: 'user', content: agent.brief }
+      { role: 'user', content: briefNotes(agent.brief) }
     ]
     let used = 0
+    /** Commands asked for while building a web page, answered without running (see isPageBuild). */
+    let pageRuns = 0
+    /** Reports with no page in them, for a page (see isPageBuild). */
+    let noPage = 0
     let rounds = 0
     let lastCall = false
     /* What it has asked for already, so asking again is caught. */
@@ -504,6 +539,17 @@ export class Agents {
       }
       messages.push({ role: 'assistant', content: reply })
       let step = stepOf(reply, world.platform)
+      /* A whole page written into a command that saves it - `cat > game.html
+         << EOF` - which never runs: taken as the report it should have been.
+         Refused, an Ultra-written maze game had to be typed out a second
+         time, minutes of a slow model, to say what it had already said. */
+      if (step.kind === 'run' && isBuild(agent.brief) && SAVES_FILE.test(step.command)) {
+        const written = pageIn(step.command)
+        if (written) {
+          this.deps.log(`[agents] ${agent.number} wrote its page into a command that saves it: taken as its report`)
+          step = { kind: 'report', text: `REPORT:${LF}${BT3}html${LF}${written}${LF}${BT3}${LF}It is saved by Wumpy from here.` }
+        }
+      }
       /* Told to report and asked for another tool anyway: the report it
          gave before, if it gave one - an agent that found the answer at
          its first step and was then asked for more must not end with
@@ -647,6 +693,17 @@ export class Agents {
           })
           continue
         }
+        /* Building a web page: no command tells it anything (see
+           isPageBuild). Answered without spending a step - only reading
+           a saved file, to change it, still runs - and the third time,
+           it is told to write. */
+        if (step.kind === 'run' && isPageBuild(agent.brief) && !READS_FILE.test(step.command)) {
+          pageRuns++
+          if (pageRuns >= 3) lastCall = true
+          this.deps.log(`[agents] ${agent.number} not run (a page needs nothing): ${step.command.replace(/\s+/g, ' ').slice(0, 120)}`)
+          messages.push({ role: 'user', content: PAGE_NEEDS_NOTHING + (lastCall ? ' Write your REPORT now.' : '') })
+          continue
+        }
         used++
         tried.set(said, used)
         const outcome = await this.act(agent, step)
@@ -684,6 +741,38 @@ export class Agents {
           giveUp()
           return
         }
+        continue
+      }
+      /* A page asked for, and no page in the report: straight back, not
+         to the reviewer. A maze game's agent reported a JSON search query
+         as the game three times; each went to review, each was sent back,
+         and the query was handed over and saved as maze-chase.html. */
+      if (isPageBuild(agent.brief) && !pageIn(step.text)) {
+        noPage++
+        this.deps.log(
+          `[agents] ${agent.number} reported no page (${noPage}): ${step.text.length} characters, ` +
+            `starting ${JSON.stringify(step.text.slice(0, 160))}, ending ${JSON.stringify(step.text.slice(-200))}`
+        )
+        if (noPage >= 3) {
+          if (lastReport) giveUp()
+          else this.end(agent, 'failed', 'it never handed back a page')
+          return
+        }
+        const json = /^[[{]/.test(step.text.replace(/^\s*REPORT:\s*/i, '').replace(/^`{3,}\w*\s*/, '').trim())
+        /* Begun and never finished: written too long, and cut off. Asked
+           for again as it was, it is cut off again - so, shorter. */
+        const unfinished = /<!doctype html|<html[\s>]/i.test(step.text)
+        const lines = step.text.split(LF).length
+        messages.push({
+          role: 'user',
+          content: unfinished
+            ? `Your page never reached </html>: it ran to ${step.text.length} characters (${lines} lines) and was cut off. ` +
+              'That is far too long - a basic game is 300 to 600 lines, about 15,000 characters. Write it again, whole and much ' +
+              'shorter: no comments beyond a few words, no extra features beyond the brief, one function per job, data built in ' +
+              'loops. From <!DOCTYPE html> to </html>, in one ```html block after REPORT:.'
+            : (json ? 'That was JSON - not a page, and not a tool: a tool is one of the fenced wumpy- blocks in your instructions, never JSON. ' : '') +
+              'Your REPORT has no web page in it, and the brief is a page. Write the whole page - from <!DOCTYPE html> to </html> - in one ```html block after REPORT:.'
+        })
         continue
       }
       lastReport = step.text
@@ -908,11 +997,12 @@ export class Agents {
          timeouts each - 33 minutes - while the chat had already moved on
          from it after five seconds. */
       if (!r.status && !r.completionTokens && !agent.movedOff) {
-        const next = this.deps.fallback?.(agent.model) ?? null
+        const next = this.deps.fallback?.(agent.model, isBuild(agent.brief)) ?? null
         if (next && next !== agent.model) {
           this.deps.log(`[agents] ${agent.number}: ${agent.model} gave nothing in ${Math.round(r.ms / 1000)}s; moving to ${next}`)
           this.deps.release(agent.model, agent.heldKey)
           agent.movedOff = agent.model
+          if (isBuild(agent.brief)) this.silentOnBuilds.add(agent.model)
           agent.model = next
           agent.heldKey = this.deps.hold(next)
           if (agent.heldKey === null) {
@@ -964,7 +1054,11 @@ export class Agents {
     let text = begun
     /* Already past what a basic game needs, at its first cut: not carried
        on at all, and what it was writing goes to the log. */
-    if (text.length > 45_000) {
+    /* A page is the tighter case: a basic game is 15,000 to 20,000
+       characters, and a maze game cut off at 43,000 was carried on,
+       went quiet for ten minutes, and had to be written again anyway. */
+    const most = isPageBuild(agent.brief) ? 30_000 : 45_000
+    if (text.length > most) {
       this.deps.log(`[agents] ${agent.number}'s reply was cut off at ${text.length} characters, past any basic game: not carrying on. It ended: ${JSON.stringify(text.slice(-300))}`)
       agent.tooLong = text.length
       return text.trim()
@@ -1058,6 +1152,16 @@ export class Agents {
      * of different lengths, walls drawn across the dots, and its ghosts
      * shut in their pen. One look shows it; no reading of the code did.
      */
+    /* The agent's model cannot see, and one beside it on the same key can:
+       the review is that one's. A maze game built on Nemotron Ultra had its
+       pictures refused four times, and nobody looked at a maze that was
+       one solid block of wall through the middle. */
+    const own = agent.model
+    const seer = shots?.length && !this.deps.sees(own) ? (this.deps.seer?.(own) ?? null) : null
+    if (seer) {
+      agent.model = seer
+      this.deps.log(`[agents] ${agent.number} its reviewer looks with ${seer}, as ${own} cannot see`)
+    }
     const seeing = Boolean(shots?.length) && this.deps.sees(agent.model)
     const raw = await this.ask(
       agent,
@@ -1075,10 +1179,12 @@ export class Agents {
       ],
       REVIEW_TOKENS
     )
+    agent.model = own
     if (seeing) this.deps.log(`[agents] ${agent.number} its reviewer was shown the page`)
     const parsed = raw ? parseReview(raw) : null
-    const review = parsed ? withoutNonBugs(parsed) : null
-    if (review?.dropped) this.deps.log(`[agents] ${agent.number} its reviewer's ${review.dropped} point(s) about the game behind its overlay were dropped`)
+    const played = [...agent.records].reverse().find((r) => r.kind === 'page')?.outcome ?? ''
+    const review = parsed ? withoutNonBugs(parsed, played) : null
+    if (review?.dropped) this.deps.log(`[agents] ${agent.number} its reviewer's ${review.dropped} point(s) were dropped: the game behind its overlay, or contradicted by Wumpy's test`)
     this.deps.log(`[agents] ${agent.number} reviewed: ${review ? review.verdict : 'no verdict'}`)
     return review
   }

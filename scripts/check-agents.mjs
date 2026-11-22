@@ -145,8 +145,11 @@ check('"what time is it" does not', N.needsFor([{ role: 'user', content: 'what t
    window), measured the way check-ask measures it. */
 const tokens = (text) => Math.ceil(text.length / 4)
 check(`the stub is a line (~${tokens(A.agentsStub(2))} tokens)`, tokens(A.agentsStub(2)) <= 45, true)
-/* 520: building things - games, pages, apps - joined what agents are for. */
-check(`the rules stay short (~${tokens(A.agentsPrompt(2))} tokens)`, tokens(A.agentsPrompt(2)) <= 560, true)
+/* 520: building things - games, pages, apps - joined what agents are for.
+   600: and a game's brief kept to what was asked - a maze game's ran to
+   2,100 characters of extras, and its game to 43,000, cut off. */
+check(`the rules stay short (~${tokens(A.agentsPrompt(2))} tokens)`, tokens(A.agentsPrompt(2)) <= 600, true)
+check('a game\'s brief is kept to what was asked', A.agentsPrompt(2).includes('no extras (levels, high scores, sounds, sizes)'), true)
 {
   const FULL = { scope: 'full', search: true, screen: true, browser: true, quota: true }
   const plain = S.preambleTokens({ ...FULL, needs: [], agents: 2 })
@@ -802,13 +805,13 @@ check('a saved agent file names its card', /agents\.saved\(from, result\.path\)/
   check('a game running under its overlay is a real bug', A.withoutNonBugs({ verdict: 'revise', notes: '1. The game keeps running underneath the title overlay, which never hides.' }).dropped, 0)
   check('a "3." inside a point does not split it', A.withoutNonBugs({ verdict: 'revise', notes: '1. Set lives to 3. Then reset.\n2. The board stays visible behind the game over screen.' }).notes, '1. Set lives to 3. Then reset.')
   check('an accept stays an accept', A.withoutNonBugs({ verdict: 'accept', notes: 'fine' }).verdict, 'accept')
-  check('and the runner uses it', /withoutNonBugs\(parsed\)/.test(read('src/main/agents.ts')), true)
+  check('and the runner uses it, with what Wumpy saw', /withoutNonBugs\(parsed, played\)/.test(read('src/main/agents.ts')), true)
 }
 
 {
   const main = read('src/main/agents.ts')
   check('an agent whose model gives nothing moves to another, once', /if \(!r\.status && !r\.completionTokens && !agent\.movedOff\)/.test(main) && /agent\.model = next/.test(main), true)
-  check('both agent runners are given the quicker model', (read('src/main/index.ts').match(/fallback: \(m\) => quickerModel\(m,/g) ?? []).length, 2)
+  check('both agent runners are given the same fallback', (read('src/main/index.ts').match(/fallback: agentFallback,/g) ?? []).length, 2)
   check('and the chat is told to act, not ask', /ACT, DO NOT ASK/.test(read('src/shared/assistant.ts')) && /never "shall I search\?"/.test(read('src/shared/assistant.ts')), true)
 }
 
@@ -847,6 +850,112 @@ check('four bad edits give up the way every other end does', /if \(badEdits >= 4
   const big = 'x'.repeat(1600)
   check('a quoted path is the same path the card reads', A.gameWritten('```wumpy-write\npath: "~/Downloads/a.html"\n<canvas></canvas>' + big + '\n```'), '~/Downloads/a.html')
   check('a from: card waits for its file instead of saying there is none', /if \(from\) setFromFile\(\(was\) => \(was === null \? undefined : was\)\)/.test(read('src/renderer/src/components/WriteCard.tsx')), true)
+}
+
+/* A maze game, built (22 Nov): five of ten steps on `which python3`, a
+   check for pygame and `echo "test"`; a turn cut off at four minutes as if
+   the model had said nothing, and a move to the smallest model; a JSON
+   search query reported as the game, and saved as maze-chase.html. */
+{
+  check('a page is a page build', A.isPageBuild('Write a retro maze chase game as one HTML file'), true)
+  check('a Python game is not', A.isPageBuild('Write a Tetris game in Python with pygame'), false)
+  check('nor is a C++ one', A.isPageBuild('Write snake in C++ for the terminal'), false)
+  check('nor an essay', A.isPageBuild('Write a 1200-word essay on the transistor'), false)
+  check('the rules show a maze built in code, mirrored, not only forbid typing one', /const wall = \(x, y, w, h\)/.test(A.BUILDING.join('\n')) && /grid\[r\]\[COLS - 1 - c\]/.test(A.BUILDING.join('\n')), true)
+  check('...with no comment inside it for a folded line to swallow', /const wall[\s\S]{0,300}\/\//.test(A.BUILDING.join('\n').split('then put the player')[0]), false)
+  check('a maze brief carries the maze rule beside it', /build the maze in code/.test(A.briefNotes('Write a retro maze chase game as one HTML file')), true)
+  check('...and a brief with no maze is left as it is', A.briefNotes('Write Snake as one HTML file'), 'Write Snake as one HTML file')
+  check('the agent is given the brief with its notes', /content: briefNotes\(agent\.brief\)/.test(read('src/main/agents.ts')), true)
+  {
+    /* The movement the rules show, run: it must move, turn, and stop at walls. */
+    const body = A.BUILDING.join('\n').split('function step(e, dt, speed) {')[1].split('\n  A key sets e.want')[0]
+    const step = new Function('open', `return function step(e, dt, speed) {${body}`)
+    const walls = new Set(['0,1', '2,1', '1,0'])
+    const s = step((c, r) => c >= 0 && r >= 0 && c < 5 && r < 5 && !walls.has(`${c},${r}`))
+    const e = { col: 1, row: 1, dir: [0, 0], want: [0, 1], t: 0 }
+    for (let i = 0; i < 40; i++) s(e, 1 / 60, 4)
+    check('the movement in the rules moves a standing player when a key is pressed', [e.col, e.row], [1, 3])
+    e.want = [1, 0]
+    for (let i = 0; i < 30; i++) s(e, 1 / 60, 4)
+    check('...turns when it is asked to, at the next tile', e.dir[0] === 1 && e.col > 1, true)
+    const f = { col: 1, row: 1, dir: [0, 0], want: [0, -1], t: 0 }
+    for (let i = 0; i < 30; i++) s(f, 1 / 60, 4)
+    check('...and does not walk into a wall', [f.col, f.row, f.dir], [1, 1, [0, 0]])
+  }
+  {
+    const PCL = await load('src/shared/pagecheck.ts', 'pagecheck-behind')
+    const look = (pts) => ({ crowd: { ghosts: pts } })
+    const looks = [look([[1, 1], [5, 5], [10, 10]]), look([[4, 1], [5, 5], [10, 13]]), look([[8, 2], [5, 5], [12, 15]])]
+    check('a chaser that never left while the rest moved is named', PCL.leftBehind(looks), [{ name: 'ghosts', which: [2] }])
+    check('...and a crowd all standing still is stuckCrowds\' to say, not this', PCL.leftBehind([look([[1, 1], [5, 5]]), look([[1, 1], [5, 5]])]), [])
+    const pcm = read('src/main/pagecheck.ts')
+    check('the page check says so', /const behind = leftBehind\(crowdLooks\)/.test(pcm), true)
+    check('a reviewer sees the board at its size, not the window shrunk to 640', /contents\.capturePage\(r\)/.test(pcm) && !/resize\(\{ width: 640 \}\)/.test(pcm), true)
+  }
+  {
+    const played = 'Loaded it and played it: no errors in its console. Holding the up arrow three times moved the player: col 14, row 23 became col 14, row 22.'
+    const r = A.withoutNonBugs({ verdict: 'revise', notes: '1. The player starts at row 23, but the maze walls occupy rows 21-27, so the player spawns inside a wall.\n2. The score never goes up when a dot is eaten.' }, played)
+    check('a reviewer\'s "player inside a wall" is dropped when Wumpy watched it move', [r.verdict, r.dropped, /score never goes up/.test(r.notes)], ['revise', 1, true])
+    check('...but kept when Wumpy saw it stand still', A.withoutNonBugs({ verdict: 'revise', notes: '1. The player spawns inside a wall.' }, 'Holding each arrow key three times did not move the player at all').dropped, 0)
+    check('...and a point about ghosts trapped is kept', A.withoutNonBugs({ verdict: 'revise', notes: '1. The ghosts are trapped inside the pen walls.' }, played).dropped, 0)
+  }
+  check('the rules give a grid player a speed to aim at', A.BUILDING.join('\n').includes('5 to 8 tiles a second'), true)
+  check('the rules ask for one statement to a line', A.BUILDING.join('\n').includes('never a whole function on one'), true)
+  {
+    const PCN = await load('src/shared/pagecheck.ts', 'pagecheck-nested')
+    const src = '<script>\nfunction a(){ if (x) { y() } \nfunction init(){ go() }\ninit()\n</script>'
+    check('"init is not defined" of a page that has it: the function left open is named', /inside `a` \(from line 2\)/.test(PCN.nestedFunction(src, ['Uncaught ReferenceError: init is not defined (line 4)']) ?? ''), true)
+    check('...and not when the function is really missing', PCN.nestedFunction('<script>\nfunction a(){}\ninit()\n</script>', ['Uncaught ReferenceError: init is not defined']), null)
+    check('...nor when it is at the top level, closed', PCN.nestedFunction('<script>\nfunction a(){ if (1) { } }\nfunction init(){}\n</script>', ['init is not defined']), null)
+    const nums = Array.from({ length: 31 }, (_, i) => `[${Array(i % 7 ? 28 : 29).fill(1).join(',')}]`)
+    check('a map typed as rows of numbers that do not line up is caught', /rows of numbers[\s\S]*row 0 is 29/.test(PCN.typedMapProblem(`<script>const ROWS = 31;\nconst MAP = [\n${nums.join(',\n')}\n];</script>`) ?? ''), true)
+  }
+  check('the rules say a page needs nothing installed', A.BUILDING.join('\n').includes('A web page needs nothing installed'), true)
+  const up = () => true
+  check('a build moves to the strongest model up, not the quickest', A.buildFallback('z-ai/glm-5.3-flash', {}, up), 'nvidia/nemotron-3-ultra-550b-a55b')
+  check('...past one that last failed', A.buildFallback('z-ai/glm-5.3-flash', { 'nvidia/nemotron-3-ultra-550b-a55b': { ok: false } }, up), 'nvidia/nemotron-3.5-super-vl-120b-a12b')
+  check('...and never to a small one', A.BUILD_MODELS.some((m) => /lightning|nano/.test(m)), false)
+  check('none up: none', A.buildFallback('x', {}, () => false), null)
+  const main = read('src/main/agents.ts')
+  check('a command while building a page is answered, not run, and costs no step', /isPageBuild\(agent\.brief\) && !READS_FILE\.test\(step\.command\)\) \{\s*pageRuns\+\+/.test(main), true)
+  check('a report with no page goes back, not to review', /isPageBuild\(agent\.brief\) && !pageIn\(step\.text\)\) \{\s*noPage\+\+/.test(main), true)
+  check('three of those and it fails, never handing over what is not a page', /noPage >= 3\) \{\s*if \(lastReport\) giveUp\(\)\s*else this\.end\(agent, 'failed'/.test(main), true)
+  const cloud = read('src/main/cloud.ts')
+  const turn = cloud.slice(cloud.indexOf('async agentTurn('), cloud.indexOf('abortAll(): void'))
+  check('an agent turn is streamed, so slow is told from silent', /stream: true/.test(turn) && /stream_options: \{ include_usage: true \}/.test(turn), true)
+  check('silence ends it, not the clock', /quiet\.abort\(/.test(turn) && /heard\(\)/.test(turn), true)
+  check('what came before it ran out is kept, as cut off', /if \(text && !ours\) return \{ text, cutOff: true/.test(turn), true)
+  check('a build is moved by strength, anything else by speed', read('src/main/index.ts').includes('(building ? buildFallback(model, latencies, usable) : null) ?? quickerModel(model, latencies, usable)'), true)
+  check('a page written into `cat > file << EOF` is taken as the report, not typed again', /SAVES_FILE\.test\(step\.command\)\) \{\s*const written = pageIn\(step\.command\)/.test(main), true)
+  check('...and pageIn finds the page in such a command', M.pageIn("cat > g.html << 'EOF'\n<!DOCTYPE html><html><body><canvas></canvas><script>1</script></body></html>\nEOF")?.startsWith('<!DOCTYPE html>'), true)
+  /* A maze typed as rows that cannot be right, said before anything plays. */
+  const PC = await load('src/shared/pagecheck.ts', 'pagecheck-maze')
+  const rows = (n, w = 28) => Array.from({ length: n }, (_, i) => `"${(i % 2 ? '1222' : '1111').repeat(w / 4)}"`)
+  const page = (body) => `<script>\nconst ROWS = 31;\nconst MAZE_RAW = [\n${body.join(',\n')}\n];\n</script>`
+  check('a maze of 32 rows under ROWS = 31 is caught', /has 32 rows, where ROWS = 31/.test(PC.typedMapProblem(page(rows(32))) ?? ''), true)
+  const ragged = rows(31); ragged[8] = '"12221"'
+  check('a row shorter than the rest is caught, by number', /row 8 is 5/.test(PC.typedMapProblem(page(ragged)) ?? ''), true)
+  check('a map that lines up is left alone', PC.typedMapProblem(page(rows(31))), null)
+  check('nor is a list of words taken for a map', PC.typedMapProblem('<script>const N=["apple pie","banana bread","cherry tart","date loaf","elderberry","fig roll","grape juice","honey cake","ice cream"]</script>'), null)
+  check('the agent is told of it, and it counts as broken', read('src/main/pagecheck.ts').includes('Boolean(result.stuck) || Boolean(map)'), true)
+  const cl = read('src/main/cloud.ts')
+  check('a picture refused mid-stream is remembered and the turn asked again without it', /refusesPicture\(chunk\.error\.message\) && withPictures\(messages\)\) return this\.blindRetry/.test(cl) && /rememberBlind\(model\)\s*console\.log/.test(cl), true)
+  check('a blind agent\'s page is reviewed by a model that sees, on the same key', /const seer = shots\?\.length && !this\.deps\.sees\(own\)/.test(main) && /agent\.model = own/.test(main), true)
+  check('both agent runners are given the seer', (read('src/main/index.ts').match(/seer: agentSeer,/g) ?? []).length, 2)
+  {
+    const pcs = read('src/main/pagecheck.ts')
+    check('a game over by itself just after it starts is said so, not "did not move"', /if \(started && startedAt && \(after\?\.over \|\| lost >= 2\)\)/.test(pcs) && /That is not the movement: something kills the player at once/.test(pcs), true)
+    check('...and is not then called a game nothing started', /tried\.length > 1 && !endedItself/.test(pcs), true)
+  }
+  check('a model that went silent on a build is not waited on again by the next one', /model: this\.buildModel\(ask\.brief\)/.test(main) && /if \(isBuild\(agent\.brief\)\) this\.silentOnBuilds\.add\(agent\.model\)/.test(main), true)
+  check('the rules say to show a map in one probe', A.BUILDING.join('\n').includes('A map in one look, never a few rows at a time'), true)
+  {
+    const PCA = await load('src/shared/pagecheck.ts', 'pagecheck-around')
+    check('a stuck player is shown on its map', PCA.aroundLine({ name: 'maze', row: 2, col: 3, under: '1', rows: ['1111111', '1112111', '111@111'] }).includes('on a "1"; @ is the player'), true)
+    check('...when it did not move, and not when the game ended itself', /if \(play && !play\.moved && !endedItself\) \{\s*const around = aroundLine/.test(read('src/main/pagecheck.ts')), true)
+  }
+  const pc = read('src/main/pagecheck.ts')
+  check('a syntax error is placed to the column, compiled and never run', /new Script\(code, \{ filename: 'page\.js' \}\)/.test(pc) && pc.includes('syntaxIn(html, result.errors)'), true)
 }
 
 console.log(failed ? `\n${failed} FAILED of the agent checks` : '\nall agent checks correct')

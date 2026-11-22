@@ -348,35 +348,18 @@ check('and there is a ceiling on asking', P.MAX_RUNS, 5)
    * two of them could see all along.
    */
   /*
-   * The pick can see, so no alternative is offered - and `sees` here is
-   * asked the same way the wire asks it. It used to be `sees === true`,
-   * which disagreed with wireMessage the day absent started meaning
-   * sighted: Ultra has no entry, so it was sent pictures while being
-   * called blind and handed an eye it did not need.
+   * The blind winner is back, and built from the catalogue again: Ultra,
+   * the pick, refused a picture at its endpoint on 22 Nov ("Received
+   * multimodal data but multimodal processing is not enabled") and is
+   * marked so. It used to be nemotron-3-super, until NVIDIA withdrew it on
+   * 21 Oct; for a month no row was blind and this branch could only be
+   * asserted at the source. Now it runs: the pick cannot see, so the
+   * report names the best eye beside it.
    */
-  check('no vision line when the pick can see', /For screenshots/.test(text), false)
-
-  /*
-   * The blind-winner case cannot be built from the catalogue any more,
-   * and that is itself the finding.
-   *
-   * It used to be nemotron-3-super - genuinely refused images, quick
-   * enough to win - and NVIDIA withdrew it on 21 Oct. Then the only blind
-   * row was glm-5.3, past the floor and never the pick, and NVIDIA
-   * withdrew that on 15 Nov. No row is marked blind now: blindness is
-   * learned from the endpoint at run time (rememberBlind).
-   *
-   * So the branch is asserted at the source rather than exercised, and
-   * the reason is written down: a test that quietly stopped covering
-   * anything is worse than one that says it cannot.
-   */
+  check('a vision line when the pick cannot see', /For screenshots/.test(text), true)
   const blind = C.CLOUD_MODELS.filter((m) => m.sees === false && m.measured)
-  check('no row is marked blind, so none can be the blind pick', blind.length, 0)
-  check(
-    'so none of them can be the pick',
-    blind.every((m) => (m.measured?.medianMs ?? 0) > P.TOO_SLOW_TO_SUGGEST_MS),
-    true
-  )
+  check('the blind pick is Ultra', blind.map((m) => m.id), ['nvidia/nemotron-3-ultra-550b-a55b'])
+  check('and the eye it names is one that sees', /For screenshots:[^\n]*nemotron-3\.5-super-vl|For screenshots:[^\n]*glm-5\.3-flash/.test(text), true)
   const probe = readFileSync('src/shared/probe.ts', 'utf8')
   check('the vision line is still there for when one is', /if \(!best\.sees\) \{/.test(probe), true)
   check('and names the best eye beside it', /For screenshots:/.test(probe), true)

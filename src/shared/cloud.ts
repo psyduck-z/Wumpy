@@ -681,6 +681,10 @@ export const CLOUD_MODELS: CloudModel[] = [
     id: 'nvidia/nemotron-3-ultra-550b-a55b',
     provider: 'nvidia',
     label: 'Nemotron 3 Ultra 550B',
+    /* Text only, by its own endpoint's word (22 Nov): "Received multimodal
+       data but multimodal processing is not enabled", four times, to a
+       build's reviewer shown the page. */
+    sees: false,
     /*
      * BACK, AND THE REASON IT LEFT NO LONGER HAPPENS.
      *

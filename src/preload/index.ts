@@ -6,7 +6,8 @@ import type { ProbeResult } from '@shared/probe'
 import type { Footprint } from '@shared/footprint'
 import type { Entry } from '@shared/journal'
 import type { RankView } from '@shared/types'
-import type { VoiceprintState, WhoseAnswer } from '@shared/types'
+import type { EnrolAnswer, VoiceprintState, WhoseAnswer } from '@shared/types'
+import type { Listening } from '@shared/meeting'
 import type { LookResult } from '../main/look'
 import type {
   AgentDelivery,
@@ -352,13 +353,25 @@ const api = {
     micState: (): Promise<{ mic: 'none' | 'absent' | 'switching' | 'running'; earbudsOut: boolean | null }> =>
       ipcRenderer.invoke(IPC.voiceMicState),
     /** Whose voice a conversation's clip was: the WAV sent to the transcriber, how long the talking was, the mic. */
-    whose: (audio: ArrayBuffer, talkedMs: number, device: string): Promise<WhoseAnswer> =>
-      ipcRenderer.invoke(IPC.voiceWhose, { audio, talkedMs, device }),
+    whose: (audio: ArrayBuffer, talkedMs: number, device: string, answer = false): Promise<WhoseAnswer> =>
+      ipcRenderer.invoke(IPC.voiceWhose, { audio, talkedMs, device, answer }),
     /** The clip `whose` gave this token for was words: learn the voice from it. */
     learn: (token: string): Promise<boolean> => ipcRenderer.invoke(IPC.voiceprintLearn, token),
     print: (): Promise<VoiceprintState> => ipcRenderer.invoke(IPC.voiceprintState),
     setPrint: (change: { on?: boolean; forget?: boolean }): Promise<VoiceprintState> =>
       ipcRenderer.invoke(IPC.voiceprintSet, change),
+    /** Calibrating: start, one sentence read at a time, then finish (or cancel). */
+    enrolStart: (): Promise<{ ready: boolean; needed: number }> => ipcRenderer.invoke(IPC.voiceprintEnrolStart),
+    enrolClip: (audio: ArrayBuffer, device: string): Promise<EnrolAnswer> =>
+      ipcRenderer.invoke(IPC.voiceprintEnrolClip, { audio, device }),
+    enrolFinish: (): Promise<VoiceprintState> => ipcRenderer.invoke(IPC.voiceprintEnrolFinish),
+    enrolCancel: (): Promise<void> => ipcRenderer.invoke(IPC.voiceprintEnrolCancel),
+    /** The screen, while a meeting is being watched: a note of it if it changed since the last look. */
+    meetingLook: (fresh: boolean): Promise<{ changed: boolean; text?: string; why?: string; by?: string }> =>
+      ipcRenderer.invoke(IPC.meetingLook, fresh),
+    /** The live meeting notes brought up to date: the notes so far, and what is new since `since` ms. */
+    meetingNotes: (req: { session: Listening; previous: string; since: number }): Promise<string | null> =>
+      ipcRenderer.invoke(IPC.meetingNotes, req),
     /** A spoken turn was asked for (wumpy --voice, the tray). */
     onTurn: (cb: () => void) => on<void>(IPC.voiceTurn, cb)
   },
@@ -400,7 +413,9 @@ const api = {
     /** Wumpy's own update: 'off' on Linux and dev runs (main/updater.ts). */
     state: (): Promise<UpdateState> => ipcRenderer.invoke(IPC.updateState),
     onState: (cb: (s: UpdateState) => void) => on<UpdateState>(IPC.updateState, cb),
-    check: (): void => ipcRenderer.send(IPC.updateCheck)
+    check: (): void => ipcRenderer.send(IPC.updateCheck),
+    /** `/update`: update now if there is anything to update to (main/updater.ts updateNow). */
+    now: (force: boolean): Promise<{ ok: boolean; message: string }> => ipcRenderer.invoke(IPC.updateNow, force)
   },
   music: {
     /** Pause what is playing while Wumpy listens or talks (main/music.ts). */

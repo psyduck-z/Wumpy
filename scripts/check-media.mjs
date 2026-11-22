@@ -176,7 +176,11 @@ check('the vision model on NVIDIA can see', C.seesMedia('nvidia/nemotron-3.5-sup
 /* And the big GLM stood here until NVIDIA withdrew it on 15 Nov (HTTP
    410). It was the last row marked blind, so no row is now: blindness is
    learned from the endpoint's refusal, as rememberBlind records it. */
-check('no row is marked blind any more', C.CLOUD_MODELS.some((m) => m.sees === false), false)
+/* Until Nemotron Ultra, offered and refusing (22 Nov): a build's reviewer
+   shown the page was answered "Received multimodal data but multimodal
+   processing is not enabled". It is the example now. */
+check('the one row marked blind is a model still offered that still refuses', C.CLOUD_MODELS.filter((m) => m.sees === false).map((m) => m.id), ['nvidia/nemotron-3-ultra-550b-a55b'])
+check('...and it is not sent pictures', C.seesMedia('nvidia/nemotron-3-ultra-550b-a55b'), false)
 /*
  * Exactly these, and each one asked rather than assumed.
  *

@@ -1,6 +1,7 @@
 import { app } from 'electron'
 import { autoUpdater } from 'electron-updater'
 import type { UpdateState } from '@shared/types'
+import { checkSource, installFromSource, whatsNew } from './sourceupdate'
 
 /**
  * Keeps an installed Wumpy on Windows up to date with what is built here.
@@ -19,12 +20,16 @@ import type { UpdateState } from '@shared/types'
  * (no answer, no agent, the panel away, ten quiet minutes). Never in the
  * middle of an answer.
  *
- * Windows only, and only an installed build: the Linux build on this laptop
- * is installed from the source by scripts/install-linux.mjs, and a dev run
- * has no release to compare itself with.
+ * Downloads are Windows only, and only an installed build. The Linux build is
+ * installed from the source by scripts/install-linux.mjs, so on Linux the
+ * same 30-minute check looks at the source folder instead (sourceupdate.ts),
+ * and `/update` builds and installs from it. A dev run has nothing to update.
+ *
+ * Every 30 minutes, not every hour: "make the auto and model check happen
+ * every 30 minutes".
  */
 
-const EVERY_MS = 60 * 60 * 1000
+export const EVERY_MS = 30 * 60 * 1000
 const LOOK_EVERY_MS = 60 * 1000
 
 export interface UpdateDeps {
@@ -51,8 +56,12 @@ export function updateState(): UpdateState {
 
 const failed = (err: unknown): string => String((err as Error)?.message ?? err).slice(0, 200)
 
-/** Looks now: on start, every hour, and from the panel. */
+/** Looks now: on start, every 30 minutes, and from the panel. */
 export function checkForUpdate(): void {
+  if (linux) {
+    void checkLinux()
+    return
+  }
   if (!deps || state.stage === 'downloading' || state.stage === 'ready') return
   set({ stage: 'checking' })
   autoUpdater.checkForUpdates().catch((err) => {
@@ -61,8 +70,108 @@ export function checkForUpdate(): void {
   })
 }
 
+/** On Linux the check is of the source folder, and nothing downloads. */
+let linux = false
+
+async function checkLinux(): Promise<void> {
+  if (!deps || state.stage === 'installing' || state.stage === 'checking') return
+  set({ stage: 'checking' })
+  try {
+    const c = await checkSource()
+    if (!c.source) {
+      set({ stage: 'failed', about: 'the source folder could not be found', checkedAt: Date.now() })
+      return
+    }
+    const about = whatsNew(c)
+    if (about) deps.log(`[update] an update is available: ${about}`)
+    set({ stage: about ? 'available' : 'current', about: about || undefined, checkedAt: Date.now() })
+  } catch (err) {
+    deps.log(`[update] could not check: ${failed(err)}`)
+    set({ stage: 'failed', checkedAt: Date.now() })
+  }
+}
+
+function startLinuxUpdates(d: UpdateDeps): void {
+  deps = d
+  linux = true
+  set({ stage: 'current' })
+  setTimeout(() => void checkLinux(), 60_000).unref?.()
+  setInterval(() => void checkLinux(), EVERY_MS).unref?.()
+}
+
+/**
+ * `/update`: update now, if there is anything to update to.
+ *
+ * Windows: restart into a downloaded update, or look for one. Linux: pull,
+ * build and install from the source folder, then restart into it. `force`
+ * rebuilds on Linux even when nothing looks new.
+ */
+export async function updateNow(force = false): Promise<{ ok: boolean; message: string }> {
+  if (!app.isPackaged) {
+    return {
+      ok: false,
+      message:
+        'This Wumpy is running straight from its source folder, so there is no installed copy to update. ' +
+        '**/restart** picks up a fresh build.'
+    }
+  }
+  if (!deps) return { ok: false, message: 'Updating is not set up on this system.' }
+  if (!linux) {
+    if (state.stage === 'ready') {
+      deps.restart(`to install Wumpy ${state.next}`)
+      return { ok: true, message: `Restarting into Wumpy ${state.next}.` }
+    }
+    if (state.stage === 'downloading') {
+      return {
+        ok: true,
+        message: `Wumpy ${state.next} is downloading (${state.percent ?? 0}%). It installs itself once it is ready, or press **Update ready** in the header.`
+      }
+    }
+    checkForUpdate()
+    return {
+      ok: true,
+      message: `Looking for a newer Wumpy than ${state.current}. If there is one it downloads by itself, and **Update ready** appears in the header.`
+    }
+  }
+  if (state.stage === 'installing') return { ok: false, message: 'Already updating — it restarts by itself when the build is done.' }
+  set({ stage: 'checking' })
+  const c = await checkSource().catch(() => null)
+  if (!c?.source) {
+    set({ stage: 'failed', checkedAt: Date.now() })
+    return {
+      ok: false,
+      message:
+        'I cannot find Wumpy’s source folder to build from. Run `npm run install:linux` in it once, and ' +
+        '`/update` will know where it is from then on.'
+    }
+  }
+  const about = whatsNew(c)
+  if (!about && !force) {
+    set({ stage: 'current', about: undefined, checkedAt: Date.now() })
+    const when = c.installedAt ? new Date(c.installedAt).toLocaleString() : 'its last install'
+    return {
+      ok: true,
+      message: `Already up to date: nothing new on GitHub, and nothing in ${c.source} has changed since it was installed (${when}). Say **/update force** to rebuild anyway.`
+    }
+  }
+  set({ stage: 'installing', about: about || 'a rebuild', checkedAt: Date.now() })
+  const result = await installFromSource(c, deps.log)
+  if (!result.ok) {
+    set({ stage: 'failed', checkedAt: Date.now() })
+    return result
+  }
+  set({ stage: 'current', about: undefined })
+  deps.restart('to start the updated Wumpy')
+  return { ok: true, message: `Updated with ${about || 'a fresh build'}. Restarting into it.` }
+}
+
 export function startUpdates(d: UpdateDeps): void {
-  if (deps || process.platform !== 'win32' || !app.isPackaged) return
+  if (deps || !app.isPackaged) return
+  if (process.platform === 'linux') {
+    startLinuxUpdates(d)
+    return
+  }
+  if (process.platform !== 'win32') return
   deps = d
   autoUpdater.autoDownload = true
   autoUpdater.autoInstallOnAppQuit = true
@@ -107,7 +216,7 @@ export function startUpdates(d: UpdateDeps): void {
  * replacing its files.
  */
 export function restartIntoUpdate(log: (line: string) => void): boolean {
-  if (state.stage !== 'ready') return false
+  if (linux || state.stage !== 'ready') return false
   log(`[update] restarting into ${state.next}`)
   autoUpdater.quitAndInstall(true, true)
   return true

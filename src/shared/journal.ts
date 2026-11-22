@@ -520,7 +520,7 @@ export function journalLines(entries: readonly Entry[], view: JournalView = {}):
       head,
       '',
       'Nothing yet today. This fills in as things happen — the model ' +
-        'changing, a command running, the hourly re-ranking finishing a sweep.',
+        'changing, a command running, the background re-ranking finishing a sweep.',
       '',
       '_Nothing is sent anywhere: it is a list on this machine, and it ' +
         'starts again at midnight._'
@@ -866,7 +866,7 @@ const WATCHED: ReadonlyArray<{
     what: 'instructions',
     show: (s) => (s.leanPrompt ? 'short form' : 'full')
   },
-  { key: 'autoRank', what: 'hourly re-ranking', show: (s) => onOff(s.autoRank) },
+  { key: 'autoRank', what: 're-ranking every 30 minutes', show: (s) => onOff(s.autoRank) },
   { key: 'shellEnabled', what: 'running commands', show: (s) => onOff(s.shellEnabled) },
   {
     key: 'confirmRisky',

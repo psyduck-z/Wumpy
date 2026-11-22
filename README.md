@@ -71,7 +71,7 @@ installed. On Linux without Windows, `npm run package` needs Wine
 uninstaller.
 
 **It keeps itself up to date.** An installed Wumpy on Windows looks for a
-newer release a minute after it starts and every hour after, downloads it
+newer release a minute after it starts and every 30 minutes after, downloads it
 quietly, and installs it the next time Wumpy restarts - starting the new
 version itself. Develop on one computer, push, and the Windows PC catches up
 on its own. `[update]` lines in `wumpy.log` say what it found.
@@ -93,7 +93,12 @@ wumpy                     # or from the app launcher
 
 `install:linux` puts a `wumpy` command in `~/.local/bin`, a launcher entry and
 an icon, and (once it has run packaged) an autostart entry so it is in the tray
-after login. Bind the shortcut in `~/.config/hypr/bindings.lua`:
+after login. After that, **`/update`** (or "update yourself") does the same
+from inside Wumpy: it pulls new commits from GitHub (fast-forward only),
+builds, installs and restarts into the new copy. Every 30 minutes it checks
+for new commits or edits made since the install and shows **Update available**
+in the header; it never builds on its own. `/update force` rebuilds anyway.
+Bind the shortcut in `~/.config/hypr/bindings.lua`:
 
 ```lua
 o.bind("SUPER + SHIFT + Z", "Wumpy", "wumpy --toggle")
@@ -165,16 +170,40 @@ nothing to `PATH`, so a bare `wumpy` is not found there.
   after two minutes with nobody talking. One low note twice means the mic
   never came on. A hold the earbuds report twice in quick succession counts
   once.
-- **Only your voice.** It learns your voice from the first six things you
-  say in conversations (each a second and a half or longer), and from then
-  on someone else talking — a person in the room, a video, a call — is not
-  answered, and talking over an answer only pauses it a moment. Everything
-  you say clearly in your own voice keeps teaching it, so a new microphone
-  or a tired voice is taken in rather than turned away; anything under a
-  second ("stop", "yes") is always heard. The voiceprint is made on the PC
-  by a small model (CAM++, 29 MB, fetched once), and the voice never leaves
-  it. `/voice me` says how far it has got; `/voice me off` hears everyone,
-  `/voice me forget` starts learning over.
+- **Only your voice.** `/voice me calibrate` has you read five short
+  sentences (on the mic you talk to Wumpy with — your earbuds), and from
+  then on someone else talking — a person in the room, a video, a call — is
+  not answered, and talking over an answer only pauses it a moment. Without
+  calibrating, it learns your voice from the first six things you say in
+  conversations instead (each a second and a half or longer), which works
+  as long as nobody else gets in first. Everything you say clearly in your
+  own voice keeps teaching it, so a new microphone or a tired voice is taken
+  in rather than turned away — but always anchored to the sentences you
+  read, so it cannot drift into someone else's. Short things ("stop", "the
+  second one") are always heard, except a spoken **yes or no to run
+  something**: that is checked however short it is, and a "yes" in someone
+  else's voice is not taken (three of those and the request stays on the
+  screen for a click). The voiceprint is made on the PC by a small model
+  (CAM++, 29 MB, fetched once) in a process of its own, and the voice never
+  leaves it. `/voice me` says how far it has got; `/voice me off` hears
+  everyone, `/voice me forget` starts over. It is a filter for a noisy
+  room, not a lock: a recording of your voice would get through.
+- **Meetings, heard and seen.** Say **"monitor my PC"** (or "monitor my
+  screen") and Wumpy transcribes your speakers and microphone as it goes (no
+  audio is kept) and looks at your screen about every 20 seconds. A screen
+  that has not visibly changed goes nowhere; one that has is described in a
+  few lines (slides, shared documents, names in the call) by a model that can
+  see, and the note joins the transcript at its time. The screenshot is sent
+  to that model and not kept. **Live notes** appear in the chat once there is
+  something to note and are rewritten in place about once a minute — when the
+  meeting changes something (a date moves, a decision is reversed) the note
+  is changed and the old one struck through, not repeated. Every message you
+  send carries the transcript, and "notes" writes up the whole thing. Say
+  **"stop monitoring"** to end it; the live notes get one last update.
+  "Listen to this meeting" still listens without watching, "watch my screen
+  too" adds the screen later, and "stop watching my screen" stops only that.
+  On Linux under Wayland the screen is read with `grim`, so there is no
+  screen-share prompt (and Wumpy's panel shows in the picture if it is open).
 - **Jason talks three tenths faster than Magpie makes him**, at the same
   pitch: Magpie ignores SSML's speaking rate, so the sound is time-stretched
   as it arrives (`speakRate` in settings.json; 1 is as made). Lists — the
@@ -908,6 +937,7 @@ or Enter to accept.
 | `/music on\|off` | Pause music while Wumpy listens and talks |
 | `/startup on\|off` | Start Wumpy in the background when you log in, so the earbuds gesture works without opening it |
 | `/restart` | Restart Wumpy and come back to the same chat (also in the tray menu, as `wumpy --restart`, or say "restart yourself") |
+| `/update` | Update Wumpy now: on Windows restart into a downloaded release, or look for one; on Linux pull, build and install from the source folder, then restart (`/update force` rebuilds anyway; or say "update yourself") |
 | `/mode [quick\|dev]` | Toggle Quick / Developer |
 | `/dock` | Move the panel, from a list |
 | `/reasoning on\|off` | Show the scratchpad |
