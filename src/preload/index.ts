@@ -6,6 +6,7 @@ import type { ProbeResult } from '@shared/probe'
 import type { Footprint } from '@shared/footprint'
 import type { Entry } from '@shared/journal'
 import type { RankView } from '@shared/types'
+import type { VoiceprintState, WhoseAnswer } from '@shared/types'
 import type { LookResult } from '../main/look'
 import type {
   AgentDelivery,
@@ -350,6 +351,14 @@ const api = {
     /** Whether the earbuds' own mic is running yet (Linux; 'none' elsewhere). See main/btmic.ts. */
     micState: (): Promise<{ mic: 'none' | 'absent' | 'switching' | 'running'; earbudsOut: boolean | null }> =>
       ipcRenderer.invoke(IPC.voiceMicState),
+    /** Whose voice a conversation's clip was: the WAV sent to the transcriber, how long the talking was, the mic. */
+    whose: (audio: ArrayBuffer, talkedMs: number, device: string): Promise<WhoseAnswer> =>
+      ipcRenderer.invoke(IPC.voiceWhose, { audio, talkedMs, device }),
+    /** The clip `whose` gave this token for was words: learn the voice from it. */
+    learn: (token: string): Promise<boolean> => ipcRenderer.invoke(IPC.voiceprintLearn, token),
+    print: (): Promise<VoiceprintState> => ipcRenderer.invoke(IPC.voiceprintState),
+    setPrint: (change: { on?: boolean; forget?: boolean }): Promise<VoiceprintState> =>
+      ipcRenderer.invoke(IPC.voiceprintSet, change),
     /** A spoken turn was asked for (wumpy --voice, the tray). */
     onTurn: (cb: () => void) => on<void>(IPC.voiceTurn, cb)
   },

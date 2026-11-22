@@ -165,6 +165,16 @@ nothing to `PATH`, so a bare `wumpy` is not found there.
   after two minutes with nobody talking. One low note twice means the mic
   never came on. A hold the earbuds report twice in quick succession counts
   once.
+- **Only your voice.** It learns your voice from the first six things you
+  say in conversations (each a second and a half or longer), and from then
+  on someone else talking — a person in the room, a video, a call — is not
+  answered, and talking over an answer only pauses it a moment. Everything
+  you say clearly in your own voice keeps teaching it, so a new microphone
+  or a tired voice is taken in rather than turned away; anything under a
+  second ("stop", "yes") is always heard. The voiceprint is made on the PC
+  by a small model (CAM++, 29 MB, fetched once), and the voice never leaves
+  it. `/voice me` says how far it has got; `/voice me off` hears everyone,
+  `/voice me forget` starts learning over.
 - **Jason talks three tenths faster than Magpie makes him**, at the same
   pitch: Magpie ignores SSML's speaking rate, so the sound is time-stretched
   as it arrives (`speakRate` in settings.json; 1 is as made). Lists — the

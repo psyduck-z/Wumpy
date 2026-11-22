@@ -204,6 +204,7 @@ export type NoteTopic =
   | 'startup'
   | 'voice-polish'
   | 'voice-autostop'
+  | 'voiceprint'
   | 'reflect'
 
 /* -------------------------------------------------------- the one assistant */
@@ -879,6 +880,29 @@ export interface HotkeyState {
  * Where Wumpy's own update stands (main/updater.ts). 'off' on Linux and dev
  * runs, which update from the source instead.
  */
+/** Whose voice a clip was: see shared/voiceprint.ts. */
+export type WhoseAnswer =
+  | {
+      kind: 'theirs'
+      score: number | null
+      why: 'learning' | 'short' | 'match' | 'off' | 'unavailable'
+      ms?: number
+      /** For learning from it once it turns out to be words: see voice.learn. */
+      token?: string
+    }
+  | { kind: 'someone else'; score: number; ms?: number }
+
+/** How far the person's voiceprint has got. */
+export interface VoiceprintState {
+  /** Other voices are turned away once it is known; off hears everyone. */
+  on: boolean
+  clips: number
+  needed: number
+  known: boolean
+  /** The microphones it has heard them on. */
+  devices: string[]
+}
+
 export interface UpdateState {
   stage: 'off' | 'current' | 'checking' | 'downloading' | 'ready' | 'failed'
   /** The version running. */
@@ -974,6 +998,12 @@ export const IPC = {
   /** Text to speech as it is made: pieces arrive on voiceAudio, then this resolves. */
   voiceSpeakStream: 'voice:speak-stream',
   voiceMicState: 'voice:mic-state',
+  /** Whose voice a clip heard in a conversation was (see main/voiceprint.ts). */
+  voiceWhose: 'voice:whose',
+  /** The voiceprint: how far it has learned, and turning it off or forgetting it. */
+  voiceprintState: 'voiceprint:state',
+  voiceprintSet: 'voiceprint:set',
+  voiceprintLearn: 'voiceprint:learn',
   /** One piece of streamed speech: { id, pcm } with 16-bit mono PCM. */
   voiceAudio: 'voice:audio',
   /** Main tells the panel to run a spoken turn (wumpy --voice). */

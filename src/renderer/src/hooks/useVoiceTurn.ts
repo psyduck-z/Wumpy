@@ -16,6 +16,7 @@ import { allCommands } from '../commands'
 import { CLOUD_MODELS } from '@shared/cloud'
 import { record, strictBar, type Recording } from '../recorder'
 import { clipForSpeech } from '../wav'
+import type { WhoseAnswer } from '@shared/types'
 import { newestPending, runningCount } from '../pending'
 import { setHandsFree, takeTold } from '../handsfree'
 import { choiceMark, newestChoice, stillWaiting, type AloudChoice, type AloudOption } from '../aloud'
@@ -142,6 +143,27 @@ export const FRESH_EAR_MS = 20_000
 export const PRE_ROLL_MS = 500
 
 /**
+ * How long past the words the voiceprint is waited for: it is made while
+ * they are heard and is usually done first. A slow one (the model loading
+ * the first time) is not worth holding the answer for.
+ */
+export const VOICEPRINT_WAIT_MS = 1500
+
+/** A clip with fewer words than this is not learned from: "yes" is not much of a voice. */
+export const LEARN_WORDS = 3
+
+/** For the log: whose voice, by how much, and why. */
+export function whoseLine(who: WhoseAnswer): string {
+  const score = who.score === null ? '' : ` (${who.score.toFixed(2)})`
+  if (who.kind === 'someone else') return `someone else's voice${score}: not answered`
+  if (who.why === 'match') return `their voice${score}`
+  if (who.why === 'learning') return `learning their voice${score}`
+  if (who.why === 'short') return 'too short to tell whose voice: heard'
+  if (who.why === 'off') return ''
+  return 'whose voice could not be told: heard'
+}
+
+/**
  * Hearing starts at the first half second of quiet, not at the end of the
  * pause: what has been said so far goes to be transcribed while the rest
  * of END_PAUSE_MS is waited out, and if nothing more is said - the usual
@@ -245,6 +267,8 @@ export function useVoiceTurn(deps: Deps): void {
 
     /** The conversation's microphone: opened once, and held until it ends. */
     let mic: MediaStream | null = null
+    /** The microphone's name, for the voiceprint: which mic a clip of the person was heard on. */
+    let device = ''
     /** What is listening on it now. From "talk now" to the end there is always one. */
     let ear: Recording | null = null
     let earSince = 0
@@ -605,6 +629,7 @@ export function useVoiceTurn(deps: Deps): void {
       }
       const track = mic.getAudioTracks()[0]
       note(`microphone: ${track?.label || 'the system default'}`)
+      device = track?.label ?? ''
       /* The earbuds disconnected, or went back in their case: the mic is
          gone, and a conversation left listening to it would wait two
          minutes for nothing. */
@@ -676,6 +701,22 @@ export function useVoiceTurn(deps: Deps): void {
       } catch (err) {
         note(`it could not be heard: ${String(err)}`)
         return { heard: '', text: '', failed: true }
+      }
+    }
+
+    /**
+     * Whose voice a clip was, by its voiceprint (see shared/voiceprint.ts),
+     * asked while its words are being heard so it costs no wait. Null when
+     * it could not be told, which counts as theirs.
+     */
+    async function whoseVoice(blob: Blob, extension: string, onsetMs: number, talkedMs: number): Promise<WhoseAnswer | null> {
+      try {
+        const ready = await clipForSpeech(blob, extension, Math.max(0, onsetMs - PRE_ROLL_MS))
+        if (ready.extension !== 'wav') return null
+        return await window.wumpy.voice.whose(ready.audio, talkedMs, device)
+      } catch (err) {
+        note(`whose voice it was could not be told: ${String(err)}`)
+        return null
       }
     }
 
@@ -766,6 +807,7 @@ export function useVoiceTurn(deps: Deps): void {
         const faint = Boolean(clip) && talkedMs < FAINT_MS && stats.peak < stats.bar * FAINT_TIMES
         if (faint) note(`too short and faint to be words (${Math.max(0, talkedMs)}ms, loudest ${stats.peak.toFixed(3)}): not sent`)
         if (clip && !faint) {
+          const voice = whoseVoice(clip.blob, clip.extension, r.onsetMs(), Math.max(0, talkedMs))
           showVoice({ stage: 'hearing', level: 0 })
           /* The typing is "got it": no chime for it. */
           startTicks()
@@ -782,7 +824,19 @@ export function useVoiceTurn(deps: Deps): void {
                 `${Date.now() - endedAt}ms after the pause${guessed?.heard ? ', from the guess' : ''}`
               : 'the transcriber returned no words'
           )
-          if (words.heard) {
+          /* Someone else's voice: not answered, and not taken for a
+             sentence that went unheard either. Waited for no longer than
+             VOICEPRINT_WAIT_MS past the words, after which it counts as
+             theirs. */
+          const who = await Promise.race([voice, sleep(VOICEPRINT_WAIT_MS).then(() => null)])
+          if (who && whoseLine(who)) note(whoseLine(who))
+          if (who?.kind === 'someone else') {
+            stopTicks()
+          } else if (words.heard) {
+            if (who?.kind === 'theirs' && who.token && words.heard.split(/\s+/).length >= LEARN_WORDS)
+              void window.wumpy.voice.learn(who.token).then((learned) => {
+                if (learned) note('learned from: their voice is known a little better')
+              })
             heardAll = heardAll ? `${heardAll} ${words.heard}` : words.heard
             textAll = textAll ? `${textAll} ${words.text}` : words.text
           } else {

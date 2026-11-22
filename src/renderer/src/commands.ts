@@ -50,6 +50,7 @@ export type CommandAction =
   | { kind: 'reasoning'; show: boolean | 'toggle' }
   | { kind: 'pin'; pinned: boolean | 'toggle' }
   | { kind: 'voice'; setting: 'on' | 'polish' | 'autostop' | 'music'; on: boolean | 'toggle' }
+  | { kind: 'voiceprint'; change: 'status' | 'on' | 'off' | 'forget' }
   /** `/startup on|off` — start in the background at login. */
   | { kind: 'startup'; on: boolean | 'toggle' }
   | { kind: 'reflect'; on: boolean | 'toggle'; rounds?: number; model?: string }
@@ -622,8 +623,24 @@ export const COMMANDS: CommandSpec[] = forThisWindow([
     name: 'voice',
     aliases: ['dictate', 'dictation', 'mic'],
     hint: 'Talk instead of typing — hold the spacebar',
-    arg: 'on|off',
-    run: (arg) => ({ kind: 'voice', setting: 'on', on: bool(arg) })
+    arg: 'on|off|me',
+    /*
+     * "me": the voiceprint, which keeps conversations to the person's own
+     * voice (see shared/voiceprint.ts). Under /voice rather than a command
+     * of its own: it is learned by itself, so all there is to do with it is
+     * look, turn it off and on, or forget it - "/voice me", "/voice me
+     * off", "/voice me forget".
+     */
+    run: (arg) => {
+      const me = /^(?:me|only me|my voice|voiceprint)\b\s*(.*)$/i.exec(arg.trim())
+      if (me) {
+        const rest = me[1].trim().toLowerCase()
+        if (/^(forget|reset|clear|relearn)$/.test(rest)) return { kind: 'voiceprint', change: 'forget' }
+        const on = bool(rest, 'toggle')
+        return { kind: 'voiceprint', change: rest === '' ? 'status' : on === true ? 'on' : on === false ? 'off' : 'status' }
+      }
+      return { kind: 'voice', setting: 'on', on: bool(arg) }
+    }
   },
   {
     /*

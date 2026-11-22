@@ -18,6 +18,15 @@ directories:
 files:
   - out/**/*
   - package.json
+  # The voiceprint's model runs on onnxruntime's WebAssembly build, from Node
+  # (src/main/voiceprint.ts): ort.node.* and the plain SIMD wasm. The other
+  # builds - WebGPU, WebGL, JSEP, JSPI, the browser bundles - are 130 MB
+  # nothing here loads.
+  - "!node_modules/onnxruntime-web/dist/*.map"
+  - "!node_modules/onnxruntime-web/dist/*{jsep,jspi,asyncify,webgpu,webgl,bundle}*"
+  - "!node_modules/onnxruntime-web/dist/ort.{all,wasm}*"
+  - "!node_modules/onnxruntime-web/dist/ort.{js,mjs,min.js,min.mjs}"
+  - "!node_modules/onnxruntime-web/lib/**"
 
 extraResources:
   - from: resources

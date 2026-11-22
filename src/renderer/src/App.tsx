@@ -151,6 +151,7 @@ import logo from './assets/logo.png'
 import { Picker, type PickerProps } from './components/Picker'
 import { firstShown, foldsTranscript, hiddenCount, REVEAL_STEP } from './transcript'
 import { activityFor } from '@shared/activity'
+import { voiceprintNote } from './voiceprintnote'
 
 /**
  * Mirrors the main process's accelerator formatting for display: the key is
@@ -2563,6 +2564,16 @@ function namedControls(shot: Attachment): string[] {
             false,
             'reflect'
           )
+          return
+        }
+        case 'voiceprint': {
+          const print =
+            action.change === 'status'
+              ? await window.wumpy.voice.print()
+              : await window.wumpy.voice.setPrint(
+                  action.change === 'forget' ? { forget: true } : { on: action.change === 'on' }
+                )
+          chat.note(voiceprintNote(print, action.change), false, 'voiceprint')
           return
         }
         case 'voice': {

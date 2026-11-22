@@ -25,6 +25,7 @@ import type { Footprint } from '@shared/footprint'
 import type { RankView, Transcript, VoiceStatus, WriteResult } from '@shared/types'
 import { Ranker, type SavedSweep } from './ranker'
 import { checkForUpdate, restartIntoUpdate, startUpdates, updateState } from './updater'
+import { learnFrom, setVoiceprint, warmVoiceprint, setVoiceprintLog, voiceprintState, whose } from './voiceprint'
 import { SettingsStore } from './store'
 import { capDiskCache, reclaimCache } from './disk'
 import { ChatStore } from './chats'
@@ -1704,11 +1705,22 @@ function registerIpc(): void {
 
   ipcMain.handle(IPC.voiceStatus, () => voiceStatus())
   ipcMain.handle(IPC.voiceMicState, () => micState())
+  ipcMain.handle(IPC.voiceWhose, (_e, req: { audio: ArrayBuffer; talkedMs: number; device: string }) =>
+    whose(req.audio, Number(req.talkedMs) || 0, String(req.device ?? '').slice(0, 200))
+  )
+  ipcMain.handle(IPC.voiceprintLearn, (_e, token: string) => learnFrom(String(token)))
+  ipcMain.handle(IPC.voiceprintState, () => voiceprintState())
+  ipcMain.handle(IPC.voiceprintSet, (_e, change: { on?: boolean; forget?: boolean }) =>
+    setVoiceprint({ on: typeof change?.on === 'boolean' ? change.on : undefined, forget: change?.forget === true })
+  )
 
   // Starting the transcriber loads a model, so it is done when the panel asks
   // rather than at launch: someone who never dictates never pays for it. With
   // hosted speech there is nothing to load at all.
   ipcMain.handle(IPC.voiceStart, async () => {
+    /* The voiceprint's model loaded (and fetched, the first time) while the
+       mic comes on, not when the first thing said is waiting on it. */
+    warmVoiceprint()
     if (!cloudSpeech()) await speech.start()
     const status = voiceStatus()
     panel.send(IPC.voiceStatusChanged, status)
@@ -2925,6 +2937,7 @@ void app.whenReady().then(async () => {
     save: (saved) => writeFileSync(join(app.getPath('userData'), 'ranking.json'), JSON.stringify(saved))
   })
   ranker.start()
+  setVoiceprintLog((line) => console.log(line))
   /* Updates on Windows, from the releases each push publishes, shown in the
      panel's header and installed once nobody is using Wumpy. See updater.ts. */
   startUpdates({
