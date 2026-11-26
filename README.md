@@ -782,13 +782,24 @@ of one is sent once a word that brings it up is said in the chat ("grill me
 on this", "explain like I'm five"), and stays for the rest of it.
 
 Wumpy ships with some, copied into the folder the first time it runs so you
-can read and change them:
+can read and change them. The second half are modelled on Claude's own
+skills (skill-creator, brainstorming, systematic debugging, doc co-authoring,
+internal comms):
 
 | Command | What it does |
 | --- | --- |
 | `/grill <plan>` | Relentless questions, one at a time, each with a recommended answer, until every branch of the plan is settled |
 | `/eli5 <topic>` | Explained as if to a five-year-old: one idea, one everyday comparison, no jargon |
 | `/humanize <text>` | Rewritten so it reads like a person wrote it, without the tells of AI writing |
+| `/skill-creator <what>` | Makes a new skill with you: a few questions, then the SKILL.md, saved as a command (`/skills new` uses it) |
+| `/brainstorm <idea>` | Shapes a rough idea into a design: questions one at a time, two or three approaches, then the design in sections |
+| `/debug <error>` | Finds the cause before fixing anything: reproduce, read the evidence, one hypothesis at a time |
+| `/coauthor <document>` | Writes a document with you section by section, then reads it the way its reader would |
+| `/comms <what happened>` | A status update, announcement or incident note for a team, the news first |
+| `/tldr <text>` | The point in one line, then the few details worth keeping |
+| `/proofread <text>` | Spelling, grammar and punctuation fixed with the smallest changes, then a list of them |
+| `/decide <choice>` | The options weighed in a small table, and a recommendation with what would change it |
+| `/tutor <topic>` | Teaches by asking: hints and one question at a time, not the answer |
 
 A shipped skill you change is yours and stays as you made it; one you
 delete stays deleted; one you never touched is updated with Wumpy.

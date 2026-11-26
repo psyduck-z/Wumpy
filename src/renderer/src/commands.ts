@@ -4,6 +4,7 @@ import { MAX_RUNS } from '@shared/probe'
 import { readOrdering, type Ordering } from '@shared/order'
 import { readKind, type EventKind } from '@shared/journal'
 import { nearest } from '@shared/nearest'
+import { shortly } from '@shared/skills'
 import { markLines } from './kinds'
 import { APP_WINDOW, PANEL_ONLY_COMMANDS } from './appwindow'
 
@@ -1009,7 +1010,7 @@ export function setSkillCommands(list: ReadonlyArray<{ name: string; description
     .map(
       (s): CommandSpec => ({
         name: s.name,
-        hint: s.description.length > 90 ? `${s.description.slice(0, 87).trimEnd()}…` : s.description,
+        hint: shortly(s.description),
         arg: (s.argumentHint ?? 'text').replace(/^<|>$/g, ''),
         skill: true,
         run: (arg) => ({ kind: 'skill', name: s.name, args: (arg ?? '').trim() })

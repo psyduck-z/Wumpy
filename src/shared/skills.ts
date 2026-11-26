@@ -124,7 +124,9 @@ export function skillFile(s: Skill): string {
 
 /** A description cut to its first sentence, for the one line every turn carries. */
 export function shortly(description: string): string {
-  const first = description.split(/(?<=[.!?])\s/)[0].replace(/[.!?]$/, '')
+  let first = description.split(/(?<=[.!?])\s/)[0].replace(/[.!?]$/, '')
+  /* "Grill me on a plan - relentless questions, ...": the part before the dash says it. */
+  if (first.length > 90 && first.includes(' - ')) first = first.split(' - ')[0]
   return first.length > 90 ? `${first.slice(0, 87).trimEnd()}…` : first
 }
 

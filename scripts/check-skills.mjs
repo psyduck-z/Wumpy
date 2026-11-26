@@ -198,6 +198,15 @@ check('a skill can carry its argument hint', store.save({ name: 'standup', body:
   check('with $ARGUMENTS read as what they asked', S.skillFacts([grill], ['grill me on my plan'], '/x').some((l) => /understand it completely: what they asked about/.test(l)), true)
   check('every shipped skill fits', Object.values(B.BUILTIN_SKILLS).every((t) => S.parseSkill('x', t).body.length <= S.MAX_SKILL_CHARS), true)
   check('every shipped skill has Claude\'s fields', Object.entries(B.BUILTIN_SKILLS).every(([n, t]) => { const k = S.parseSkill('x', t); return k.name === n && /\bUse when\b/.test(k.description) && Boolean(k.argumentHint) }), true)
+  check('a long description is cut to what it says', S.shortly(B.BUILTIN_SKILLS.grill.match(/description: (.*)/)[1]), 'Grill me on a plan, idea or decision')
+  {
+    const shipped = Object.values(B.BUILTIN_SKILLS).map((t) => S.parseSkill('x', t))
+    /* Ordinary chat must not pull a skill in for the rest of the conversation. */
+    for (const said of ['should I use postgres or sqlite', 'it doesn\'t work when I click it', 'teach me about black holes', 'help me understand this error', 'write an announcement for the team', 'this needs to sound natural', 'what is the weather'])
+      check(`"${said}" brings in no skill`, S.activeSkills(shipped, [said]).map((k) => k.name), [])
+    for (const [said, want] of [['grill me on this plan', 'grill'], ["explain like i'm five", 'eli5'], ['can you humanize this', 'humanize'], ['help me decide between these', 'decide'], ['make a skill for my standups', 'skill-creator'], ['tldr please', 'tldr'], ['proofread this', 'proofread'], ['quiz me on French verbs', 'tutor']])
+      check(`"${said}" brings in ${want}`, S.activeSkills(shipped, [said]).map((k) => k.name), [want])
+  }
   check('a skill tag can carry an argument hint', K.savesIn('<skill name="a" argument-hint="<topic>">Do it.</skill>').skills[0].argumentHint, '<topic>')
 }
 {
