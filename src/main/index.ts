@@ -144,6 +144,7 @@ import { QUIET_FOR_MS, gapFor, limitLine } from '@shared/limits'
 import { mayBeInvented } from '@shared/heard'
 import { speakable } from '@shared/spoken'
 import { savesIn, withoutKept } from '@shared/kept'
+import { commandFeedback } from '@shared/parsefail'
 import { asksToBuild, asksToKeep } from '@shared/needs'
 import { hangmanFacts } from '@shared/hangman'
 
@@ -725,7 +726,8 @@ function channelFacts(handsFree: boolean): string[] {
     '  on purpose: answer the new thing, and do not pick the old answer back up unless they ask.',
     '- A skill run here keeps its method but not its layout: say its result in this spoken shape -',
     '  detect-ai is the share and the most suspicious passage, grade is the grade and the one change',
-    '  that matters most - and offer the full version on screen in a few words.',
+    '  that matters most - and offer the full version on screen in a few words. Name a skill',
+    '  the way they would say it: "use humanize on it", never "/humanize".',
     '- Commands still work. When the answer depends on this computer, propose ONE command as',
     '  usual. Its # line is what they hear as the question ("Can I <# line>?") and they answer',
     '  yes or no out loud - so write it as a short plain action: "# Check how full the disk is".',
@@ -4091,6 +4093,39 @@ async function verifyCheck(): Promise<void> {
     console.log(`[wumpy] verify check: ${JSON.stringify(q)} -> ${checked ? 'CHECKS' : 'no check'}, ${says ? 'says how it knows' : 'no receipt'}`)
     console.log(`[wumpy] verify check: reply ${JSON.stringify(reply.slice(0, 700))}`)
   }
+  /* And the second half: once the check is back, the answer names it. The
+     output is handed back exactly as the panel hands it (commandFeedback). */
+  const q = "what's 17.5% of 2,384?"
+  const first = withoutKept(await modelSays([{ role: 'user', content: q }], false))
+  const block = /```(wumpy-run[\w-]*)\n(?:#[^\n]*\n)?([\s\S]*?)```/.exec(first)
+  if (!block) {
+    console.log(`[wumpy] verify check: follow-up skipped, no command proposed: ${JSON.stringify(first.slice(0, 200))}`)
+    return
+  }
+  const output = commandFeedback({
+    command: block[2].trim(),
+    shell: block[1].endsWith('bash') ? 'bash' : 'powershell',
+    cwd: homedir(),
+    stdout: '417.2\n',
+    stderr: '',
+    exitCode: 0,
+    durationMs: 12,
+    timedOut: false,
+    truncated: false,
+    readOnly: true
+  } as ShellResult).text
+  const answer = withoutKept(
+    await modelSays(
+      [
+        { role: 'user', content: q },
+        { role: 'assistant', content: first },
+        { role: 'user', content: output }
+      ],
+      false
+    )
+  )
+  const named = /\((?:ran|calculated|checked)[^)]*\)/i.test(answer)
+  console.log(`[wumpy] verify check: after the output -> ${named ? 'names the check' : 'NO RECEIPT'}: ${JSON.stringify(answer.slice(0, 300))}`)
 }
 
 async function panelSnapshot(typed?: string): Promise<void> {
@@ -4139,6 +4174,13 @@ async function writingSkillCheck(): Promise<void> {
       `AI paragraph ${first && (!others || first.index < others.index) ? 'named first' : first ? 'named, not first' : 'NOT NAMED'}`
   )
   console.log(`[wumpy] writing check: reply ${JSON.stringify(reply)}`)
+  /* On the earbuds: the same skill, said - short, no table, no markdown. */
+  const spoken = withoutKept(await modelSays([{ role: 'user', content: skillPrompt(skill, text) }], true))
+  const sentences = spoken.split(/(?<=[.!?])\s+/).filter(Boolean).length
+  console.log(
+    `[wumpy] writing check: aloud ${spoken.length} chars, ${sentences} sentences, ` +
+      `${/[|#*]/.test(spoken) ? 'HAS MARKDOWN' : 'plain'}: ${JSON.stringify(spoken.slice(0, 500))}`
+  )
 }
 
 async function hearingCheck(): Promise<void> {
