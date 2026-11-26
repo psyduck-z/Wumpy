@@ -202,9 +202,9 @@ check('a skill can carry its argument hint', store.save({ name: 'standup', body:
   {
     const shipped = Object.values(B.BUILTIN_SKILLS).map((t) => S.parseSkill('x', t))
     /* Ordinary chat must not pull a skill in for the rest of the conversation. */
-    for (const said of ['should I use postgres or sqlite', 'it doesn\'t work when I click it', 'teach me about black holes', 'help me understand this error', 'write an announcement for the team', 'this needs to sound natural', 'what is the weather'])
+    for (const said of ['should I use postgres or sqlite', 'it doesn\'t work when I click it', 'teach me about black holes', 'help me understand this error', 'write an announcement for the team', 'this needs to sound natural', 'what is the weather', 'AI is changing how we work', 'I wrote this essay yesterday', 'that is a fact', 'what grade did you get'])
       check(`"${said}" brings in no skill`, S.activeSkills(shipped, [said]).map((k) => k.name), [])
-    for (const [said, want] of [['grill me on this plan', 'grill'], ["explain like i'm five", 'eli5'], ['can you humanize this', 'humanize'], ['help me decide between these', 'decide'], ['make a skill for my standups', 'skill-creator'], ['tldr please', 'tldr'], ['proofread this', 'proofread'], ['quiz me on French verbs', 'tutor']])
+    for (const [said, want] of [['grill me on this plan', 'grill'], ["explain like i'm five", 'eli5'], ['can you humanize this', 'humanize'], ['help me decide between these', 'decide'], ['make a skill for my standups', 'skill-creator'], ['tldr please', 'tldr'], ['proofread this', 'proofread'], ['quiz me on French verbs', 'tutor'], ['how much of this was written by AI?', 'detect-ai'], ['what ai percentage is this essay', 'detect-ai'], ['can you fact check this article', 'fact-check'], ['does this sound rude to you', 'tone-check'], ['grade my essay out of 20', 'grade'], ['can you make it sound less like AI', 'humanize']])
       check(`"${said}" brings in ${want}`, S.activeSkills(shipped, [said]).map((k) => k.name), [want])
   }
   check('a skill tag can carry an argument hint', K.savesIn('<skill name="a" argument-hint="<topic>">Do it.</skill>').skills[0].argumentHint, '<topic>')

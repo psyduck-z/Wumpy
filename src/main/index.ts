@@ -3264,6 +3264,10 @@ app.on('second-instance', (_event, argv) => {
     void hearingCheck()
     return
   }
+  if (argv.includes('--skill-check=writing')) {
+    void writingSkillCheck()
+    return
+  }
   if (argv.includes('--skill-check')) {
     void skillCheck()
     return
@@ -4048,6 +4052,36 @@ async function skillCheck(): Promise<void> {
     'for itself',
     await modelSays([{ role: 'user', content: skillPrompt(creator, 'for yourself: always check the weather and my calendar before suggesting plans for my day') }], false)
   )
+}
+
+/**
+ * detect-ai on the real model: a story with one paragraph a model wrote
+ * between two a person did. Right is that paragraph first among the most
+ * suspicious, and a share near a third rather than all or nothing.
+ */
+async function writingSkillCheck(): Promise<void> {
+  const skill = skills.get('detect-ai')
+  if (!skill) {
+    console.log('[wumpy] writing check: no detect-ai in the skills folder')
+    return
+  }
+  const text = [
+    "Honestly I didn't want to go to the lake that weekend. My brother had just reversed into the neighbour's bin (again) and mum was in a mood, so the drive up was three hours of nobody talking except the satnav.",
+    "In today's fast-paced world, family trips serve as a testament to the enduring power of connection. They allow us to navigate the complexities of modern life, foster meaningful bonds, and create memories that last a lifetime. It's important to note that these experiences are not just about the destination - they're about the journey itself.",
+    'Anyway the lake was freezing. I lasted about four seconds in the water and then sat on a rock eating crisps while Dan tried to catch a fish with a net he bought at a petrol station.'
+  ].join('\n\n')
+  console.log(`[wumpy] writing check: on ${resolveModel() ?? 'no model'}`)
+  const t0 = Date.now()
+  const reply = withoutKept(await modelSays([{ role: 'user', content: skillPrompt(skill, text) }], false))
+  const pct = /(\d{1,3})\s*%/.exec(reply)
+  const suspicious = reply.split(/most suspicious/i)[1] ?? ''
+  const first = /fast-paced|testament|family trips/i.exec(suspicious)
+  const others = /reversed|neighbour|freezing|crisps|petrol/i.exec(suspicious)
+  console.log(
+    `[wumpy] writing check: ${Math.round((Date.now() - t0) / 1000)}s; share ${pct ? pct[1] + '%' : 'NONE'}; ` +
+      `AI paragraph ${first && (!others || first.index < others.index) ? 'named first' : first ? 'named, not first' : 'NOT NAMED'}`
+  )
+  console.log(`[wumpy] writing check: reply ${JSON.stringify(reply)}`)
 }
 
 async function hearingCheck(): Promise<void> {

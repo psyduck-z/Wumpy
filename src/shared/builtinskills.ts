@@ -15,6 +15,10 @@
  * debugging, doc co-authoring and internal comms, and the everyday ones -
  * tldr, proofread, decide, tutor.
  *
+ * Then "more skills like detect ai percent in a writing and which parts are
+ * most suspicious": detect-ai, and the other checks a piece of writing gets
+ * before it goes out - fact-check, tone-check and grade.
+ *
  * Written the way a good skill is written: what it is for in the
  * description (that is what decides when it is used), then the method as
  * steps, then the rules that stop the predictable failure, then the shape of
@@ -377,6 +381,160 @@ The table, then **Recommendation:** one option, with the two or three reasons th
 - Do commit to a recommendation. "It depends" is not an answer - say what it depends on and pick.
 - If it is easily reversible, say so: then the cost of choosing wrong is small, and speed matters more.
 - It is my decision. Make the case; do not lecture.
+`,
+
+  'detect-ai': `---
+name: detect-ai
+description: Estimate how much of a piece of writing reads as AI-written, as a percentage, and point to the most suspicious passages and why. Use when they ask whether text was written by AI, how AI it sounds, or for an AI-detection check.
+triggers: detect ai, ai detector, ai detection, ai percent, ai percentage, written by ai, was this ai, ai written, how much of this is ai, chatgpt wrote
+argument-hint: <text to check>
+---
+# Detect AI
+
+Judge how much of this reads as AI-written, and where: $ARGUMENTS
+
+If no text was given, ask for it in one line and wait.
+
+## How
+
+1. Split it into passages: paragraphs, or chunks of a few sentences in a long one.
+2. Score each passage 0-100 for how machine-written it reads, from the signals below. Weigh them together; no single one decides.
+3. The overall percentage is the share of the text, by length, that reads as AI-written, not an average of the scores. A human essay with one pasted AI paragraph is about 20%, not 50%.
+
+## Signals of AI writing
+
+- Stock vocabulary: delve, tapestry, testament, realm, landscape, navigate, leverage, robust, seamless, pivotal, crucial, foster, multifaceted, "in today's fast-paced world".
+- Even rhythm: sentence after sentence of the same length and shape, with no short punchy ones and no long wandering ones.
+- Reflex structures: lists of three, "It's not just X, it's Y", a heading or bullet for everything, em-dashes everywhere.
+- Padding and hedging: "It's important to note", "may potentially", balanced on-the-other-hand views nobody asked for, a tidy summary at the end of every paragraph.
+- Generic in place of specific: "many experts", "various studies", examples that could be about anything, no names, dates, places or numbers that only this writer would know.
+- No voice: never a joke, an opinion with an edge, an aside, or a mistake. Grammar perfect and lifeless.
+
+## Signals of a person
+
+Typos and slips, odd word choices, specific memories and details, tangents, strong or unpopular opinions, uneven pacing, slang, references to their own class, job or life. These lower a passage's score.
+
+## Answer
+
+**About N% reads as AI-written** - then a confidence (low, medium or high) and one line on why.
+
+**Most suspicious** - up to five passages, most suspicious first. Quote the start of each (the first ten words or so), give its score, and name the signals in a few words each.
+
+**Reads as human** - one or two passages that pull the other way, and why.
+
+**Caveat** - one line: this is a judgement from the writing, not proof. Clear formal writing, non-native English and text run through grammar tools all score high when a person wrote them, and anything under about 150 words is too short to judge well. Say so more strongly when it applies.
+
+Offer /humanize for the suspicious passages if it is their own writing.
+
+## Rules
+
+- Never claim certainty, and never give a single score without the passages behind it.
+- Never say who wrote it or accuse anyone. It is an estimate for them to weigh.
+- Judge the writing, not the topic: text about AI is not AI text.
+`,
+
+  'fact-check': `---
+name: fact-check
+description: Pull out every checkable claim in a piece of text and rate each one - true, doubtful, false or can't tell - with what to check. Use when they want claims, an article, a post or their own draft fact-checked.
+triggers: fact check, fact-check, factcheck, check the facts, verify these claims
+argument-hint: <text with claims>
+---
+# Fact-check
+
+Fact-check this: $ARGUMENTS
+
+If no text was given, ask for it in one line.
+
+## How
+
+1. List the claims that can be checked: numbers, dates, names, quotes, causes ("X led to Y"), comparisons ("the largest", "the first"). Skip opinions and predictions, but note an opinion presented as fact.
+2. Rate each one from what you know:
+   - **True** - you are confident, and it is not the kind of fact that changes.
+   - **Doubtful** - partly right, out of date, missing context, or stretched.
+   - **False** - you are confident it is wrong; give the correct version.
+   - **Can't tell** - too recent, too local, or too specific to know.
+3. If you can look things up, look up the doubtful and can't-tell ones before rating them, and say where the answer came from. If you cannot, say exactly what to search for.
+4. Watch for numbers that change over time (prices, populations, records, who holds a job) and anything after your knowledge ends: rate those can't tell unless checked, and say the date your knowledge runs to.
+
+## Answer
+
+A table: claim (short) | rating | why, or the correction. Most serious problems first.
+
+Then **Overall** - one or two lines: how reliable the text is, and the one fix that matters most.
+
+## Rules
+
+- Do not guess. "Can't tell" is better than a confident wrong answer.
+- Judge each claim, not the writer, and not the opinion it supports.
+`,
+
+  'tone-check': `---
+name: tone-check
+description: Say how a message will come across to the person reading it - tone, the lines that could land badly, and a better version. Use when they ask how something sounds, whether it is rude, too harsh or passive-aggressive, before they send it.
+triggers: tone check, check the tone, check my tone, does this sound rude, too harsh, passive aggressive, passive-aggressive, how will this come across
+argument-hint: <message, and who it is to>
+---
+# Tone check
+
+How will this come across? $ARGUMENTS
+
+If no message was given, ask for it in one line. If it matters and is not clear, ask who it is going to (boss, friend, customer, ex) in the same line.
+
+## How
+
+1. Read it as the person receiving it, on a bad day, will.
+2. Describe the tone in three or four words: "polite but cold", "warm, slightly needy", "clear and friendly".
+3. Find the lines that could land badly: blunt orders, sarcasm that may not read as a joke, "per my last email", "just", "actually", "as I said", ALL CAPS, too many exclamation marks or none at all, a missing thank-you, an apology that blames.
+4. Check it fits the relationship and what they want from it: a request should be easy to say yes to; a complaint should be firm without being a fight.
+
+## Answer
+
+**Comes across as:** the few words, then one line on why.
+
+**Could land badly:** each line quoted, how it might be read, and a better wording. Skip this if nothing does.
+
+**Rewritten:** the whole message in the same voice with those fixes, ready to send - unless it was already fine, in which case say "It's good to send." and stop.
+
+## Rules
+
+- Keep what they meant. Softening is not the same as giving in; if they need to say no, it still says no.
+- Keep their voice and length. Do not make a text to a friend sound like HR.
+`,
+
+  grade: `---
+name: grade
+description: Mark a piece of work like a fair, demanding teacher - a grade against the rubric, what earns it, and the changes that would raise it most. Use when they want an essay, assignment, cover letter or answer graded, marked or given feedback.
+triggers: grade my, mark my essay, mark my assignment, feedback on my essay, rubric
+argument-hint: <work, and the task or rubric>
+---
+# Grade
+
+Grade this: $ARGUMENTS
+
+If no work was given, ask for it. If the task, level or rubric is not given, ask once in one line ("What was the question, and what level is this - GCSE, A-level, first-year uni?"); if they would rather not say, assume a sensible one and state it.
+
+## How
+
+1. Read the task first, then the whole piece, before judging any part.
+2. Mark against the rubric if there is one. If not, use: answers the question; argument and structure; evidence and examples; analysis (why, not just what); clarity and style; accuracy (facts, spelling, references).
+3. For each criterion: a mark or band, and one line quoting or pointing to the part that earned it.
+4. Find the three changes that would raise the grade most. Be specific: which paragraph, what is missing, what to do.
+
+## Answer
+
+**Grade:** the mark or band, and one line on why it is that and not higher.
+
+**By criterion:** a short table - criterion | mark | why.
+
+**To raise it:** the three changes, biggest gain first.
+
+**Done well:** one or two things to keep, named specifically.
+
+## Rules
+
+- Be honest about the grade. Inflated marks help no one; neither does harshness for show.
+- Do not rewrite the work for them. Show what to change; a short example sentence is fine.
+- If it does not answer the question, say so first: it caps everything else.
 `,
 
   tutor: `---

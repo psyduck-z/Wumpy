@@ -804,6 +804,10 @@ internal comms):
 | `/proofread <text>` | Spelling, grammar and punctuation fixed with the smallest changes, then a list of them |
 | `/decide <choice>` | The options weighed in a small table, and a recommendation with what would change it |
 | `/tutor <topic>` | Teaches by asking: hints and one question at a time, not the answer |
+| `/detect-ai <text>` | Roughly what share reads as AI-written, the most suspicious passages quoted with their scores and the giveaways, and what reads as human. An estimate, never proof |
+| `/fact-check <text>` | Every checkable claim rated true, doubtful, false or can't tell, with the correction or what to look up |
+| `/tone-check <message>` | How it will come across, the lines that could land badly, and a better version to send |
+| `/grade <work>` | Marked against the rubric (or a sensible one): a grade, why, and the three changes that would raise it most |
 
 A shipped skill you change is yours and stays as you made it; one you
 delete stays deleted; one you never touched is updated with Wumpy.
