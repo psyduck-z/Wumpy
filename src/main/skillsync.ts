@@ -32,7 +32,16 @@ interface Gist {
   id: string
   description: string | null
   html_url?: string
+  owner?: { login?: string } | null
   files: Record<string, { filename: string; content?: string; truncated?: boolean; raw_url?: string } | null>
+}
+
+interface SyncState {
+  gist?: string
+  /** The GitHub account the gist belongs to. */
+  account?: string
+  /** Each skill's hash when the two sides last agreed; null, agreed deleted. */
+  base: Record<string, string | null>
 }
 
 export interface SyncResult {
@@ -136,16 +145,22 @@ export class SkillSync {
     return (await res.json()) as T
   }
 
-  private state(): { gist?: string; base: Record<string, string | null> } {
+  private state(): SyncState {
     try {
-      const s = JSON.parse(readFileSync(this.stateFile, 'utf8')) as { gist?: string; base?: Record<string, string | null> }
-      return { gist: s.gist, base: s.base ?? {} }
+      const s = JSON.parse(readFileSync(this.stateFile, 'utf8')) as Partial<SyncState>
+      return { gist: s.gist, account: s.account, base: s.base ?? {} }
     } catch {
       return { base: {} }
     }
   }
 
-  private saveState(s: { gist?: string; base: Record<string, string | null> }): void {
+  /** Which GitHub account this device last synced with, for /sync status. */
+  status(): { account?: string } {
+    const account = this.state().account
+    return account ? { account } : {}
+  }
+
+  private saveState(s: SyncState): void {
     try {
       writeFileSync(this.stateFile, JSON.stringify(s, null, 2))
     } catch {
@@ -153,13 +168,19 @@ export class SkillSync {
     }
   }
 
-  /** This account's skills gist: the one remembered, else found by its description, else made. */
-  private async gist(token: string, remembered?: string): Promise<Gist> {
+  /**
+   * This account's skills gist: the one remembered, else found by its
+   * description, else made. Only ever one of `account`'s own: an unlisted
+   * gist can be read by anyone with its id, so the one remembered may well
+   * load when it is somebody else's.
+   */
+  private async gist(token: string, account: string, remembered?: string): Promise<Gist> {
     if (remembered) {
       try {
-        return await this.call<Gist>(token, `/gists/${remembered}`)
+        const g = await this.call<Gist>(token, `/gists/${remembered}`)
+        if (g.owner?.login === account) return g
       } catch {
-        /* Deleted, or another account's: look for it again. */
+        /* Deleted: look for it again. */
       }
     }
     for (let page = 1; page <= 5; page++) {
@@ -215,8 +236,24 @@ export class SkillSync {
       }
     }
     try {
+      const me = await this.call<{ login?: string }>(auth.token, '/user')
+      const account = String(me?.login ?? '')
+      if (!account) throw new Error('GitHub did not say whose token this is')
       const st = this.state()
-      const gist = await this.gist(auth.token, st.gist)
+      const gist = await this.gist(auth.token, account, st.account === account ? st.gist : undefined)
+      /*
+       * What was last agreed only holds for the gist it was agreed with. A
+       * different one - another account's (someone else's token, typed into
+       * this Wumpy), or a new one because theirs was deleted - starts empty,
+       * and against the old agreement an empty gist reads as "every skill was
+       * deleted on another device": this device's skills would be deleted.
+       * From nothing, the two sides are put together instead, and nothing is
+       * lost.
+       */
+      if (gist.id !== st.gist || st.account !== account) {
+        if (st.gist) this.log(`[skills] sync: a different gist (${account}'s), merging from scratch`)
+        st.base = {}
+      }
       const manifest = readManifest(await this.content(auth.token, gist, MANIFEST))
       const localView = this.store.syncView(new Set([...Object.keys(manifest.skills), ...Object.keys(st.base)]))
       const local = Object.fromEntries(Object.entries(localView).map(([n, v]) => [n, { hash: v.hash, at: v.at }]))
@@ -259,7 +296,7 @@ export class SkillSync {
         files[MANIFEST] = { content: JSON.stringify(next, null, 2) }
         await this.call(auth.token, `/gists/${gist.id}`, { method: 'PATCH', body: { files } })
       }
-      this.saveState({ gist: gist.id, base })
+      this.saveState({ gist: gist.id, account, base })
       const said = summary(steps)
       this.log(`[skills] sync: ${said.line}`)
       return { ok: true, changed: localChanged, message: said.line }

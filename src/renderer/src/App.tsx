@@ -2896,8 +2896,8 @@ function namedControls(shot: Attachment): string[] {
           chat.note(
             result.ok && first
               ? `**Sharing skills between your devices.** ${result.message[0].toUpperCase()}${result.message.slice(1)}. ` +
-                  'They are kept in an unlisted gist on your GitHub account — anyone with its link could read them, so ' +
-                  'keep secrets out of skills. Every device signed in to the same account gets them, every 30 minutes ' +
+                  `They are kept in an unlisted gist on ${result.account ? `the GitHub account **${result.account}**` : 'your GitHub account'} — anyone with its link could read them, so ` +
+                  'keep secrets out of skills. Every device using the same account gets them, every 30 minutes ' +
                   'and soon after one is saved. `/sync off` stops it.'
               : result.ok && action.action === 'now'
                 ? `Skills synced: ${result.message}.`

@@ -2685,18 +2685,21 @@ ${command}`
       if (req?.action === 'on') settings.patch({ skillSync: true })
       if (req?.action === 'status') {
         const auth = await skillSync.token()
+        const account = skillSync.status().account
+        const whose = account ? `the GitHub account **${account}**` : 'your GitHub account'
         return {
           ok: true,
           on: on(),
           message: on()
-            ? `Sharing skills between your devices, through a gist on your GitHub account${auth ? (auth.from === 'gh' ? ' (signed in with gh)' : '') : ' — but there is no GitHub token on this device yet'}.`
+            ? `Sharing skills between your devices, through a gist on ${whose}${auth ? (auth.from === 'gh' ? ' (signed in with gh)' : '') : ' — but there is no GitHub token on this device yet'}.` +
+              (account ? ` If that is not yours, \`/sync key\` with your own token switches to yours; no skills here are lost.` : '')
             : 'Skills are not shared between devices.'
         }
       }
       if (!on()) return { ok: false, on: false, message: 'Sharing skills is off. `/sync on` turns it on.' }
       const result = await skillSync.sync()
       if (result.changed) panel.send(IPC.skillsChanged, null)
-      return { ...result, on: true }
+      return { ...result, on: true, account: skillSync.status().account }
     }
   )
   ipcMain.handle(IPC.skillGet, (_e, name: string) => skills.get(String(name ?? '')))

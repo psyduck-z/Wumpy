@@ -61,18 +61,23 @@ check('what it did, in a line', P.summary({ a: 'upload', b: 'download', c: 'dele
 const gists = new Map()
 let nextId = 1
 const calls = []
+/* Accounts by token: "good-token" is theirs; the others are other people. */
+const ACCOUNTS = { 'good-token': 'omar', 'good-bob': 'bob', 'good-carol': 'carol' }
 globalThis.fetch = async (url, init = {}) => {
   const u = new URL(url)
   const method = init.method ?? 'GET'
   calls.push(`${method} ${u.pathname}`)
-  if (!/^Bearer good/.test(init.headers?.Authorization ?? '')) return new Response('{}', { status: 401 })
+  const me = ACCOUNTS[(init.headers?.Authorization ?? '').replace(/^Bearer /, '')]
+  if (!me) return new Response('{}', { status: 401 })
   const json = (body, status = 200) => new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json' } })
-  const view = (g) => ({ id: g.id, description: g.description, files: Object.fromEntries(Object.entries(g.files).map(([k, c]) => [k, { filename: k, content: c }])) })
-  if (u.pathname === '/gists' && method === 'GET') return json([...gists.values()].map((g) => ({ id: g.id, description: g.description, files: {} })))
+  const view = (g) => ({ id: g.id, description: g.description, owner: { login: g.owner }, files: Object.fromEntries(Object.entries(g.files).map(([k, c]) => [k, { filename: k, content: c }])) })
+  if (u.pathname === '/user' && method === 'GET') return json({ login: me })
+  /* As GitHub: the list is your own gists; an unlisted one can be read by anyone with its id, but changed only by its owner. */
+  if (u.pathname === '/gists' && method === 'GET') return json([...gists.values()].filter((g) => g.owner === me).map((g) => ({ id: g.id, description: g.description, owner: { login: g.owner }, files: {} })))
   if (u.pathname === '/gists' && method === 'POST') {
     const body = JSON.parse(init.body)
     if (body.public !== false) return json({ message: 'should be unlisted' }, 422)
-    const g = { id: `g${nextId++}`, description: body.description, files: Object.fromEntries(Object.entries(body.files).map(([k, f]) => [k, f.content])) }
+    const g = { id: `g${nextId++}`, owner: me, description: body.description, files: Object.fromEntries(Object.entries(body.files).map(([k, f]) => [k, f.content])) }
     gists.set(g.id, g)
     return json(view(g), 201)
   }
@@ -80,6 +85,7 @@ globalThis.fetch = async (url, init = {}) => {
   if (m && gists.has(m[1])) {
     const g = gists.get(m[1])
     if (method === 'PATCH') {
+      if (g.owner !== me) return json({}, 404)
       for (const [k, f] of Object.entries(JSON.parse(init.body).files)) {
         if (f === null) delete g.files[k]
         else g.files[k] = f.content
@@ -152,6 +158,26 @@ await laptop.sync.sync()
 await windows.sync.sync()
 await laptop.sync.sync()
 check('edited on one, deleted on the other: the edit is kept everywhere', [has(laptop, 'recipes'), has(windows, 'recipes')], ['Metric units, and serves four.', 'Metric units, and serves four.'])
+
+/* Someone else's GitHub account on one of these devices. */
+const owned = (who) => [...gists.values()].filter((g) => g.owner === who)
+const theirs = owned('omar')[0]
+const theirsBefore = JSON.stringify(theirs.files)
+writeFileSync(join(laptop.dir, 'github-token.bin'), 'enc:good-bob')
+r = await laptop.sync.sync()
+check('another account: its own gist, not the old one', [r.ok, owned('bob').length], [true, 1])
+check('which gets the skills on this device', Boolean(owned('bob')[0]?.files['recipes.SKILL.md']), true)
+check('and nothing here is lost', has(laptop, 'recipes'), 'Metric units, and serves four.')
+check('and the first account\'s gist is left alone', JSON.stringify(theirs.files), theirsBefore)
+check('status names the account', (await laptop.sync.status()).account, 'bob')
+
+windows.store.save({ name: 'only-windows', body: 'Kept on Windows.' })
+await windows.sync.sync()
+gists.delete(theirs.id) /* their gist deleted, then a new account on Windows */
+writeFileSync(join(windows.dir, 'github-token.bin'), 'enc:good-carol')
+r = await windows.sync.sync()
+check('a new, empty account never deletes the skills here', [r.ok, has(windows, 'only-windows'), has(windows, 'recipes')], [true, 'Kept on Windows.', 'Metric units, and serves four.'])
+check('it shares them instead', Object.keys(owned('carol')[0]?.files ?? {}).filter((f) => f.endsWith('.SKILL.md')).sort(), ['grill.SKILL.md', 'only-windows.SKILL.md', 'recipes.SKILL.md'])
 
 writeFileSync(join(laptop.dir, 'github-token.bin'), 'enc:bad-token')
 r = await laptop.sync.sync()
