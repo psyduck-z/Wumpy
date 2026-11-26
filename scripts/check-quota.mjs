@@ -687,7 +687,7 @@ check('a key on its own is added to the others', /add: !replacing/.test(cmdSrc),
 check('only replace starts the list again', /\^\(replace\|reset\)\\s/.test(cmdSrc), true)
 check('and refuses words', /Which ones\?/.test(cmdSrc), true)
 check('the check offers the exact command', /drop \$\{dead\.map/.test(appSrc), true)
-check('and says the counts restart', /the positions moved/.test(appSrc), true)
+/* Dropped from the note when the notes were cut short; the counts still restart. */
 
 /* ------------------------------------------------------- the small words */
 

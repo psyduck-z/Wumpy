@@ -149,9 +149,7 @@ export async function updateNow(force = false): Promise<{ ok: boolean; message: 
   if (!app.isPackaged) {
     return {
       ok: false,
-      message:
-        'This Wumpy is running straight from its source folder, so there is no installed copy to update. ' +
-        '**/restart** picks up a fresh build.'
+      message: 'Running from source — **/restart** picks up a fresh build.'
     }
   }
   if (!deps) return { ok: false, message: 'Updating is not set up on this system.' }
@@ -163,19 +161,19 @@ export async function updateNow(force = false): Promise<{ ok: boolean; message: 
     if (state.stage === 'downloading') {
       return {
         ok: true,
-        message: `Wumpy ${state.next} is downloading (${state.percent ?? 0}%). It installs itself once it is ready, or press **Update ready** in the header.`
+        message: `Downloading ${state.next} (${state.percent ?? 0}%).`
       }
     }
     checkForUpdate()
     return {
       ok: true,
-      message: `Looking for a newer Wumpy than ${state.current}. If there is one it downloads by itself, and **Update ready** appears in the header.`
+      message: `Checking for a newer version than ${state.current}.`
     }
   }
-  if (state.stage === 'installing') return { ok: false, message: 'Already updating — it restarts by itself when the build is done.' }
+  if (state.stage === 'installing') return { ok: false, message: 'Already updating.' }
   if (state.stage === 'ready') {
     deps.restart('to start the updated Wumpy')
-    return { ok: true, message: 'The update is already built. Restarting into it.' }
+    return { ok: true, message: 'Restarting into the update.' }
   }
   failedFor = ''
   set({ stage: 'checking' })
@@ -184,19 +182,13 @@ export async function updateNow(force = false): Promise<{ ok: boolean; message: 
     set({ stage: 'failed', checkedAt: Date.now() })
     return {
       ok: false,
-      message:
-        'I cannot find Wumpy’s source folder to build from. Run `npm run install:linux` in it once, and ' +
-        '`/update` will know where it is from then on.'
+      message: 'Source folder not found — run `npm run install:linux` in it once.'
     }
   }
   const about = whatsNew(c)
   if (!about && !force) {
     set({ stage: 'current', about: undefined, checkedAt: Date.now() })
-    const when = c.installedAt ? new Date(c.installedAt).toLocaleString() : 'its last install'
-    return {
-      ok: true,
-      message: `Already up to date: nothing new on GitHub, and nothing in ${c.source} has changed since it was installed (${when}). Say **/update force** to rebuild anyway.`
-    }
+    return { ok: true, message: 'Up to date.' }
   }
   set({ stage: 'installing', about: about || 'a rebuild', checkedAt: Date.now() })
   const result = await installFromSource(c, deps.log)
@@ -206,7 +198,7 @@ export async function updateNow(force = false): Promise<{ ok: boolean; message: 
   }
   set({ stage: 'current', about: undefined })
   deps.restart('to start the updated Wumpy')
-  return { ok: true, message: `Updated with ${about || 'a fresh build'}. Restarting into it.` }
+  return { ok: true, message: 'Updated. Restarting.' }
 }
 
 export function startUpdates(d: UpdateDeps): void {

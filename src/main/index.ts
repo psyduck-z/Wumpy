@@ -2683,29 +2683,29 @@ ${command}`
       const on = (): boolean => settings.get('skillSync') === true
       if (req?.action === 'off') {
         settings.patch({ skillSync: false })
-        return { ok: true, on: false, message: 'Stopped sharing skills between devices. The ones already shared stay in your gist.' }
+        return { ok: true, on: false, message: 'Sync off.' }
       }
       if (req?.action === 'key') {
         const kept = skillSync.setToken(String(req.token ?? ''))
         if (!kept.ok) return { ok: false, on: on(), message: kept.why }
-        if (!String(req.token ?? '').trim()) return { ok: true, on: on(), message: 'Forgot the GitHub token.' }
+        if (!String(req.token ?? '').trim()) return { ok: true, on: on(), message: 'Token removed.' }
         settings.patch({ skillSync: true })
       }
       if (req?.action === 'on') settings.patch({ skillSync: true })
       if (req?.action === 'status') {
         const auth = await skillSync.token()
         const account = skillSync.status().account
-        const whose = account ? `the GitHub account **${account}**` : 'your GitHub account'
         return {
           ok: true,
           on: on(),
           message: on()
-            ? `Sharing skills between your devices, through a gist on ${whose}${auth ? (auth.from === 'gh' ? ' (signed in with gh)' : '') : ' — but there is no GitHub token on this device yet'}.` +
-              (account ? ` If that is not yours, \`/sync key\` with your own token switches to yours; no skills here are lost.` : '')
-            : 'Skills are not shared between devices.'
+            ? auth
+              ? `Syncing skills${account ? ` via **${account}**` : ''}.`
+              : 'Sync is on, but this device has no GitHub token: `/sync key <token>`.'
+            : 'Sync is off. `/sync on` turns it on.'
         }
       }
-      if (!on()) return { ok: false, on: false, message: 'Sharing skills is off. `/sync on` turns it on.' }
+      if (!on()) return { ok: false, on: false, message: 'Sync is off. `/sync on` turns it on.' }
       const result = await skillSync.sync()
       if (result.changed) panel.send(IPC.skillsChanged, null)
       return { ...result, on: true, account: skillSync.status().account }

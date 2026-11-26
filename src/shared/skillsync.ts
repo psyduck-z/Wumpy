@@ -94,11 +94,11 @@ export function summary(steps: Record<string, Step>): { up: string[]; down: stri
   const down = pick('download')
   const gone = pick('deleteLocal')
   const parts = [
-    down.length ? `got ${list(down)} from your other devices` : '',
-    gone.length ? `removed ${list(gone)}, deleted on another device` : '',
+    down.length ? `got ${list(down)}` : '',
+    gone.length ? `removed ${list(gone)}` : '',
     up.length ? `shared ${list(up)}` : ''
   ].filter(Boolean)
-  return { up, down, gone, line: parts.length ? parts.join('; ') : 'already the same everywhere' }
+  return { up, down, gone, line: parts.length ? parts.join('; ') : 'up to date' }
 }
 
 function list(names: string[]): string {

@@ -229,10 +229,7 @@ export class SkillSync {
       return {
         ok: false,
         changed: false,
-        message:
-          'Wumpy needs a GitHub token to share skills between your devices. Make one at ' +
-          'https://github.com/settings/tokens/new?scopes=gist&description=Wumpy%20skills (only the **gist** scope), ' +
-          'then type `/sync key <token>` — or sign in with `gh auth login` on this machine.'
+        message: 'Not signed in to GitHub. Make a [token with the gist scope](https://github.com/settings/tokens/new?scopes=gist&description=Wumpy%20skills), then `/sync key <token>`.'
       }
     }
     try {

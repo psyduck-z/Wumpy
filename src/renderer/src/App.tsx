@@ -1634,18 +1634,8 @@ function namedControls(shot: Attachment): string[] {
        * the command, i like it when i ask it directly" - so what it says
        * is the sentence that stops it, which is also just a sentence.
        */
-      chat.note(
-        [
-          `**Listening** to ${what}. **Live notes** appear here once there is something to note, ` +
-            'and keep updating — and correcting themselves — as the meeting goes. Ask me anything ' +
-            'about what was said, or say **notes** for a full write-up.',
-          '',
-          'Say **stop listening** when you are done. Only the text is kept, ' +
-            'no audio, and the channels are mixed so it cannot say who spoke.',
-          '',
-          '_Recording others may need their consent where you are._'
-        ].join(NEWLINE)
-      )
+      /* Short, as asked: "shorten it, like really short". */
+      chat.note(`**Listening** to ${what}. Live notes appear here; say **stop listening** to end. Text only, no audio. _Others may need to consent where you are._`)
       return true
     },
     [chat, listening, liveNotes]
@@ -2406,22 +2396,15 @@ function namedControls(shot: Attachment): string[] {
             const current = await window.wumpy.context.get()
             chat.note(
               current.text
-                ? `Wumpy is carrying this into every chat:${NEWLINE}${NEWLINE}${current.text}` +
-                    `${NEWLINE}${NEWLINE}The file is at ${current.path}. ` +
-                    'Add with `/remember <thing>`, wipe it with `/remember clear`.' +
-                    (current.truncated ? ' It is longer than Wumpy sends — trim it.' : '')
-                : 'Nothing remembered yet. `/remember I prefer celsius` and it will ' +
-                    'be there in every chat from now on.'
+                ? `${current.text}` + (current.truncated ? `${NEWLINE}${NEWLINE}_Too long — trim ${current.path}._` : '')
+                : 'Nothing remembered yet. Try `/remember I prefer celsius`.'
             )
             return
           }
           const result = await window.wumpy.context.set(action.value, true)
           chat.note(
             result.ok
-              ? `Noted, and it will be there in the next chat too.` +
-                  (result.truncated
-                    ? ' The notes are now longer than Wumpy sends — trim them.'
-                    : '')
+              ? 'Noted.' + (result.truncated ? ' The notes are too long now — trim them.' : '')
               : result.why
           )
           return
@@ -2458,15 +2441,9 @@ function namedControls(shot: Attachment): string[] {
             const reasons = [...new Set(dead.map((k) => k.why).filter(Boolean))]
             chat.note(
               [
-                `**${alive} of ${result.keys.length} ${label} keys work.**`,
-                '',
-                `Refused: key ${dead.map((k) => k.number).join(', ')}.`,
-                ...reasons.map((r) => `_${r}_`),
-                '',
-                'They are out of the rotation now, and stay out across restarts and across ' +
-                  'midnight — a refused key is not something waiting fixes.',
-                `Drop them with \`/key ${provider} drop ${dead.map((k) => k.number).join(' ')}\`, ` +
-                  `or replace the whole list with \`/key ${provider} replace <key…>\`.`
+                `**${alive} of ${result.keys.length} ${label} keys work.** Refused: key ${dead.map((k) => k.number).join(', ')}` +
+                  (reasons.length ? ` (${reasons.join('; ')})` : '') + '.',
+                `\`/key ${provider} drop ${dead.map((k) => k.number).join(' ')}\` removes them.`
               ].join(NEWLINE)
             )
             setKeyStatus(await window.wumpy.keys.status())
@@ -2482,8 +2459,7 @@ function namedControls(shot: Attachment): string[] {
             setKeyStatus(await window.wumpy.keys.status())
             void window.wumpy.assistant.status().then(setAssistant)
             chat.note(
-              `Removed ${label} key ${result.removed?.join(', ')}. ` +
-                `${result.total} left. The day's counts start again, since the positions moved.`
+              `Removed ${label} key ${result.removed?.join(', ')}. ${result.total} left.`
             )
             return
           }
@@ -2505,11 +2481,8 @@ function namedControls(shot: Attachment): string[] {
             const has = status.configured.includes(provider)
             chat.note(
               has
-                ? `${status.counts?.[provider] ?? 1} ${label} key(s) saved. Add another with ` +
-                    `\`/key ${provider} <key>\`, replace them all with ` +
-                    `\`/key ${provider} replace <key…>\`, or remove them with \`/key ${provider} clear\`.`
-                : `No ${label} key yet. Get one at ${PROVIDERS[provider].keyUrl} ` +
-                    `and paste it with \`/key ${provider} <key>\`.`
+                ? `${status.counts?.[provider] ?? 1} ${label} key(s) saved.`
+                : `No ${label} key yet. [Get one](${PROVIDERS[provider].keyUrl}), then \`/key ${provider} <key>\`.`
             )
             return
           }
@@ -2535,12 +2508,8 @@ function namedControls(shot: Attachment): string[] {
             !result.ok
               ? result.why
               : already
-                ? `That ${label} key was already saved. ${total} stored. ` +
-                    'Each key has to come from a different account.'
-                : `${action.add ? 'Added' : 'Saved'} the ${label} key${total === 1 ? '' : 's'}, ` +
-                    `encrypted on this computer. ${total} stored` +
-                    (total > 1 ? ', used in turn so each limit counts separately. ' : '. ') +
-                    'Pick a model with `/model`.'
+                ? `Already saved. ${total} ${label} key${total === 1 ? '' : 's'}.`
+                : `${action.add ? 'Added' : 'Saved'} — ${total} ${label} key${total === 1 ? '' : 's'}.`
           )
           return
         }
@@ -2587,9 +2556,7 @@ function namedControls(shot: Attachment): string[] {
           await patch({ reflect: next, reflectRounds: rounds })
           chat.note(
             next
-              ? `Self-reflection on — when a task is done, a mentor reviews it on your other key ` +
-                  `and sends it back until it passes, up to **${rounds}** review${rounds === 1 ? '' : 's'}. ` +
-                  '`/reflect off` to stop.'
+              ? `Self-reflection on — up to **${rounds}** review${rounds === 1 ? '' : 's'} per task.`
               : 'Self-reflection off.',
             false,
             'reflect'
@@ -2700,8 +2667,7 @@ function namedControls(shot: Attachment): string[] {
                not a reason to open a microphone: said, not guessed. */
             if (!listening.on && action.ask === '') {
               chat.note(
-                'I am not listening to a meeting. Say **monitor my PC** to listen and watch your screen together, ' +
-                  'or ask me to **look at my screen** for a one-off look.'
+                'Not listening. Say **monitor my PC** to start.'
               )
               return
             }
@@ -2720,20 +2686,8 @@ function namedControls(shot: Attachment): string[] {
             const why = await listening.watch()
             if (monitor && starting) {
               chat.note(
-                [
-                  '**Monitoring your PC** — listening to your speakers **and** your microphone' +
-                    (why ? '.' : ', and looking at your screen about every 20 seconds when it has changed.'),
-                  '',
-                  '**Live notes** appear here once there is something to note, and keep updating as the meeting ' +
-                    'goes — when something changes (a date moves, a decision is reversed) the note is changed, ' +
-                    'not repeated. Ask me anything about it, or say **notes** for a full write-up.',
-                  '',
-                  'Say **stop monitoring** when you are done. Only text is kept — no audio, no screenshots' +
-                    (why ? '.' : '; each changed screen is sent to a model that can see, to be read.'),
-                  ...(why ? ['', `Not watching your screen: ${why}`] : []),
-                  '',
-                  '_Recording others may need their consent where you are._'
-                ].join(NEWLINE),
+                `**Monitoring your PC** — audio${why ? '' : ' and screen'}. Live notes appear here; say **stop monitoring** to end. Text only${why ? '' : '; screenshots go to a model and are not kept'}. _Others may need to consent where you are._` +
+                  (why ? `${NEWLINE}${NEWLINE}Not watching your screen: ${why}` : ''),
                 Boolean(why)
               )
               return
@@ -2744,12 +2698,7 @@ function namedControls(shot: Attachment): string[] {
               chat.note(`Listening, but not watching your screen: ${why}`, true)
               return
             }
-            chat.note(
-              '**Watching your screen** too. About every 20 seconds, when it has changed, a model that can see ' +
-                'notes what is on it — slides, shared documents, names in the call — and those notes join the ' +
-                'transcript. The screenshots are sent to that model and not kept. Say **stop watching my screen** ' +
-                'to stop.'
-            )
+            chat.note('**Watching your screen** too — screenshots go to a model and are not kept. Say **stop watching my screen** to stop.')
             return
           }
 
@@ -2775,9 +2724,7 @@ function namedControls(shot: Attachment): string[] {
             const words = heard ? wordCount(heard) : 0
             chat.note(
               words
-                ? `Stopped — ${words} words over ${stamp(elapsed(heard!))}. ` +
-                    'The live notes get one last update. Ask me anything about it, or say **notes**. ' +
-                    'It stays with this chat until you start a new one.'
+                ? `Stopped — ${words} words over ${stamp(elapsed(heard!))}. Say **notes** for a write-up.`
                 : 'Stopped. Nothing was heard.'
             )
             /* The last minute or so has not been noted yet. */
@@ -2832,9 +2779,8 @@ function namedControls(shot: Attachment): string[] {
           await patch({ launchAtLogin: next })
           chat.note(
             next
-              ? 'Wumpy now starts in the background when you log in, so the earbuds gesture and the ' +
-                  'shortcut work without opening it first. Closing the window only hides it.'
-              : 'Wumpy no longer starts when you log in. The earbuds gesture still starts it, a little slower.',
+              ? 'Starts in the background when you log in.'
+              : 'No longer starts when you log in.',
             false,
             'startup'
           )
@@ -2855,16 +2801,13 @@ function namedControls(shot: Attachment): string[] {
         }
         case 'update': {
           if (update?.stage === 'installing') {
-            chat.note('Already updating. Wumpy restarts by itself when the build is done.')
+            chat.note('Already updating.')
             tell('Already updating.')
             return
           }
           /* On Linux this can be minutes of building, so say so first. */
           if (update?.stage !== 'off') {
-            chat.note(
-              'Checking for an update. On Linux, if there is one, Wumpy builds it from the source folder and ' +
-                'restarts into it — a few minutes, and you can keep using it meanwhile.'
-            )
+            chat.note('Checking for updates…')
           }
           const result = await window.wumpy.update.now(action.force)
           chat.note(result.message, !result.ok)
@@ -2883,22 +2826,19 @@ function namedControls(shot: Attachment): string[] {
         }
         case 'sync': {
           if (action.action === 'key' && !action.token) {
-            chat.note(
-              'Make a token at https://github.com/settings/tokens/new?scopes=gist&description=Wumpy%20skills ' +
-                '(only the **gist** scope is needed), then type `/sync key <token>`. It is kept encrypted on this device.'
-            )
+            chat.note(`Make a [token with the gist scope](${'https://github.com/settings/tokens/new?scopes=gist&description=Wumpy%20skills'}), then \`/sync key <token>\`.`)
             return
           }
-          if (action.action === 'on' || action.action === 'now' || action.action === 'key') chat.note('Syncing your skills…')
           const result = await window.wumpy.skills.sync({ action: action.action, token: action.token })
           if (result.changed) void window.wumpy.skills.list().then(setSkillCommands).catch(() => undefined)
           const first = action.action === 'on' || action.action === 'key'
           chat.note(
+            /* "When I do /sync on, it has another whole chunk of information.
+               Shorten that down." One line: what happened, and the one
+               thing worth knowing - an unlisted gist can be read by anyone
+               with its link. */
             result.ok && first
-              ? `**Sharing skills between your devices.** ${result.message[0].toUpperCase()}${result.message.slice(1)}. ` +
-                  `They are kept in an unlisted gist on ${result.account ? `the GitHub account **${result.account}**` : 'your GitHub account'} — anyone with its link could read them, so ` +
-                  'keep secrets out of skills. Every device using the same account gets them, every 30 minutes ' +
-                  'and soon after one is saved. `/sync off` stops it.'
+              ? `**Skills syncing**${result.account ? ` via ${result.account}` : ''}: ${result.message}. Keep secrets out — anyone with the gist's link can read it.`
               : result.ok && action.action === 'now'
                 ? `Skills synced: ${result.message}.`
                 : result.message,
@@ -2910,10 +2850,7 @@ function namedControls(shot: Attachment): string[] {
           const ask = action.ask
           if (/^(folder|open|dir|edit|files?)$/i.test(ask)) {
             const dir = await window.wumpy.skills.folder(true)
-            chat.note(
-              `Opened your skills folder: \`${dir}\`. Each skill is a folder with a \`SKILL.md\` in it — change one, ` +
-                'or add a folder of your own, and it is a command the next time the panel opens.'
-            )
+            chat.note(`Opened \`${dir}\`.`)
             return
           }
           const making = /^(?:new|add|make|create)\b\s*([\s\S]*)$/i.exec(ask)
@@ -2942,25 +2879,20 @@ function namedControls(shot: Attachment): string[] {
           setSkillCommands(list)
           /* On the earbuds the table is nothing: the names, said, and how to run one. */
           tell(skillsAloud(list.filter((sk) => sk.command)))
-          const dir = await window.wumpy.skills.folder(false).catch(() => '')
           chat.note(
             [
-              list.length ? '**Your skills** — each one is a command:' : '**No skills yet.**',
-              '',
               ...(list.length
                 ? [
                     '| Command | What it does | On earbuds, say |',
                     '| --- | --- | --- |',
                     ...list.map(
                       (sk) =>
-                        `| \`/${sk.name}\`${sk.builtin ? '' : ' · yours'}${sk.argumentHint ? ` ${sk.argumentHint.replace(/\|/g, '\\|')}` : ''} | ${shortly(sk.description).replace(/\|/g, '\\|')} | “use ${skillSaidAs(sk).replace(/\|/g, '\\|')} on …” |`
+                        `| \`/${sk.name}\`${sk.builtin ? '' : ' · yours'} | ${shortly(sk.description).replace(/\|/g, '\\|')} | “use ${skillSaidAs(sk).replace(/\|/g, '\\|')} on …” |`
                     ),
                     ''
                   ]
-                : []),
-              '**Add one:** `/skills new <what it should do>`, or just say “make a skill that…”.',
-              `**Change one:** \`/skills folder\` opens ${dir ? `\`${dir}\`` : 'the folder'} — each skill is \`<name>/SKILL.md\`, ` +
-                'in the same layout as Claude’s. A built-in one you change is kept as yours.'
+                : ['No skills yet.', '']),
+              '`/skills new <what>` makes one · `/skills folder` opens them.'
             ].join(NEWLINE)
           )
           return

@@ -239,8 +239,7 @@ export async function installFromSource(
       return {
         ok: false,
         message:
-          `Could not pull the new commits into ${source} — nothing was changed. ` +
-          `Git said:\n\n\`\`\`\n${tail(pulled.out)}\n\`\`\``
+          `Pull failed, nothing changed:\n\n\`\`\`\n${tail(pulled.out, 3)}\n\`\`\``
       }
     }
   }
@@ -256,7 +255,7 @@ export async function installFromSource(
   if (!built.ok) {
     return {
       ok: false,
-      message: `The build failed, so the installed Wumpy was left as it was. The end of it:\n\n\`\`\`\n${tail(built.out, 10)}\n\`\`\``
+      message: `Build failed, nothing changed:\n\n\`\`\`\n${tail(built.out, 4)}\n\`\`\``
     }
   }
   log('[update] installed')

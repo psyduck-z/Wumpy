@@ -54,7 +54,7 @@ check('first sync, different on each side: the newer', P.plan({ a: v('2', 9) }, 
 check('a tombstone with nothing here is nothing', P.plan({}, { a: { hash: '', at: 1, deleted: true } }, { a: null }), { a: 'same' })
 check('a gist file name per skill', [P.gistFile('grill'), P.nameOfGistFile('grill.SKILL.md'), P.nameOfGistFile('../x.md')], ['grill.SKILL.md', 'grill', null])
 check('a broken manifest is an empty one', P.readManifest('{nope'), { version: 1, skills: {} })
-check('what it did, in a line', P.summary({ a: 'upload', b: 'download', c: 'deleteLocal', d: 'same' }).line, 'got /b from your other devices; removed /c, deleted on another device; shared /a')
+check('what it did, in a line', P.summary({ a: 'upload', b: 'download', c: 'deleteLocal', d: 'same' }).line, 'got /b; removed /c; shared /a')
 
 /* -------------------------------------------- two devices, one fake gist */
 
@@ -124,10 +124,10 @@ r = await laptop.sync.sync()
 check('a skill made on the laptop is shared', [r.message, Boolean([...gists.values()][0].files['standup.SKILL.md'])], ['shared /standup', true])
 r = await windows.sync.sync()
 check('the other device finds the same gist', gists.size, 1)
-check('and gets the skill', [r.message, has(windows, 'standup'), r.changed], ['got /standup from your other devices', 'Yesterday / Today / Blockers from: $ARGUMENTS', true])
+check('and gets the skill', [r.message, has(windows, 'standup'), r.changed], ['got /standup', 'Yesterday / Today / Blockers from: $ARGUMENTS', true])
 check('with its argument hint', windows.store.get('standup')?.argumentHint, '<what I did>')
 r = await windows.sync.sync()
-check('a second sync with nothing new changes nothing', [r.message, r.changed], ['already the same everywhere', false])
+check('a second sync with nothing new changes nothing', [r.message, r.changed], ['up to date', false])
 
 windows.store.save({ name: 'standup', body: 'Three bullets from: $ARGUMENTS' })
 await windows.sync.sync()
@@ -146,8 +146,8 @@ check('and an untouched copy never overwrites the change', /money first/.test(re
 laptop.store.save({ name: 'standup', body: '' })
 await laptop.sync.sync()
 r = await windows.sync.sync()
-check('a skill deleted on one device is deleted on the other', [has(windows, 'standup'), r.message], [null, 'removed /standup, deleted on another device'])
-check('and stays deleted', [(await laptop.sync.sync()).message, has(laptop, 'standup')], ['already the same everywhere', null])
+check('a skill deleted on one device is deleted on the other', [has(windows, 'standup'), r.message], [null, 'removed /standup'])
+check('and stays deleted', [(await laptop.sync.sync()).message, has(laptop, 'standup')], ['up to date', null])
 
 laptop.store.save({ name: 'recipes', body: 'Metric units.' })
 await laptop.sync.sync()
@@ -192,7 +192,7 @@ check('every 30 minutes and after a save, only when on', /setInterval\(\(\) => v
 check('a sync that changed skills here refreshes the commands', /if \(result\.changed\) panel\?\.send\(IPC\.skillsChanged, null\)/.test(main) && /window\.wumpy\.skills\.onChanged\(refresh\)/.test(read('src/renderer/src/App.tsx')), true)
 check('the token never goes in input history', /\/\^\\\/sync\\s\+\(key\|token\)\\b\/i\.test\(entry\)/.test(read('src/renderer/src/hooks/useInputHistory.ts')), true)
 check('and the model may never run /sync', /NEVER_PROPOSED = new Set\(\['key', 'approve', 'open', 'sync'\]\)/.test(cmds), true)
-check('it is said that an unlisted gist can be read by anyone with the link', /anyone with its link could read them/.test(read('src/renderer/src/App.tsx')), true)
+check('it is said that an unlisted gist can be read by anyone with the link', /anyone with the gist's link can read it/.test(read('src/renderer/src/App.tsx')), true)
 
 rmSync(root, { recursive: true, force: true })
 console.log(`\n${failed === 0 ? 'all skill sync checks correct' : `${failed} skill sync checks FAILED`}`)

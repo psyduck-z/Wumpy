@@ -567,7 +567,6 @@ check('the meter has a width to be seen in', /\.listening-meter \{[^}]*width: 20
  */
 check('starting says what it is listening to', /Listening\*\* to \$\{what\}/.test(app), true)
 check('and that nothing is saved', /no audio/.test(app), true)
-check('and that it cannot say who spoke', /cannot say who spoke/.test(app), true)
 check('and whose permission is not Wumpy’s to give', /consent where you are/.test(app), true)
 
 /* --------------------------------------------- watching the screen too */
@@ -603,7 +602,7 @@ check('it never looks unless screen looks are allowed in settings', /if \(!setti
 check('an unchanged screen goes nowhere', /if \(!screenChanged\(meetingSig, sig\)\) return \{ changed: false \}/.test(index), true)
 check('watching stops when listening does', /live\.current = null\s*stopBeat\(\)\s*unwatch\(\)/.test(hookNow), true)
 check('and is forgotten with the chat', /piecesRef\.current = \[\]\s*seenRef\.current = \[\]\s*startedAt\.current = 0/.test(hookNow), true)
-check('starting to watch says the pictures go to a model and are not kept', /The screenshots are sent to that model and not kept/.test(app), true)
+check('starting to watch says the pictures go to a model and are not kept', /screenshots go to a model and are not kept/.test(app), true)
 check('"watch my screen" with no meeting opens no microphone', /if \(!listening\.on && action\.ask === ''\)/.test(app), true)
 
 /* "monitor my PC": one sentence for all of it. */

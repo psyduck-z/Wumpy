@@ -143,7 +143,7 @@ export function startOfDay(now = Date.now()): number {
  * readable where it lands. `/log all` is allowed to fold - somebody who
  * asked for everything can open it.
  */
-export const RECENT = 16
+export const RECENT = 8
 
 /** Tidies a detail into one line of at most MAX_DETAIL characters. */
 export function detailOf(what: string): string {
@@ -513,30 +513,29 @@ export function journalLines(entries: readonly Entry[], view: JournalView = {}):
   const only = view.only ?? null
   const limit = view.limit === undefined ? RECENT : view.limit
 
-  const head = '**What Wumpy has done**'
+  /*
+   * "When I do /log, it says a ton of a long chunk - shorten it, really
+   * short." So no heading and no footer of explanation: the block, and one
+   * line saying how to see the rest when there is more.
+   */
   const kept = prune(entries, now)
-  if (!kept.length) {
-    return [
-      head,
-      '',
-      'Nothing yet today. This fills in as things happen — the model ' +
-        'changing, a command running, the background re-ranking finishing a sweep.',
-      '',
-      '_Nothing is sent anywhere: it is a list on this machine, and it ' +
-        'starts again at midnight._'
-    ]
-  }
+  if (!kept.length) return ['Nothing yet today.']
 
-  const matching = only ? kept.filter((e) => e.kind === only) : kept
-  if (!matching.length) {
-    return [
-      head,
-      '',
-      `Nothing of that sort today, out of ${kept.length} ` +
-        'things that did happen.',
-      '',
-      '`/log` shows everything.'
-    ]
+  let matching = only ? kept.filter((e) => e.kind === only) : kept
+  if (!matching.length) return ['Nothing of that sort today. `/log` shows everything.']
+
+  /*
+   * The short view drops the noise: the ranking runs every half hour, so
+   * only its latest sweep is shown; and a restart writes two lines in the
+   * same minute ("restarting", then "version"), which are one event.
+   */
+  if (limit !== null && !only) {
+    const lastRank = [...matching].reverse().find((e) => e.kind === 'rank')
+    matching = matching.filter((e, i, all) => {
+      if (e.kind === 'rank') return e === lastRank
+      const before = all[i - 1]
+      return !(e.kind === 'start' && before?.kind === 'start' && e.at - before.at < 60_000)
+    })
   }
 
   /* The newest `limit`, then reversed: slicing from the end keeps the recent
@@ -575,31 +574,16 @@ export function journalLines(entries: readonly Entry[], view: JournalView = {}):
     else section.rows.push({ e, times: 1 })
   }
 
-  const lines = [head, '', FENCE]
+  const lines = [FENCE]
+  /* A day's heading only when there is more than one day to tell apart. */
+  const headed = sections.length > 1 || sections[0]?.heading !== 'Today'
   for (const [i, section] of sections.entries()) {
-    /* A blank line before every section but the first, so the rule has air
-       above it and the block does not open on one. */
     if (i > 0) lines.push('')
-    lines.push(rule(section.heading))
+    if (headed) lines.push(rule(section.heading))
     for (const row of section.rows) lines.push(...entryLines(row.e, row.times))
   }
-  lines.push(FENCE, '')
-  if (shown.length < matching.length) {
-    lines.push(
-      `_The last ${shown.length} of ${matching.length}, newest first. ` +
-        '`/log all` for the rest._'
-    )
-  }
-  /* Said every time, because a list of what somebody has been doing is the
-     one feature in this app where "where does this go?" deserves an answer
-     before it is asked. */
-  /* Two lines of footer under a block this size was most of a panel, so it
-     says the same two things in a third of the words: where it lives, and
-     that it holds what was DONE and not what was said. */
-  lines.push(
-    '_Today only, on this machine, never sent to a model: what was done, ' +
-      'never what was said. `/log clear` forgets it now._'
-  )
+  lines.push(FENCE)
+  if (shown.length < kept.length && limit !== null) lines.push(`_\`/log all\` for all ${kept.length}._`)
   return lines
 }
 

@@ -412,7 +412,8 @@ const STORED = [...TODAY].reverse()
 {
   const lines = J.journalLines(STORED, { now: NOW })
   const text = lines.join(NL)
-  check('the report names itself', lines[0], '**What Wumpy has done**')
+  /* "Shorten it, like really short": no heading, the block is the report. */
+  check('the report is the block, with no heading over it', lines[0], '````')
   /**
    * Asked for: "don't make it a table, make it look more old style... more
    * basic. More like, not like a table style." So: no table anywhere in it,
@@ -420,11 +421,9 @@ const STORED = [...TODAY].reverse()
    * heading in bold - "just make it hard, like it's a separate section".
    */
   check('nothing in it is a table', text.includes('| --- |'), false)
-  check('today is a rule across the block', text.includes('─── Today ────'), true)
-  /* One day kept is one section: the rule names the day and there is never
-     a second one to scroll past. */
+  /* One day needs no rule: the rule is there to tell days apart. */
   const rules = lines.filter((l) => l.startsWith('───'))
-  check('one day, one rule', rules.length, 1)
+  check('one day, no rule', rules.length, 0)
   check('newest first', text.indexOf('20:14') < text.indexOf('19:58'), true)
   check(
     'the time, the sort of thing, and the thing',
@@ -459,19 +458,13 @@ const STORED = [...TODAY].reverse()
    * fence cannot survive is a fence: a recorded command may contain three.
    */
   check('the listing is one fenced block', lines.filter((l) => l === '````').length, 2)
-  check('opened before the first rule', lines.indexOf('````') < lines.findIndex((l) => l.startsWith('───')), true)
   {
     const sneaky = J.journalLines([J.entry('command', 'echo ```` stop', NOW)], { now: NOW })
     check('a command cannot end the block early', sneaky.filter((l) => l === '````').length, 2)
     check('and what it typed is still legible', sneaky.join(NL).includes("echo '''' stop"), true)
   }
-  /* The promise, made every time. A list of what somebody has been doing is
-     the one place in this app where "where does this go" deserves an answer
-     before it is asked. */
-  check('it says what is not in it', text.includes('what was done, never what was said'), true)
-  check('and that it never leaves', text.includes('never sent to a model'), true)
-  check('and how long it is kept', text.includes('Today only'), true)
-  check('and how to be rid of it', text.includes('`/log clear`'), true)
+  /* No footer of explanation under it any more - asked for short. */
+  check('nothing is said under the block when it all fits', lines[lines.length - 1], '````')
   /* Nothing in the report still promises a week of it. */
   check('nothing claims seven days', /seven days|last week/i.test(text), false)
 }
@@ -588,7 +581,7 @@ const STORED = [...TODAY].reverse()
     .join(NL)
     .split('````')[1]
   check('the bare report is not folded away', bulk.foldsCode(fenced), false)
-  check('and it is close enough to the limit to matter', bulk.measure(fenced).lines > 15, true)
+  check('and it is short', bulk.measure(fenced).lines <= 12, true)
 }
 
 /* Truncation, and the way out of it. */
@@ -596,14 +589,14 @@ const STORED = [...TODAY].reverse()
   let many = []
   for (let i = 0; i < 60; i++) many.push(J.entry('command', `run ${i}`, NOW - (60 - i) * MINUTE))
   const brief = J.journalLines(many, { now: NOW }).join(NL)
-  check('the bare report is the recent ones', brief.includes(`The last ${J.RECENT} of 60`), true)
+  check('the bare report is the recent ones', brief.includes('for all 60'), true)
   check('the newest is in it', brief.includes('run 59'), true)
   check('the oldest is not', brief.includes('run 0'), false)
   check('and it says how to see the rest', brief.includes('`/log all`'), true)
 
   const full = J.journalLines(many, { now: NOW, limit: null }).join(NL)
   check('all of it is all of it', full.includes('run 0'), true)
-  check('and then there is nothing to announce', full.includes('for the rest'), false)
+  check('and then there is nothing to announce', full.includes('for all'), false)
 }
 
 /* One sort of thing only. */
@@ -613,7 +606,6 @@ const STORED = [...TODAY].reverse()
   check('and drops the rest', only.includes('npm run build'), false)
   const none = J.journalLines(STORED, { now: NOW, only: 'write', limit: null }).join(NL)
   check('a filter that matches nothing says so', none.includes('Nothing of that sort'), true)
-  check('and says how much did happen', none.includes('out of 5'), true)
   check('and points at the whole thing', none.includes('`/log` shows everything'), true)
 }
 
@@ -621,7 +613,6 @@ const STORED = [...TODAY].reverse()
 {
   const empty = J.journalLines([], { now: NOW }).join(NL)
   check('nothing yet is explained, not blank', empty.includes('Nothing yet'), true)
-  check('with what will fill it', empty.includes('re-ranking'), true)
   check('a table of nothing is not printed', empty.includes('| --- |'), false)
 }
 /* Everything in it is from yesterday: the same thing as empty, not a day rule
@@ -633,7 +624,6 @@ const STORED = [...TODAY].reverse()
     { now: NOW }
   ).join(NL)
   check('a list that is all from yesterday reads as empty', stale.includes('Nothing yet'), true)
-  check('and says when it starts again', stale.includes('starts again at midnight'), true)
   check('with no day rule over nothing', stale.includes('───'), false)
 }
 
