@@ -64,6 +64,14 @@ check('builds with the same script a person runs', /run\('npm', \['run', 'instal
 check('no shell between Wumpy and the build', /spawn\(cmd, args, \{/.test(src) && !/shell: true/.test(src))
 check('the install says where it was built from', /writeFileSync\(join\(root, 'source\.txt'\), process\.cwd\(\)\)/.test(read('scripts/install-linux.mjs')))
 
+/* In the background, and without popping up. */
+check('Linux builds a found update by itself while nobody is using Wumpy', /if \(state\.stage === 'available'\) void buildInBackground\(d\)/.test(up) && /c\.dirty \|\| !d\.idle\(\)/.test(up))
+check('but never from a folder with uncommitted work', /if \(state\.stage !== 'available' \|\| !c\?\.source \|\| c\.dirty/.test(up))
+check('a failed background build is not retried in a loop', /failedFor === stateOf\(c\)/.test(up) && /failedFor = stateOf\(c\)/.test(up))
+check('and restarts into it once idle, as Windows does', /else if \(state\.stage === 'ready' && d\.idle\(\)\) d\.restart\(/.test(up))
+check('an update installed from the tray starts in the tray (Windows)', /process\.platform === 'win32' && updateState\(\)\.stage === 'ready' && !panel\?\.onScreen/.test(main) && /!startsHidden\(\) && !process\.argv\.includes\('--restart'\)\) panel\.show\('launch'\)/.test(main))
+check('and the note that says so is read once, whatever the flags', /noted = Date\.now\(\) - statSync\(note\)\.mtimeMs < 10 \* 60_000\s*unlinkSync\(note\)/.test(main) && /return noted \|\| process\.argv\.includes\('--hidden'\)/.test(main))
+
 const { build } = await import('esbuild')
 const { join } = await import('node:path')
 const { mkdtempSync, mkdirSync, writeFileSync, utimesSync, rmSync, symlinkSync } = await import('node:fs')

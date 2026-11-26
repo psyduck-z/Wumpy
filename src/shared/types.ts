@@ -728,7 +728,7 @@ export interface WumpySettings {
    */
   modelOrder: string
   /**
-   * Re-measure the models in the background, about once an hour.
+   * Re-measure the models in the background, about every 30 minutes.
    *
    * Asked for: one key does the ranking, the other answers questions, and
    * the ranking stops the moment the user needs the account. On unless
@@ -736,6 +736,12 @@ export interface WumpySettings {
    * @shared/ranking, which holds every rule about when it may go.
    */
   autoRank: boolean
+  /**
+   * Share skills between their devices, through an unlisted GitHub gist on
+   * their own account (main/skillsync.ts). Off until they turn it on: it
+   * sends the skills folder to GitHub.
+   */
+  skillSync: boolean
 }
 
 /* ---------------------------------------------------------------- messaging */
@@ -1156,6 +1162,8 @@ export const IPC = {
   skillList: 'skill:list',
   skillGet: 'skill:get',
   skillFolder: 'skill:folder',
+  skillSync: 'skill:sync',
+  skillsChanged: 'skill:changed',
   keyStatus: 'key:status',
   keySet: 'key:set',
   keyAdd: 'key:add',

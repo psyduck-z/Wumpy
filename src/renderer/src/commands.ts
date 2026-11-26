@@ -120,6 +120,8 @@ export type CommandAction =
   | { kind: 'skill'; name: string; args: string }
   /** `/skills` — list them; `/skills new <what>`, `/skills folder`. */
   | { kind: 'skills'; ask: string }
+  /** `/sync` — skills on every device: now, on, off, or `key <token>`. */
+  | { kind: 'sync'; action: 'now' | 'on' | 'off' | 'key' | 'status'; token: string }
   /** Send to the model, but wrapped in a prompt that shapes the answer. */
   | { kind: 'prompt'; text: string; label: string }
 
@@ -835,6 +837,19 @@ export const COMMANDS: CommandSpec[] = forThisWindow([
     run: (arg) => ({ kind: 'skills', ask: (arg ?? '').trim() })
   },
   {
+    name: 'sync',
+    hint: 'Share your skills between your devices, through a gist on your GitHub account',
+    arg: 'on | off | status | key <token>',
+    run: (arg) => {
+      const [word, ...rest] = (arg ?? '').trim().split(/\s+/)
+      const w = (word ?? '').toLowerCase()
+      if (!w || w === 'now') return { kind: 'sync', action: 'now', token: '' }
+      if (w === 'on' || w === 'off' || w === 'status') return { kind: 'sync', action: w, token: '' }
+      if (w === 'key' || w === 'token') return { kind: 'sync', action: 'key', token: rest.join('').trim() }
+      return { kind: 'error', message: 'Usage: `/sync` (now), `/sync on`, `/sync off`, `/sync status`, or `/sync key <github token>`.' }
+    }
+  },
+  {
     name: 'skill',
     hint: 'Run a skill by name, even one whose name another command has',
     arg: 'name text',
@@ -1330,7 +1345,8 @@ export function readCommandChip(text: string): string | null {
  * command in the chat... delete this chat. And then it's going to tell me,
  * are you sure you want to delete this chat? And then I'm going to say yes."
  */
-const NEVER_PROPOSED = new Set(['key', 'approve', 'open'])
+/* /sync too: a planted `/sync key <theirs>` would send their skills to somebody else's gist. */
+const NEVER_PROPOSED = new Set(['key', 'approve', 'open', 'sync'])
 
 export interface AppProposal {
   /** The command line, as typed: `/rename Fish pie`. */

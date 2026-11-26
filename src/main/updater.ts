@@ -1,7 +1,7 @@
 import { app } from 'electron'
 import { autoUpdater } from 'electron-updater'
 import type { UpdateState } from '@shared/types'
-import { checkSource, installFromSource, whatsNew } from './sourceupdate'
+import { checkSource, installFromSource, whatsNew, type SourceCheck } from './sourceupdate'
 
 /**
  * Keeps an installed Wumpy on Windows up to date with what is built here.
@@ -73,8 +73,14 @@ export function checkForUpdate(): void {
 /** On Linux the check is of the source folder, and nothing downloads. */
 let linux = false
 
+/** The last look at the source, for the background build to act on. */
+let lastLinux: SourceCheck | null = null
+/** A background build that failed is not retried until something new arrives, or /update. */
+let failedFor = ''
+const stateOf = (c: SourceCheck): string => `${c.behind}:${c.installedAt}:${c.edited}`
+
 async function checkLinux(): Promise<void> {
-  if (!deps || state.stage === 'installing' || state.stage === 'checking') return
+  if (!deps || state.stage === 'installing' || state.stage === 'checking' || state.stage === 'ready') return
   set({ stage: 'checking' })
   try {
     const c = await checkSource()
@@ -83,12 +89,41 @@ async function checkLinux(): Promise<void> {
       return
     }
     const about = whatsNew(c)
-    if (about) deps.log(`[update] an update is available: ${about}`)
+    if (about) deps.log(`[update] an update is available: ${about}${c.dirty ? ' (uncommitted changes: not building it by itself)' : ''}`)
+    lastLinux = c
     set({ stage: about ? 'available' : 'current', about: about || undefined, checkedAt: Date.now() })
   } catch (err) {
     deps.log(`[update] could not check: ${failed(err)}`)
     set({ stage: 'failed', checkedAt: Date.now() })
   }
+}
+
+/**
+ * UPDATES IN THE BACKGROUND, on Linux too: "allow Wumpy to update in the
+ * background and not pop up every time it updates". An update found by the
+ * 30-minute check is built and installed while nobody is using Wumpy, and
+ * Wumpy restarts into it the same way - quietly, staying in the tray if it
+ * was in the tray.
+ *
+ * Except from a source folder with uncommitted changes: that is work in
+ * progress, and installing it by itself is how a half-made change ends up
+ * running. Those wait for /update, and the header says one is there.
+ */
+async function buildInBackground(d: UpdateDeps): Promise<void> {
+  const c = lastLinux
+  if (state.stage !== 'available' || !c?.source || c.dirty || !d.idle() || failedFor === stateOf(c)) return
+  const about = whatsNew(c)
+  d.log(`[update] building ${about} in the background`)
+  set({ stage: 'installing', about })
+  const result = await installFromSource(c, d.log)
+  if (!result.ok) {
+    failedFor = stateOf(c)
+    d.log(`[update] background build failed; left as it was until /update: ${result.message.slice(0, 300)}`)
+    set({ stage: 'available', about, checkedAt: Date.now() })
+    return
+  }
+  /* 'ready', as a Windows download is: restarted into once nobody is using Wumpy. */
+  set({ stage: 'ready', next: 'the new build', about, checkedAt: Date.now() })
 }
 
 function startLinuxUpdates(d: UpdateDeps): void {
@@ -97,6 +132,10 @@ function startLinuxUpdates(d: UpdateDeps): void {
   set({ stage: 'current' })
   setTimeout(() => void checkLinux(), 60_000).unref?.()
   setInterval(() => void checkLinux(), EVERY_MS).unref?.()
+  setInterval(() => {
+    if (state.stage === 'available') void buildInBackground(d)
+    else if (state.stage === 'ready' && d.idle()) d.restart('to start the updated Wumpy while nobody is using it')
+  }, LOOK_EVERY_MS).unref?.()
 }
 
 /**
@@ -134,6 +173,11 @@ export async function updateNow(force = false): Promise<{ ok: boolean; message: 
     }
   }
   if (state.stage === 'installing') return { ok: false, message: 'Already updating — it restarts by itself when the build is done.' }
+  if (state.stage === 'ready') {
+    deps.restart('to start the updated Wumpy')
+    return { ok: true, message: 'The update is already built. Restarting into it.' }
+  }
+  failedFor = ''
   set({ stage: 'checking' })
   const c = await checkSource().catch(() => null)
   if (!c?.source) {

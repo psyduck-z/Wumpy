@@ -98,5 +98,8 @@ export const DEFAULT_SETTINGS: WumpySettings = {
   modelOrder: DEFAULT_ORDERING,
 
   // See WumpySettings.autoRank. On, and inert without a second key.
-  autoRank: true
+  autoRank: true,
+
+  // See WumpySettings.skillSync. Off: it sends their skills to GitHub.
+  skillSync: false
 }

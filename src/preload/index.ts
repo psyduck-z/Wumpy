@@ -258,7 +258,12 @@ const api = {
     /** One skill, whole, to run as a command. */
     get: (name: string): Promise<Skill | null> => ipcRenderer.invoke(IPC.skillGet, name),
     /** Opens the skills folder; resolves to its path. */
-    folder: (open: boolean): Promise<string> => ipcRenderer.invoke(IPC.skillFolder, open)
+    folder: (open: boolean): Promise<string> => ipcRenderer.invoke(IPC.skillFolder, open),
+    /** Skills on every device (main/skillsync.ts). */
+    sync: (req: { action: 'now' | 'on' | 'off' | 'key' | 'status'; token?: string }): Promise<{ ok: boolean; on: boolean; message: string; changed?: boolean }> =>
+      ipcRenderer.invoke(IPC.skillSync, req),
+    /** Another device's skills arrived. */
+    onChanged: (cb: () => void) => on<null>(IPC.skillsChanged, () => cb())
   },
   keys: {
     /**

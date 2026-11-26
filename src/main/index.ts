@@ -72,6 +72,8 @@ import { launchPath } from '@shared/launchpath'
 import { folderFacts, resolveUserFolders } from './folders'
 import { ContextStore } from './context'
 import { SkillStore } from './skills'
+import { SkillSync } from './skillsync'
+import { skillPrompt } from '@shared/skills'
 import { Speech } from './speech'
 import {
   DEFAULT_RATE,
@@ -214,6 +216,7 @@ let cloud: CloudClient
 let keys: KeyStore
 let notes: ContextStore
 let skills: SkillStore
+let skillSync: SkillSync
 let usage: UsageStore
 let pools: PoolStore
 let ranker: Ranker
@@ -795,6 +798,10 @@ function factsFor(
   stopAt: number | null = null
 ): string {
   /* Everything they have said in this chat, for the skills that came up. */
+  const lastReplyOf = (list: ChatRequest['messages']): string => {
+    const reply = [...list].reverse().find((m) => m.role === 'assistant')
+    return typeof reply?.content === 'string' ? reply.content : ''
+  }
   const said = messages.filter((m) => m.role === 'user').map((m) => (typeof m.content === 'string' ? m.content : ''))
   const now = new Date()
   return [
@@ -840,7 +847,7 @@ function factsFor(
       : []),
     ...buildFacts(messages),
     // Their skills: one line each, and the whole of any that came up. See skills.ts.
-    ...(skills?.forPrompt(said) ?? []),
+    ...(skills?.forPrompt(said, lastReplyOf(messages)) ?? []),
     // A guess in a game of hangman, checked here rather than by the model. See hangman.ts.
     ...hangmanFacts(messages.map((m) => ({ role: m.role, content: typeof m.content === 'string' ? m.content : '' }))),
     // Silent unless something is running out. See quotaFacts.
@@ -2660,6 +2667,38 @@ ${command}`
   }))
 
   ipcMain.handle(IPC.skillList, () => skills.summaries())
+  /* Skills on every device (main/skillsync.ts): now, on, off, or a token. */
+  ipcMain.handle(
+    IPC.skillSync,
+    async (_e, req: { action: 'now' | 'on' | 'off' | 'key' | 'status'; token?: string }) => {
+      const on = (): boolean => settings.get('skillSync') === true
+      if (req?.action === 'off') {
+        settings.patch({ skillSync: false })
+        return { ok: true, on: false, message: 'Stopped sharing skills between devices. The ones already shared stay in your gist.' }
+      }
+      if (req?.action === 'key') {
+        const kept = skillSync.setToken(String(req.token ?? ''))
+        if (!kept.ok) return { ok: false, on: on(), message: kept.why }
+        if (!String(req.token ?? '').trim()) return { ok: true, on: on(), message: 'Forgot the GitHub token.' }
+        settings.patch({ skillSync: true })
+      }
+      if (req?.action === 'on') settings.patch({ skillSync: true })
+      if (req?.action === 'status') {
+        const auth = await skillSync.token()
+        return {
+          ok: true,
+          on: on(),
+          message: on()
+            ? `Sharing skills between your devices, through a gist on your GitHub account${auth ? (auth.from === 'gh' ? ' (signed in with gh)' : '') : ' — but there is no GitHub token on this device yet'}.`
+            : 'Skills are not shared between devices.'
+        }
+      }
+      if (!on()) return { ok: false, on: false, message: 'Sharing skills is off. `/sync on` turns it on.' }
+      const result = await skillSync.sync()
+      if (result.changed) panel.send(IPC.skillsChanged, null)
+      return { ...result, on: true }
+    }
+  )
   ipcMain.handle(IPC.skillGet, (_e, name: string) => skills.get(String(name ?? '')))
   ipcMain.handle(IPC.skillFolder, async (_e, open: boolean) => {
     skills.seed()
@@ -2672,6 +2711,7 @@ ${command}`
     (_e, req: { name: string; description?: string; triggers?: string[]; body: string; argumentHint?: string }) => {
       const result = skills.save(req)
       if (result.ok) journal.add('skill', `${result.name}: ${result.did}`)
+      if (result.ok) syncSoon()
       return result
     }
   )
@@ -2939,6 +2979,7 @@ void app.whenReady().then(async () => {
   keys = new KeyStore()
   notes = new ContextStore()
   skills = new SkillStore()
+  skillSync = new SkillSync(skills, (line) => console.log(line))
   pools = new PoolStore()
   cloud = new CloudClient(keys, pools, { up: (p) => localUp.has(p), refresh: checkLocal })
   usage = new UsageStore()
@@ -3049,6 +3090,9 @@ void app.whenReady().then(async () => {
     save: (saved) => writeFileSync(join(app.getPath('userData'), 'ranking.json'), JSON.stringify(saved))
   })
   ranker.start()
+  /* Skills from their other devices: shortly after start, then every 30 minutes, when it is on. */
+  setTimeout(() => void syncInBackground('start'), 45_000).unref?.()
+  setInterval(() => void syncInBackground('every 30 minutes'), 30 * 60_000).unref?.()
   setVoiceprintLog((line) => console.log(line))
   /* Updates on Windows, from the releases each push publishes, shown in the
      panel's header and installed once nobody is using Wumpy; on Linux, from
@@ -3175,7 +3219,7 @@ void app.whenReady().then(async () => {
   // during an install. A restart is asked for from a terminal or a script,
   // never to look at Wumpy.
   if (process.argv.includes('--voice')) startVoiceTurn('started with --voice')
-  else if (!process.argv.includes('--hidden') && !process.argv.includes('--restart')) panel.show('launch')
+  else if (!startsHidden() && !process.argv.includes('--restart')) panel.show('launch')
 
   /* Last, and not awaited by anything above it: reclaiming a cache is
      housekeeping, and the panel should not wait on a disk walk to open. */
@@ -3215,6 +3259,10 @@ app.on('second-instance', (_event, argv) => {
   }
   if (argv.includes('--hearing-check')) {
     void hearingCheck()
+    return
+  }
+  if (argv.includes('--skill-check')) {
+    void skillCheck()
     return
   }
   if (argv.includes('--memory-check')) {
@@ -3289,8 +3337,48 @@ let launchChat: string | null =
   process.argv.find((a) => a.startsWith('--resume-chat='))?.slice('--resume-chat='.length) ?? null
 if (launchChat && !/^[\w-]{1,80}$/.test(launchChat)) launchChat = null
 
+/**
+ * A background skills sync, when sharing is on: quiet unless it changed
+ * something here, in which case the panel re-reads the commands.
+ */
+async function syncInBackground(why: string): Promise<void> {
+  if (!skillSync || settings.get('skillSync') !== true) return
+  const result = await skillSync.sync()
+  if (!result.ok) console.log(`[skills] background sync (${why}) did not run: ${result.message}`)
+  if (result.changed) panel?.send(IPC.skillsChanged, null)
+}
+
+/** A skill was just saved: shared a few seconds later, once a burst of saves has settled. */
+let syncTimer: ReturnType<typeof setTimeout> | undefined
+function syncSoon(): void {
+  clearTimeout(syncTimer)
+  syncTimer = setTimeout(() => void syncInBackground('a skill was saved'), 8000)
+}
+
+/**
+ * Whether this start stays in the tray: --hidden, or a restart into an
+ * update that the installer launched without flags, from a tray that had
+ * the panel away (the note restartWumpy leaves; fresh, and read once).
+ */
+const START_HIDDEN = 'start-hidden.txt'
+function startsHidden(): boolean {
+  /* Read and removed first, whatever the flags say, so it can never linger
+     and hide a start that was meant to show the panel. */
+  let noted = false
+  const note = join(app.getPath('userData'), START_HIDDEN)
+  try {
+    if (existsSync(note)) {
+      noted = Date.now() - statSync(note).mtimeMs < 10 * 60_000
+      unlinkSync(note)
+    }
+  } catch {
+    noted = false
+  }
+  return noted || process.argv.includes('--hidden')
+}
+
 /** Wumpy's own launch flags, which describe one start and are not carried over. */
-const OWN_FLAGS = /^--(?:hidden|voice|toggle|restart|speech-check|voice-samples|compare-voices|hearing-check|memory-check|agents-check|build-check(?:=.*)?|delegate-check|page-check=.*|compare-hearing|resume-chat=.*)$/
+const OWN_FLAGS = /^--(?:hidden|voice|toggle|restart|speech-check|voice-samples|compare-voices|hearing-check|memory-check|skill-check|agents-check|build-check(?:=.*)?|delegate-check|page-check=.*|compare-hearing|resume-chat=.*)$/
 
 async function restartWumpy(why: string, chatId: string | null): Promise<void> {
   if (restarting) return
@@ -3309,6 +3397,15 @@ async function restartWumpy(why: string, chatId: string | null): Promise<void> {
       writeFileSync(join(app.getPath('userData'), 'resume-chat.txt'), chatId)
     } catch {
       /* It opens on an empty chat instead. */
+    }
+  }
+  /* Nor --hidden: an update installed while Wumpy sat in the tray must not
+     open the panel over whatever they are doing. See startsHidden. */
+  if (process.platform === 'win32' && updateState().stage === 'ready' && !panel?.onScreen) {
+    try {
+      writeFileSync(join(app.getPath('userData'), START_HIDDEN), String(Date.now()))
+    } catch {
+      /* It opens the panel once, as it used to. */
     }
   }
   if (restartIntoUpdate((line) => console.log(line))) return
@@ -3911,6 +4008,43 @@ async function memoryCheck(): Promise<void> {
         `kept ${one(/<keep>([\s\S]*?)<\/keep>/i.exec(reply)?.[1] ?? '(none)')}; said ${one(shown)}`
     )
   }
+}
+
+/**
+ * `wumpy --skill-check`: whether the model in use really makes a skill when
+ * asked to - from a description, from what was just done in the chat, and
+ * for itself - through skill-creator, as the panel sends it. Only reads the
+ * replies; nothing is saved.
+ */
+async function skillCheck(): Promise<void> {
+  const creator = skills.get('skill-creator')
+  if (!creator) {
+    console.log('[wumpy] skill check: no skill-creator in the skills folder')
+    return
+  }
+  const say = (label: string, reply: string): void => {
+    const made = savesIn(reply).skills
+    console.log(
+      `[wumpy] skill check: ${label}: ${made.length ? 'MADE' : 'none made'} ` +
+        `${JSON.stringify(made.map((k) => ({ name: k.name, description: k.description, triggers: k.triggers, hint: k.argumentHint, body: k.body.slice(0, 300) })))}; ` +
+        `shown ${JSON.stringify(withoutKept(reply).replace(/\s+/g, ' ').slice(0, 300))}`
+    )
+  }
+  console.log(`[wumpy] skill check: on ${resolveModel() ?? 'no model'}`)
+  const work: ChatRequest['messages'] = [
+    { role: 'user', content: 'write my standup: fixed the login bug, reviewed PR 42, blocked on the API keys from IT. Keep it to Yesterday / Today / Blockers, one line each, no fluff.' }
+  ]
+  work.push({ role: 'assistant', content: await modelSays(work.slice(), false) })
+  work.push({ role: 'user', content: skillPrompt(creator, 'from this conversation: the way we just did it') })
+  say('from the conversation', await modelSays(work, false))
+  say(
+    'described',
+    await modelSays([{ role: 'user', content: skillPrompt(creator, 'to turn a pasted email thread into three bullets and a suggested reply') }], false)
+  )
+  say(
+    'for itself',
+    await modelSays([{ role: 'user', content: skillPrompt(creator, 'for yourself: always check the weather and my calendar before suggesting plans for my day') }], false)
+  )
 }
 
 async function hearingCheck(): Promise<void> {

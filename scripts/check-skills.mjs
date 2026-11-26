@@ -216,9 +216,42 @@ check('a skill can carry its argument hint', store.save({ name: 'standup', body:
   check('but never take over one of the app\'s own', /!taken\.has\(s\.name\)/.test(cmds), true)
   check('/skill <name> runs one anyway', /name: 'skill',/.test(cmds), true)
   check('a skill command sends the skill, showing what was typed', /chat\.send\(skillPrompt\(skill, action\.args\), shown\)/.test(app), true)
-  check('the list is read when the panel comes up', /refresh\(\)\s*return window\.wumpy\.panel\.onShown\(refresh\)/.test(app), true)
+  check('the list is read when the panel comes up', /refresh\(\)\s*const offShown = window\.wumpy\.panel\.onShown\(refresh\)/.test(app), true)
   check('and when a chat saves one', /if \(skills\.length\) void window\.wumpy\.skills\.list\(\)\.then\(setSkillCommands\)/.test(read('src/renderer/src/saves.ts')), true)
   check('the palette hears about them', /useSyncExternalStore\(onCommandsChanged, commandsSeen\)/.test(read('src/renderer/src/components/Composer.tsx')), true)
+}
+
+/* ---------------------------------------- asking it to make one */
+{
+  const out = join(process.cwd(), '.skills-intents.mjs')
+  await build({ entryPoints: ['src/renderer/src/intents.ts'], bundle: true, platform: 'node', format: 'esm', outfile: out, logLevel: 'error', alias: { '@shared': './src/shared' } })
+  const { matchIntent } = await import(pathToFileURL(out).href)
+  rmSync(out, { force: true })
+  for (const [said, ask] of [
+    ['make a skill for my standups', 'new for my standups'],
+    ['create your own skill to check the weather every morning', 'new to check the weather every morning'],
+    ['Write yourself a skill that turns my notes into flashcards.', 'new that turns my notes into flashcards'],
+    ['can you create a new skill called standup', 'new called standup'],
+    ['make a skill: summarise my emails', 'new summarise my emails'],
+    ['create a skill', 'new'],
+    ['create a skill for yourself', 'new'],
+    ['save that as a skill', 'new from this conversation: the way we just did it'],
+    ['turn what we just did into a skill called weekly-report', 'new from this conversation: the way we just did it, named weekly-report'],
+    ['make this conversation into your own skill', 'new from this conversation: the way we just did it']
+  ]) check(`"${said}" makes a skill`, matchIntent(said), { kind: 'skills', ask })
+  for (const said of ['make a skill tree for my game', 'what skills do you have?', 'I need to learn a new skill', 'create a skillset matrix'])
+    check(`"${said}" is for the model`, matchIntent(said)?.kind ?? null, null)
+  const app = read('src/renderer/src/App.tsx')
+  check('with nothing said, skill-creator asks what it should do', /if \(!what && !creator\) \{/.test(app), true)
+  const creator = B.BUILTIN_SKILLS['skill-creator']
+  check('skill-creator makes skills for Wumpy itself too', /A skill for yourself/.test(creator) && /for Wumpy itself/.test(creator), true)
+  check('saved only by the tag, never by writing the file', /The only way to save a skill is this tag/.test(creator) && /Do not write a file/.test(creator), true)
+  check('and from what was just done, without asking again', /## From this conversation/.test(creator) && /Do not ask me to describe it again/.test(creator), true)
+  const shipped = Object.values(B.BUILTIN_SKILLS).map((t) => S.parseSkill('x', t))
+  check('"create your own skill" brings skill-creator in when it reaches the model', S.activeSkills(shipped, ['could you create your own skill for my morning routine, with the weather and my calendar?']).map((k) => k.name), ['skill-creator'])
+  check('"yes" to "save that as a skill?" still gets the format', S.skillFacts(shipped, ['yes'], '/x', 'Want me to save that as a skill?').some((l) => l.includes('<skill name="short-name"')), true)
+  check('a skill command is not talk about skills', S.skillFacts(shipped, [S.skillPrompt(shipped[0], 'x')], '/x').some((l) => l.includes('<skill name="short-name"')), false)
+  check('the model is told it can make them', S.skillFacts(shipped, ['hello'], '/x')[0].includes('You can make new ones, for them or for yourself'), true)
 }
 
 /* ------------------------------------------------------------ notes */
@@ -233,7 +266,7 @@ check('a fact said twice is kept once', notes.read(), '- They prefer celsius.')
 const main = read('src/main/index.ts')
 const chat = read('src/renderer/src/hooks/useChat.ts')
 const assistant = read('src/shared/assistant.ts')
-check('skills reach the facts, from what they said in the chat', /\.\.\.\(skills\?\.forPrompt\(said\) \?\? \[\]\)/.test(main) && /const said = messages\.filter\(\(m\) => m\.role === 'user'\)/.test(main), true)
+check('skills reach the facts, from what they said in the chat', /\.\.\.\(skills\?\.forPrompt\(said, lastReplyOf\(messages\)\) \?\? \[\]\)/.test(main) && /const said = messages\.filter\(\(m\) => m\.role === 'user'\)/.test(main), true)
 check('saved when the answer is finished, not before', /if \(written\.current\.id === d\.requestId\) void keepSaves\(written\.current\.text, noteRef\.current\)/.test(chat), true)
 check('and every save is said', /Saved to your notes: /.test(read('src/renderer/src/saves.ts')) && /the skill /.test(read('src/renderer/src/saves.ts')), true)
 check('the model is told how, when it is about remembering', /put <remember>one short fact<\/remember> anywhere in your reply/.test(assistant), true)

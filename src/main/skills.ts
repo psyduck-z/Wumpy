@@ -27,7 +27,7 @@ const MAX_SKILLS = 60
 /** Which shipped skills have been put in the folder, and what each said then. */
 const SHIPPED = '.builtin.json'
 
-const hash = (text: string): string => createHash('sha256').update(text.replace(/\r\n/g, '\n')).digest('hex').slice(0, 16)
+export const hash = (text: string): string => createHash('sha256').update(text.replace(/\r\n/g, '\n')).digest('hex').slice(0, 16)
 
 export class SkillStore {
   readonly dir = join(app.getPath('userData'), 'skills')
@@ -197,8 +197,53 @@ export class SkillStore {
     }
   }
 
+  /**
+   * What sync sees: every skill's text, hash and last change - except the
+   * shipped ones still as shipped, which every Wumpy has already, unless
+   * `also` names them (the other side has its own version).
+   */
+  syncView(also: ReadonlySet<string> = new Set()): Record<string, { text: string; hash: string; at: number }> {
+    const record = this.shipped()
+    const out: Record<string, { text: string; hash: string; at: number }> = {}
+    for (const s of this.list()) {
+      const file = this.fileOf(s.name)
+      if (!file) continue
+      try {
+        const text = readFileSync(file, 'utf8')
+        const h = hash(text)
+        const asShipped = Boolean(record[s.name] && record[s.name] !== 'theirs' && record[s.name] === h)
+        /* As shipped, it only takes part when the other side has a version of it -
+           and then as older than any edit, so it never overwrites one. */
+        if (asShipped && !also.has(s.name)) continue
+        out[s.name] = { text, hash: h, at: asShipped ? 0 : Math.round(statSync(file).mtimeMs) }
+      } catch {
+        /* Unreadable: not synced this time. */
+      }
+    }
+    return out
+  }
+
+  /** A skill's whole file, as it came from another device. */
+  put(name: string, text: string): boolean {
+    const n = skillName(name)
+    if (!n || n !== name || !text.trim() || text.length > MAX_SKILL_CHARS * 3) return false
+    try {
+      const file = this.fileOf(n) ?? join(this.dir, n, 'SKILL.md')
+      mkdirSync(join(file, '..'), { recursive: true })
+      writeAtomic(file, text)
+      return true
+    } catch {
+      return false
+    }
+  }
+
+  /** Removes one, as deleted on another device. */
+  drop(name: string): boolean {
+    return this.save({ name, body: '' }).ok
+  }
+
   /** The lines for this turn's facts, from everything they have said in the chat. */
-  forPrompt(said: readonly string[]): string[] {
-    return skillFacts(this.list(), said, this.dir)
+  forPrompt(said: readonly string[], lastReply = ''): string[] {
+    return skillFacts(this.list(), said, this.dir, lastReply)
   }
 }

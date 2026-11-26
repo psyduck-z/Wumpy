@@ -145,7 +145,9 @@ export function Header({
             title={
               busy
                 ? 'After this answer: restarts into the new version'
-                : `Wumpy ${update.next} is downloaded (this is ${update.current}). Restart into it now - this chat opens again. Otherwise it installs itself while nobody is using Wumpy.`
+                : update.about
+                  ? `The update (${update.about}) is built and installed. Restart into it now - this chat opens again. Otherwise Wumpy restarts into it by itself while nobody is using it.`
+                  : `Wumpy ${update.next} is downloaded (this is ${update.current}). Restart into it now - this chat opens again. Otherwise it installs itself while nobody is using Wumpy.`
             }
           >
             Update ready

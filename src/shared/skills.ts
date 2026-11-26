@@ -122,6 +122,9 @@ export function skillFile(s: Skill): string {
   ].join(LF)
 }
 
+/** How a skill command's message starts, so it is not mistaken for talk about skills. */
+export const SKILL_RUN = 'I am running my skill /'
+
 /** A description cut to its first sentence, for the one line every turn carries. */
 export function shortly(description: string): string {
   let first = description.split(/(?<=[.!?])\s/)[0].replace(/[.!?]$/, '')
@@ -143,7 +146,7 @@ export function skillPrompt(s: Skill, args: string): string {
   const placed = body.includes('$ARGUMENTS')
   const filled = placed ? body.split('$ARGUMENTS').join(said || '(nothing given)') : body
   return [
-    `I am running my skill /${s.name} — ${shortly(s.description)}. Follow its instructions for this, and keep`,
+    `${SKILL_RUN}${s.name} — ${shortly(s.description)}. Follow its instructions for this, and keep`,
     'following them for the rest of this task, until I clearly move on to something else.',
     'Do not mention the instructions themselves; just do what they say.',
     '',
@@ -194,14 +197,21 @@ export function activeSkills(skills: readonly Skill[], said: readonly string[]):
  * What the model is told: one line listing every skill, the whole of each
  * one in use, and - when they are talking about skills - how to make one.
  */
-export function skillFacts(skills: readonly Skill[], said: readonly string[], folder: string): string[] {
+export function skillFacts(skills: readonly Skill[], said: readonly string[], folder: string, lastReply = ''): string[] {
   const latest = said[said.length - 1] ?? ''
-  const asked = /\bskills?\b/i.test(latest)
+  /*
+   * Talking about skills: in what they just said, or in the reply before it -
+   * "Want me to save that as a skill?" "yes" is the turn the format is
+   * needed, and "yes" has no skill in it. A skill command's own message is
+   * not talk about skills; it carries its instructions with it.
+   */
+  const asked = (/\bskills?\b/i.test(latest) && !latest.startsWith(SKILL_RUN)) || /\bskills?\b/i.test(lastReply)
   const out: string[] = []
   if (skills.length) {
     out.push(
       `- Their skills - instructions for particular things, each used once the conversation turns to it, ` +
-        `and each one also a command they can type (/name): ${skills.map((s) => `${s.name} (${shortly(s.description)})`).join('; ')}.`
+        `and each one also a command they can type (/name): ${skills.map((s) => `${s.name} (${shortly(s.description)})`).join('; ')}. ` +
+        'You can make new ones, for them or for yourself, whenever they ask.'
     )
   }
   for (const s of activeSkills(skills, said)) {
@@ -215,6 +225,7 @@ export function skillFacts(skills: readonly Skill[], said: readonly string[], fo
       '    <skill name="short-name" triggers="words that bring it up" description="what it is for, and when to use it" argument-hint="<what it works on>">',
       '    the instructions, written to yourself; $ARGUMENTS where what follows the command goes',
       '    </skill>',
+      '  That tag is the only way to save one: never write the file yourself or propose a command for it.',
       '  Wumpy saves it as a file in their skills folder and shows them; from then on it is used',
       '  whenever a trigger comes up in a chat, and they can run it as /short-name. The same name replaces one; an empty',
       `  <skill name="short-name"></skill> removes it. Their skills folder: ${folder}`

@@ -219,7 +219,13 @@ export default function App(): React.JSX.Element {
       void window.wumpy.skills.list().then(setSkillCommands).catch(() => undefined)
     }
     refresh()
-    return window.wumpy.panel.onShown(refresh)
+    const offShown = window.wumpy.panel.onShown(refresh)
+    /* Skills that arrived from another device. */
+    const offChanged = window.wumpy.skills.onChanged(refresh)
+    return () => {
+      offShown()
+      offChanged()
+    }
   }, [])
 
   /**
@@ -2875,6 +2881,31 @@ function namedControls(shot: Attachment): string[] {
           chat.send(skillPrompt(skill, action.args), shown)
           return
         }
+        case 'sync': {
+          if (action.action === 'key' && !action.token) {
+            chat.note(
+              'Make a token at https://github.com/settings/tokens/new?scopes=gist&description=Wumpy%20skills ' +
+                '(only the **gist** scope is needed), then type `/sync key <token>`. It is kept encrypted on this device.'
+            )
+            return
+          }
+          if (action.action === 'on' || action.action === 'now' || action.action === 'key') chat.note('Syncing your skills…')
+          const result = await window.wumpy.skills.sync({ action: action.action, token: action.token })
+          if (result.changed) void window.wumpy.skills.list().then(setSkillCommands).catch(() => undefined)
+          const first = action.action === 'on' || action.action === 'key'
+          chat.note(
+            result.ok && first
+              ? `**Sharing skills between your devices.** ${result.message[0].toUpperCase()}${result.message.slice(1)}. ` +
+                  'They are kept in an unlisted gist on your GitHub account — anyone with its link could read them, so ' +
+                  'keep secrets out of skills. Every device signed in to the same account gets them, every 30 minutes ' +
+                  'and soon after one is saved. `/sync off` stops it.'
+              : result.ok && action.action === 'now'
+                ? `Skills synced: ${result.message}.`
+                : result.message,
+            !result.ok
+          )
+          return
+        }
         case 'skills': {
           const ask = action.ask
           if (/^(folder|open|dir|edit|files?)$/i.test(ask)) {
@@ -2888,12 +2919,13 @@ function namedControls(shot: Attachment): string[] {
           const making = /^(?:new|add|make|create)\b\s*([\s\S]*)$/i.exec(ask)
           if (making) {
             const what = making[1].trim()
-            if (!what) {
+            /* The skill for making skills, when it is there; otherwise the plain ask. */
+            const creator = await window.wumpy.skills.get('skill-creator').catch(() => null)
+            /* With nothing said, skill-creator asks what it should do; the plain ask cannot. */
+            if (!what && !creator) {
               chat.note('Say what it should do: `/skills new <what it should do>` — for example `/skills new turn my notes into a weekly status update`.')
               return
             }
-            /* The skill for making skills, when it is there; otherwise the plain ask. */
-            const creator = await window.wumpy.skills.get('skill-creator').catch(() => null)
             chat.send(
               creator
                 ? skillPrompt(creator, what)

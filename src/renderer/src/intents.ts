@@ -160,6 +160,36 @@ const INTENTS: Intent[] = [
     build: () => ({ kind: 'update', force: false })
   },
   {
+    /*
+     * "make a skill for my standups", "create your own skill to check the
+     * weather", "write yourself a skill", "create a skill": skill-creator,
+     * every time, rather than hoping the model notices it can. Asked for as
+     * "allow me to also ask it to create its own skill". What follows the
+     * word skill must read as what it is for - for, that, to, called... -
+     * so "make a skill tree for my game" is still a question for the model.
+     */
+    pattern:
+      /^(?:please\s+)?(?:can\s+you\s+|could\s+you\s+|i\s+want\s+you\s+to\s+|go\s+and\s+)?(?:make|create|write|build|add|set\s+up|teach)\s+(?:me\s+|yourself\s+)?(?:a\s+|an\s+|your\s+own\s+|a\s+new\s+|another\s+|one\s+more\s+)?(?:new\s+)?skill(?:\s+(?:for|that|to|which|so|called|named|about|on|where|when|of)\b(.*)|\s*:\s*(.*)|\s*(?:please|now|for\s+yourself|for\s+me)?)\s*[.!]?$/i,
+    build: (m) => {
+      const connector = (m.input ?? '').match(/skill\s+(for|that|to|which|so|called|named|about|on|where|when|of)\b/i)?.[1] ?? ''
+      /* "for yourself" and "for me" say whose it is, not what it is for. */
+      const rest = trimTail(m[1] ?? m[2] ?? '').replace(/^(?:yourself|me|you)$/i, '')
+      return { kind: 'skills', ask: `new ${rest ? `${connector ? `${connector} ` : ''}${rest}` : ''}`.trim() }
+    }
+  },
+  {
+    /*
+     * "save that as a skill", "turn what we just did into a skill", "make
+     * this conversation into your own skill": the way it was just done, kept.
+     */
+    pattern:
+      /^(?:please\s+)?(?:can\s+you\s+)?(?:save|turn|make|keep|remember|store)\s+(?:this|that|it|all\s+(?:this|that)|what\s+(?:we|you)\s+(?:just\s+)?did|how\s+(?:we|you)\s+(?:just\s+)?did\s+(?:it|that)|this\s+conversation|this\s+chat)\s+(?:as|into)\s+(?:a\s+|an\s+|your\s+own\s+|a\s+new\s+)?skill(?:\s+(?:called|named)\s+(.+?))?\s*[.!]?$/i,
+    build: (m) => ({
+      kind: 'skills',
+      ask: `new from this conversation: the way we just did it${m[1] ? `, named ${trimTail(m[1])}` : ''}`
+    })
+  },
+  {
     /* "change the model", "switch models", "pick a model": the list. */
     pattern:
       /^(?:please\s+)?(?:can\s+you\s+)?(?:change|switch|pick|choose|select)\s+(?:the\s+|my\s+|a\s+|your\s+)?(?:ai\s+)?models?\.?$/i,

@@ -66,7 +66,8 @@ export function useInputHistory(): InputHistory {
        command happened to answer to that spelling the line would be stored
        in plain text. Nothing whose name starts with "key" is worth
        remembering anyway. */
-    if (/^\/(key|apikey)/i.test(entry)) {
+    /* `/sync key <github token>` carries one too. */
+    if (/^\/(key|apikey)/i.test(entry) || /^\/sync\s+(key|token)\b/i.test(entry)) {
       setBrowsing(false)
       return
     }

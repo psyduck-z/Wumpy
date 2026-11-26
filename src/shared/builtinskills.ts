@@ -124,15 +124,21 @@ Give the rewritten text only, ready to paste - no preamble. Then one line, in it
 `,
   'skill-creator': `---
 name: skill-creator
-description: Make a new Wumpy skill, or improve one - interview me about what it should do, then write it. Use when they want to create, write or change a skill.
-triggers: make a skill, create a skill, new skill, write a skill
+description: Make a new Wumpy skill, or improve one - for them, or for Wumpy itself - from a description or from what was just done in the chat. Use when they want to create, write, save or change a skill.
+triggers: make a skill, create a skill, new skill, write a skill, your own skill, yourself a skill, as a skill, into a skill
 argument-hint: <what the skill should do>
 ---
 # Skill creator
 
 Help me make a skill for this: $ARGUMENTS
 
-A skill is a SKILL.md: a header, then instructions written to an assistant like you. It runs as /name, and comes in by itself when one of its trigger words is said.
+A skill is a SKILL.md: a header, then instructions written to an assistant like you. It runs as /name, and comes in by itself when one of its trigger words is said. A skill for yourself - a way you want to work, a routine of yours, something you keep being asked - is made exactly the same way; you are the one who will follow it.
+
+If nothing was said about what it should do, ask in one short question and wait.
+
+## From this conversation
+
+When I ask to save what we just did as a skill, the method is already in the chat above. Take the steps that worked - not the false starts or the dead ends - and the corrections I made along the way, and write those as the method. Keep what will be true every time; put what changes each time (the file, the topic, the person) where $ARGUMENTS goes. Do not ask me to describe it again.
 
 ## How
 
@@ -150,7 +156,7 @@ A skill is a SKILL.md: a header, then instructions written to an assistant like 
 
 ## Saving
 
-Put it in your reply exactly like this, and Wumpy saves it as a file and makes it a command:
+The only way to save a skill is this tag, in your reply. Do not write a file, propose a command or use any other tool for it - Wumpy puts the file in the right place itself and makes it a command:
 
 <skill name="the-name" description="What it does. Use when ..." triggers="phrase one, phrase two" argument-hint="<what it works on>">
 the instructions

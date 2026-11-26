@@ -96,8 +96,12 @@ an icon, and (once it has run packaged) an autostart entry so it is in the tray
 after login. After that, **`/update`** (or "update yourself") does the same
 from inside Wumpy: it pulls new commits from GitHub (fast-forward only),
 builds, installs and restarts into the new copy. Every 30 minutes it checks
-for new commits or edits made since the install and shows **Update available**
-in the header; it never builds on its own. `/update force` rebuilds anyway.
+for new commits or edits made since the install, and builds and installs one
+in the background while nobody is using Wumpy, then restarts into it quietly
+(staying in the tray if it was there). A source folder with uncommitted
+changes is work in progress: that waits for `/update`, and the header shows
+**Update available**. `/update force` rebuilds anyway. On Windows, an update
+installed while Wumpy is in the tray no longer opens the panel afterwards.
 Bind the shortcut in `~/.config/hypr/bindings.lua`:
 
 ```lua
@@ -819,6 +823,19 @@ argument-hint: <what I did>
 Turn this into a standup with Yesterday, Today and Blockers: $ARGUMENTS
 ```
 
+**On every device.** `/sync on` shares your skills between your devices
+through an unlisted gist on your own GitHub account: a skill made, changed
+or deleted on one shows up the same on the others, every 30 minutes and a
+few seconds after one is saved (`/sync` does it now). Changed on two devices
+at once, the newer wins, and a deletion never beats an edit. Shipped skills
+nobody changed are not sent. On a machine where `gh` is signed in, that is
+all it needs; elsewhere, `/sync key <token>` with a GitHub token that has
+only the **gist** scope (kept encrypted, never in input history). An
+unlisted gist can be read by anyone who has its link, so keep secrets out of
+skills. `/sync off` stops it. Also: "make yourself a skill for...", "save
+that as a skill" and "turn what we just did into a skill" all go through
+`skill-creator`, which writes the method from the conversation itself.
+
 `$ARGUMENTS` is what followed the command (left out, it goes at the end).
 `disable-model-invocation: true` makes a skill a command only, never brought
 in by a trigger word; `user-invocable: false` makes it the opposite. A
@@ -972,6 +989,7 @@ or Enter to accept.
 | `/startup on\|off` | Start Wumpy in the background when you log in, so the earbuds gesture works without opening it |
 | `/restart` | Restart Wumpy and come back to the same chat (also in the tray menu, as `wumpy --restart`, or say "restart yourself") |
 | `/skills` | List your skills (each one is a command), `/skills new <what it should do>` to add one, `/skills folder` to open them |
+| `/sync` `<on\|off\|status\|key token>` | Share your skills between your devices through an unlisted gist on your GitHub account; bare, syncs now |
 | `/skill` `<name text>` | Run a skill by name, even one whose name another command has |
 | `/update` | Update Wumpy now: on Windows restart into a downloaded release, or look for one; on Linux pull, build and install from the source folder, then restart (`/update force` rebuilds anyway; or say "update yourself") |
 | `/mode [quick\|dev]` | Toggle Quick / Developer |
