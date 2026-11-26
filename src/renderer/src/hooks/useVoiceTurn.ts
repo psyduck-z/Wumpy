@@ -1,6 +1,6 @@
 import { useEffect, useRef } from 'react'
 import type { ChatMessage } from '@shared/types'
-import { approvalQuestion, firstYesNo, speakable, spokenCommand, spokenSlash, yesNo, type CommandName } from '@shared/spoken'
+import { approvalQuestion, firstYesNo, speakable, spokenCommand, spokenSkill, spokenSlash, yesNo, type CommandName } from '@shared/spoken'
 import {
   ORDER_NAME,
   isCancel,
@@ -12,7 +12,7 @@ import {
   sayModel,
   spokenList
 } from '@shared/spokenpick'
-import { allCommands } from '../commands'
+import { allCommands, skillVoiceNames } from '../commands'
 import { CLOUD_MODELS } from '@shared/cloud'
 import { record, strictBar, type Recording } from '../recorder'
 import { clipForSpeech } from '../wav'
@@ -1194,7 +1194,11 @@ export function useVoiceTurn(deps: Deps): void {
       /* "Slash love", "slash the leak": a command misheard is asked about,
          not run and not sent to the model as words. Yes runs it; anything
          else they say instead is what they meant. */
-      const spoken = spokenCommand(heard.heard, commandNames())
+      /* "Use grill on my plan", "slash detect AI ...": a skill by any name it
+         answers to aloud, before the general guess at a command - which
+         would hear "detect" and ask about something else. */
+      const skill = spokenSkill(heard.heard, skillVoiceNames())
+      const spoken = skill ? { ...skill, sure: true } : spokenCommand(heard.heard, commandNames())
       if (spoken && !spoken.sure) {
         note(`"${heard.heard.slice(0, 60)}" sounds like ${spoken.command}: asking`)
         const reply = await confirmCommand(spoken.name)
@@ -1345,7 +1349,7 @@ export function useVoiceTurn(deps: Deps): void {
              stand at the start to be heard as one: "Okay. Also," and then
              "slash log" is /log. */
           const standsAlone =
-            Boolean(spokenCommand(heard.heard, commandNames()) ?? spokenSlash(heard.heard)) ||
+            Boolean(spokenSkill(heard.heard, skillVoiceNames()) ?? spokenCommand(heard.heard, commandNames()) ?? spokenSlash(heard.heard)) ||
             modelSwitchIn(heard.heard, MODEL_NAMES) !== null
           const whole = held && !standsAlone ? { text: `${held.text} ${heard.text}`, heard: `${held.heard} ${heard.heard}` } : heard
           held = null

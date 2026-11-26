@@ -273,7 +273,8 @@ internal static class Program
     private static uint _targetVk = 'C';
 
     /// <summary>
-    /// Whether Shift must be held too (`--shift`). Wumpy asks for Win+Shift+Z,
+    /// Whether Shift must be held too (`--shift`). Wumpy once asked for Win+Shift+Z
+    /// and now asks for Win+Z, without it -
     /// the same combination it uses on Linux, so the shortcut is one thing to
     /// remember across machines; Win+C stays the default for the selftest.
     /// </summary>

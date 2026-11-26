@@ -564,7 +564,9 @@ check('because guessed options are still guessing', /still guessing/.test(prompt
   // And the lesson is written down where the next person will look.
   check(
     'and says why, so it is not re-added',
-    /describe the mistake, do not script it/i.test(everything),
+    /* In a comment beside the section now, where the next person to edit
+       it looks - not in the prompt, which told the model how to write prompts. */
+    /describe the mistake, do not script it/i.test(readFileSync('src/shared/assistant.ts', 'utf8')),
     true
   )
 }

@@ -251,6 +251,7 @@ const api = {
       triggers?: string[]
       body: string
       argumentHint?: string
+      aliases?: string[]
     }): Promise<{ ok: boolean; why: string; name: string; did: 'saved' | 'replaced' | 'removed' }> =>
       ipcRenderer.invoke(IPC.skillSave, skill),
     /** Every skill, for the command palette and /skills. */

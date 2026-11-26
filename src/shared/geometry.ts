@@ -46,7 +46,8 @@ export interface PanelSizes {
  */
 export function geometryFor(dock: Dock, workArea: Rect, sizes: PanelSizes): Rect {
   if (isTall(dock)) {
-    const width = sizes.tallWidth + EDGE_MARGIN * 2
+    /* Never more than half a small screen, however wide it was set. */
+    const width = Math.min(sizes.tallWidth, Math.max(320, Math.round(workArea.width / 2))) + EDGE_MARGIN * 2
     /* Top clearance, bottom margin: not symmetric any more, on purpose. */
     const height = Math.max(120, workArea.height - TITLEBAR_CLEARANCE - EDGE_MARGIN)
     const x = dock === 'right' ? workArea.x + workArea.width - width : workArea.x

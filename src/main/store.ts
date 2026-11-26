@@ -2,7 +2,7 @@ import { app } from 'electron'
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { writeAtomic } from './atomic'
-import { DEFAULT_SETTINGS } from '@shared/defaults'
+import { DEFAULT_SETTINGS, widenedSizes } from '@shared/defaults'
 import type { WumpySettings } from '@shared/types'
 
 /**
@@ -36,7 +36,7 @@ export class SettingsStore {
     try {
       const raw = JSON.parse(readFileSync(this.file, 'utf8')) as Partial<WumpySettings>
       // Merge over defaults so settings added in a later version are present.
-      return { ...DEFAULT_SETTINGS, ...raw }
+      return { ...DEFAULT_SETTINGS, ...raw, ...widenedSizes(raw) }
     } catch {
       return { ...DEFAULT_SETTINGS }
     }

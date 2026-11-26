@@ -31,6 +31,7 @@ name: grill
 description: Grill me on a plan, idea or decision - relentless questions, one at a time, until every branch is settled. Use when they want a plan stress-tested before they commit to it.
 triggers: grill me, grill my, stress test my plan, poke holes in
 argument-hint: <plan, idea or decision>
+aliases: grill me, the grill
 ---
 # Grill
 
@@ -66,6 +67,7 @@ name: eli5
 description: Explain something as if to a five-year-old - plain words, one everyday comparison, no jargon. Use when they ask for something explained simply, or "like I'm five".
 triggers: eli5, explain like i'm five, explain like im five, explain it like i'm 5, like i'm five, like im 5
 argument-hint: <topic or question>
+aliases: explain like I'm five, explain simply, like I'm five
 ---
 # Explain like I'm five
 
@@ -95,6 +97,7 @@ name: humanize
 description: Rewrite text so it reads like a person wrote it - cut the tells of AI writing, keep the meaning and the facts. Use when they want text humanized, made to sound natural, or less like a chatbot.
 triggers: humanize, humanise, sound more human, sound less like ai, less robotic
 argument-hint: <text to rewrite>
+aliases: humanise, make it human, sound human
 ---
 # Humanize
 
@@ -131,6 +134,7 @@ name: skill-creator
 description: Make a new Wumpy skill, or improve one - for them, or for Wumpy itself - from a description or from what was just done in the chat. Use when they want to create, write, save or change a skill.
 triggers: make a skill, create a skill, new skill, write a skill, your own skill, yourself a skill, as a skill, into a skill
 argument-hint: <what the skill should do>
+aliases: skill maker, new skill
 ---
 # Skill creator
 
@@ -162,7 +166,7 @@ When I ask to save what we just did as a skill, the method is already in the cha
 
 The only way to save a skill is this tag, in your reply. Do not write a file, propose a command or use any other tool for it - Wumpy puts the file in the right place itself and makes it a command:
 
-<skill name="the-name" description="What it does. Use when ..." triggers="phrase one, phrase two" argument-hint="<what it works on>">
+<skill name="the-name" description="What it does. Use when ..." triggers="phrase one, phrase two" argument-hint="<what it works on>" aliases="easy names to say it by">
 the instructions
 </skill>
 
@@ -178,6 +182,7 @@ name: brainstorm
 description: Turn a rough idea into a clear design through questions and options before anything is built. Use when they have an idea, a feature or a project to shape and have not decided how yet.
 triggers: brainstorm, bounce ideas, shape this idea
 argument-hint: <idea>
+aliases: brainstorming, ideas
 ---
 # Brainstorm
 
@@ -207,6 +212,7 @@ name: debug
 description: Find the real cause of a bug or failure before fixing anything - reproduce, read the evidence, test one hypothesis at a time. Use when there is an error, a crash, a failing test or "it doesn't work".
 triggers: debug this, help me debug, find the root cause
 argument-hint: <error, symptom or failing thing>
+aliases: debugger, bug hunt
 ---
 # Debug
 
@@ -239,6 +245,7 @@ name: coauthor
 description: Write a document together, section by section - gather the context, draft, refine, then test it the way a reader would. Use when they want to write a proposal, spec, report, essay or other document with help.
 triggers: co-write, coauthor, write a document with me
 argument-hint: <what the document is>
+aliases: co-author, write with me
 ---
 # Co-author
 
@@ -268,6 +275,7 @@ name: comms
 description: Write a status update, announcement, newsletter item or other message to a team - clear, short, the news first. Use when they need to update people at work or school about progress, problems, plans or changes.
 triggers: status update, weekly update, progress update
 argument-hint: <what happened, and who it is for>
+aliases: team update, announcement
 ---
 # Comms
 
@@ -300,6 +308,7 @@ name: tldr
 description: Boil something down to what matters - the point in one line, then the few details worth keeping. Use when they want a summary, the gist, or a too-long-didn't-read of a text, page, thread or file.
 triggers: tldr, tl;dr, give me the gist, sum this up, summarise this, summarize this
 argument-hint: <text, link or thing to summarise>
+aliases: sum up, too long didn't read, TL DR
 ---
 # TL;DR
 
@@ -329,6 +338,7 @@ name: proofread
 description: Fix spelling, grammar and punctuation with the smallest changes, keeping the writer's voice - then list what changed. Use when they want text checked, corrected or proofread before sending.
 triggers: proofread, check my spelling, check my grammar, fix my grammar, any typos
 argument-hint: <text to check>
+aliases: proof read, proofreader, spell check
 ---
 # Proofread
 
@@ -359,6 +369,7 @@ name: decide
 description: Help make a decision - lay out the options, weigh what matters, and recommend one with the reasons. Use when they are choosing between options, stuck on a choice, or asking "should I...".
 triggers: help me decide, pros and cons, decision matrix
 argument-hint: <the decision and the options>
+aliases: decision, help me choose
 ---
 # Decide
 
@@ -388,6 +399,7 @@ name: detect-ai
 description: Estimate how much of a piece of writing reads as AI-written, as a percentage, and point to the most suspicious passages and why. Use when they ask whether text was written by AI, how AI it sounds, or for an AI-detection check.
 triggers: detect ai, ai detector, ai detection, ai percent, ai percentage, written by ai, was this ai, ai written, how much of this is ai, chatgpt wrote
 argument-hint: <text to check>
+aliases: AI check, AI detector, AI detect
 ---
 # Detect AI
 
@@ -438,6 +450,7 @@ name: fact-check
 description: Pull out every checkable claim in a piece of text and rate each one - true, doubtful, false or can't tell - with what to check. Use when they want claims, an article, a post or their own draft fact-checked.
 triggers: fact check, fact-check, factcheck, check the facts, verify these claims
 argument-hint: <text with claims>
+aliases: fact checker, facts
 ---
 # Fact-check
 
@@ -473,6 +486,7 @@ name: tone-check
 description: Say how a message will come across to the person reading it - tone, the lines that could land badly, and a better version. Use when they ask how something sounds, whether it is rude, too harsh or passive-aggressive, before they send it.
 triggers: tone check, check the tone, check my tone, does this sound rude, too harsh, passive aggressive, passive-aggressive, how will this come across
 argument-hint: <message, and who it is to>
+aliases: tone, tone checker
 ---
 # Tone check
 
@@ -506,6 +520,7 @@ name: grade
 description: Mark a piece of work like a fair, demanding teacher - a grade against the rubric, what earns it, and the changes that would raise it most. Use when they want an essay, assignment, cover letter or answer graded, marked or given feedback.
 triggers: grade my, mark my essay, mark my assignment, feedback on my essay, rubric
 argument-hint: <work, and the task or rubric>
+aliases: marker, mark it
 ---
 # Grade
 
@@ -542,6 +557,7 @@ name: tutor
 description: Teach by asking, not telling - guide me to work it out myself with questions and hints. Use when they want to learn or understand something, practise, or get help with homework without being handed the answer.
 triggers: tutor me, quiz me, teach me step by step, socratic
 argument-hint: <topic or problem>
+aliases: teacher, lesson
 ---
 # Tutor
 

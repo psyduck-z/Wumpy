@@ -239,7 +239,7 @@ check('a skill can carry its argument hint', store.save({ name: 'standup', body:
     ['turn what we just did into a skill called weekly-report', 'new from this conversation: the way we just did it, named weekly-report'],
     ['make this conversation into your own skill', 'new from this conversation: the way we just did it']
   ]) check(`"${said}" makes a skill`, matchIntent(said), { kind: 'skills', ask })
-  for (const said of ['make a skill tree for my game', 'what skills do you have?', 'I need to learn a new skill', 'create a skillset matrix'])
+  for (const said of ['make a skill tree for my game', 'I need to learn a new skill', 'create a skillset matrix'])
     check(`"${said}" is for the model`, matchIntent(said)?.kind ?? null, null)
   const app = read('src/renderer/src/App.tsx')
   check('with nothing said, skill-creator asks what it should do', /if \(!what && !creator\) \{/.test(app), true)
@@ -252,6 +252,54 @@ check('a skill can carry its argument hint', store.save({ name: 'standup', body:
   check('"yes" to "save that as a skill?" still gets the format', S.skillFacts(shipped, ['yes'], '/x', 'Want me to save that as a skill?').some((l) => l.includes('<skill name="short-name"')), true)
   check('a skill command is not talk about skills', S.skillFacts(shipped, [S.skillPrompt(shipped[0], 'x')], '/x').some((l) => l.includes('<skill name="short-name"')), false)
   check('the model is told it can make them', S.skillFacts(shipped, ['hello'], '/x')[0].includes('You can make new ones, for them or for yourself'), true)
+}
+
+/* ---------------------------------------- skills on the earbuds */
+{
+  const V = await load('src/shared/spoken.ts', 'spoken')
+  const B2 = await load('src/shared/builtinskills.ts', 'builtin-voice')
+  const all = Object.entries(B2.BUILTIN_SKILLS).map(([n, t]) => S.parseSkill(n, t))
+  check('every shipped skill has a name that is easy to say', all.filter((k) => !k.aliases?.length).map((k) => k.name), [])
+  const voices = all.map((k) => ({ name: k.name, aliases: k.aliases }))
+  for (const [said, want] of [
+    ['use grill on my plan to move to Berlin', '/grill my plan to move to Berlin'],
+    ['Run detect AI on my essay.', '/detect-ai my essay'],
+    ['slash detect AI my essay', '/detect-ai my essay'],
+    ['Slash E-L-I five, black holes', '/eli5 black holes'],
+    ['use explain like I\'m five on black holes', '/eli5 black holes'],
+    ['do a fact check on this article', '/fact-check this article'],
+    ['Can you use the tone check for my email to my boss?', '/tone-check my email to my boss'],
+    ['use the AI check skill on this', '/detect-ai this'],
+    ['tone check skill on this message', '/tone-check this message'],
+    ['use grill: my plan', '/grill my plan'],
+    ['Do my sum up of the meeting', '/tldr the meeting'],
+    ['run grill', '/grill'],
+    ['use proofread', '/proofread']
+  ]) check(`"${said}" runs a skill`, V.spokenSkill(said, voices)?.command ?? null, want)
+  for (const said of [
+    'grill me on this plan',
+    'use the summary from earlier to write an email',
+    'run the tests',
+    'do the dishes',
+    'debug this for me',
+    'I want to decide what to eat',
+    'use debug mode in vscode',
+    'start the timer'
+  ]) check(`"${said}" stays a sentence`, V.spokenSkill(said, voices), null)
+  check('a hard name is said by its other name', [V.skillSaidAs({ name: 'eli5', aliases: ["explain like I'm five"] }), V.skillSaidAs({ name: 'tldr', aliases: ['sum up'] }), V.skillSaidAs({ name: 'fact-check' })], ["explain like I'm five", 'sum up', 'fact check'])
+  const aloud = V.skillsAloud(voices.slice(0, 3))
+  check('the list read aloud is names and how to run one', /^You have 3 skills: grill, explain like I'm five, and humanize\. To run one, say "use"/.test(aloud), true)
+  check('a skill made in chat can carry its spoken names', K.savesIn('<skill name="wx" aliases="weather, forecast">Check it.</skill>').skills[0].aliases, ['weather', 'forecast'])
+  check('and they are kept in its file', S.parseSkill('x', S.skillFile({ name: 'wx', description: 'd', triggers: ['wx'], body: 'b', aliases: ['weather'] })).aliases, ['weather'])
+  const out = join(process.cwd(), '.skills-intents2.mjs')
+  await build({ entryPoints: ['src/renderer/src/intents.ts'], bundle: true, platform: 'node', format: 'esm', outfile: out, logLevel: 'error', alias: { '@shared': './src/shared' } })
+  const { matchIntent } = await import(pathToFileURL(out).href)
+  rmSync(out, { force: true })
+  for (const said of ['what skills do I have?', 'Which skills do you have', 'list my skills', 'read me my skills', 'what are my skills again?', 'remind me of my skills'])
+    check(`"${said}" lists them`, matchIntent(said), { kind: 'skills', ask: '' })
+  const voice = read('src/renderer/src/hooks/useVoiceTurn.ts')
+  check('the voice turn hears a skill before guessing at a command', /const skill = spokenSkill\(heard\.heard, skillVoiceNames\(\)\)/.test(voice), true)
+  check('and /skills reads them out on the earbuds', /tell\(skillsAloud\(/.test(read('src/renderer/src/App.tsx')), true)
 }
 
 /* ------------------------------------------------------------ notes */

@@ -1018,8 +1018,19 @@ let commandsVersion = 0
 const commandListeners = new Set<() => void>()
 
 /** The skills, as commands. Called with what main lists (`window.wumpy.skills.list`). */
-export function setSkillCommands(list: ReadonlyArray<{ name: string; description: string; argumentHint?: string; command: boolean }>): void {
+/** Each skill command's name and spoken names, for the voice (see @shared/spoken). */
+let skillVoices: Array<{ name: string; aliases?: string[] }> = []
+export function skillVoiceNames(): ReadonlyArray<{ name: string; aliases?: string[] }> {
+  return skillVoices
+}
+
+export function setSkillCommands(
+  list: ReadonlyArray<{ name: string; description: string; argumentHint?: string; command: boolean; aliases?: string[] }>
+): void {
   const taken = new Set(COMMANDS.flatMap((c) => [c.name, ...(c.aliases ?? [])]))
+  skillVoices = list
+    .filter((s) => s.command && s.name && !taken.has(s.name))
+    .map((s) => ({ name: s.name, ...(s.aliases?.length ? { aliases: s.aliases } : {}) }))
   skillSpecs = list
     .filter((s) => s.command && s.name && !taken.has(s.name))
     .map(

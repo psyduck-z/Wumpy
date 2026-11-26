@@ -8,9 +8,12 @@ export const DEFAULT_SETTINGS: WumpySettings = {
   model: DEFAULT_MODEL,
 
   dock: 'right',
-  tallWidth: 440,
-  compactWidth: 460,
-  compactHeight: 420,
+  /* Wider than the first 440 / 460 x 420: "make the panel in windows a bit
+     wider, so that all the text fits and skills are easy to see". See
+     widenedSizes for the panels still at the old size. */
+  tallWidth: 520,
+  compactWidth: 540,
+  compactHeight: 480,
 
   // The panel floats above everything and stays put when you click elsewhere.
   // Toggle it off with the pin button, Esc, or the hotkey.
@@ -102,4 +105,20 @@ export const DEFAULT_SETTINGS: WumpySettings = {
 
   // See WumpySettings.skillSync. Off: it sends their skills to GitHub.
   skillSync: false
+}
+
+/** The sizes every panel had before they were widened. */
+const OLD_SIZES = { tallWidth: 440, compactWidth: 460, compactHeight: 420 } as const
+
+/**
+ * A saved panel size still at the old default is moved to the new one. The
+ * settings file keeps every value, so a new default never reached anybody
+ * who had ever changed a setting; one they set themselves is left alone.
+ */
+export function widenedSizes(saved: Partial<WumpySettings>): Partial<WumpySettings> {
+  const out: Partial<WumpySettings> = {}
+  for (const key of Object.keys(OLD_SIZES) as Array<keyof typeof OLD_SIZES>) {
+    if (saved[key] === OLD_SIZES[key]) out[key] = DEFAULT_SETTINGS[key]
+  }
+  return out
 }

@@ -225,3 +225,103 @@ export function speakable(markdown: string, limit = 600): string {
   text = end > limit / 3 ? cut.slice(0, end + 1) : `${cut.slice(0, cut.lastIndexOf(' '))}…`
   return text
 }
+
+/* ------------------------------------------------------------ skills aloud */
+
+/** A skill as the voice knows it: its name and what else it is called aloud. */
+export interface SpokenSkill {
+  name: string
+  aliases?: readonly string[]
+}
+
+const NUMBER_WORDS: Record<string, string> = {
+  zero: '0', one: '1', two: '2', three: '3', four: '4', five: '5', six: '6', seven: '7', eight: '8', nine: '9', ten: '10'
+}
+
+/** Words run together, as letters and digits only: "E-L-I five" and "eli5" are both "eli5". */
+function compact(words: readonly string[]): string {
+  return words
+    .map((w) => {
+      const plain = w.toLowerCase().replace(/[^a-z0-9]/g, '')
+      return NUMBER_WORDS[plain] ?? plain
+    })
+    .join('')
+}
+
+/** Every way a skill's name can come back from speech recognition, run together. */
+function sayings(s: SpokenSkill): string[] {
+  return [s.name, ...(s.aliases ?? [])].map((n) => compact(n.split(/[\s-]+/))).filter((c) => c.length >= 3)
+}
+
+/**
+ * What to call a skill out loud: its name when it can be said ("fact-check"
+ * is "fact check"), else its first other name - "eli5" and "tldr" are not
+ * words, and read out they are noise.
+ */
+export function skillSaidAs(s: SpokenSkill): string {
+  const words = s.name.split('-')
+  const sayable = words.every((w) => /^[a-z]+$/.test(w) && /[aeiouy]/.test(w))
+  return sayable || !s.aliases?.length ? words.join(' ') : s.aliases[0]
+}
+
+/** What may join a skill's name to what it is run on: "use grill ON my plan". */
+const JOINS = /^(?:on|for|with|about|to|of|at|over|against|into|in)$/i
+
+/**
+ * A skill asked for out loud, as the command it means.
+ *
+ * "Make the skills easier to remember for when I'm on earbuds." A skill is a
+ * command, but "slash detect AI" came back as "detect" and a guess, and
+ * "slash E-L-I five" as nothing; and nobody remembers to say "slash" on a
+ * walk. So three ways, each with a cue, so that ordinary talk never turns
+ * into a command:
+ *
+ *   slash <name> [anything]                    "slash detect AI my essay"
+ *   use|run|do|start|try [the|my|a] <name>     "use grill on my plan",
+ *       [skill] [on|for|about|... anything]    "do a fact check on this"
+ *   <name> skill [on|for|... anything]          "tone check skill on this"
+ *
+ * The name is matched as said, run together - "detect AI", "detect-AI" and
+ * "detect a.i." are all detect-ai - or by any of the skill's other names.
+ * After use/run/do, what follows the name has to start with a joining word
+ * (or be nothing), so "use the summary from earlier" stays a sentence.
+ */
+export function spokenSkill(heard: string, skills: readonly SpokenSkill[]): { command: string; name: string } | null {
+  const said = heard.trim().replace(/[.!?]+$/, '')
+  if (!said || !skills.length) return null
+  const slash = /^(?:slash|\/)[\s,.:;!-]*/i.exec(said)
+  const verb = slash
+    ? null
+    : /^(?:(?:please|wumpy|jason|can you|could you|now)[\s,]+)*(?:use|run|do|start|try)\s+(?:(?:the|my|a|an|your)\s+)?/i.exec(said)
+  const body = slash ? said.slice(slash[0].length) : verb ? said.slice(verb[0].length) : said
+  const words = body.split(/\s+/).filter(Boolean)
+  for (let n = Math.min(5, words.length); n >= 1; n--) {
+    const c = compact(words.slice(0, n))
+    const skill = skills.find((s) => sayings(s).includes(c))
+    if (!skill) continue
+    let rest = words.slice(n)
+    const saidSkill = /^skills?[,.:;]?$/i.test(rest[0] ?? '')
+    if (saidSkill) rest = rest.slice(1)
+    /* A name at the start with no cue is talk, not a command. */
+    if (!slash && !verb && !saidSkill) return null
+    /* "use grill: my plan" - a colon or comma after the name joins too. */
+    const marked = /[:,]$/.test(words[saidSkill ? n : n - 1] ?? '')
+    if (rest.length && JOINS.test(rest[0].replace(/[,.:;]$/, ''))) rest = rest.slice(1)
+    else if (rest.length && !slash && !saidSkill && !marked) return null
+    const args = rest.join(' ').replace(/^[\s,.:;!-]+/, '').trim()
+    return { command: `/${skill.name}${args ? ` ${args}` : ''}`, name: skill.name }
+  }
+  return null
+}
+
+/**
+ * The skills, read out: "make the skills easier to remember". Names only -
+ * sixteen descriptions is a minute of listening - with how to run one.
+ */
+export function skillsAloud(skills: readonly SpokenSkill[]): string {
+  if (!skills.length) return 'You have no skills yet. Say "make a skill that", and what it should do.'
+  const names = skills.map(skillSaidAs)
+  const list = names.length > 1 ? `${names.slice(0, -1).join(', ')}, and ${names[names.length - 1]}` : names[0]
+  const example = skills.find((s) => s.name === 'grill') ? 'use grill on my plan' : `use ${names[0]} on this`
+  return `You have ${skills.length} skill${skills.length === 1 ? '' : 's'}: ${list}. To run one, say "use", its name, and what it's for, like "${example}".`
+}

@@ -143,6 +143,7 @@ export class SkillStore {
         name: s.name,
         description: s.description,
         ...(s.argumentHint ? { argumentHint: s.argumentHint } : {}),
+        ...(s.aliases?.length ? { aliases: s.aliases } : {}),
         command: s.command !== false,
         builtin
       }
@@ -150,7 +151,7 @@ export class SkillStore {
   }
 
   /** Makes or replaces one; an empty body removes it. */
-  save(raw: { name: string; description?: string; triggers?: string[]; body: string; argumentHint?: string }): {
+  save(raw: { name: string; description?: string; triggers?: string[]; body: string; argumentHint?: string; aliases?: string[] }): {
     ok: boolean
     why: string
     name: string
@@ -185,7 +186,8 @@ export class SkillStore {
         description: (raw.description ?? '').trim() || name.replace(/-/g, ' '),
         triggers: triggers.length ? triggers : [name.replace(/-/g, ' ')],
         body,
-        ...(raw.argumentHint?.trim() ? { argumentHint: raw.argumentHint.trim() } : {})
+        ...(raw.argumentHint?.trim() ? { argumentHint: raw.argumentHint.trim() } : {}),
+        ...(raw.aliases?.some((a) => a.trim()) ? { aliases: raw.aliases.map((a) => a.trim()).filter(Boolean).slice(0, 6) } : {})
       })
       /* New ones go in a folder of their own, as Claude lays them out. */
       const file = existing ?? join(this.dir, name, 'SKILL.md')

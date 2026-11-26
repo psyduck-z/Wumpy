@@ -37,6 +37,8 @@
  *                              command; without it, that is added at the end
  *
  * `triggers` is Wumpy's own: the words that bring a skill in by themselves.
+ * So is `aliases`: other names it answers to out loud, for the earbuds -
+ * "use explain like I'm five on black holes" is /eli5 (see @shared/spoken).
  *
  * Pure, for scripts/check-skills.mjs.
  */
@@ -53,6 +55,8 @@ export interface Skill {
   auto?: false
   /** false: not offered as a command. */
   command?: false
+  /** Other names it answers to out loud: "explain like I'm five" for eli5. */
+  aliases?: string[]
 }
 
 /** A skill as the panel lists it: enough for the command palette and /skills. */
@@ -61,6 +65,7 @@ export interface SkillSummary {
   description: string
   argumentHint?: string
   command: boolean
+  aliases?: string[]
   /** One Wumpy ships with (see @shared/builtinskills), still as shipped. */
   builtin: boolean
 }
@@ -100,6 +105,11 @@ export function parseSkill(fallback: string, text: string): Skill {
     .filter(Boolean)
   const skill: Skill = { name, description, triggers: triggers.length ? triggers : [name.replace(/-/g, ' ')], body }
   if (fields['argument-hint']) skill.argumentHint = fields['argument-hint']
+  const aliases = (fields.aliases || '')
+    .split(',')
+    .map((a) => a.trim())
+    .filter(Boolean)
+  if (aliases.length) skill.aliases = aliases
   if (/^(true|yes)$/i.test(fields['disable-model-invocation'] ?? '')) skill.auto = false
   if (/^(false|no)$/i.test(fields['user-invocable'] ?? '')) skill.command = false
   return skill
@@ -114,6 +124,7 @@ export function skillFile(s: Skill): string {
     `description: ${one(s.description)}`,
     `triggers: ${s.triggers.map(one).join(', ')}`,
     ...(s.argumentHint ? [`argument-hint: ${one(s.argumentHint)}`] : []),
+    ...(s.aliases?.length ? [`aliases: ${s.aliases.map(one).join(', ')}`] : []),
     ...(s.auto === false ? ['disable-model-invocation: true'] : []),
     ...(s.command === false ? ['user-invocable: false'] : []),
     '---',
@@ -222,12 +233,13 @@ export function skillFacts(skills: readonly Skill[], said: readonly string[], fo
   if (asked) {
     out.push(
       '- To make a skill, or change one, put this in your reply:',
-      '    <skill name="short-name" triggers="words that bring it up" description="what it is for, and when to use it" argument-hint="<what it works on>">',
+      '    <skill name="short-name" triggers="words that bring it up" description="what it is for, and when to use it" argument-hint="<what it works on>" aliases="easy names to say it by aloud">',
       '    the instructions, written to yourself; $ARGUMENTS where what follows the command goes',
       '    </skill>',
       '  That tag is the only way to save one: never write the file yourself or propose a command for it.',
       '  Wumpy saves it as a file in their skills folder and shows them; from then on it is used',
-      '  whenever a trigger comes up in a chat, and they can run it as /short-name. The same name replaces one; an empty',
+      '  whenever a trigger comes up in a chat, and they can run it as /short-name - or on earbuds, "use <name or alias> on ...".',
+      '  Give a name that is hard to say (letters, digits) an alias that is easy to. The same name replaces one; an empty',
       `  <skill name="short-name"></skill> removes it. Their skills folder: ${folder}`
     )
   }

@@ -167,7 +167,16 @@ const MACHINE = [
      said Wumpy keeps nothing between chats and so denied `/remember`. */
   'Nothing is saved unless your reply carries <remember>one fact</remember>,',
   'which Wumpy writes to their notes; without one, never say you saved it.',
-  'A stated preference is not a machine question: acknowledge it and use it.'
+  'A stated preference is not a machine question: acknowledge it and use it.',
+  /* PROVE IT TO YOURSELF FIRST, in short: the whole section would take this
+     form past the 5000 tokens check-ask holds it to. */
+  '',
+  'Check before you state, for your own sake, never from memory - even when',
+  'sure: run code before calling it working, compute every number in the',
+  'shell, look up APIs and versions, search what changes (prices, news), and',
+  'say in a line how you know, naming a check that actually ran: "(ran it)",',
+  '"(searched: source)". Never claim a check that did not run; unchecked is',
+  '"from memory, not checked".'
 ].join(LF)
 
 const WRITING = [

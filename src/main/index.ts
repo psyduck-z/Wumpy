@@ -723,6 +723,9 @@ function channelFacts(handsFree: boolean): string[] {
     '  it is clearly the next step.',
     '- If your last answer looks cut short and they have said something new, they talked over you',
     '  on purpose: answer the new thing, and do not pick the old answer back up unless they ask.',
+    '- A skill run here keeps its method but not its layout: say its result in this spoken shape -',
+    '  detect-ai is the share and the most suspicious passage, grade is the grade and the one change',
+    '  that matters most - and offer the full version on screen in a few words.',
     '- Commands still work. When the answer depends on this computer, propose ONE command as',
     '  usual. Its # line is what they hear as the question ("Can I <# line>?") and they answer',
     '  yes or no out loud - so write it as a short plain action: "# Check how full the disk is".',
@@ -1005,7 +1008,7 @@ function applyHotkeys(): void {
 }
 
 /**
- * Claims Win+Shift+Z through the helper process - the same shortcut Omarchy
+ * Claims Win+Z through the helper process - the same shortcut Omarchy
  * gets through a Hyprland binding, so it is one combination on every machine.
  * The helper sits below the shell, so the keystroke never reaches anything
  * else (the dedicated Copilot key is still caught too).
@@ -1014,15 +1017,19 @@ async function startLowLevelHook(): Promise<void> {
   /* Linux has no keyboard hook to install: Hyprland owns the keys, and a
      binding there runs `wumpy --toggle` (see the README). */
   if (process.platform === 'linux') {
-    hotkeyState.intercepted = 'Super+Shift+Z'
+    hotkeyState.intercepted = 'Super+Z'
     return
   }
-  lowLevelHook = new LowLevelHook('Z', () => panel.toggle(), true)
+  /* Win+Z, as asked: "can you change the shortcut to just Super Z?". Shift
+     is no longer needed, and Win+Shift+Z still works, since Shift is not
+     refused. The hook swallows the keystroke, so Windows 11's own Win+Z
+     (the snap layouts flyout) gives way to Wumpy. */
+  lowLevelHook = new LowLevelHook('Z', () => panel.toggle(), false)
   const ok = await lowLevelHook.start()
-  hotkeyState.intercepted = ok ? 'Super+Shift+Z' : null
+  hotkeyState.intercepted = ok ? 'Super+Z' : null
   if (!ok) {
     lowLevelHook = null
-    console.warn('[wumpy] Win+Shift+Z interception unavailable; use the tray icon')
+    console.warn('[wumpy] Win+Z interception unavailable; use the tray icon')
   } else {
     /**
      * The helper takes the foreground, not Wumpy.
@@ -2711,7 +2718,7 @@ ${command}`
 
   ipcMain.handle(
     IPC.skillSave,
-    (_e, req: { name: string; description?: string; triggers?: string[]; body: string; argumentHint?: string }) => {
+    (_e, req: { name: string; description?: string; triggers?: string[]; body: string; argumentHint?: string; aliases?: string[] }) => {
       const result = skills.save(req)
       if (result.ok) journal.add('skill', `${result.name}: ${result.did}`)
       if (result.ok) syncSoon()
@@ -3264,6 +3271,17 @@ app.on('second-instance', (_event, argv) => {
     void hearingCheck()
     return
   }
+  /* A picture of the panel as it is drawn, without putting it on screen:
+     for checking a change to how it looks. `--snapshot-type=/skills` types
+     that into the composer first. Saved as panel.png in the user data folder. */
+  if (argv.some((a) => a === '--panel-snapshot')) {
+    void panelSnapshot(argv.find((a) => a.startsWith('--snapshot-type='))?.slice('--snapshot-type='.length))
+    return
+  }
+  if (argv.includes('--verify-check')) {
+    void verifyCheck()
+    return
+  }
   if (argv.includes('--skill-check=writing')) {
     void writingSkillCheck()
     return
@@ -3310,7 +3328,7 @@ app.on('second-instance', (_event, argv) => {
     startVoiceTurn('wumpy --voice')
     return
   }
-  // The shortcut (Super+Shift+Z through a Hyprland binding on Linux).
+  // The shortcut (Super+Z through a Hyprland binding on Linux).
   if (argv.includes('--toggle')) {
     panel?.toggle()
     return
@@ -4052,6 +4070,45 @@ async function skillCheck(): Promise<void> {
     'for itself',
     await modelSays([{ role: 'user', content: skillPrompt(creator, 'for yourself: always check the weather and my calendar before suggesting plans for my day') }], false)
   )
+}
+
+/**
+ * PROVE IT TO YOURSELF FIRST, on the real model: three questions a model
+ * answers from memory without thinking - a percentage, a version, a
+ * figure about the world. Right is a check proposed (a command or a
+ * search), or an answer that says how it knows.
+ */
+async function verifyCheck(): Promise<void> {
+  console.log(`[wumpy] verify check: on ${resolveModel() ?? 'no model'}`)
+  for (const q of [
+    "what's 17.5% of 2,384?",
+    'In which Python version was str.removeprefix added?',
+    "What's the population of Australia right now?"
+  ]) {
+    const reply = withoutKept(await modelSays([{ role: 'user', content: q }], false))
+    const checked = /```(?:wumpy-run|wumpy-search|bash|powershell|sh)\b/.test(reply)
+    const says = /\((?:ran|calculated|searched|checked)[^)]*\)|from memory, not checked/i.test(reply)
+    console.log(`[wumpy] verify check: ${JSON.stringify(q)} -> ${checked ? 'CHECKS' : 'no check'}, ${says ? 'says how it knows' : 'no receipt'}`)
+    console.log(`[wumpy] verify check: reply ${JSON.stringify(reply.slice(0, 700))}`)
+  }
+}
+
+async function panelSnapshot(typed?: string): Promise<void> {
+  const win = panel.liveWindow()
+  if (!win) return
+  if (typed) {
+    await win.webContents.executeJavaScript(
+      `(() => { const ta = document.querySelector('.composer textarea'); if (!ta) return false;
+        Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value').set.call(ta, ${JSON.stringify(typed)});
+        ta.dispatchEvent(new Event('input', { bubbles: true }));
+        ta.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true })); return true })()`
+    )
+    await new Promise((r) => setTimeout(r, 2500))
+  }
+  const image = await win.webContents.capturePage()
+  const file = join(app.getPath('userData'), 'panel.png')
+  writeFileSync(file, image.toPNG())
+  console.log(`[wumpy] panel snapshot: ${file} ${JSON.stringify(image.getSize())}`)
 }
 
 /**

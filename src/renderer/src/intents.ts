@@ -18,6 +18,8 @@ interface Intent {
   pattern: RegExp
   /** Builds the action from the match, or returns null to decline. */
   build(m: RegExpMatchArray): CommandAction | null
+  /** Matched even as a question: "what skills do I have?" is asking for the list. */
+  question?: true
 }
 
 // Character classes as strings, so they can be composed into regexes below.
@@ -158,6 +160,17 @@ const INTENTS: Intent[] = [
     pattern:
       /^(?:please\s+)?(?:can\s+you\s+)?(?:update|upgrade)\s+(?:wumpy|yourself|1p|one\s*p)(?:\s+(?:now|please))?\.?$/i,
     build: () => ({ kind: 'update', force: false })
+  },
+  {
+    /*
+     * "what skills do I have", "list my skills", "read me my skills": the
+     * list - read aloud on the earbuds, a table at the screen. Asked for as
+     * "make the skills easier to remember for when I'm on earbuds".
+     */
+    pattern:
+      /^(?:(?:please|hey wumpy|wumpy|so|okay|ok)[\s,]+)*(?:what|which)\s+(?:skills|commands\s+and\s+skills)\s+(?:do|have)\s+(?:i|you|we)(?:\s+(?:got|have))?(?:\s+(?:again|now))?\s*\??$|^(?:please\s+)?(?:list|read(?:\s+me)?|tell\s+me|remind\s+me(?:\s+of)?|show\s+me)\s+(?:all\s+)?(?:my|your|the)\s+skills(?:\s+again)?(?:\s+please)?\s*[.?!]?$|^what\s+are\s+(?:my|your|the)\s+skills(?:\s+again)?\s*\??$/i,
+    build: () => ({ kind: 'skills', ask: '' }),
+    question: true
   },
   {
     /*
@@ -321,12 +334,14 @@ const INTENTS: Intent[] = [
 export function matchIntent(text: string): CommandAction | null {
   const trimmed = text.trim()
   // Slash commands are handled by the parser; questions are for the model.
-  if (!trimmed || trimmed.startsWith('/') || trimmed.endsWith('?')) return null
+  if (!trimmed || trimmed.startsWith('/')) return null
+  const asked = trimmed.endsWith('?')
   // Only short, direct phrasings. A paragraph that happens to contain "rename"
   // is a conversation, not a command.
   if (trimmed.length > 80 || trimmed.split(/\s+/).length > 14) return null
 
   for (const intent of INTENTS) {
+    if (asked && !intent.question) continue
     const m = trimmed.match(intent.pattern)
     if (!m) continue
     const action = intent.build(m)

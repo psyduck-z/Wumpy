@@ -41,19 +41,39 @@
  * is the combination that reads as harsh at night, and this panel is mostly
  * used at night.
  */
+/*
+ * Black, dark grey and orange, with a little of the old blue: "make the
+ * theme colours like dark grey/black and orange and a little bit of the
+ * current blue too".
+ *
+ * The panel stays near-black; the cards on it are a step lighter, a dark
+ * grey rather than a second black, so they read as grey. Orange is the
+ * accent - everything that was violet: the send and run buttons, focus,
+ * chips, the selected row. The violet-blue it replaced stays for the few
+ * things that are about reading rather than acting - links, your own
+ * messages, the context bar - so it is there without competing.
+ *
+ * Text on an orange fill is dark: white on this orange is under 3:1.
+ */
 [data-theme="dark"],
 :root {
-  --bg: 6 6 7;
-  --surface: 11 11 13;
-  --raised: 20 20 23;
+  --bg: 8 8 9;
+  --surface: 16 16 18;
+  --raised: 28 28 31;
   --border: 255 255 255 / 0.06;
   /* The panel's outer edge. Deliberately well above --border: see .panel. */
   --outline: 255 255 255 / 0.18;
   --text: 216 216 220;
-  --muted: 124 124 130;
-  --accent: 139 128 255;
-  --accent-soft: 139 128 255 / 0.16;
-  --accent-text: 173 165 255;
+  --muted: 134 134 140;
+  --accent: 249 115 22;
+  --accent-soft: 249 115 22 / 0.15;
+  --accent-text: 253 166 90;
+  --on-accent: 20 12 6;
+  /* Warnings (context filling up, quota, automatic approval): yellow, so they are never the orange accent. */
+  --warn: 234 200 40;
+  --blue: 139 128 255;
+  --blue-soft: 139 128 255 / 0.14;
+  --blue-text: 173 165 255;
   --danger: 248 113 113;
   --danger-soft: 248 113 113 / 0.12;
   /*
@@ -76,8 +96,8 @@
    * and against the danger red - five things that mean something, no two of
    * them closer than 93 - which is how that was found rather than shipped.
    */
-  --kind-change: 232 170 40;
-  --kind-change-text: 247 204 100;
+  --kind-change: 232 204 40;
+  --kind-change-text: 250 226 120;
   --kind-sees: 56 189 248;
   --kind-sees-text: 125 211 252;
   --kind-out: 52 204 134;
@@ -223,7 +243,8 @@ body {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-  max-width: 190px;
+  /* The chat's title: room for most of it now the panel is wider. */
+  max-width: 260px;
 }
 
 .brand-title {
@@ -366,8 +387,8 @@ body {
 }
 
 .msg-user .msg-body {
-  background: rgb(var(--accent-soft));
-  border: 1px solid rgb(var(--accent) / 0.22);
+  background: rgb(var(--blue-soft));
+  border: 1px solid rgb(var(--blue) / 0.22);
   border-radius: 12px 12px 4px 12px;
   padding: 7px 11px;
   max-width: 88%;
@@ -382,7 +403,7 @@ body {
   margin-top: 3px;
   font-size: 10px;
   letter-spacing: 0.02em;
-  color: rgb(var(--accent) / 0.75);
+  color: rgb(var(--blue) / 0.75);
 }
 
 .msg-assistant {
@@ -504,7 +525,7 @@ body {
   margin: 14px 0 6px;
 }
 .msg-assistant a {
-  color: rgb(var(--accent-text));
+  color: rgb(var(--blue-text));
 }
 
 .msg-assistant table {
@@ -524,7 +545,7 @@ body {
 .msg-assistant blockquote {
   margin: 0 0 9px;
   padding-left: 10px;
-  border-left: 2px solid rgb(var(--accent) / 0.5);
+  border-left: 2px solid rgb(var(--blue) / 0.5);
   color: rgb(var(--muted));
 }
 
@@ -704,7 +725,7 @@ body {
 }
 
 .search-results a {
-  color: rgb(var(--accent-text));
+  color: rgb(var(--blue-text));
   text-decoration: none;
 }
 
@@ -978,10 +999,11 @@ body {
  */
 .cmd-run {
   background: rgb(var(--accent));
-  color: #fff;
+  color: rgb(var(--on-accent));
 }
 .cmd.is-risky .cmd-run {
   background: rgb(var(--danger));
+  color: #fff;
 }
 .cmd-skip {
   background: transparent;
@@ -1396,8 +1418,8 @@ body {
   margin-left: 6px;
   padding: 0 4px;
   border-radius: 5px;
-  background: rgb(var(--accent) / 0.16);
-  color: rgb(var(--accent-text));
+  background: rgb(var(--blue) / 0.16);
+  color: rgb(var(--blue-text));
   font-variant-numeric: tabular-nums;
   font-weight: 600;
 }
@@ -1474,7 +1496,7 @@ body {
   margin: 6px 0 0;
   padding: 8px 10px;
   background: rgb(var(--surface));
-  border-left: 2px solid rgb(var(--accent) / 0.4);
+  border-left: 2px solid rgb(var(--blue) / 0.4);
   border-radius: 0 8px 8px 0;
   color: rgb(var(--muted));
   font-size: 11.5px;
@@ -1813,7 +1835,7 @@ body {
   margin-left: auto;
   background: none;
   border: none;
-  color: rgb(var(--accent-text));
+  color: rgb(var(--blue-text));
   font: inherit;
   font-size: 11px;
   cursor: pointer;
@@ -1983,7 +2005,7 @@ body {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-  max-width: 120px;
+  max-width: 180px;
   /* Enough to tell models apart when the bar is full - mid-answer it was cut
      to "z.." while the live readout took the room. */
   min-width: 72px;
@@ -2064,8 +2086,8 @@ body {
 
 /* Automatic modes are stated louder, because they act without being asked. */
 .approval.is-auto {
-  color: #f59e0b;
-  border-color: #f59e0b66;
+  color: rgb(var(--warn));
+  border-color: rgb(var(--warn) / 0.4);
 }
 
 .approval.is-all {
@@ -2107,11 +2129,11 @@ body {
   position: absolute;
   inset: 0 auto 0 0;
   border-radius: 3px;
-  background: rgb(var(--accent));
+  background: rgb(var(--blue));
 }
 
 .ctx.is-warn .ctx-fill {
-  background: #f59e0b;
+  background: rgb(var(--warn));
 }
 .ctx.is-critical .ctx-fill {
   background: rgb(var(--danger));
@@ -2124,7 +2146,7 @@ body {
 }
 
 .ctx.is-warn .ctx-label {
-  color: #f59e0b;
+  color: rgb(var(--warn));
 }
 .ctx.is-critical .ctx-label {
   color: rgb(var(--danger));
@@ -2176,10 +2198,10 @@ body {
 }
 
 .quota.is-warn .quota-dot {
-  background: #f59e0b;
+  background: rgb(var(--warn));
 }
 .quota.is-warn .quota-label {
-  color: #f59e0b;
+  color: rgb(var(--warn));
 }
 
 .quota.is-critical .quota-dot {
@@ -2455,7 +2477,7 @@ body {
 
 .btn-send {
   background: rgb(var(--accent));
-  color: #fff;
+  color: rgb(var(--on-accent));
 }
 .btn-send:disabled {
   opacity: 0.3;

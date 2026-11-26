@@ -83,7 +83,7 @@ import {
   type ShortWhy
 } from '@shared/spokenpick'
 import { afterTurn, handsFree, tell } from './handsfree'
-import { speakable } from '@shared/spoken'
+import { skillSaidAs, skillsAloud, speakable } from '@shared/spoken'
 import { useChat, nextId, type ChatStats } from './hooks/useChat'
 import { useListening } from './hooks/useListening'
 import { useLiveNotes } from './hooks/useLiveNotes'
@@ -2940,6 +2940,8 @@ function namedControls(shot: Attachment): string[] {
           }
           const list = await window.wumpy.skills.list().catch(() => [])
           setSkillCommands(list)
+          /* On the earbuds the table is nothing: the names, said, and how to run one. */
+          tell(skillsAloud(list.filter((sk) => sk.command)))
           const dir = await window.wumpy.skills.folder(false).catch(() => '')
           chat.note(
             [
@@ -2947,11 +2949,11 @@ function namedControls(shot: Attachment): string[] {
               '',
               ...(list.length
                 ? [
-                    '| Command | What it does | |',
+                    '| Command | What it does | On earbuds, say |',
                     '| --- | --- | --- |',
                     ...list.map(
                       (sk) =>
-                        `| \`/${sk.name}\`${sk.argumentHint ? ` ${sk.argumentHint.replace(/\|/g, '\\|')}` : ''} | ${shortly(sk.description).replace(/\|/g, '\\|')} | ${sk.builtin ? 'built in' : 'yours'} |`
+                        `| \`/${sk.name}\`${sk.builtin ? '' : ' · yours'}${sk.argumentHint ? ` ${sk.argumentHint.replace(/\|/g, '\\|')}` : ''} | ${shortly(sk.description).replace(/\|/g, '\\|')} | “use ${skillSaidAs(sk).replace(/\|/g, '\\|')} on …” |`
                     ),
                     ''
                   ]

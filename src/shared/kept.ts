@@ -38,7 +38,7 @@ export function withoutKept(text: string): string {
 
 export interface Saves {
   remember: string[]
-  skills: Array<{ name: string; description: string; triggers: string[]; body: string; argumentHint?: string }>
+  skills: Array<{ name: string; description: string; triggers: string[]; body: string; argumentHint?: string; aliases?: string[] }>
 }
 
 function attribute(tag: string, name: string): string {
@@ -65,7 +65,10 @@ export function savesIn(text: string): Saves {
         .map((t) => t.trim())
         .filter(Boolean),
       body: m[2].trim(),
-      ...(attribute(m[1], 'argument-hint') ? { argumentHint: attribute(m[1], 'argument-hint') } : {})
+      ...(attribute(m[1], 'argument-hint') ? { argumentHint: attribute(m[1], 'argument-hint') } : {}),
+      ...(attribute(m[1], 'aliases')
+        ? { aliases: attribute(m[1], 'aliases').split(',').map((a) => a.trim()).filter(Boolean) }
+        : {})
     })
   }
   return out

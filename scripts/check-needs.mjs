@@ -162,8 +162,8 @@ const tokensFor = (list) => A.preambleTokens({ ...FULL, needs: list })
    save anything" to "nothing is saved without the tag", 11 tokens; how the
    tag works is in the paragraph gated on remembering, which is where the
    other 43 went. */
-check('everything, as it was', A.preambleTokens(FULL), 15901)
-check('a turn about nothing in particular', tokensFor([]), 8795)
+check('everything, as it was', A.preambleTokens(FULL), 15847)
+check('a turn about nothing in particular', tokensFor([]), 8741)
 check('which is a third of it gone', A.preambleTokens(FULL) - tokensFor([]) > 4500, true)
 check('a turn about the screen', tokensFor(['desktop']) < A.preambleTokens(FULL), true)
 check('a turn about a website', tokensFor(['open']) < A.preambleTokens(FULL), true)
@@ -387,10 +387,10 @@ check('nor one about opening a site', needs(said('I opened vocabulary.com for yo
 
 /* ------------------------------------------------------- the shape contract */
 
-check('no list at all means everything', A.preambleTokens({ ...FULL }), 15901)
-check('an empty list is a real answer, not everything', tokensFor([]) < 15901, true)
+check('no list at all means everything', A.preambleTokens({ ...FULL }), 15847)
+check('an empty list is a real answer, not everything', tokensFor([]) < 15847, true)
 check('one capability is not the other', tokensFor(['open']) !== tokensFor(['desktop']), true)
-check('every topic together is everything', tokensFor(ALL), 15901)
+check('every topic together is everything', tokensFor(ALL), 15847)
 
 /* --------------------------------------------------------------- the wiring */
 
