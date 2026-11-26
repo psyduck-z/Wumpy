@@ -1,5 +1,5 @@
 import { deadlineFact, deadlineIn } from '@shared/deadline'
-import { app, clipboard, dialog, ipcMain, nativeImage, session, Tray } from 'electron'
+import { app, clipboard, dialog, ipcMain, nativeImage, session, shell, Tray } from 'electron'
 import { cpus, homedir } from 'node:os'
 import { existsSync, mkdirSync, readFileSync, statSync, unlinkSync, writeFileSync } from 'node:fs'
 import { basename, dirname, join, resolve } from 'node:path'
@@ -2659,9 +2659,17 @@ ${command}`
     truncated: notes.truncated()
   }))
 
+  ipcMain.handle(IPC.skillList, () => skills.summaries())
+  ipcMain.handle(IPC.skillGet, (_e, name: string) => skills.get(String(name ?? '')))
+  ipcMain.handle(IPC.skillFolder, async (_e, open: boolean) => {
+    skills.seed()
+    if (open === true) await shell.openPath(skills.dir)
+    return skills.dir
+  })
+
   ipcMain.handle(
     IPC.skillSave,
-    (_e, req: { name: string; description?: string; triggers?: string[]; body: string }) => {
+    (_e, req: { name: string; description?: string; triggers?: string[]; body: string; argumentHint?: string }) => {
       const result = skills.save(req)
       if (result.ok) journal.add('skill', `${result.name}: ${result.did}`)
       return result

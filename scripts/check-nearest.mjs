@@ -130,7 +130,7 @@ check('nearestName is just the name', N.nearestName('mdoel', COMMANDS), 'model')
 /* --------------------------------------------------------------- the wiring */
 
 const source = readFileSync('src/renderer/src/commands.ts', 'utf8')
-check('the parser asks for the nearest', /nearest\(name, COMMANDS\)/.test(source), true)
+check('the parser asks for the nearest', /nearest\(name, allCommands\(\)\)/.test(source), true)
 check('and offers the spelling that matched', /did\.via/.test(source), true)
 
 /*

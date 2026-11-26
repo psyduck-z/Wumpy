@@ -1,4 +1,5 @@
 import { savesIn } from '@shared/kept'
+import { setSkillCommands } from './commands'
 
 /**
  * Saves what a finished answer asked to be kept - a line for their notes, a
@@ -29,7 +30,9 @@ export async function keepSaves(text: string, note: (content: string, error?: bo
     note(
       r.did === 'removed'
         ? `Removed the skill “${r.name}”.`
-        : `${r.did === 'replaced' ? 'Updated' : 'Saved'} the skill “${r.name}” — it is used whenever it comes up.`
+        : `${r.did === 'replaced' ? 'Updated' : 'Saved'} the skill “${r.name}” — run it as \`/${r.name}\`, and it is used whenever it comes up.`
     )
   }
+  /* A skill saved is a command now, not at the next start. */
+  if (skills.length) void window.wumpy.skills.list().then(setSkillCommands).catch(() => undefined)
 }

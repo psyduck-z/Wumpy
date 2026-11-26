@@ -115,11 +115,17 @@ export type CommandAction =
   | { kind: 'restart' }
   /** `/update` — update Wumpy now, if it has not updated itself (main/updater.ts). */
   | { kind: 'update'; force: boolean }
+  /** `/<skill> args` or `/skill <name> args` — run one of their skills (@shared/skills). */
+  | { kind: 'skill'; name: string; args: string }
+  /** `/skills` — list them; `/skills new <what>`, `/skills folder`. */
+  | { kind: 'skills'; ask: string }
   /** Send to the model, but wrapped in a prompt that shapes the answer. */
   | { kind: 'prompt'; text: string; label: string }
 
 export interface CommandSpec {
   name: string
+  /** One of their skills (setSkillCommands), not one of the app's own. */
+  skill?: boolean
   aliases?: string[]
   /** Shown in the palette. */
   hint: string
@@ -822,6 +828,24 @@ export const COMMANDS: CommandSpec[] = forThisWindow([
     run: () => ({ kind: 'restart' })
   },
   {
+    name: 'skills',
+    hint: 'Your skills, each one a command — or add one: /skills new <what it should do>',
+    arg: 'new <what> | folder',
+    run: (arg) => ({ kind: 'skills', ask: (arg ?? '').trim() })
+  },
+  {
+    name: 'skill',
+    hint: 'Run a skill by name, even one whose name another command has',
+    arg: 'name text',
+    argRequired: true,
+    run: (arg) => {
+      const [name, ...rest] = (arg ?? '').trim().split(/\s+/)
+      return name
+        ? { kind: 'skill', name: name.toLowerCase(), args: rest.join(' ') }
+        : { kind: 'error', message: 'Usage: /skill <name> <text>. `/skills` lists them.' }
+    }
+  },
+  {
     name: 'update',
     aliases: ['upgrade'],
     hint: 'Update Wumpy to the newest version now',
@@ -965,9 +989,48 @@ export const KEY_ONLY: Array<{ keys: string; what: string }> = KEYS.filter((k) =
   (k) => ({ keys: k.keys, what: k.what })
 )
 
-/** Every command, for the menu. */
+/*
+ * SKILLS ARE COMMANDS TOO, as in Claude: "allow me to add skills, and make
+ * them a command". They live in files main reads, so the list arrives from
+ * there (setSkillCommands) and changes while the panel is open - a skill
+ * saved from a chat is a command the moment it is saved. A skill named like
+ * one of the app's own commands does not take it over; `/skill <name>`
+ * still runs it.
+ */
+let skillSpecs: CommandSpec[] = []
+let commandsVersion = 0
+const commandListeners = new Set<() => void>()
+
+/** The skills, as commands. Called with what main lists (`window.wumpy.skills.list`). */
+export function setSkillCommands(list: ReadonlyArray<{ name: string; description: string; argumentHint?: string; command: boolean }>): void {
+  const taken = new Set(COMMANDS.flatMap((c) => [c.name, ...(c.aliases ?? [])]))
+  skillSpecs = list
+    .filter((s) => s.command && s.name && !taken.has(s.name))
+    .map(
+      (s): CommandSpec => ({
+        name: s.name,
+        hint: s.description.length > 90 ? `${s.description.slice(0, 87).trimEnd()}…` : s.description,
+        arg: (s.argumentHint ?? 'text').replace(/^<|>$/g, ''),
+        skill: true,
+        run: (arg) => ({ kind: 'skill', name: s.name, args: (arg ?? '').trim() })
+      })
+    )
+  commandsVersion++
+  for (const listen of commandListeners) listen()
+}
+
+/** For useSyncExternalStore: told when the skill commands change. */
+export function onCommandsChanged(listen: () => void): () => void {
+  commandListeners.add(listen)
+  return () => commandListeners.delete(listen)
+}
+export function commandsSeen(): number {
+  return commandsVersion
+}
+
+/** Every command, for the menu: the app's, then their skills. */
 export function allCommands(): CommandSpec[] {
-  return COMMANDS
+  return skillSpecs.length ? [...COMMANDS, ...skillSpecs] : COMMANDS
 }
 
 /** Every name and alias, for matching. */
@@ -977,7 +1040,7 @@ function matches(spec: CommandSpec, name: string): boolean {
 
 export function findCommand(name: string): CommandSpec | undefined {
   const n = name.toLowerCase()
-  return COMMANDS.find((c) => matches(c, n))
+  return allCommands().find((c) => matches(c, n))
 }
 
 /**
@@ -988,8 +1051,8 @@ export function completions(input: string): CommandSpec[] {
   if (!input.startsWith('/')) return []
   const [name] = input.slice(1).split(/\s+/)
   const n = name.toLowerCase()
-  if (!n) return COMMANDS
-  return COMMANDS.filter(
+  if (!n) return allCommands()
+  return allCommands().filter(
     (c) => c.name.startsWith(n) || (c.aliases?.some((a) => a.startsWith(n)) ?? false)
   )
 }
@@ -1020,7 +1083,7 @@ export function parseCommand(input: string): CommandAction | null {
     /* The SPELLING that matched, not the canonical name: someone who typed
        "/qouta" meant "/quota", which is a real alias of /usage and works -
        answering "/usage" sends them to a word they did not reach for. */
-    const did = nearest(name, COMMANDS)
+    const did = nearest(name, allCommands())
     /* As code, because the renderer offers a clickable command as a button
        and this is the moment it is most wanted: the user has the command
        nearly right and would otherwise retype the whole line. */
@@ -1069,6 +1132,7 @@ export function helpText(): string {
     const arg = c.arg ? ` \`<${bar(c.arg)}>\`` : ''
     return `| ${names}${arg} | ${bar(c.hint)} |`
   })
+  const skillRows = skillSpecs.map((c) => `| \`/${c.name}\`${c.arg ? ` \`<${bar(c.arg)}>\`` : ''} | ${bar(c.hint)} |`)
   return [
     '**Commands**',
     '',
@@ -1076,6 +1140,9 @@ export function helpText(): string {
     '| --- | --- |',
     ...rows,
     '',
+    ...(skillRows.length
+      ? ['**Your skills** — each one a command. `/skills` to add or change them.', '', '| Command | What it does |', '| --- | --- |', ...skillRows, '']
+      : []),
     /* The same rows /shortcuts prints, from the same list. They were typed out
        again here, in different words, and drifted. */
     ...keyRows(),

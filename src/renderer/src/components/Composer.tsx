@@ -1,5 +1,5 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
-import { allCommands, completions, type CommandSpec } from '../commands'
+import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react'
+import { allCommands, commandsSeen, completions, onCommandsChanged, type CommandSpec } from '../commands'
 import { CommandPalette } from './CommandPalette'
 import { useInputHistory } from '../hooks/useInputHistory'
 import { insistFocus } from '../focus'
@@ -196,7 +196,10 @@ export function Composer({
 
   // The command names go along so that "slash also" can become "/also"; they are
   // read from the real list, so a command added later is dictatable at once.
-  const commandNames = useMemo(() => allCommands().map((c) => c.name), [])
+  /* Their skills are commands too, and arrive (and change) after the first render. */
+  const commandsNow = useSyncExternalStore(onCommandsChanged, commandsSeen)
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  const commandNames = useMemo(() => allCommands().map((c) => c.name), [commandsNow])
   const dictation = useDictation(insert, commandNames)
 
   // Ctrl+M starts and stops it. On the window rather than the box, because the
@@ -355,7 +358,8 @@ export function Composer({
   const palette = useMemo(() => {
     if (!value.startsWith('/') || /\s/.test(value)) return [] as CommandSpec[]
     return completions(value)
-  }, [value])
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [value, commandsNow])
 
   useEffect(() => setSelected(0), [value])
 

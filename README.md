@@ -772,23 +772,46 @@ one plain file (`context.md` in Wumpy's settings folder), read into every
 chat, and kept to about a dozen facts because they go with every message.
 `/remember <thing>` adds a line yourself; `/remember clear` empties it.
 
-**Skills: instructions for particular things.** A skill is a markdown file
-in the `skills` folder next to the notes: how you like summaries, the rules
-of a game, your homework routine. Every turn carries one line per skill;
-the whole of one is sent once a word that brings it up is said in the chat,
-and stays for the rest of it. Ask for one in words, "make a skill for
-hangman: ...", and the model writes the file. Asking for the same name
-replaces it, and asking to remove it deletes the file. A skill written by
-hand looks like this:
+**Skills: instructions for particular things, and each one a command.**
+A skill is a folder in the `skills` folder (next to the notes) with a
+`SKILL.md` in it, laid out the way Claude's are: how you like summaries, the
+rules of a game, a way of working. Every skill is a command: `/grill my plan
+to move to Berlin`, `/eli5 how vaccines work`, `/humanize <text>`. They also
+come in by themselves: every turn carries one line per skill, and the whole
+of one is sent once a word that brings it up is said in the chat ("grill me
+on this", "explain like I'm five"), and stays for the rest of it.
+
+Wumpy ships with some, copied into the folder the first time it runs so you
+can read and change them:
+
+| Command | What it does |
+| --- | --- |
+| `/grill <plan>` | Relentless questions, one at a time, each with a recommended answer, until every branch of the plan is settled |
+| `/eli5 <topic>` | Explained as if to a five-year-old: one idea, one everyday comparison, no jargon |
+| `/humanize <text>` | Rewritten so it reads like a person wrote it, without the tells of AI writing |
+
+A shipped skill you change is yours and stays as you made it; one you
+delete stays deleted; one you never touched is updated with Wumpy.
+
+`/skills` lists them all. `/skills new <what it should do>` (or "make a
+skill that...") has the model write one; `/skills folder` opens the folder.
+`/skill <name> <text>` runs one whose name another command already has. A
+skill written by hand looks like this:
 
 ```markdown
 ---
-name: hangman
-description: Playing hangman out loud
-triggers: hangman, guess the word
+name: standup
+description: Write my daily standup. Use when I paste what I did.
+triggers: standup, stand-up
+argument-hint: <what I did>
 ---
-Pick a word of 5 to 8 letters. Show the board as blanks and letters.
+Turn this into a standup with Yesterday, Today and Blockers: $ARGUMENTS
 ```
+
+`$ARGUMENTS` is what followed the command (left out, it goes at the end).
+`disable-model-invocation: true` makes a skill a command only, never brought
+in by a trigger word; `user-invocable: false` makes it the opposite. A
+single `<name>.md` file still works too.
 
 **Games keep their secrets.** A model forgets everything between turns
 except the conversation, so a hangman word it never wrote down was gone by
@@ -937,6 +960,8 @@ or Enter to accept.
 | `/music on\|off` | Pause music while Wumpy listens and talks |
 | `/startup on\|off` | Start Wumpy in the background when you log in, so the earbuds gesture works without opening it |
 | `/restart` | Restart Wumpy and come back to the same chat (also in the tray menu, as `wumpy --restart`, or say "restart yourself") |
+| `/skills` | List your skills (each one is a command), `/skills new <what it should do>` to add one, `/skills folder` to open them |
+| `/skill` `<name text>` | Run a skill by name, even one whose name another command has |
 | `/update` | Update Wumpy now: on Windows restart into a downloaded release, or look for one; on Linux pull, build and install from the source folder, then restart (`/update force` rebuilds anyway; or say "update yourself") |
 | `/mode [quick\|dev]` | Toggle Quick / Developer |
 | `/dock` | Move the panel, from a list |

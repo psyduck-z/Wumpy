@@ -8,6 +8,7 @@ import type { Entry } from '@shared/journal'
 import type { RankView } from '@shared/types'
 import type { EnrolAnswer, VoiceprintState, WhoseAnswer } from '@shared/types'
 import type { Listening } from '@shared/meeting'
+import type { Skill, SkillSummary } from '@shared/skills'
 import type { LookResult } from '../main/look'
 import type {
   AgentDelivery,
@@ -249,8 +250,15 @@ const api = {
       description?: string
       triggers?: string[]
       body: string
+      argumentHint?: string
     }): Promise<{ ok: boolean; why: string; name: string; did: 'saved' | 'replaced' | 'removed' }> =>
-      ipcRenderer.invoke(IPC.skillSave, skill)
+      ipcRenderer.invoke(IPC.skillSave, skill),
+    /** Every skill, for the command palette and /skills. */
+    list: (): Promise<SkillSummary[]> => ipcRenderer.invoke(IPC.skillList),
+    /** One skill, whole, to run as a command. */
+    get: (name: string): Promise<Skill | null> => ipcRenderer.invoke(IPC.skillGet, name),
+    /** Opens the skills folder; resolves to its path. */
+    folder: (open: boolean): Promise<string> => ipcRenderer.invoke(IPC.skillFolder, open)
   },
   keys: {
     /**

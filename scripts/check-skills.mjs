@@ -130,17 +130,87 @@ check('the newest mentioned first', S.activeSkills(skills, ['hangman', 'give me 
 
 /* ------------------------------------------------- the folder, for real */
 
+const B = await load('src/shared/builtinskills.ts', 'builtin')
 const store = new SkillStore()
-check('no folder yet: no skills', store.list(), [])
+const shippedNames = Object.keys(B.BUILTIN_SKILLS).sort()
+const mine = () => store.list().filter((s) => !shippedNames.includes(s.name))
+check('a new folder starts with the shipped skills', store.list().map((s) => s.name), shippedNames)
+check('each in a folder of its own, as Claude lays them out', shippedNames.every((n) => existsSync(join(dir, 'skills', n, 'SKILL.md'))), true)
+check('and none of theirs yet', mine(), [])
 check('a skill is saved', store.save({ name: 'Hangman', description: 'Playing hangman out loud', triggers: ['Hangman'], body: 'Pick a word.' }).did, 'saved')
-check('as a file they can open', existsSync(join(dir, 'skills', 'hangman.md')), true)
-check('and read back', store.list().map((s) => [s.name, s.description, s.triggers, s.body]), [['hangman', 'Playing hangman out loud', ['hangman'], 'Pick a word.']])
+check('as a file they can open, in its own folder', existsSync(join(dir, 'skills', 'hangman', 'SKILL.md')), true)
+check('and read back', mine().map((s) => [s.name, s.description, s.triggers, s.body]), [['hangman', 'Playing hangman out loud', ['hangman'], 'Pick a word.']])
 check('the same name replaces it', store.save({ name: 'hangman', body: 'Pick a longer word.' }).did, 'replaced')
-check('with what was asked', store.list()[0].body, 'Pick a longer word.')
+check('with what was asked', store.get('hangman')?.body, 'Pick a longer word.')
 check('it reaches the facts when it comes up', store.forPrompt(['play hangman']).some((l) => l.includes('Pick a longer word.')), true)
 check('an empty one removes it', store.save({ name: 'hangman', body: '' }).did, 'removed')
-check('and the file is gone', existsSync(join(dir, 'skills', 'hangman.md')), false)
-check('a nameless skill is refused', store.save({ name: '!!', body: 'x' }).ok, false)
+check('and the file and its folder are gone', existsSync(join(dir, 'skills', 'hangman')), false)
+writeFileSync(join(dir, 'skills', 'summaries.md'), 'Three bullets, no intro.')
+check('a single <name>.md, as Wumpy first wrote them, still reads', store.get('summaries')?.body, 'Three bullets, no intro.')
+store.save({ name: 'summaries', body: 'Four bullets.' })
+check('and is changed where it is', readFileSync(join(dir, 'skills', 'summaries.md'), 'utf8').includes('Four bullets.'), true)
+check('a skill can carry its argument hint', store.save({ name: 'standup', body: 'Write my standup from: $ARGUMENTS', argumentHint: '<what I did>' }).ok && store.get('standup')?.argumentHint, '<what I did>')
+{
+  const sums = store.summaries()
+  check('the panel is told which are built in', sums.filter((x) => x.builtin).map((x) => x.name), shippedNames)
+  check('and which are theirs', sums.filter((x) => !x.builtin).map((x) => x.name).sort(), ['standup', 'summaries'])
+  check('every one a command unless it says otherwise', sums.every((x) => x.command), true)
+}
+
+/* The shipped skills: kept when changed, updated when not, gone when deleted. */
+{
+  const record = () => JSON.parse(readFileSync(join(dir, 'skills', '.builtin.json'), 'utf8'))
+  const grillFile = join(dir, 'skills', 'grill', 'SKILL.md')
+  writeFileSync(grillFile, readFileSync(grillFile, 'utf8') + '\nAlways ask about money first.\n')
+  check('a shipped skill they changed is theirs', store.summaries().find((x) => x.name === 'grill')?.builtin, false)
+  /* A newer Wumpy with a different grill and eli5 still as shipped. */
+  const rec = record()
+  rec.grill = 'oldhash'
+  rec.eli5 = (await import('node:crypto')).createHash('sha256').update(readFileSync(join(dir, 'skills', 'eli5', 'SKILL.md'), 'utf8')).digest('hex').slice(0, 16)
+  const eli5Before = readFileSync(join(dir, 'skills', 'eli5', 'SKILL.md'), 'utf8')
+  writeFileSync(join(dir, 'skills', 'eli5', 'SKILL.md'), eli5Before.replace('# Explain', '# OLD Explain'))
+  rec.eli5 = (await import('node:crypto')).createHash('sha256').update(readFileSync(join(dir, 'skills', 'eli5', 'SKILL.md'), 'utf8')).digest('hex').slice(0, 16)
+  writeFileSync(join(dir, 'skills', '.builtin.json'), JSON.stringify(rec))
+  rmSync(join(dir, 'skills', 'humanize'), { recursive: true, force: true })
+  const again = new SkillStore()
+  again.list()
+  check('an untouched shipped skill is brought up to date', readFileSync(join(dir, 'skills', 'eli5', 'SKILL.md'), 'utf8'), B.BUILTIN_SKILLS.eli5)
+  check('a changed one is left exactly as they made it', /Always ask about money first/.test(readFileSync(grillFile, 'utf8')), true)
+  check('and a deleted one stays deleted', existsSync(join(dir, 'skills', 'humanize')), false)
+}
+
+/* As commands. */
+{
+  const grill = S.parseSkill('grill', B.BUILTIN_SKILLS.grill)
+  check('Claude\'s header fields are read', [grill.argumentHint, grill.auto, grill.command], ['<plan, idea or decision>', undefined, undefined])
+  const p = S.skillPrompt(grill, 'move to Berlin in March')
+  check('$ARGUMENTS takes what followed the command', /until we both understand it completely: move to Berlin in March/.test(p) && !/\$ARGUMENTS/.test(p), true)
+  check('the instructions travel in the message, to last the whole task', /<instructions skill="grill">[\s\S]*<\/instructions>/.test(p) && /rest of this task/.test(p), true)
+  const plain = S.parseSkill('standup', 'Write it as three bullets.')
+  check('without $ARGUMENTS they go at the end, as in Claude', S.skillPrompt(plain, 'fixed the login bug').endsWith('ARGUMENTS: fixed the login bug'), true)
+  check('and with nothing given it asks', /ask me for it in one short question/.test(S.skillPrompt(plain, '')), true)
+  const only = S.parseSkill('x', ['---', 'name: deploy', 'description: "Deploy the site"', 'disable-model-invocation: true', '---', 'Deploy.'].join(NL))
+  check('quoted descriptions are read as YAML has them', only.description, 'Deploy the site')
+  check('disable-model-invocation: only ever run as a command', [only.auto, S.activeSkills([only], ['deploy it']).length], [false, 0])
+  check('user-invocable: false is not a command', S.parseSkill('x', ['---', 'name: tone', 'user-invocable: false', '---', 'Warm.'].join(NL)).command, false)
+  check('and both survive being written back', S.parseSkill('x', S.skillFile(only)).auto, false)
+  check('a trigger brings a shipped skill in by itself', S.activeSkills([grill], ['can you grill me on this']).map((s) => s.name), ['grill'])
+  check('with $ARGUMENTS read as what they asked', S.skillFacts([grill], ['grill me on my plan'], '/x').some((l) => /understand it completely: what they asked about/.test(l)), true)
+  check('every shipped skill fits', Object.values(B.BUILTIN_SKILLS).every((t) => S.parseSkill('x', t).body.length <= S.MAX_SKILL_CHARS), true)
+  check('every shipped skill has Claude\'s fields', Object.entries(B.BUILTIN_SKILLS).every(([n, t]) => { const k = S.parseSkill('x', t); return k.name === n && /\bUse when\b/.test(k.description) && Boolean(k.argumentHint) }), true)
+  check('a skill tag can carry an argument hint', K.savesIn('<skill name="a" argument-hint="<topic>">Do it.</skill>').skills[0].argumentHint, '<topic>')
+}
+{
+  const cmds = read('src/renderer/src/commands.ts')
+  const app = read('src/renderer/src/App.tsx')
+  check('skills join the command list', /return skillSpecs\.length \? \[\.\.\.COMMANDS, \.\.\.skillSpecs\] : COMMANDS/.test(cmds) && /return allCommands\(\)\.find\(\(c\) => matches\(c, n\)\)/.test(cmds), true)
+  check('but never take over one of the app\'s own', /!taken\.has\(s\.name\)/.test(cmds), true)
+  check('/skill <name> runs one anyway', /name: 'skill',/.test(cmds), true)
+  check('a skill command sends the skill, showing what was typed', /chat\.send\(skillPrompt\(skill, action\.args\), shown\)/.test(app), true)
+  check('the list is read when the panel comes up', /refresh\(\)\s*return window\.wumpy\.panel\.onShown\(refresh\)/.test(app), true)
+  check('and when a chat saves one', /if \(skills\.length\) void window\.wumpy\.skills\.list\(\)\.then\(setSkillCommands\)/.test(read('src/renderer/src/saves.ts')), true)
+  check('the palette hears about them', /useSyncExternalStore\(onCommandsChanged, commandsSeen\)/.test(read('src/renderer/src/components/Composer.tsx')), true)
+}
 
 /* ------------------------------------------------------------ notes */
 

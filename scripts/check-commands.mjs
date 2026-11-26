@@ -243,6 +243,8 @@ const BARE_IS_USELESS = [
   'rename',
   'open',
   'key',
+  // A skill by name: bare, there is no name to run. /skills lists them.
+  'skill',
   // The prompt wrappers: all six wrap something the user writes, and have
   // nothing to wrap without it.
   'plan',

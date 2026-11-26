@@ -38,7 +38,7 @@ export function withoutKept(text: string): string {
 
 export interface Saves {
   remember: string[]
-  skills: Array<{ name: string; description: string; triggers: string[]; body: string }>
+  skills: Array<{ name: string; description: string; triggers: string[]; body: string; argumentHint?: string }>
 }
 
 function attribute(tag: string, name: string): string {
@@ -53,7 +53,8 @@ export function savesIn(text: string): Saves {
     const fact = m[1].replace(/\s+/g, ' ').trim()
     if (fact && fact.length <= 300) out.remember.push(fact)
   }
-  for (const m of text.matchAll(/<skill\b([^>]*)>([\s\S]*?)<\/skill>/gi)) {
+  /* Attributes may hold a ">" inside quotes: argument-hint="<topic>". */
+  for (const m of text.matchAll(/<skill\b((?:"[^"]*"|'[^']*'|[^>"'])*)>([\s\S]*?)<\/skill>/gi)) {
     const name = attribute(m[1], 'name')
     if (!name) continue
     out.skills.push({
@@ -63,7 +64,8 @@ export function savesIn(text: string): Saves {
         .split(',')
         .map((t) => t.trim())
         .filter(Boolean),
-      body: m[2].trim()
+      body: m[2].trim(),
+      ...(attribute(m[1], 'argument-hint') ? { argumentHint: attribute(m[1], 'argument-hint') } : {})
     })
   }
   return out

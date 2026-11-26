@@ -1153,6 +1153,9 @@ export const IPC = {
   contextSet: 'context:set',
   /** Makes, replaces or removes a skill (see @shared/skills). */
   skillSave: 'skill:save',
+  skillList: 'skill:list',
+  skillGet: 'skill:get',
+  skillFolder: 'skill:folder',
   keyStatus: 'key:status',
   keySet: 'key:set',
   keyAdd: 'key:add',

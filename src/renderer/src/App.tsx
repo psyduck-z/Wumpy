@@ -87,6 +87,7 @@ import { speakable } from '@shared/spoken'
 import { useChat, nextId, type ChatStats } from './hooks/useChat'
 import { useListening } from './hooks/useListening'
 import { useLiveNotes } from './hooks/useLiveNotes'
+import { skillPrompt, shortly } from '@shared/skills'
 import type { AudioSource } from './loopback'
 import {
   ENOUGH_WORDS,
@@ -99,6 +100,7 @@ import {
 } from '@shared/meeting'
 import {
   allCommands,
+  setSkillCommands,
   parseCommand,
   helpText,
   shortcutsText,
@@ -209,6 +211,16 @@ export default function App(): React.JSX.Element {
   const listening = useListening(useCallback(() => allCommands().map((c) => c.name), []))
   /** The live notes card that follows a meeting while it is heard. */
   const liveNotes = useLiveNotes(listening, chat)
+
+  /* Their skills, as commands: read at start, and again each time the panel
+     comes up, so a SKILL.md edited by hand is a command without a restart. */
+  useEffect(() => {
+    const refresh = (): void => {
+      void window.wumpy.skills.list().then(setSkillCommands).catch(() => undefined)
+    }
+    refresh()
+    return window.wumpy.panel.onShown(refresh)
+  }, [])
 
   /**
    * What the model is doing, read off the reply as it arrives.
@@ -2851,6 +2863,72 @@ function namedControls(shot: Attachment): string[] {
           const result = await window.wumpy.update.now(action.force)
           chat.note(result.message, !result.ok)
           tell(result.ok ? result.message.replace(/\*\*/g, '') : 'The update did not work. The reason is in the panel.')
+          return
+        }
+        case 'skill': {
+          const skill = await window.wumpy.skills.get(action.name).catch(() => null)
+          if (!skill) {
+            chat.note(`There is no skill called “${action.name}”. \`/skills\` lists them.`, true)
+            return
+          }
+          const shown = raw.trim().startsWith('/') ? raw.trim() : `/${skill.name} ${action.args}`.trim()
+          chat.send(skillPrompt(skill, action.args), shown)
+          return
+        }
+        case 'skills': {
+          const ask = action.ask
+          if (/^(folder|open|dir|edit|files?)$/i.test(ask)) {
+            const dir = await window.wumpy.skills.folder(true)
+            chat.note(
+              `Opened your skills folder: \`${dir}\`. Each skill is a folder with a \`SKILL.md\` in it — change one, ` +
+                'or add a folder of your own, and it is a command the next time the panel opens.'
+            )
+            return
+          }
+          const making = /^(?:new|add|make|create)\b\s*([\s\S]*)$/i.exec(ask)
+          if (making) {
+            const what = making[1].trim()
+            if (!what) {
+              chat.note('Say what it should do: `/skills new <what it should do>` — for example `/skills new turn my notes into a weekly status update`.')
+              return
+            }
+            /* The skill for making skills, when it is there; otherwise the plain ask. */
+            const creator = await window.wumpy.skills.get('skill-creator').catch(() => null)
+            chat.send(
+              creator
+                ? skillPrompt(creator, what)
+                : `Make me a new skill: ${what}\n\nAsk at most two short questions if something important is unclear; ` +
+                    'otherwise write it now, as a <skill> tag with name, description (what it does and when to use it), ' +
+                    'triggers and argument-hint, and instructions written to yourself: a title, the method as numbered ' +
+                    'steps, the rules that stop the obvious failure, and the shape of the answer. Put $ARGUMENTS where ' +
+                    'what follows the command belongs.',
+              raw.trim()
+            )
+            return
+          }
+          const list = await window.wumpy.skills.list().catch(() => [])
+          setSkillCommands(list)
+          const dir = await window.wumpy.skills.folder(false).catch(() => '')
+          chat.note(
+            [
+              list.length ? '**Your skills** — each one is a command:' : '**No skills yet.**',
+              '',
+              ...(list.length
+                ? [
+                    '| Command | What it does | |',
+                    '| --- | --- | --- |',
+                    ...list.map(
+                      (sk) =>
+                        `| \`/${sk.name}\`${sk.argumentHint ? ` ${sk.argumentHint.replace(/\|/g, '\\|')}` : ''} | ${shortly(sk.description).replace(/\|/g, '\\|')} | ${sk.builtin ? 'built in' : 'yours'} |`
+                    ),
+                    ''
+                  ]
+                : []),
+              '**Add one:** `/skills new <what it should do>`, or just say “make a skill that…”.',
+              `**Change one:** \`/skills folder\` opens ${dir ? `\`${dir}\`` : 'the folder'} — each skill is \`<name>/SKILL.md\`, ` +
+                'in the same layout as Claude’s. A built-in one you change is kept as yours.'
+            ].join(NEWLINE)
+          )
           return
         }
         case 'prompt':
