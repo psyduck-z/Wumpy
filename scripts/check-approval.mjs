@@ -93,6 +93,22 @@ console.log(
  * Every one of these was allowed by an earlier version of isReadOnly().
  */
 const MUST_BLOCK = [
+  'rfkill unblock bluetooth',
+  'rfkill block all',
+  /* command runs its argument unless asked -v. */
+  'command rm -rf ~/x',
+  'command -p rm x',
+  'command -v $(rm x)',
+  /* awk, when its program writes or runs something. */
+  `awk '{print > "/tmp/x"}' /proc/uptime`,
+  `awk 'BEGIN{system("rm -rf ~")}'`,
+  `awk 'BEGIN{print "x" | "sh"}'`,
+  `awk 'BEGIN{"id" | getline u; print u}'`,
+  `awk -f prog.awk /etc/hostname`,
+  `gawk -i inplace '{print}' notes.txt`,
+  `gawk -o '{print}' /proc/uptime`,
+  `gawk -p '{print}' /proc/uptime`,
+  `awk '$1 > 5' /proc/uptime`,
   /* A command inside a command was never looked at: these ran by themselves
      on the auto mode. */
   'echo $(rm -rf /tmp/x)',
@@ -222,6 +238,17 @@ const MUST_BLOCK = [
 
 /** Reads that must keep working, or the auto mode is useless. */
 const MUST_ALLOW = [
+  /* The install check the Linux prompt itself teaches. */
+  'command -v git && git --version',
+  'command -v docker',
+  'rfkill list',
+  `du -h -d 1 ~ 2>/dev/null | sort -rh | head -15`,
+  `find ~ -xdev -type f -printf '%s %p\\n' 2>/dev/null | sort -rn | head -15`,
+  'command -v thunar nautilus dolphin 2>/dev/null || true',
+  /* awk that only prints - the uptime answer Wumpy's own Linux prompt gives. */
+  `awk '{printf "%.1f\\n", $1/3600}' /proc/uptime`,
+  `free -b | awk '/Mem/{printf "%.1f", $3/$2*100}'`,
+  `awk -F: '{print $1}' /etc/passwd`,
   /* Reads that discard their errors, loop, or filter: a background agent
      spent ten steps being refused these. */
   /* Bash's discard, which only means that on Linux: on Windows a path

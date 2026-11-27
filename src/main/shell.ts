@@ -343,13 +343,23 @@ const READ_ONLY = new Set([
   'file',
   'which',
   'whereis',
+  /* Only as `command -v name`, which says where a program is: given anything
+     else, command RUNS its argument. See flagsRead. */
+  'command',
+  /* Do nothing at all: `command -v a b 2>/dev/null || true` was refused for its true. */
+  'true',
+  'false',
   'printenv',
   'sensors',
   /* Filters, which read what they are piped and print it: `upower -e |
      grep BAT` and `grep -r TODO src` were refused for want of a name here.
      None of these can write except through a redirect, which is caught
-     on its own. sed and awk are not here: both can write by themselves. */
+     on its own. sed is not here: it can write by itself (w, -i). awk can
+     too, and is here only for the programs that cannot - see flagsRead. */
   'grep',
+  'awk',
+  'gawk',
+  'mawk',
   'egrep',
   'fgrep',
   'rg',
@@ -364,7 +374,8 @@ const READ_ONLY = new Set([
   'hyprctl',
   'systemctl',
   'bluetoothctl',
-  'wpctl'
+  'wpctl',
+  'rfkill'
 ])
 
 /**
@@ -410,6 +421,8 @@ const READ_SUBCOMMANDS: Record<string, string[]> = {
   systemctl: ['status', 'list-units', 'list-unit-files', 'list-timers', 'is-active', 'is-enabled', 'is-failed', 'show', 'cat'],
   bluetoothctl: ['devices', 'info', 'show', 'list', 'paired-devices'],
   wpctl: ['status', 'inspect', 'get-volume'],
+  /* list reports; block and unblock switch radios. */
+  rfkill: ['list'],
   /* -i and -e report; --monitor never ends, and nothing here changes power. */
   upower: ['-i', '-e', '-d', '--dump', '--enumerate', '--show-info', '--version'],
   // Interpreters and editors get nothing but their version and help flags:
@@ -811,6 +824,32 @@ function flagsRead(head: string, segment: string, masked: string): boolean {
       return !has(/(^|\s)--?(toolexec|exec|overlay)(=|\s|$)/)
     case 'sensors':
       return !has(/(^|\s)-[a-zA-Z]*s/)
+    /*
+     * awk, only when its program cannot write or run anything.
+     *
+     * Wumpy's own Linux prompt answers "how long has it been on" with
+     * `awk '{printf "%.1f\n", $1/3600}' /proc/uptime`, and the gate refused
+     * it for being awk - so the one question the prompt shows how to answer
+     * waited for a click that df never needs. awk writes with print > file
+     * (any > at all is already refused by WRITE_MARKERS, comparison or not),
+     * runs with system() and | "cmd", and gawk writes with -o, -p, -d and
+     * -i inplace, and loads code with -f, -i, -l and -E. So: no system, no
+     * getline (it can run a command too), no | anywhere in the program, and
+     * no flag but -F and -v.
+     */
+    /* The prompt's own install check is `command -v git && git --version`,
+       and it was refused for its first word. */
+    case 'command': {
+      const words = masked.trim().split(/\s+/).slice(1)
+      return words.length >= 2 && /^-[vV]$/.test(words[0]) && words.slice(1).every((w) => /^[\w.+-]+$/.test(w))
+    }
+    case 'awk':
+    case 'gawk':
+    case 'mawk': {
+      if (has(/\bsystem\s*\(|\bgetline\b|\|/)) return false
+      const flags = masked.trim().split(/\s+/).slice(1).filter((t) => t.startsWith('-'))
+      return flags.every((t) => /^-[Fv]/.test(t) || t === '--')
+    }
     /* `ForEach-Object Delete` calls Delete on everything it is handed. */
     case 'foreach-object': {
       let rest = masked

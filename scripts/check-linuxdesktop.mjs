@@ -43,6 +43,13 @@ check('Linux without the helper is not promised a click', !/YOU CAN CLICK AND TY
 check('and is told there is no mouse control then', /there is no mouse control on this machine/.test(without))
 check('Windows is unchanged: it can click', /YOU CAN CLICK AND TYPE/.test(windows) && !/ON THIS MACHINE \(Linux/.test(windows))
 check('no screen, no clicking, on Linux either', !/YOU CAN CLICK/.test(A.assemblePrompt(shape({ hands: true, screen: false }))))
+/* Hyprland 0.56 answers every old-style dispatch with "error": a prompt that
+   teaches `hyprctl dispatch workspace 3` makes Wumpy wrong on the first try. */
+const oldForm = /hyprctl dispatch (?:workspace|movetoworkspace|closewindow|focuswindow|movecursor|killactive|exec)\b/
+check('the Linux prompt teaches no old-style dispatch', !oldForm.test(withHands) && !oldForm.test(without), (oldForm.exec(withHands) ?? oldForm.exec(without) ?? [''])[0])
+check('and does teach the Lua one', /hl\.dsp\.focus\(\{ workspace = "3" \}\)/.test(withHands) && /hl\.dsp\.window\.close\(\{ window = "class:/.test(withHands))
+const panelSrc = readFileSync('src/main/panel.ts', 'utf8')
+check('the panel brings itself forward with the Lua dispatch first', /hl\.dsp\.focus\(\{ window = "pid:/.test(panelSrc))
 const stub = A.assemblePrompt(shape({ hands: true, needs: [] }))
 check('a turn not about the desktop gets the one-line stub', /You can click and type on their screen with a ```wumpy-do/.test(stub))
 

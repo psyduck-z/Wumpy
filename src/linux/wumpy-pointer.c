@@ -8,7 +8,7 @@
  * wtype's pointer cousins use. This is the smallest program that speaks it.
  *
  * It does not move the pointer. Where the pointer is goes through
- * `hyprctl dispatch movecursor`, which takes the same layout coordinates
+ * `hyprctl dispatch hl.dsp.cursor.move`, which takes the same layout coordinates
  * Electron's screen module reports, so there is one coordinate system and no
  * guessing at how an absolute virtual-pointer extent maps onto several
  * monitors. This presses at wherever the pointer now is.

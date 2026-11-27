@@ -438,7 +438,12 @@ export class Panel {
        * none of this: it is mapped again on the workspace you are on.
        */
       if (wasVisible && process.env.HYPRLAND_INSTANCE_SIGNATURE) {
-        execFile('hyprctl', ['dispatch', 'focuswindow', `pid:${process.pid}`], () => {})
+        /* Hyprland 0.56 dispatches in Lua and answers the old form with
+           "error: ..." (exit 0), which left this doing nothing; an older one
+           only knows the old form. */
+        execFile('hyprctl', ['dispatch', `hl.dsp.focus({ window = "pid:${process.pid}" })`], (_e, out) => {
+          if (String(out).startsWith('error')) execFile('hyprctl', ['dispatch', 'focuswindow', `pid:${process.pid}`], () => {})
+        })
       }
       win.webContents.send(IPC.panelShown)
       return

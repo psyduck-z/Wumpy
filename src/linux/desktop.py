@@ -14,7 +14,7 @@ verb it was given, because the Electron side matches replies by that word.
 Coordinates are Hyprland layout coordinates, which are what Electron's
 screen module reports, so src/shared/steps.ts toScreen needs no change.
 
-Hands: `hyprctl dispatch movecursor` puts the pointer; wumpy-pointer (C,
+Hands: `hyprctl dispatch hl.dsp.cursor.move` puts the pointer; wumpy-pointer (C,
 wlr-virtual-pointer) presses and scrolls; wtype types. None needs root.
 Eyes: AT-SPI, the Linux accessibility tree, for names. An app shows its tree
 only while accessibility is on, so this turns it on (org.a11y.Status) at
