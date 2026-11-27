@@ -260,9 +260,14 @@ const api = {
     get: (name: string): Promise<Skill | null> => ipcRenderer.invoke(IPC.skillGet, name),
     /** Opens the skills folder; resolves to its path. */
     folder: (open: boolean): Promise<string> => ipcRenderer.invoke(IPC.skillFolder, open),
-    /** Skills on every device (main/skillsync.ts). */
-    sync: (req: { action: 'now' | 'on' | 'off' | 'key' | 'status'; token?: string }): Promise<{ ok: boolean; on: boolean; message: string; changed?: boolean; account?: string }> =>
-      ipcRenderer.invoke(IPC.skillSync, req),
+    /** Skills on every device: over Wi-Fi (main/lansync.ts) and GitHub (main/skillsync.ts). */
+    sync: (req: {
+      action: 'now' | 'on' | 'off' | 'key' | 'status' | 'pair' | 'unpair'
+      token?: string
+      arg?: string
+    }): Promise<{ ok: boolean; on: boolean; message: string; changed?: boolean; account?: string }> => ipcRenderer.invoke(IPC.skillSync, req),
+    /** Something about Wi-Fi sync they did not just ask for: "Paired with desk." */
+    onNote: (cb: (text: string) => void) => on<string>(IPC.syncNote, cb),
     /** Another device's skills arrived. */
     onChanged: (cb: () => void) => on<null>(IPC.skillsChanged, () => cb())
   },

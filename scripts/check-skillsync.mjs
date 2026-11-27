@@ -192,7 +192,7 @@ check('every 30 minutes and after a save, only when on', /setInterval\(\(\) => v
 check('a sync that changed skills here refreshes the commands', /if \(result\.changed\) panel\?\.send\(IPC\.skillsChanged, null\)/.test(main) && /window\.wumpy\.skills\.onChanged\(refresh\)/.test(read('src/renderer/src/App.tsx')), true)
 check('the token never goes in input history', /\/\^\\\/sync\\s\+\(key\|token\)\\b\/i\.test\(entry\)/.test(read('src/renderer/src/hooks/useInputHistory.ts')), true)
 check('and the model may never run /sync', /NEVER_PROPOSED = new Set\(\['key', 'approve', 'open', 'sync'\]\)/.test(cmds), true)
-check('it is said that an unlisted gist can be read by anyone with the link', /anyone with the gist's link can read it/.test(read('src/renderer/src/App.tsx')), true)
+check('it is said that an unlisted gist can be read by anyone with the link', /anyone with the gist's link can read it/.test(main), true)
 
 rmSync(root, { recursive: true, force: true })
 console.log(`\n${failed === 0 ? 'all skill sync checks correct' : `${failed} skill sync checks FAILED`}`)

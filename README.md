@@ -838,7 +838,18 @@ argument-hint: <what I did>
 Turn this into a standup with Yesterday, Today and Blockers: $ARGUMENTS
 ```
 
-**On every device.** `/sync on` shares your skills between your devices
+**Over Wi-Fi, no account.** `/sync pair` on one device shows a six-digit
+code; `/sync pair 482913` on the other pairs them, once. From then on, while
+both are on the same network, a skill made, changed or deleted on one shows
+up on the other by itself within seconds - same merge rules as below. The
+code is never sent (SPAKE2), three wrong tries cancel it, and everything
+after is encrypted with the secret only the two devices hold. Nothing
+listens on the network until something is paired. On Linux, pairing opens
+port 47820 in ufw once, with a password pop-up; Windows asks to allow Wumpy
+on private networks the first time. `/sync status` lists paired devices,
+`/sync unpair [name]` forgets them.
+
+**On every device, through GitHub.** `/sync on` shares your skills between your devices
 through an unlisted gist on your own GitHub account: a skill made, changed
 or deleted on one shows up the same on the others, every 30 minutes and a
 few seconds after one is saved (`/sync` does it now). Changed on two devices
@@ -847,7 +858,8 @@ nobody changed are not sent. On a machine where `gh` is signed in, that is
 all it needs; elsewhere, `/sync key <token>` with a GitHub token that has
 only the **gist** scope (kept encrypted, never in input history). An
 unlisted gist can be read by anyone who has its link, so keep secrets out of
-skills. `/sync off` stops it. Also: "make yourself a skill for...", "save
+skills. `/sync off` stops it (and Wi-Fi sync), and with both set up, `/sync`
+runs both. Also: "make yourself a skill for...", "save
 that as a skill" and "turn what we just did into a skill" all go through
 `skill-creator`, which writes the method from the conversation itself.
 
@@ -1004,7 +1016,7 @@ or Enter to accept.
 | `/startup on\|off` | Start Wumpy in the background when you log in, so the earbuds gesture works without opening it |
 | `/restart` | Restart Wumpy and come back to the same chat (also in the tray menu, as `wumpy --restart`, or say "restart yourself") |
 | `/skills` | List your skills (each one is a command), `/skills new <what it should do>` to add one, `/skills folder` to open them |
-| `/sync` `<on\|off\|status\|key token>` | Share your skills between your devices through an unlisted gist on your GitHub account; bare, syncs now |
+| `/sync` `<pair [code]\|unpair\|on\|off\|status\|key token>` | Share your skills between your devices: over Wi-Fi once paired, or through an unlisted gist on your GitHub account; bare, syncs now |
 | `/skill` `<name text>` | Run a skill by name, even one whose name another command has |
 | `/update` | Update Wumpy now: on Windows restart into a downloaded release, or look for one; on Linux pull, build and install from the source folder, then restart (`/update force` rebuilds anyway; or say "update yourself") |
 | `/mode [quick\|dev]` | Toggle Quick / Developer |

@@ -104,7 +104,10 @@ export const DEFAULT_SETTINGS: WumpySettings = {
   autoRank: true,
 
   // See WumpySettings.skillSync. Off: it sends their skills to GitHub.
-  skillSync: false
+  skillSync: false,
+
+  // See WumpySettings.lanSync. On, and nothing runs until a device is paired.
+  lanSync: true
 }
 
 /** The sizes every panel had before they were widened. */

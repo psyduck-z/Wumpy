@@ -742,6 +742,11 @@ export interface WumpySettings {
    * sends the skills folder to GitHub.
    */
   skillSync: boolean
+  /**
+   * Share skills with the devices paired over Wi-Fi (`/sync pair`,
+   * main/lansync.ts). On, and inert until one is paired; `/sync off` stops it.
+   */
+  lanSync: boolean
 }
 
 /* ---------------------------------------------------------------- messaging */
@@ -1164,6 +1169,7 @@ export const IPC = {
   skillFolder: 'skill:folder',
   skillSync: 'skill:sync',
   skillsChanged: 'skill:changed',
+  syncNote: 'skill:syncnote',
   keyStatus: 'key:status',
   keySet: 'key:set',
   keyAdd: 'key:add',

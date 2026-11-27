@@ -1,7 +1,8 @@
 import { deadlineFact, deadlineIn } from '@shared/deadline'
-import { app, clipboard, dialog, ipcMain, nativeImage, session, shell, Tray } from 'electron'
-import { cpus, homedir } from 'node:os'
-import { existsSync, mkdirSync, readFileSync, statSync, unlinkSync, writeFileSync } from 'node:fs'
+import { app, clipboard, dialog, ipcMain, nativeImage, safeStorage, session, shell, Tray } from 'electron'
+import { cpus, homedir, hostname } from 'node:os'
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, statSync, unlinkSync, writeFileSync } from 'node:fs'
+import { createHash } from 'node:crypto'
 import { basename, dirname, join, resolve } from 'node:path'
 import { IPC } from '@shared/types'
 import type {
@@ -72,7 +73,8 @@ import { launchPath } from '@shared/launchpath'
 import { folderFacts, resolveUserFolders } from './folders'
 import { ContextStore } from './context'
 import { SkillStore } from './skills'
-import { SkillSync } from './skillsync'
+import { SkillSync, type SyncResult } from './skillsync'
+import { LAN_PORT, LanSync, openFirewall, pairCode } from './lansync'
 import { skillPrompt } from '@shared/skills'
 import { Speech } from './speech'
 import {
@@ -218,6 +220,8 @@ let keys: KeyStore
 let notes: ContextStore
 let skills: SkillStore
 let skillSync: SkillSync
+/** Skills with their paired devices over Wi-Fi: see main/lansync.ts. */
+let lanSync: LanSync
 let usage: UsageStore
 let pools: PoolStore
 let ranker: Ranker
@@ -2676,39 +2680,101 @@ ${command}`
   }))
 
   ipcMain.handle(IPC.skillList, () => skills.summaries())
-  /* Skills on every device (main/skillsync.ts): now, on, off, or a token. */
+  /*
+   * Skills on every device: over Wi-Fi with paired devices (main/lansync.ts),
+   * and through GitHub when they are signed in (main/skillsync.ts) - both, if
+   * both are set up. Every message is one line: "shorten that down".
+   */
   ipcMain.handle(
     IPC.skillSync,
-    async (_e, req: { action: 'now' | 'on' | 'off' | 'key' | 'status'; token?: string }) => {
-      const on = (): boolean => settings.get('skillSync') === true
-      if (req?.action === 'off') {
-        settings.patch({ skillSync: false })
-        return { ok: true, on: false, message: 'Sync off.' }
+    async (_e, req: { action: SyncAction; token?: string; arg?: string }) => {
+      const github = (): boolean => settings.get('skillSync') === true
+      const wifi = (): boolean => settings.get('lanSync') !== false
+      const paired = (): boolean => lanSync.peers().length > 0
+      const arg = String(req?.arg ?? '').trim()
+      const reply = (ok: boolean, message: string, changed = false): SyncReply => ({ ok, on: github() || (wifi() && paired()), message, changed, account: skillSync.status().account })
+      switch (req?.action) {
+        case 'off':
+          settings.patch({ skillSync: false, lanSync: false })
+          lanSync.stop()
+          return reply(true, 'Sync off.')
+        case 'pair': {
+          const code = arg ? pairCode(arg) : null
+          if (arg && !code) return reply(false, 'A code is six digits: `/sync pair 482913`.')
+          settings.patch({ lanSync: true })
+          const wall = await openFirewall()
+          const closed = wall === 'refused' ? ' (Firewall left closed: the other device may not find this one.)' : ''
+          await lanSync.start()
+          if (!code) {
+            const shown = lanSync.show()
+            return reply(true, `On the other device: \`/sync pair ${shown.code}\` (lasts 5 min).${closed}`)
+          }
+          const r = await lanSync.join(code)
+          if (r.changed) panel.send(IPC.skillsChanged, null)
+          if (r.ok) journal.add('skill', r.message.replace(/\*\*/g, ''))
+          if (!paired()) lanSync.stop()
+          return reply(r.ok, `${r.message}${closed}`, r.changed)
+        }
+        case 'unpair': {
+          const gone = lanSync.unpair(arg)
+          return reply(
+            gone > 0,
+            gone ? (arg ? `Unpaired **${arg}**.` : `Unpaired ${gone === 1 ? 'it' : `all ${gone}`}.`) : arg ? `No paired device called “${arg}”.` : 'Nothing is paired.'
+          )
+        }
+        case 'status': {
+          const parts: string[] = []
+          if (wifi() && paired()) {
+            parts.push(`Wi-Fi with ${lanSync.peers().map((p) => `**${p.name}**${p.synced ? ` (synced ${ago(p.synced)})` : ''}`).join(', ')}`)
+          }
+          if (github()) {
+            const account = skillSync.status().account
+            parts.push((await skillSync.token()) ? `GitHub${account ? ` as **${account}**` : ''}` : 'GitHub, but no token here (`/sync key <token>`)')
+          }
+          return reply(true, parts.length ? `Syncing skills: ${parts.join(' · ')}.` : 'Sync is off. `/sync pair` (Wi-Fi) or `/sync on` (GitHub).')
+        }
+        case 'key': {
+          const kept = skillSync.setToken(String(req.token ?? ''))
+          if (!kept.ok) return reply(false, kept.why)
+          if (!String(req.token ?? '').trim()) return reply(true, 'Token removed.')
+          settings.patch({ skillSync: true })
+          break
+        }
+        case 'on':
+          settings.patch({ skillSync: true, lanSync: true })
+          break
       }
-      if (req?.action === 'key') {
-        const kept = skillSync.setToken(String(req.token ?? ''))
-        if (!kept.ok) return { ok: false, on: on(), message: kept.why }
-        if (!String(req.token ?? '').trim()) return { ok: true, on: on(), message: 'Token removed.' }
-        settings.patch({ skillSync: true })
-      }
-      if (req?.action === 'on') settings.patch({ skillSync: true })
-      if (req?.action === 'status') {
-        const auth = await skillSync.token()
-        const account = skillSync.status().account
-        return {
-          ok: true,
-          on: on(),
-          message: on()
-            ? auth
-              ? `Syncing skills${account ? ` via **${account}**` : ''}.`
-              : 'Sync is on, but this device has no GitHub token: `/sync key <token>`.'
-            : 'Sync is off. `/sync on` turns it on.'
+      /* now, on, key: everything that is set up, at once. */
+      const first = req?.action === 'on' || req?.action === 'key'
+      const done: string[] = []
+      let ok = true
+      let changed = false
+      if (wifi() && paired()) {
+        await lanSync.start()
+        for (const r of await lanSync.syncAll()) {
+          done.push(`${r.message} (${r.peer})`)
+          ok &&= r.ok
+          changed ||= r.changed
         }
       }
-      if (!on()) return { ok: false, on: false, message: 'Sync is off. `/sync on` turns it on.' }
-      const result = await skillSync.sync()
-      if (result.changed) panel.send(IPC.skillsChanged, null)
-      return { ...result, on: true, account: skillSync.status().account }
+      let viaGithub: SyncResult | null = null
+      if (github() && ((await skillSync.token()) || !done.length)) {
+        viaGithub = await skillSync.sync()
+        ok &&= viaGithub.ok
+        changed ||= viaGithub.changed
+      }
+      if (changed) panel.send(IPC.skillsChanged, null)
+      if (!done.length && !viaGithub) return reply(false, 'Sync is off. `/sync pair` (Wi-Fi) or `/sync on` (GitHub).')
+      if (viaGithub && !viaGithub.ok && !done.length) {
+        /* Nothing on Wi-Fi either: say both ways in. */
+        const unsigned = viaGithub.message.startsWith('Not signed in')
+        return reply(false, unsigned ? `${viaGithub.message.replace(/\.$/, '')} — or \`/sync pair\` to sync over Wi-Fi.` : viaGithub.message)
+      }
+      if (viaGithub) done.push(viaGithub.ok ? `${viaGithub.message} (GitHub)` : viaGithub.message.replace(/\.$/, ''))
+      const account = skillSync.status().account
+      const warn = first && viaGithub?.ok ? " Keep secrets out — anyone with the gist's link can read it." : ''
+      const head = first ? `**Skills syncing**${viaGithub?.ok && account ? ` via ${account}` : ''}` : 'Skills synced'
+      return reply(ok, `${head}: ${done.join(' · ')}.${warn}`, changed)
     }
   )
   ipcMain.handle(IPC.skillGet, (_e, name: string) => skills.get(String(name ?? '')))
@@ -2992,6 +3058,28 @@ void app.whenReady().then(async () => {
   notes = new ContextStore()
   skills = new SkillStore()
   skillSync = new SkillSync(skills, (line) => console.log(line))
+  lanSync = new LanSync({
+    dir: app.getPath('userData'),
+    store: skills,
+    name: hostname() || 'another device',
+    log: (line) => console.log(line),
+    changed: () => {
+      panel?.send(IPC.skillsChanged, null)
+      syncSoon()
+    },
+    note: (text) => {
+      journal.add('skill', text.replace(/\*\*/g, ''))
+      panel?.send(IPC.syncNote, text)
+    },
+    seal: (secret) => (safeStorage.isEncryptionAvailable() ? `enc:${safeStorage.encryptString(secret).toString('base64')}` : null),
+    open: (sealed) => {
+      try {
+        return sealed.startsWith('enc:') ? safeStorage.decryptString(Buffer.from(sealed.slice(4), 'base64')) : null
+      } catch {
+        return null
+      }
+    }
+  })
   pools = new PoolStore()
   cloud = new CloudClient(keys, pools, { up: (p) => localUp.has(p), refresh: checkLocal })
   usage = new UsageStore()
@@ -3105,6 +3193,8 @@ void app.whenReady().then(async () => {
   /* Skills from their other devices: shortly after start, then every 30 minutes, when it is on. */
   setTimeout(() => void syncInBackground('start'), 45_000).unref?.()
   setInterval(() => void syncInBackground('every 30 minutes'), 30 * 60_000).unref?.()
+  /* Paired over Wi-Fi: listening from the start, so their other devices find this one. */
+  if (settings.get('lanSync') !== false && lanSync.peers().length) void lanSync.start()
   setVoiceprintLog((line) => console.log(line))
   /* Updates on Windows, from the releases each push publishes, shown in the
      panel's header and installed once nobody is using Wumpy; on Linux, from
@@ -3296,6 +3386,10 @@ app.on('second-instance', (_event, argv) => {
     void memoryCheck()
     return
   }
+  if (argv.includes('--wifi-check')) {
+    void wifiCheck()
+    return
+  }
   if (argv.includes('--agents-check')) {
     void agentsCheck()
     return
@@ -3368,6 +3462,15 @@ if (launchChat && !/^[\w-]{1,80}$/.test(launchChat)) launchChat = null
  * A background skills sync, when sharing is on: quiet unless it changed
  * something here, in which case the panel re-reads the commands.
  */
+type SyncAction = 'now' | 'on' | 'off' | 'key' | 'status' | 'pair' | 'unpair'
+type SyncReply = { ok: boolean; on: boolean; message: string; changed: boolean; account?: string }
+
+/** "4 min ago", for /sync status. */
+function ago(at: number): string {
+  const min = Math.round((Date.now() - at) / 60_000)
+  return min < 1 ? 'just now' : min < 60 ? `${min} min ago` : min < 48 * 60 ? `${Math.round(min / 60)} h ago` : `${Math.round(min / 1440)} days ago`
+}
+
 async function syncInBackground(why: string): Promise<void> {
   if (!skillSync || settings.get('skillSync') !== true) return
   const result = await skillSync.sync()
@@ -3378,6 +3481,7 @@ async function syncInBackground(why: string): Promise<void> {
 /** A skill was just saved: shared a few seconds later, once a burst of saves has settled. */
 let syncTimer: ReturnType<typeof setTimeout> | undefined
 function syncSoon(): void {
+  lanSync?.nudge()
   clearTimeout(syncTimer)
   syncTimer = setTimeout(() => void syncInBackground('a skill was saved'), 8000)
 }
@@ -3979,6 +4083,66 @@ async function buildCheck(arg: string): Promise<void> {
   const file = join(out, `${spec.name}-${new Date().toISOString().replace(/[:.]/g, '-')}.md`)
   writeFileSync(file, transcript.join('\n\n'))
   say(`done in ${Math.round((Date.now() - began) / 1000)}s; the exchange is in ${file}`)
+}
+
+/**
+ * `wumpy --wifi-check`: Wi-Fi sync inside the real app - its skills folder,
+ * its keychain, its network. A second device is made in this same process
+ * (an in-memory skills store), pairs with this Wumpy through the real
+ * pairing code and the real broadcasts, and a skill goes each way by
+ * itself. The firewall is not touched. Leaves the test instance paired with nothing.
+ */
+async function wifiCheck(): Promise<void> {
+  const say = (l: string): void => console.log(`[wumpy] wifi check: ${l}`)
+  const fake = new Map<string, { text: string; at: number }>()
+  const h = (t: string): string => createHash('sha256').update(t).digest('hex').slice(0, 16)
+  const other = new LanSync({
+    dir: mkdtempSync(join(app.getPath('temp'), 'wumpy-wifi-')),
+    name: 'check-device',
+    /* ufw drops broadcasts on a closed port even from this machine to itself,
+       so the other device calls this one directly - which also tries the
+       answer-back that gets past a firewall on the other end. */
+    udpPort: LAN_PORT + 10,
+    targets: () => [{ address: '127.0.0.1', port: LAN_PORT }],
+    log: (l) => say(`(other) ${l}`),
+    changed: () => undefined,
+    store: {
+      syncView: () => Object.fromEntries([...fake].map(([n, v]) => [n, { text: v.text, hash: h(v.text), at: v.at }])),
+      put: (n, t) => (fake.set(n, { text: t, at: Date.now() }), true),
+      drop: (n) => fake.delete(n)
+    }
+  })
+  const stamp = Date.now().toString(36)
+  fake.set(`from-other-${stamp}`, { text: `---\nname: from-other-${stamp}\ndescription: made on the other device\n---\nHello.\n`, at: Date.now() })
+  try {
+    settings.patch({ lanSync: true })
+    await lanSync.start()
+    await other.start()
+    const shown = lanSync.show()
+    say(`showing ${shown.code}`)
+    const t0 = Date.now()
+    const joined = await other.join(shown.code)
+    say(`join: ${joined.ok} "${joined.message}" in ${Date.now() - t0} ms`)
+    say(`paired here: ${lanSync.peers().map((p) => p.name).join(', ')}`)
+    say(`the other device's skill arrived here: ${Boolean(skills.get(`from-other-${stamp}`))}`)
+    const mine = `from-here-${stamp}`
+    skills.save({ name: mine, description: 'made on this device', body: 'Hi from here.' })
+    lanSync.nudge()
+    let arrived = false
+    for (let i = 0; i < 60 && !arrived; i++) {
+      await new Promise((r) => setTimeout(r, 250))
+      arrived = fake.has(mine)
+    }
+    say(`a skill made here reached the other device by itself: ${arrived}`)
+    skills.drop(mine)
+    skills.drop(`from-other-${stamp}`)
+  } catch (err) {
+    say(`failed: ${(err as Error)?.stack ?? err}`)
+  } finally {
+    other.stop()
+    lanSync.unpair()
+    say('done')
+  }
 }
 
 async function memoryCheck(): Promise<void> {

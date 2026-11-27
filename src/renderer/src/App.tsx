@@ -222,9 +222,12 @@ export default function App(): React.JSX.Element {
     const offShown = window.wumpy.panel.onShown(refresh)
     /* Skills that arrived from another device. */
     const offChanged = window.wumpy.skills.onChanged(refresh)
+    /* "Paired with laptop." on the device that showed the code. */
+    const offNote = window.wumpy.skills.onNote((text) => chatRef.current?.note(text))
     return () => {
       offShown()
       offChanged()
+      offNote()
     }
   }, [])
 
@@ -2829,21 +2832,11 @@ function namedControls(shot: Attachment): string[] {
             chat.note(`Make a [token with the gist scope](${'https://github.com/settings/tokens/new?scopes=gist&description=Wumpy%20skills'}), then \`/sync key <token>\`.`)
             return
           }
-          const result = await window.wumpy.skills.sync({ action: action.action, token: action.token })
+          if (action.action === 'pair' && action.arg) chat.note('Looking for that device…')
+          const result = await window.wumpy.skills.sync({ action: action.action, token: action.token, arg: action.arg })
           if (result.changed) void window.wumpy.skills.list().then(setSkillCommands).catch(() => undefined)
-          const first = action.action === 'on' || action.action === 'key'
-          chat.note(
-            /* "When I do /sync on, it has another whole chunk of information.
-               Shorten that down." One line: what happened, and the one
-               thing worth knowing - an unlisted gist can be read by anyone
-               with its link. */
-            result.ok && first
-              ? `**Skills syncing**${result.account ? ` via ${result.account}` : ''}: ${result.message}. Keep secrets out — anyone with the gist's link can read it.`
-              : result.ok && action.action === 'now'
-                ? `Skills synced: ${result.message}.`
-                : result.message,
-            !result.ok
-          )
+          /* Main says it in one line, for Wi-Fi and GitHub both: "shorten that down". */
+          chat.note(result.message, !result.ok)
           return
         }
         case 'skills': {

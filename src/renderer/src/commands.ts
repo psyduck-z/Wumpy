@@ -121,7 +121,7 @@ export type CommandAction =
   /** `/skills` — list them; `/skills new <what>`, `/skills folder`. */
   | { kind: 'skills'; ask: string }
   /** `/sync` — skills on every device: now, on, off, or `key <token>`. */
-  | { kind: 'sync'; action: 'now' | 'on' | 'off' | 'key' | 'status'; token: string }
+  | { kind: 'sync'; action: 'now' | 'on' | 'off' | 'key' | 'status' | 'pair' | 'unpair'; token: string; arg?: string }
   /** Send to the model, but wrapped in a prompt that shapes the answer. */
   | { kind: 'prompt'; text: string; label: string }
 
@@ -838,15 +838,17 @@ export const COMMANDS: CommandSpec[] = forThisWindow([
   },
   {
     name: 'sync',
-    hint: 'Share your skills between your devices, through a gist on your GitHub account',
-    arg: 'on | off | status | key <token>',
+    hint: 'Share your skills between your devices: over Wi-Fi (pair once), or a gist on your GitHub account',
+    arg: 'pair [code] | unpair | on | off | status | key <token>',
     run: (arg) => {
       const [word, ...rest] = (arg ?? '').trim().split(/\s+/)
       const w = (word ?? '').toLowerCase()
       if (!w || w === 'now') return { kind: 'sync', action: 'now', token: '' }
       if (w === 'on' || w === 'off' || w === 'status') return { kind: 'sync', action: w, token: '' }
       if (w === 'key' || w === 'token') return { kind: 'sync', action: 'key', token: rest.join('').trim() }
-      return { kind: 'error', message: 'Usage: `/sync` (now), `/sync on`, `/sync off`, `/sync status`, or `/sync key <github token>`.' }
+      if (w === 'pair') return { kind: 'sync', action: 'pair', token: '', arg: rest.join(' ').trim() }
+      if (w === 'unpair' || w === 'forget') return { kind: 'sync', action: 'unpair', token: '', arg: rest.join(' ').trim() }
+      return { kind: 'error', message: 'Usage: `/sync`, `/sync pair [code]`, `/sync unpair`, `/sync on`, `/sync off`, `/sync status`, `/sync key <token>`.' }
     }
   },
   {
