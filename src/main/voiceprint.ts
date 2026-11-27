@@ -16,6 +16,8 @@ import {
   judge,
   known,
   learn,
+  readShared,
+  shareText,
   steadiness,
   RATE,
   type Clip,
@@ -351,6 +353,42 @@ export function enrolFinish(): VoiceprintState {
   )
   reading = []
   return { ...voiceprintState(), steadiness: steady }
+}
+
+// ---------------------------------------------------------------------------
+// Sharing the calibration with their other devices (Wi-Fi sync).
+//
+// "allow me to share voice (calibrated) so that i don't have to calibrate it
+// for every one". Only the sentences read on purpose travel - the clips learned
+// from conversations are this machine's mic and room, and the other device
+// learns its own. It goes only to devices they paired, over the encrypted
+// Wi-Fi sync (main/lansync.ts), never to GitHub: a voiceprint is a biometric.
+// A newer calibration anywhere wins; forgetting one here does not reach out
+// and forget it everywhere else.
+// ---------------------------------------------------------------------------
+
+/** Its name in the sync: not a skill name, which cannot start with @. */
+export const SHARED_VOICE = '@voice'
+
+/** This device's calibration as the sync carries it, or null when there is none. */
+export function sharedVoice(): { text: string; hash: string; at: number } | null {
+  const shared = shareText(load())
+  return shared && { ...shared, hash: sha256(Buffer.from(shared.text)).slice(0, 16) }
+}
+
+/**
+ * A calibration from another device, checked before it is believed (see
+ * readShared), then taken as this device's - keeping what it has learned
+ * here that still sounds like them (enrolled()).
+ */
+export function takeSharedVoice(text: string): boolean {
+  const read = readShared(text, MODEL)
+  if (!read) return false
+  const before = load()
+  if (sharedVoice()?.text === shareText({ model: MODEL, clips: read.map((c) => ({ ...c, enrolled: true })) })?.text) return true
+  save({ ...enrolled(before, read), off: before.off })
+  log(`[voiceprint] calibration taken from another device (${read.length} sentences)`)
+  return true
 }
 
 export function enrolCancel(): void {

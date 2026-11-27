@@ -364,6 +364,9 @@ export function SettingsTab({
           </button>
           <Toggle on={print?.on ?? false} label="Only my voice" onChange={(next) => void window.wumpy.voice.setPrint({ on: next }).then(setPrint)} />
         </Row>
+        <Row what="Share my voice with my devices" sub="calibrate once: it goes to the devices paired over Wi-Fi, never to GitHub">
+          <Toggle on={settings.shareVoice ?? true} label="Share my voice with my devices" onChange={toggle('shareVoice')} />
+        </Row>
         <Row what="Tidy up dictation" cmd="/polish">
           <Toggle on={settings.voicePolish} label="Tidy up dictation" onChange={toggle('voicePolish')} />
         </Row>

@@ -102,6 +102,7 @@ export function summary(steps: Record<string, Step>): { up: string[]; down: stri
 }
 
 function list(names: string[]): string {
-  const shown = names.slice(0, 5).map((n) => `/${n}`)
+  /* "@voice" is the voice calibration riding along with the skills (main/voiceprint.ts), not a command. */
+  const shown = names.slice(0, 5).map((n) => (n === '@voice' ? 'your voice calibration' : `/${n}`))
   return names.length > 5 ? `${shown.join(', ')} and ${names.length - 5} more` : shown.join(', ')
 }

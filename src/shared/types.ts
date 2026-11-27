@@ -743,6 +743,13 @@ export interface WumpySettings {
    */
   skillSync: boolean
   /**
+   * Send the voice calibration to the devices paired over Wi-Fi, and take
+   * theirs, so "only my voice" is calibrated once (main/voiceprint.ts
+   * sharedVoice). Wi-Fi only - never GitHub - because it is a biometric. On:
+   * they asked for it, and it reaches nobody but their own paired devices.
+   */
+  shareVoice: boolean
+  /**
    * Share skills with the devices paired over Wi-Fi (`/sync pair`,
    * main/lansync.ts). On, and inert until one is paired; `/sync off` stops it.
    */

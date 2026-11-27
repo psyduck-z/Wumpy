@@ -30,6 +30,9 @@ import {
   enrolCancel,
   enrolClip,
   enrolFinish,
+  sharedVoice,
+  SHARED_VOICE,
+  takeSharedVoice,
   enrolStart,
   learnFrom,
   setVoiceprint,
@@ -1785,7 +1788,12 @@ function registerIpc(): void {
   ipcMain.handle(IPC.voiceprintEnrolClip, (_e, req: { audio: ArrayBuffer; device: string }) =>
     enrolClip(req?.audio, String(req?.device ?? '').slice(0, 200))
   )
-  ipcMain.handle(IPC.voiceprintEnrolFinish, () => enrolFinish())
+  ipcMain.handle(IPC.voiceprintEnrolFinish, () => {
+    const state = enrolFinish()
+    /* A new calibration goes to their other devices now, not at the next minute's announcement. */
+    if (state.calibrated) lanSync?.nudge()
+    return state
+  })
   ipcMain.handle(IPC.voiceprintEnrolCancel, () => enrolCancel())
   ipcMain.handle(IPC.voiceprintLearn, (_e, token: string) => learnFrom(String(token)))
   ipcMain.handle(IPC.voiceprintState, () => voiceprintState())
@@ -3085,9 +3093,27 @@ void app.whenReady().then(async () => {
   notes = new ContextStore()
   skills = new SkillStore()
   skillSync = new SkillSync(skills, (line) => console.log(line))
+  const skillStore = skills
   lanSync = new LanSync({
     dir: app.getPath('userData'),
-    store: skills,
+    /* The skills, and the voice calibration riding along as "@voice" while
+       sharing it is on (see WumpySettings.shareVoice). Never dropped from
+       here: forgetting a voice on one device is not forgetting it on all. */
+    store: {
+      syncView: (also) => {
+        const view = skillStore.syncView(also)
+        const voice = settings.get('shareVoice') ? sharedVoice() : null
+        if (voice) view[SHARED_VOICE] = voice
+        return view
+      },
+      put: (name, text) => {
+        if (name !== SHARED_VOICE) return skillStore.put(name, text)
+        /* Settings reads the voiceprint's state each time it is opened, so
+           there is nothing to push: it shows "calibrated" from then on. */
+        return settings.get('shareVoice') && takeSharedVoice(text)
+      },
+      drop: (name) => (name === SHARED_VOICE ? false : skillStore.drop(name))
+    },
     name: hostname() || 'another device',
     log: (line) => console.log(line),
     changed: () => {

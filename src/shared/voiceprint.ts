@@ -489,3 +489,44 @@ export function steadiness(read: { v: ArrayLike<number> }[]): number | null {
   for (let i = 0; i < read.length; i++) low = Math.min(low, cosine(mean(read.filter((_, j) => j !== i)), read[i].v))
   return low
 }
+
+// ---------------------------------------------------------------------------
+// The calibration as their other devices receive it (main/voiceprint.ts
+// sharedVoice, carried by the Wi-Fi sync). Pure, for scripts/check-sharevoice.mjs.
+// ---------------------------------------------------------------------------
+
+/** The sentences read on purpose, as text; null until a calibration is complete. */
+export function shareText(print: Voiceprint): { text: string; at: number } | null {
+  const read = print.clips.filter((c) => c.enrolled)
+  if (read.length < ENROL_CLIPS) return null
+  const text = JSON.stringify({ model: print.model, clips: read.map(({ v, at, ms, device }) => ({ v, at, ms, device })) })
+  return { text, at: Math.max(...read.map((c) => c.at)) }
+}
+
+/**
+ * A calibration from another device, or null if it is not one to believe:
+ * the same model, a sensible number of sentences, each a vector of ordinary
+ * numbers the same length as the others. A voiceprint decides whose "yes" is
+ * taken, so anything odd is refused rather than repaired.
+ */
+export function readShared(text: string, model: string): Clip[] | null {
+  let got: { model?: unknown; clips?: unknown }
+  try {
+    got = JSON.parse(text)
+  } catch {
+    return null
+  }
+  if (got?.model !== model || !Array.isArray(got.clips)) return null
+  const clips = got.clips as Array<Partial<Clip>>
+  if (clips.length < ENROL_CLIPS || clips.length > ENROL_CLIPS * 4) return null
+  const size = Array.isArray(clips[0]?.v) ? clips[0].v.length : 0
+  if (size < 16 || size > 1024) return null
+  const read: Clip[] = []
+  for (const c of clips) {
+    if (!Array.isArray(c.v) || c.v.length !== size || !c.v.every((x) => typeof x === 'number' && Number.isFinite(x))) return null
+    const at = Number(c.at)
+    if (!Number.isFinite(at) || at <= 0) return null
+    read.push({ v: c.v, at, ms: Math.max(0, Number(c.ms) || 0), device: String(c.device ?? '').slice(0, 120) })
+  }
+  return read
+}

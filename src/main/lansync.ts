@@ -43,6 +43,18 @@ import { writeAtomic } from './atomic'
 import { parseSkill } from '@shared/skills'
 import { plan, summary } from '@shared/skillsync'
 
+/**
+ * Whether what came over the wire may be handed to the store at all.
+ *
+ * A skill must parse as the skill it says it is. A name starting with @ is
+ * not a skill - no skill can be called that - but something else the store
+ * carries alongside them (the voice calibration, "@voice"), which the store
+ * checks itself in put().
+ */
+function fits(name: string, text: string): boolean {
+  return name.startsWith('@') ? /^@[a-z]+$/.test(name) : parseSkill(name, text).name === name
+}
+
 /** TCP and UDP both. Opened in ufw by pairing, so it has to stay the same. */
 export const LAN_PORT = 47820
 const HELLO = 'wumpy-lan/1'
@@ -797,7 +809,7 @@ export class LanSync {
         } else if (step === 'download') {
           const got = await wire.ask({ t: 'get', name })
           const text = typeof got?.text === 'string' ? got.text : ''
-          if (text && parseSkill(name, text).name === name && this.o.store.put(name, text)) {
+          if (text && fits(name, text) && this.o.store.put(name, text)) {
             base[name] = remote[name].hash
             changed = true
           }
@@ -870,7 +882,7 @@ export class LanSync {
           wire.send({ t: 'text', text: this.o.store.syncView(new Set([name]))[name]?.text ?? '' })
         } else if (m.t === 'put') {
           const text = typeof m.text === 'string' ? m.text : ''
-          const ok = Boolean(text && parseSkill(name, text).name === name && this.o.store.put(name, text))
+          const ok = Boolean(text && fits(name, text) && this.o.store.put(name, text))
           changed ||= ok
           wire.send({ t: 'ok', ok })
         } else if (m.t === 'drop') {

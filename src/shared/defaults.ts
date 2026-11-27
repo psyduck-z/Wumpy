@@ -105,6 +105,8 @@ export const DEFAULT_SETTINGS: WumpySettings = {
 
   // See WumpySettings.skillSync. Off: it sends their skills to GitHub.
   skillSync: false,
+  // See WumpySettings.shareVoice. Wi-Fi paired devices only.
+  shareVoice: true,
 
   // See WumpySettings.lanSync. On, and nothing runs until a device is paired.
   lanSync: true
