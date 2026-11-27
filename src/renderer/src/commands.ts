@@ -915,6 +915,7 @@ export const KEYS: readonly {
   { keys: '↑ / ↓', what: 'Recall what you typed before, in an empty box' },
   { keys: 'Ctrl+M', what: 'Start or stop dictation' },
   { keys: 'Ctrl+K', what: 'Every command, searchable' },
+  { keys: 'Ctrl+1 / 2 / 3', what: 'The Chat, Skills and Settings tabs (Ctrl+, is Settings too; Esc goes back to Chat)' },
   /*
    * Ctrl+/ rather than F1.
    *

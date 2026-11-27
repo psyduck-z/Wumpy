@@ -23,7 +23,7 @@ import type {
 } from '@shared/types'
 import { DEFAULT_MODEL, assistantFor, assemblePrompt, type PromptShape } from '@shared/assistant'
 import type { Footprint } from '@shared/footprint'
-import type { RankView, Transcript, VoiceStatus, WriteResult } from '@shared/types'
+import type { RankView, SyncInfo, Transcript, VoiceStatus, WriteResult } from '@shared/types'
 import { Ranker, type SavedSweep } from './ranker'
 import { checkForUpdate, restartIntoUpdate, startUpdates, updateNow, updateState } from './updater'
 import {
@@ -1086,6 +1086,10 @@ function registerIpc(): void {
     if (patch.hotkeys) applyHotkeys()
     if (patch.tallWidth || patch.compactWidth || patch.compactHeight) panel.applyGeometry()
     if (patch.launchAtLogin !== undefined) syncLaunchAtLogin(patch.launchAtLogin)
+    /* From the Settings tab's switches: Wi-Fi sync starts or stops with its switch, GitHub syncs once turned on. */
+    if (patch.lanSync === false) lanSync.stop()
+    if (patch.lanSync === true && lanSync.peers().length) void lanSync.start()
+    if (patch.skillSync === true) void syncInBackground('turned on')
     if (patch.model) void refreshModels()
     /* Turning dictation on warms the transcriber there and then, rather
        than leaving the first press of the key to pay for a Python
@@ -2776,6 +2780,14 @@ ${command}`
       const head = first ? `**Skills syncing**${viaGithub?.ok && account ? ` via ${account}` : ''}` : 'Skills synced'
       return reply(ok, `${head}: ${done.join(' · ')}.${warn}`, changed)
     }
+  )
+  ipcMain.handle(
+    IPC.syncInfo,
+    async (): Promise<SyncInfo> => ({
+      wifi: settings.get('lanSync') !== false,
+      peers: lanSync.peers().map(({ name, synced, here }) => ({ name, synced, here })),
+      github: { on: settings.get('skillSync') === true, account: skillSync.status().account, token: Boolean(await skillSync.token()) }
+    })
   )
   ipcMain.handle(IPC.skillGet, (_e, name: string) => skills.get(String(name ?? '')))
   ipcMain.handle(IPC.skillFolder, async (_e, open: boolean) => {

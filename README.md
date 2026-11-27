@@ -1345,7 +1345,15 @@ committed. It runs automatically on `npm install`.
 
 ## Settings
 
-Tray → **Open settings file**, or edit `%APPDATA%\Wumpy\settings.json`. Model
+The **Settings** tab (Ctrl+3, or Ctrl+,) has the switches without the
+commands: sync - paired devices with when each last synced, **Show a code** /
+**Pair** for a new one, GitHub on or off - then the model, thinking, self-review,
+what runs without asking, search engine, voice and "only my voice", where the
+panel sits and starting at login. Each row's tooltip names the command that
+does the same. The **Skills** tab (Ctrl+2) lists every skill: click one to put
+`/name ` in the box. The chat stays as it was underneath either.
+
+Or tray → **Open settings file**, or edit `%APPDATA%\Wumpy\settings.json`. Model
 and toggle changes apply immediately; hotkey changes apply on restart.
 
 | Key | Default | Meaning |

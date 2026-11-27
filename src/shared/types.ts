@@ -749,6 +749,13 @@ export interface WumpySettings {
   lanSync: boolean
 }
 
+/** What the Settings tab shows about sync: paired devices, and GitHub. */
+export interface SyncInfo {
+  wifi: boolean
+  peers: Array<{ name: string; synced?: number; here: boolean }>
+  github: { on: boolean; account?: string; token: boolean }
+}
+
 /* ---------------------------------------------------------------- messaging */
 
 export interface ChatRequest {
@@ -1170,6 +1177,7 @@ export const IPC = {
   skillSync: 'skill:sync',
   skillsChanged: 'skill:changed',
   syncNote: 'skill:syncnote',
+  syncInfo: 'skill:syncinfo',
   keyStatus: 'key:status',
   keySet: 'key:set',
   keyAdd: 'key:add',

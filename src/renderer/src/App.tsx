@@ -87,7 +87,7 @@ import { skillSaidAs, skillsAloud, speakable } from '@shared/spoken'
 import { useChat, nextId, type ChatStats } from './hooks/useChat'
 import { useListening } from './hooks/useListening'
 import { useLiveNotes } from './hooks/useLiveNotes'
-import { skillPrompt, shortly } from '@shared/skills'
+import { skillPrompt, shortly, type SkillSummary } from '@shared/skills'
 import type { AudioSource } from './loopback'
 import {
   ENOUGH_WORDS,
@@ -141,6 +141,9 @@ import {
   type Visit
 } from '@shared/circling'
 import { DOCK_CYCLE, Header } from './components/Header'
+import { Tabs, type Tab } from './components/Tabs'
+import { SettingsTab } from './components/SettingsTab'
+import { SkillsTab } from './components/SkillsTab'
 import { APP_WINDOW } from './appwindow'
 import { clampRounds } from '@shared/reflect'
 import { useAgents } from './hooks/useAgents'
@@ -216,14 +219,23 @@ export default function App(): React.JSX.Element {
      comes up, so a SKILL.md edited by hand is a command without a restart. */
   useEffect(() => {
     const refresh = (): void => {
-      void window.wumpy.skills.list().then(setSkillCommands).catch(() => undefined)
+      void window.wumpy.skills
+        .list()
+        .then((list) => {
+          setSkillCommands(list)
+          setSkillList(list)
+        })
+        .catch(() => undefined)
     }
     refresh()
     const offShown = window.wumpy.panel.onShown(refresh)
     /* Skills that arrived from another device. */
     const offChanged = window.wumpy.skills.onChanged(refresh)
     /* "Paired with laptop." on the device that showed the code. */
-    const offNote = window.wumpy.skills.onNote((text) => chatRef.current?.note(text))
+    const offNote = window.wumpy.skills.onNote((text) => {
+      chatRef.current?.note(text)
+      setSyncTick((n) => n + 1)
+    })
     return () => {
       offShown()
       offChanged()
@@ -285,6 +297,12 @@ export default function App(): React.JSX.Element {
   }, [compacting, streaming, streamingId, messages])
 
   const [settings, setSettings] = useState<WumpySettings | null>(null)
+  /* Chat, Skills or Settings: see components/Tabs. */
+  const [tab, setTab] = useState<Tab>('chat')
+  /* Every skill, for the Skills tab. */
+  const [skillList, setSkillList] = useState<SkillSummary[]>([])
+  /* Bumped when main says something about sync, so Settings shows it. */
+  const [syncTick, setSyncTick] = useState(0)
   const [assistant, setAssistant] = useState<AssistantStatus | null>(null)
   /** Wumpy's own update, for the header's pill (main/updater.ts). */
   const [update, setUpdate] = useState<UpdateState | null>(null)
@@ -462,6 +480,11 @@ export default function App(): React.JSX.Element {
       document.removeEventListener('visibilitychange', onVisibility)
     }
   }, [])
+
+  /* An answer starting - typed, or said on the earbuds - is on the Chat tab. */
+  useEffect(() => {
+    if (streaming) setTab('chat')
+  }, [streaming])
 
   /* ---------------------------------------------------------------- actions */
 
@@ -2221,6 +2244,13 @@ function namedControls(shot: Attachment): string[] {
           return
         }
         case 'settings': {
+          /* "If I wanted to do settings, it could be in another tab." Typed,
+             it opens the tab; on the earbuds there is no tab to look at, so
+             the sheet is still written into the chat. */
+          if (!handsFree()) {
+            setTab('settings')
+            return
+          }
           /* Settings may not have arrived yet on a very early run; there is
              nothing true to print until they do. */
           if (!settings) {
@@ -2872,6 +2902,12 @@ function namedControls(shot: Attachment): string[] {
           setSkillCommands(list)
           /* On the earbuds the table is nothing: the names, said, and how to run one. */
           tell(skillsAloud(list.filter((sk) => sk.command)))
+          setSkillList(list)
+          /* Typed, the Skills tab is the list; on the earbuds, the table stays for the transcript. */
+          if (!handsFree()) {
+            setTab('skills')
+            return
+          }
           chat.note(
             [
               ...(list.length
@@ -3608,6 +3644,7 @@ function namedControls(shot: Attachment): string[] {
         }
         e.preventDefault()
         if (streaming) stopAndMaybeEdit()
+        else if (tab !== 'chat') setTab('chat')
         else if (picker) setPicker(null)
         // An app window is not dismissed by Esc - only the overlay is.
         else if (!APP_WINDOW) close()
@@ -3631,6 +3668,12 @@ function namedControls(shot: Attachment): string[] {
        * Unmodified apart from Shift in the F6 case: Ctrl+F6 and Alt+F6 mean
        * other things in other apps and nothing here, so they are left alone.
        */
+      /* Ctrl+1, 2, 3: the tabs. Ctrl+, is Settings, as in most apps. */
+      if (e.ctrlKey && !e.altKey && !e.shiftKey && (e.key === '1' || e.key === '2' || e.key === '3' || e.key === ',')) {
+        e.preventDefault()
+        setTab(e.key === '1' ? 'chat' : e.key === '2' ? 'skills' : 'settings')
+        return
+      }
       if ((e.key === 'Tab' && e.ctrlKey && !e.altKey) || (e.key === 'F6' && !e.ctrlKey && !e.altKey)) {
         if (stepRegion(e.shiftKey)) e.preventDefault()
         return
@@ -3827,7 +3870,7 @@ function namedControls(shot: Attachment): string[] {
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [chat, close, newChat, retitle, runCommand, scrollBy, stepMessage, stepRegion, picker, streaming, stopAndMaybeEdit])
+  }, [chat, close, newChat, retitle, runCommand, scrollBy, stepMessage, stepRegion, picker, streaming, stopAndMaybeEdit, tab])
 
   const warnedRef = useRef(false)
   useEffect(() => {
@@ -4221,6 +4264,69 @@ function namedControls(shot: Attachment): string[] {
         }
       />
 
+      <Tabs tab={tab} onTab={setTab} busy={streaming} />
+
+      {/*
+        The chat stays mounted under the other tabs, only hidden: a draft in
+        the box, the scroll position and every card's state (a command card
+        that already ran must not mount again) all survive a look at Settings.
+      */}
+      {tab === 'settings' && settings && (
+        <div className="scroll tab-scroll">
+          <SettingsTab
+            settings={settings}
+            model={model}
+            pool={pool}
+            pinned={pinned}
+            syncTick={syncTick}
+            onPatch={patch}
+            onApproval={(mode) => {
+              /* As /approve does, without the note: the switch shows it. */
+              void patch({ approvalMode: mode })
+              setAutoRuns(0)
+              autoRunsRef.current = 0
+              ranCommandsRef.current = []
+            }}
+            onPin={(next) => void patch({ hideOnBlur: !next })}
+            onDock={(d) => {
+              window.wumpy.panel.setDock(d)
+              setSettings((prev) => (prev ? { ...prev, dock: d } : prev))
+            }}
+            onModel={() => {
+              setTab('chat')
+              void runCommand({ kind: 'model', name: '' }, '/model')
+            }}
+            onCommand={(cmd) => {
+              setTab('chat')
+              runNamedCommand(cmd)
+            }}
+            onCalibrate={() => setCalibrating(true)}
+            onSkillsChanged={() =>
+              void window.wumpy.skills.list().then((list) => {
+                setSkillCommands(list)
+                setSkillList(list)
+              })
+            }
+          />
+        </div>
+      )}
+      {tab === 'skills' && (
+        <div className="scroll tab-scroll">
+          <SkillsTab
+            skills={skillList}
+            onRun={(name) => {
+              setTab('chat')
+              setPrefill(`/${name} `)
+            }}
+            onNew={() => {
+              setTab('chat')
+              setPrefill('/skills new ')
+            }}
+            onFolder={() => void window.wumpy.skills.folder(true)}
+          />
+        </div>
+      )}
+      <div className="tab-keep" hidden={tab !== 'chat'}>
       {picker ? (
         <Picker {...pickerProps(picker)} />
       ) : (
@@ -4326,9 +4432,11 @@ function namedControls(shot: Attachment): string[] {
         </div>
       )}
 
+      </div>
+
       {/* Scrolling up stops the view following the answer, and there was no way
           back but to scroll all the way down by hand. */}
-      {!picker && !atBottom && messages.length > 0 && (
+      {tab === 'chat' && !picker && !atBottom && messages.length > 0 && (
         <button
           type="button"
           className="jump-bottom"
@@ -4354,6 +4462,7 @@ function namedControls(shot: Attachment): string[] {
         finished transcript still needs words to be worth a chip; a live
         session does not.
       */}
+      <div className="tab-keep" hidden={tab !== 'chat'}>
       <StatusBar
         model={model}
         ready={assistant?.ready ?? false}
@@ -4396,6 +4505,7 @@ function namedControls(shot: Attachment): string[] {
         onCompact={() => void compactHistory()}
         onQuota={() => void runCommand({ kind: 'usage', reset: false }, '/usage')}
       />
+      </div>
 
       <Toast message={toast} onDone={() => setToast(null)} />
 
@@ -4409,6 +4519,7 @@ function namedControls(shot: Attachment): string[] {
         />
       )}
 
+      <div className="tab-keep" hidden={tab !== 'chat'}>
       <Composer
         onSend={onSend}
         onStop={stopAndMaybeEdit}
@@ -4428,6 +4539,7 @@ function namedControls(shot: Attachment): string[] {
         }}
         placeholder="Ask Wumpy…"
       />
+      </div>
     </div>
   )
 }
