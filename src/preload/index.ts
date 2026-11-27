@@ -117,7 +117,7 @@ const api = {
      * Whether Wumpy may run the command, and why it looks risky if it does.
      * Drives the card: a command it may not run gets no Run button.
      */
-    check: (req: { command: string }): Promise<CommandVerdict> =>
+    check: (req: { command: string; shell?: ShellKind }): Promise<CommandVerdict> =>
       ipcRenderer.invoke(IPC.shellRisk, req)
   },
   screen: {

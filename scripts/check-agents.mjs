@@ -660,7 +660,7 @@ check('a finished command keeps "done" when its card is rebuilt', /rememberOutco
 /* ------------------------------------------------------------ wiring */
 
 const main = read('src/main/index.ts')
-check('agents run only reads judge() would run without a click', /const verdict = judge\(command\)[\s\S]{0,1000}if \(!verdict\.auto \|\| !verdict\.readOnly\)/.test(main), true)
+check('agents run only reads judge() would run without a click', /const verdict = judge\(command, shell\)[\s\S]{0,1000}if \(!verdict\.auto \|\| !verdict\.readOnly\)/.test(main), true)
 check('and with one key there are none', /Background agents need at least two keys/.test(main), true)
 check('the ranker stands aside while agents work, and while a key is tested', (main.match(/busy: turnStartedAt !== null \|\| \(agents\?\.active\(\) \?\? 0\) > 0 \|\| \(limitTester\?\.busy \?\? false\),/g) ?? []).length, 2)
 check('agents never read secrets, in any mode', [

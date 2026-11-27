@@ -444,7 +444,7 @@ const VERSION_FLAGS = new Set([
 ])
 
 /** Flags that make an otherwise harmless search tool act. */
-const DANGEROUS_FIND_FLAGS = /(^|\s)-(exec|execdir|delete|ok|okdir|fls|fprint|fprintf)(\s|$)/i
+const DANGEROUS_FIND_FLAGS = /(^|\s)-(exec|execdir|delete|ok|okdir|fls|fprint0?|fprintf)(\s|$)/i
 
 /** Anything here means the command writes somewhere, whatever its head says. */
 const WRITE_MARKERS =
@@ -486,27 +486,95 @@ function isReadingCmdlet(name: string): boolean {
  * memory, and how much". A `;` or `|` inside brackets, braces or quotes
  * belongs to the expression, not to the pipeline.
  */
-function topLevelSegments(command: string): string[] {
-  const out: string[] = []
-  let buf = ''
-  let depth = 0
-  let quote: string | null = null
+/**
+ * How a shell quotes, which decides where its commands start and end.
+ *
+ * Every quote was taken as a quote and nothing escaped one, so
+ * `echo \"; touch x; echo \"` read as a single echo: bash takes `\"` as a
+ * plain character, ends the echo at the `;`, and runs `touch`. PowerShell
+ * escapes with a backtick, and in cmd a single quote is no quote at all -
+ * `echo 'a & calc'` runs calc there. Found by checking the review's
+ * findings, 2026-11.
+ */
+type Dialect = 'bash' | 'ps' | 'cmd'
 
+/**
+ * The shell a command will run in. Off Windows that is bash, whatever the
+ * block was tagged (see launcher). On Windows, the one it is going to, and
+ * PowerShell when it is not said - which is what runs it then.
+ */
+function dialectsFor(shell: ShellKind | undefined, platform: string): Dialect[] {
+  if (platform !== 'win32') return ['bash']
+  if (shell === 'cmd') return ['cmd']
+  if (shell === 'bash') return ['bash']
+  return ['ps']
+}
+
+/**
+ * The command with everything quoted or escaped blanked to `_`, as `dialect`
+ * reads it: same length, so a place in one is the same place in the other.
+ * The quote marks themselves are kept. Structure is read from this; what
+ * runs is still the original.
+ */
+function maskQuotes(command: string, dialect: Dialect): string {
+  const out = command.split('')
+  const esc = dialect === 'bash' ? '\\' : dialect === 'ps' ? '`' : '^'
+  let quote: string | null = null
+  /* bash's $'...', where a backslash escapes, unlike in '...'. */
+  let ansi = false
   for (let i = 0; i < command.length; i++) {
     const c = command[i]
     if (quote) {
-      buf += c
-      if (c === quote) quote = null
+      const escapes =
+        (dialect === 'bash' && c === '\\' && (quote === '"' || ansi)) || (dialect === 'ps' && c === '`' && quote === '"')
+      if (escapes) {
+        out[i] = '_'
+        if (i + 1 < command.length) out[++i] = '_'
+        continue
+      }
+      if (c === quote) {
+        /* PowerShell doubles a quote to put one in: 'it''s'. */
+        if (dialect === 'ps' && command[i + 1] === quote) {
+          out[i] = '_'
+          out[++i] = '_'
+          continue
+        }
+        quote = null
+        ansi = false
+        continue
+      }
+      out[i] = '_'
       continue
     }
-    if (c === '"' || c === "'") {
+    if (c === esc) {
+      out[i] = '_'
+      if (i + 1 < command.length) out[++i] = '_'
+      continue
+    }
+    if (c === '"' || (c === "'" && dialect !== 'cmd')) {
       quote = c
-      buf += c
+      ansi = dialect === 'bash' && c === "'" && command[i - 1] === '$'
+    }
+  }
+  return out.join('')
+}
+
+function topLevelSegments(command: string, dialect: Dialect = 'bash'): string[] {
+  const out: string[] = []
+  let buf = ''
+  let depth = 0
+  const m = maskQuotes(command, dialect)
+
+  for (let i = 0; i < command.length; i++) {
+    const c = m[i]
+    if (c !== command[i]) {
+      buf += command[i]
       continue
     }
-    if (c === '(' || c === '[' || c === '{') depth++
-    else if (c === ')' || c === ']' || c === '}') depth = Math.max(0, depth - 1)
-    else if (depth === 0 && (c === '|' || c === ';' || c === '\n' || c === '\r')) {
+    /* cmd has no brackets that hold a `&` in, and no `;` between commands. */
+    if (dialect !== 'cmd' && (c === '(' || c === '[' || c === '{')) depth++
+    else if (dialect !== 'cmd' && (c === ')' || c === ']' || c === '}')) depth = Math.max(0, depth - 1)
+    else if (depth === 0 && (c === '|' || (c === ';' && dialect !== 'cmd') || c === '\n' || c === '\r')) {
       /* A new line is a new command, as much as a `;` is: `cat a` and then
          `mv ~/Documents ~/.trash` on the next line was one read. */
       out.push(buf)
@@ -540,8 +608,8 @@ function topLevelSegments(command: string): string[] {
  * something", and spent ten of its ten steps asking again. Only the exact
  * device is let through: `>/dev/nullx` is a file, and still a write.
  */
-const HARMLESS_REDIRECTS =
-  process.platform === 'win32'
+const harmlessRedirects = (platform: string): RegExp =>
+  platform === 'win32'
     ? /(^|\s)(?:\d|&)?>>?\s*(?:\$null|nul)(?=$|[\s;|&)])|(^|\s)\d>&\d(?=$|[\s;|&)])/gi
     : /* Not $null or nul here: in bash `$null` is a variable that can hold
          any path, and `> nul` makes a file called nul. */
@@ -593,12 +661,187 @@ function substitutions(command: string): string[] {
   return out.map((s) => s.trim()).filter((s) => s && !/^\$[\w:]+(?:\.\w+|\[[^\]]*\])*$/.test(s))
 }
 
-export function isReadOnly(command: string): boolean {
-  const trimmed = command.trim().replace(HARMLESS_REDIRECTS, ' ').trim()
+/**
+ * .NET types whose static members only compute or report. Anything else
+ * reached with `::` - `[Diagnostics.Process]::Start('calc')`,
+ * `[IO.File]::WriteAllText(...)` - runs or writes, and a calculated
+ * property's script block was never looked into for it.
+ */
+const PURE_TYPES =
+  /^(?:system\.)?(?:math|io\.path|datetime|datetimeoffset|timespan|string|char|int|int16|int32|int64|uint32|uint64|long|double|single|float|decimal|byte|bool|boolean|convert|guid|version|regex|text\.regularexpressions\.regex|text\.encoding|bitconverter|uri|globalization\.cultureinfo)$/i
+/** Types with both kinds of member: these ones only report. */
+const READING_MEMBERS: Record<string, RegExp> = {
+  environment:
+    /^(?:get\w*|machinename|username|userdomainname|osversion|processorcount|is64bit\w*|currentdirectory|systemdirectory|tickcount(?:64)?|version|newline|commandline|userinteractive|systempagesize|workingset|specialfolder)$/i,
+  'io.file': /^(?:exists|get\w+|read\w+)$/i,
+  'io.directory': /^(?:exists|get\w+|enumerate\w+)$/i,
+  'net.dns': /^gethostname$/i
+}
+
+/**
+ * Methods that only compute a value from the one they are called on. A
+ * method on a file, a folder or a process is how a read became a write:
+ * `(Get-Item ~/Documents).Delete($true)`, `Where-Object { $_.Kill() }`.
+ */
+const PURE_METHODS =
+  /^(?:to\w*|get\w*|trim\w*|substring|contains|containskey|containsvalue|startswith|endswith|split|replace|indexof|indexofany|lastindexof|padleft|padright|equals|compareto|add(?:days|hours|minutes|seconds|milliseconds|months|years|ticks)|subtract|normalize|format|join|count|tostring)$/i
+
+/**
+ * What PowerShell can do inside an expression that no command name shows:
+ * call a .NET static, call a method, or set a property. Read from the
+ * command with its quoted text blanked (maskQuotes), so a string that
+ * mentions `.Delete(` is no reason to ask, and a call outside one is seen.
+ */
+function psExpressionsRead(masked: string): boolean {
+  for (const m of masked.matchAll(/::/g)) {
+    const before = masked.slice(0, m.index)
+    const type = /\[\s*([\w.]+)\s*\]\s*$/.exec(before)?.[1]?.toLowerCase().replace(/^system\./, '')
+    if (!type) return false
+    const member = /^::\s*([A-Za-z_]\w*)/.exec(masked.slice(m.index))?.[1] ?? ''
+    if (PURE_TYPES.test(type)) continue
+    if (!READING_MEMBERS[type]?.test(member)) return false
+  }
+  /* A member named at run time - `.'Kill'()`, `.$m()` - can be anything. */
+  if (/[\w)\]}]\.\s*['"$(]/.test(masked)) return false
+  for (const m of masked.matchAll(/[\w)\]}]\.([A-Za-z_]\w*)\s*\(/g)) {
+    const name = m[1]
+    /* .Where({...}) and .ForEach({...}) filter; .ForEach('Kill') calls Kill. */
+    if (/^(?:where|foreach)$/i.test(name)) {
+      if (!/^\s*\{/.test(masked.slice(m.index + m[0].length))) return false
+      continue
+    }
+    if (!PURE_METHODS.test(name)) return false
+  }
+  /* `(Get-Process x).PriorityClass = 'Idle'` changes the process. */
+  if (/(?:[\w)\]}]\.|::\s*)[A-Za-z_]\w*\s*(?:[+\-*/%]|\?\?)?=(?!=)/.test(masked)) return false
+  return true
+}
+
+/** The statement keywords whose own brackets are what runs. */
+const KEYWORDS = /^(?:if|elseif|else|foreach|for|while|do|until|switch|try|catch|finally|trap|param|begin|process|end|function|filter)\b/i
+/**
+ * A statement that is a value rather than a command. Not `%` - ForEach-
+ * Object's alias - nor `.`, which runs a script, nor `/`, a path.
+ */
+const EXPRESSION_START = /^[$\d(\[@\-!{"',]/
+
+/**
+ * Every command inside a bracket is judged as a command.
+ *
+ * Only Verb-Noun names were looked for inside brackets, so a bare name
+ * there ran unseen: `Get-Content (calc)`, and `Select-Object @{e={ calc }}`
+ * - a calculated property runs its block once for every row. Now each
+ * statement inside `(...)` and `{...}` is either a value, whose own
+ * brackets are looked into the same way, or a command, which has to be a
+ * read like any other. `${HOME}` and bash's `$((1 + 2))` hold no command.
+ */
+function bracketsRead(raw: string, masked: string, dialect: Dialect, judge: (c: string) => boolean): boolean {
+  const open = new Set(['(', '{'])
+  for (let i = 0; i < masked.length; i++) {
+    if (!open.has(masked[i])) continue
+    const close = masked[i] === '(' ? ')' : '}'
+    let depth = 1
+    let j = i + 1
+    for (; j < masked.length && depth > 0; j++) {
+      if (masked[j] === masked[i]) depth++
+      else if (masked[j] === close) depth--
+    }
+    const body = raw.slice(i + 1, depth === 0 ? j - 1 : j)
+    const variable = masked[i] === '{' && masked[i - 1] === '$'
+    const arithmetic = masked[i] === '(' && masked[i + 1] === '(' && masked[i - 1] === '$'
+    if (!variable && !arithmetic && !statementsRead(body, dialect, masked[i] === '{' && masked[i - 1] === '@', judge)) return false
+    i = j - 1
+  }
+  return true
+}
+
+function statementsRead(body: string, dialect: Dialect, hashtable: boolean, judge: (c: string) => boolean): boolean {
+  for (const part of topLevelSegments(body, dialect)) {
+    let s = part.trim().replace(/^\$[\w:]+\s*[+\-*/]?=(?!=)\s*/, '').replace(/^(?:return|throw|exit)\b\s*/i, '')
+    /* In @{...} a bare word before `=` is a key; the value can still run. */
+    if (hashtable) s = s.replace(/^[A-Za-z_][\w-]*\s*=(?!=)\s*/, '')
+    if (!s) continue
+    /* In bash everything in a bracket is a command - `( $SHELL -c x )` runs
+       one - so only PowerShell (and cmd, where a `$` is just a letter) has
+       values here. */
+    if (dialect !== 'bash' && (KEYWORDS.test(s) || EXPRESSION_START.test(s))) {
+      const m = maskQuotes(s, dialect)
+      if (!bracketsRead(s, m, dialect, judge)) return false
+      continue
+    }
+    if (!judge(s)) return false
+  }
+  return true
+}
+
+/**
+ * The flags that make one of the allowed tools write or run something.
+ * `segment` is one command; `masked` is the same with its quoted text
+ * blanked.
+ */
+function flagsRead(head: string, segment: string, masked: string): boolean {
+  const has = (re: RegExp): boolean => re.test(segment)
+  switch (head) {
+    /* `--output` writes what it is told to wherever it is told: git log
+       --format=... --output=~/.bashrc writes a shell startup file. The rest
+       run programs, or read another repository's settings. */
+    case 'git':
+      return !has(/(^|\s)(--output|--ext-diff|--textconv|--exec-path|--config-env|--git-dir|--work-tree)(=|\s|$)/i)
+    /* Short options run together: -oFILE and -uo FILE write as -o does. */
+    case 'sort':
+      return !has(/(^|\s)(-[a-zA-Z]*o|--output|--compress-program|\/o)/i)
+    /* tree -R writes a listing into every folder it visits. */
+    case 'tree':
+      return !has(/(^|\s)(-[a-zA-Z]*[oR]|--output)/)
+    /* file -C compiles a magic file, which it writes. */
+    case 'file':
+      return !has(/(^|\s)(-[a-zA-Z]*C|--compile)/)
+    case 'date':
+      return !has(/(^|\s)(--set|-u?s)(?=[\s='"\d]|$)/)
+    case 'hostname':
+      /* Given a name, it renames the computer. */
+      return !segment
+        .trim()
+        .split(/\s+/)
+        .slice(1)
+        .some((t) => !t.startsWith('-') || /^(-F|--file|-b|--boot)/.test(t))
+    case 'hyprctl':
+      return !has(/(^|\s)--batch(=|\s|$)/)
+    case 'go':
+      return !has(/(^|\s)--?(toolexec|exec|overlay)(=|\s|$)/)
+    case 'sensors':
+      return !has(/(^|\s)-[a-zA-Z]*s/)
+    /* `ForEach-Object Delete` calls Delete on everything it is handed. */
+    case 'foreach-object': {
+      let rest = masked
+      for (let was = ''; was !== rest; ) [was, rest] = [rest, rest.replace(/\{[^{}]*\}/g, ' ')]
+      const words = rest.trim().split(/\s+/).slice(1)
+      return words.every((w) => /^-(process|begin|end)$/i.test(w))
+    }
+    default:
+      return true
+  }
+}
+
+/**
+ * Whether a command only reads, in the shell it will run in (`shell`, when
+ * known: see dialectsFor). `platform` is for the checks, which try the
+ * Windows rules on Linux too.
+ */
+export function isReadOnly(command: string, shell?: ShellKind, platform: string = process.platform): boolean {
+  return dialectsFor(shell, platform).every((d) => readsAs(command, d, platform))
+}
+
+function readsAs(command: string, dialect: Dialect, platform: string): boolean {
+  const isReadOnly = (c: string): boolean => readsAs(c, dialect, platform)
+  const trimmed = command.trim().replace(harmlessRedirects(platform), ' ').trim()
   if (!trimmed) return false
   /* Writing into a process substitution is writing. */
   if (/>\(/.test(trimmed)) return false
   for (const inner of substitutions(trimmed)) if (!isReadOnly(inner)) return false
+  const masked = maskQuotes(trimmed, dialect)
+  if (dialect === 'ps' && !psExpressionsRead(masked)) return false
+  if (!bracketsRead(trimmed, masked, dialect, isReadOnly)) return false
 
   // Redirection, piping into a mutating cmdlet, or any write-shaped verb.
   if (WRITE_MARKERS.test(trimmed)) return false
@@ -628,7 +871,7 @@ export function isReadOnly(command: string): boolean {
   }
 
   // Every segment of a pipeline has to be read-only on its own.
-  const segments = topLevelSegments(trimmed)
+  const segments = topLevelSegments(trimmed, dialect)
   for (const segment of segments) {
     /**
      * `$folder = [Environment]::GetFolderPath("MyDocuments"); Get-ChildItem
@@ -654,9 +897,15 @@ export function isReadOnly(command: string): boolean {
       .replace(/^\$\w+\s*=\s*/, '')
       .replace(/^(?:do|then|else|elif|if)\s+/i, '')
     if (/^(?:done|fi|then|do|else)$/i.test(body)) continue
+    /* A variable on its own prints its value: `$env:USERNAME`. */
+    /* Not in bash, where `$x` alone runs whatever x holds. */
+    if (dialect !== 'bash' && /^\$[\w:]+(?:\.\w+)*$/.test(body)) continue
     if (/^for\s+\w+\s+in\b/i.test(body)) continue
     const tokens = body.split(/\s+/).filter(Boolean)
     if (tokens.length === 0) continue
+    /* A .NET static that only reports - [Environment]::MachineName,
+       [IO.Directory]::GetFiles(...) - checked by psExpressionsRead above. */
+    if (dialect === 'ps' && /^\[[\w.]+\]\s*::/.test(tokens[0])) continue
     // Strip what wraps a call rather than names it: a leading paren, and a
     // trailing property access or closing paren.
     const head = tokens[0]
@@ -712,8 +961,8 @@ export function isReadOnly(command: string): boolean {
     if (head === 'find' && DANGEROUS_FIND_FLAGS.test(segment)) return false
     /* And these each have one flag that writes or never ends. */
     if (head === 'rg' && /(^|\s)--pre(=|\s|$)/.test(segment)) return false
-    if ((head === 'sort' || head === 'tree') && /(^|\s)(-o|--output)(=|\s|$)/.test(segment)) return false
     if (head === 'upower' && /(^|\s)(--monitor|--monitor-detail|-m)(\s|$)/.test(segment)) return false
+    if (!flagsRead(head, segment, maskQuotes(segment, dialect))) return false
 
     const reads = READ_SUBCOMMANDS[head]
     if (reads) {
@@ -747,19 +996,43 @@ export function isReadOnly(command: string): boolean {
   return true
 }
 
-/** How bad, not merely whether. Only 'severe' interrupts accept-all. */
+/**
+ * Whether a command may run, and whether it runs without a click: judge()
+ * in index.ts, without the settings, so scripts/check-approval.mjs tests
+ * this and not a copy of it. A copy is how that check went on passing
+ * "destructive still asks in accept-all" long after accept-all stopped
+ * asking (found by a review, 2026-11).
+ *
+ * Accept-all runs everything, red ones included - the user's word, see
+ * judge(). `auto` runs reads, and nothing marked risky while confirmRisky
+ * is on.
+ */
+export function decide(v: {
+  readOnly: boolean
+  level: RiskLevel
+  scope: 'none' | 'read' | 'full'
+  mode: string
+  confirmRisky: boolean
+}): { allowed: boolean; auto: boolean } {
+  const allowed = v.scope === 'full' || (v.scope === 'read' && v.readOnly)
+  const risky = v.mode !== 'all' && v.level !== 'none' && v.confirmRisky
+  const auto = allowed && !risky && (v.mode === 'all' || (v.mode === 'auto' && v.readOnly))
+  return { allowed, auto }
+}
+
+/** How bad, not merely whether. Shown on the card; accept-all runs every level. */
 export type RiskLevel = 'none' | 'reversible' | 'severe'
 
-export function riskLevel(command: string): RiskLevel {
+export function riskLevel(command: string, shell?: ShellKind): RiskLevel {
   for (const { pattern, reversible } of RISKY) {
     if (pattern.test(command)) return reversible ? 'reversible' : 'severe'
   }
   // The checks below assessRisk's loop - protected places, secret files -
   // are all severe by nature, so anything they catch counts as severe.
-  return assessRisk(command) ? 'severe' : 'none'
+  return assessRisk(command, shell) ? 'severe' : 'none'
 }
 
-export function assessRisk(command: string): string | null {
+export function assessRisk(command: string, shell?: ShellKind): string | null {
   for (const { pattern, why } of RISKY) {
     if (pattern.test(command)) return why
   }
@@ -778,7 +1051,7 @@ export function assessRisk(command: string): string | null {
    * as quiet as looking anywhere else.
    */
   const place = protectedPlace(command)
-  if (place && !isReadOnly(command)) return `writes into ${place}`
+  if (place && !isReadOnly(command, shell)) return `writes into ${place}`
 
   /**
    * A read that must still ask, because reading is how a secret leaves.
@@ -797,7 +1070,77 @@ export function assessRisk(command: string): string | null {
    */
   const secret = SECRET_FILES.find(({ pattern }) => pattern.test(command))
   if (secret) return secret.why
+  return secretByWildcard(command)
+}
 
+/** Folders that hold keys, and the names of files that are one. */
+const SECRET_DIRS = ['.ssh', '.aws', '.gnupg', '.docker', '.password-store', '.kube']
+const SECRET_NAMES = [
+  'id_rsa',
+  'id_ed25519',
+  'id_ecdsa',
+  'id_dsa',
+  'keys.bin',
+  '.env',
+  '.env.local',
+  '.netrc',
+  '.npmrc',
+  '.pypirc',
+  '.git-credentials',
+  'credentials',
+  'credentials.json',
+  'key.pem',
+  'key.ppk',
+  'key.p12',
+  'key.pfx',
+  'key.jks',
+  'key.keystore',
+  'vault.kdbx'
+]
+
+/** A glob as a pattern, read the way the shell expands it. */
+function globPattern(glob: string, platform: string): RegExp {
+  let re = ''
+  for (let i = 0; i < glob.length; i++) {
+    const c = glob[i]
+    if (c === '*') re += '[^/\\\\]*'
+    else if (c === '?') re += '.'
+    else if (c === '[') {
+      const end = glob.indexOf(']', i + 2)
+      if (end < 0) re += '\\['
+      else {
+        re += `[${glob.slice(i + 1, end).replace(/^!/, '^').replace(/\\/g, '\\\\')}]`
+        i = end
+      }
+    } else re += c.replace(/[.+^${}()|\\]/g, '\\$&')
+  }
+  /* bash's * and ? never match a leading dot; PowerShell's do. */
+  const dot = platform !== 'win32' && /^[*?[]/.test(glob) ? '(?!\\.)' : ''
+  return new RegExp(`^${dot}${re}$`, platform === 'win32' ? 'i' : '')
+}
+
+/**
+ * A wildcard that reaches a secret the names above would have caught
+ * spelled out: `cat ~/.ss?/id_*`, `head ~/.a?s/cred*`, `keys.bi?`. Each
+ * part of a path with a wildcard in it is tried against the folders and
+ * files that hold keys. A plain `*` on its own is left alone as a file
+ * name - `du -sh ~/*` is ordinary - but not as a folder on Windows, where
+ * it takes in .ssh.
+ */
+export function secretByWildcard(command: string, platform: string = process.platform): string | null {
+  for (const word of command.split(/[\s"'=,;|&()<>]+/)) {
+    if (!/[*?[]/.test(word)) continue
+    const parts = word.split(/[\\/]+/).filter(Boolean)
+    for (let i = 0; i < parts.length; i++) {
+      const part = parts[i]
+      if (!/[*?[]/.test(part)) continue
+      const last = i === parts.length - 1
+      const plain = /^\*+$/.test(part)
+      const re = globPattern(part, platform)
+      if ((!plain || !last) && SECRET_DIRS.some((d) => re.test(d))) return 'reaches a folder of keys with a wildcard'
+      if (last && !plain && SECRET_NAMES.some((n) => re.test(n))) return 'reaches a file of keys with a wildcard'
+    }
+  }
   return null
 }
 

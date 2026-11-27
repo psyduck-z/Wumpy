@@ -48,8 +48,12 @@ const judge = main.slice(main.indexOf('function judge('), main.indexOf('IPC.shel
  * be true of the expression - that `mode === 'all'` is what switches the
  * stop off, not a risk level inside it.
  */
-check('judge() has a risky test', /const risky =/.test(judge), true)
-const risky = judge.match(/const risky = (.*)/)?.[1] ?? ''
+/* judge() hands the decision to decide() in shell.ts, which check-approval.mjs also runs. */
+const shellSrc = readFileSync('src/main/shell.ts', 'utf8')
+const decideSrc = shellSrc.slice(shellSrc.indexOf('export function decide('), shellSrc.indexOf('export type RiskLevel'))
+check('judge() decides with decide()', /decide\(\{ readOnly, level, scope, mode/.test(judge), true)
+check('decide() has a risky test', /const risky =/.test(decideSrc), true)
+const risky = decideSrc.match(/const risky = (.*)/)?.[1] ?? ''
 check('accept-all is what turns it off', /mode !== 'all'/.test(risky), true)
 check('no risk level survives in accept-all', /level === 'severe'/.test(risky), false)
 check('confirmRisky cannot re-enable it', /mode === 'all' \? /.test(risky), false)

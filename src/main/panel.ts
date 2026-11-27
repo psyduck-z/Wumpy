@@ -134,7 +134,10 @@ export class Panel {
        */
       webPreferences: {
         preload: join(__dirname, '../preload/index.js'),
-        sandbox: false,
+        /* The preload needs nothing of Node's: it is bundled to one file
+           that requires only electron. Sandboxed, a page that went wrong
+           has no Node at all to reach for (found by a review, 2026-11). */
+        sandbox: true,
         contextIsolation: true,
         nodeIntegration: false,
         spellcheck: false,

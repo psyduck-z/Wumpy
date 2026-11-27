@@ -43,7 +43,7 @@ import { capDiskCache, reclaimCache } from './disk'
 import { ChatStore } from './chats'
 import { InputHistory } from './history'
 import { CloudClient, requestsInLastMinute, setKeyGap, sinceLimited, whenLimited } from './cloud'
-import { KeyStore } from './keys'
+import { KeyStore, NOT_SECURE, storesSecurely } from './keys'
 import { JournalStore } from './journal'
 import {
   diffSettings,
@@ -64,7 +64,7 @@ import { Panel } from './panel'
 import { createTray, resourcePath } from './tray'
 import { registerHotkeys, unregisterHotkeys } from './hotkey'
 import { LowLevelHook } from './lowlevelhook'
-import { runCommand, assessRisk, isReadOnly, riskLevel } from './shell'
+import { runCommand, assessRisk, isReadOnly, riskLevel, decide, secretByWildcard } from './shell'
 import { PriorityManager } from './priority'
 import { webSearch } from './search'
 import { cleanTitle, titleBrief, titleSource } from '@shared/titles'
@@ -508,6 +508,9 @@ function moveToChosenVoice(): void {
 /** Where secrets live: no background agent reads these. */
 const AGENT_SECRETS =
   /\.ssh[\\/]|id_(?:rsa|ed25519|ecdsa|dsa)\b|\.gnupg|keys\.bin|\.aws[\\/]|\.netrc|\.git-credentials|credentials\.json|(?:^|[\s/\\])\.env\b|\/etc\/shadow|\.password-store|keyring|Login Data|\bCookies\b|\.kdbx/i
+
+/** The names above, or a wildcard reaching one: `cat ~/.ss?/id_*`. */
+const touchesSecrets = (command: string): boolean => AGENT_SECRETS.test(command) || secretByWildcard(command) !== null
 
 /**
  * How many background agents may work now: from the keys of the provider
@@ -2383,11 +2386,10 @@ function registerIpc(): void {
    * The renderer asks and obeys; it never works this out for itself, so a bug
    * or a tampered page cannot widen what is permitted.
    */
-  function judge(command: string): CommandVerdict {
+  function judge(command: string, shell?: ShellKind): CommandVerdict {
     const scope = currentAssistant().tools
-    const readOnly = isReadOnly(command)
-    const allowed = scope === 'full' || (scope === 'read' && readOnly)
-    const risk = assessRisk(command)
+    const readOnly = isReadOnly(command, shell)
+    const risk = assessRisk(command, shell)
     const mode = settings.get('approvalMode')
 
     /**
@@ -2415,14 +2417,13 @@ function registerIpc(): void {
      * CLOSE_PROMPT, which exists because the first command to run under this
      * killed a tray icon the user wanted to keep.
      */
-    const level = riskLevel(command)
-    const risky = mode !== 'all' && level !== 'none' && settings.get('confirmRisky')
-    const auto = allowed && !risky && (mode === 'all' || (mode === 'auto' && readOnly))
+    const level = riskLevel(command, shell)
+    const { allowed, auto } = decide({ readOnly, level, scope, mode, confirmRisky: settings.get('confirmRisky') })
 
     return { risk, allowed, scope, auto, readOnly, level }
   }
 
-  ipcMain.handle(IPC.shellRisk, (_e, req: { command: string }) => judge(req.command))
+  ipcMain.handle(IPC.shellRisk, (_e, req: { command: string; shell?: ShellKind }) => judge(req.command, req.shell))
 
   /*
    * Background agents. They run what judge() would run without a click and
@@ -2453,10 +2454,10 @@ function registerIpc(): void {
       })
     }),
     run: async (command, shell) => {
-      const verdict = judge(command)
+      const verdict = judge(command, shell)
       /* Out of sight, an agent reads nothing that holds a secret - whatever
          the mode; accept-all turns the risk check off, not this. */
-      if (AGENT_SECRETS.test(command)) {
+      if (touchesSecrets(command)) {
         return { ran: false, ok: false, output: 'NOT RUN: agents do not read keys, passwords or credentials.' }
       }
       if (!settings.get('shellEnabled') || !verdict.allowed) {
@@ -2571,7 +2572,7 @@ function registerIpc(): void {
       // Scope is enforced here, not in the renderer and not by asking the
       // model nicely. /shell off is the only thing that turns it down now,
       // and it turns it off entirely.
-      const verdict = judge(command)
+      const verdict = judge(command, req.shell)
       if (!verdict.allowed) {
         const scope = verdict.scope
         return {
@@ -2832,7 +2833,7 @@ ${command}`
       ? checkLocal()
       : Promise.resolve()
     ).then(() => [...localUp]),
-    canStore: keys.available(),
+    canStore: storesSecurely(),
     counts: Object.fromEntries(PROVIDER_IDS.map((id) => [id, keys.count(id)]))
   }))
 
@@ -2861,9 +2862,7 @@ ${command}`
   ipcMain.handle(IPC.keyAdd, (_e, req: { provider: ProviderId; key: string }) => {
     const provider = req?.provider
     if (!isProviderId(provider)) return { ok: false, why: 'Unknown provider.' }
-    if (!keys.available()) {
-      return { ok: false, why: 'This PC cannot store a key securely, so Wumpy will not store one.' }
-    }
+    if (!storesSecurely()) return { ok: false, why: NOT_SECURE }
     const verdict = vetKeys(provider, req.key ?? '')
     if (!verdict.ok) return { ok: false, why: verdict.why }
     const total = keys.add(provider, req.key)
@@ -2880,10 +2879,10 @@ ${command}`
     if (!isProviderId(provider)) {
       return { ok: false, why: 'Unknown provider.' }
     }
-    if (!keys.available()) {
+    if (!storesSecurely()) {
       // Refused rather than stored in the clear. A key the user believes is
       // encrypted and is not would change which key they were willing to paste.
-      return { ok: false, why: 'This PC cannot store a key securely, so Wumpy will not store one.' }
+      return { ok: false, why: NOT_SECURE }
     }
     const verdict = vetKeys(provider, req.key ?? '')
     if (!verdict.ok) return { ok: false, why: verdict.why }
@@ -3096,7 +3095,7 @@ void app.whenReady().then(async () => {
       journal.add('skill', text.replace(/\*\*/g, ''))
       panel?.send(IPC.syncNote, text)
     },
-    seal: (secret) => (safeStorage.isEncryptionAvailable() ? `enc:${safeStorage.encryptString(secret).toString('base64')}` : null),
+    seal: (secret) => (storesSecurely() ? `enc:${safeStorage.encryptString(secret).toString('base64')}` : null),
     open: (sealed) => {
       try {
         return sealed.startsWith('enc:') ? safeStorage.decryptString(Buffer.from(sealed.slice(4), 'base64')) : null
@@ -3773,8 +3772,8 @@ function agentRunner(ready: (d: AgentDelivery) => void, say: (line: string) => v
     }),
     run: async (command, shell) => {
       if (!settings.get('shellEnabled')) return { ran: false, ok: false, output: 'NOT RUN: running commands is turned off.' }
-      if (AGENT_SECRETS.test(command)) return { ran: false, ok: false, output: 'NOT RUN: agents do not read keys, passwords or credentials.' }
-      if (!isReadOnly(command)) return { ran: false, ok: false, output: 'NOT RUN: this one would change something, and that needs the user’s click.' }
+      if (touchesSecrets(command)) return { ran: false, ok: false, output: 'NOT RUN: agents do not read keys, passwords or credentials.' }
+      if (!isReadOnly(command, shell)) return { ran: false, ok: false, output: 'NOT RUN: this one would change something, and that needs the user’s click.' }
       const r = await runCommand(command, shell, settings.get('shellCwd') || undefined)
       return {
         ran: true,
@@ -4077,7 +4076,7 @@ async function buildCheck(arg: string): Promise<void> {
           /^\s*(?:g\+\+|gcc|clang\+\+|clang|c\+\+|cc)\s/.test(command) &&
           !/[;&|`$<>]/.test(command) &&
           command.split(/\s+/).filter((w) => /[\\/]/.test(w)).every((w) => resolve(w.replace(/^~(?=\/)/, homedir())).startsWith(`${dir}/`))
-        if (!compiles && (!isReadOnly(command) || AGENT_SECRETS.test(command))) {
+        if (!compiles && (!isReadOnly(command) || touchesSecrets(command))) {
           say(`  did not run (it changes something): ${command.slice(0, 160)}`)
           transcript.push(`> not run in the check: ${command}`)
           back.push(`That command was not run: this is a check, and it only runs commands that read. Carry on without it.`)

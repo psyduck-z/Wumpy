@@ -1,6 +1,6 @@
 import { app } from 'electron'
 import { readFileSync, mkdirSync, readdirSync, statSync, unlinkSync, existsSync } from 'node:fs'
-import { join } from 'node:path'
+import { basename, join } from 'node:path'
 import { writeAtomic } from './atomic'
 import type { Attachment, ChatMessage, ChatSummary, SavedChat } from '@shared/types'
 import { sendsBytes } from '@shared/attach'
@@ -230,7 +230,10 @@ export class ChatStore {
     return messages.map((m) => {
       if (!m.images?.length) return m
       const images = m.images.map((img) => {
-        if (img.dataUrl || !img.file) return img
+        /* Only a name in the image folder: a saved chat is the page's to
+           write, and `../../.ssh/id_rsa` here would read any file there is
+           into the page (found by a review, 2026-11). */
+        if (img.dataUrl || !img.file || img.file !== basename(img.file)) return img
         try {
           const bytes = readFileSync(join(this.imageDir, img.file))
           return { ...img, dataUrl: `data:${mimeFor(img.file)};base64,${bytes.toString('base64')}` }

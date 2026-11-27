@@ -3,10 +3,11 @@
 # so this is how an installer comes out of an Omarchy laptop. The installer
 # is kept as the run's artifact (`gh run download` fetches it).
 #
-# The checks run here too, after the installer is saved, so their results
-# on Windows are on record - the path checks only run where there is real
-# PowerShell - without holding the installer back. A failure turns the run
-# red rather than hiding behind a passing step.
+# The checks run here too, after the installer is saved as the run's
+# artifact, so their results on Windows are on record - the path checks
+# only run where there is real PowerShell. The release - which every
+# installed Wumpy updates itself from - is published only after they pass,
+# and only from main: a build that fails its checks is never shipped.
 name: windows
 
 on:
@@ -25,6 +26,11 @@ jobs:
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          # The token is not left in .git/config, where any install script
+          # run by `npm ci` could read it and publish a release itself. Only
+          # the publish step below is handed it.
+          persist-credentials: false
       - uses: actions/setup-node@v4
         with:
           node-version: 22
@@ -49,15 +55,6 @@ jobs:
       # -c.extraMetadata... into -c and a file name.
       - run: npx electron-builder --win --x64 --publish never -c.extraMetadata.version=0.1.${{ github.run_number }}
         shell: bash
-      - name: Publish the release
-        shell: bash
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          v=0.1.${{ github.run_number }}
-          gh release create "v$v" "dist/Wumpy-$v-setup.exe" "dist/Wumpy-$v-setup.exe.blockmap" dist/latest.yml \
-            --target "$GITHUB_SHA" --title "Wumpy $v" \
-            --notes "Built from $GITHUB_SHA: $(git log -1 --format=%s)"
       - uses: actions/upload-artifact@v4
         # Storage full is no reason to skip the Windows checks below.
         continue-on-error: true
@@ -75,6 +72,17 @@ jobs:
       # runner is an administrator, so there is no pop-up to click.
       - name: The firewall, live on Windows
         run: node scripts/check-firewall-live.mjs
+      # Last, once everything above has passed (a failed step stops the job).
+      - name: Publish the release
+        if: github.ref == 'refs/heads/main'
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          v=0.1.${{ github.run_number }}
+          gh release create "v$v" "dist/Wumpy-$v-setup.exe" "dist/Wumpy-$v-setup.exe.blockmap" dist/latest.yml \
+            --target "$GITHUB_SHA" --title "Wumpy $v" \
+            --notes "Built from $GITHUB_SHA: $(git log -1 --format=%s)"
       # The recorder in Windows' own Chromium, on a fake mic playing a made-up
       # sentence (see the script). A runner has no sound card, which this may
       # need, so a failure here is reported, not fatal.

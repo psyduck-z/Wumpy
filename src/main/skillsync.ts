@@ -8,6 +8,7 @@
  * it needs nothing at all.
  */
 import { app, safeStorage } from 'electron'
+import { NOT_SECURE, storesSecurely } from './keys'
 import { execFile } from 'node:child_process'
 import { existsSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { homedir } from 'node:os'
@@ -75,7 +76,7 @@ export class SkillSync {
     if (!/^(gh[pousr]_[A-Za-z0-9_]{20,}|github_pat_[A-Za-z0-9_]{20,})$/.test(t)) {
       return { ok: false, why: 'That does not look like a GitHub token (they start with ghp_ or github_pat_).' }
     }
-    if (!safeStorage.isEncryptionAvailable()) return { ok: false, why: 'This system cannot encrypt it, so it was not kept.' }
+    if (!storesSecurely()) return { ok: false, why: NOT_SECURE }
     try {
       writeAtomic(this.tokenFile, safeStorage.encryptString(t))
       return { ok: true, why: '' }

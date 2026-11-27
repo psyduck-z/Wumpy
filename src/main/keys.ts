@@ -26,6 +26,31 @@ import { splitKeys } from '@shared/rotation'
  * A key is never logged. Errors carry a masked form, because a stack trace in a
  * support paste is a key in a support paste.
  */
+/**
+ * Whether something stored now is really encrypted.
+ *
+ * On Linux with no keyring running, Chromium does not fail: it encrypts
+ * with a fixed key built into it ('basic_text'), which anyone who has the
+ * file can undo. Wumpy forces gnome-libsecret (index.ts), but that only
+ * says which keyring to ask, not that one is there. So nothing new is
+ * stored then - what was stored before still reads (found by a review,
+ * 2026-11).
+ */
+export function storesSecurely(): boolean {
+  try {
+    if (!safeStorage.isEncryptionAvailable()) return false
+    return process.platform !== 'linux' || safeStorage.getSelectedStorageBackend() !== 'basic_text'
+  } catch {
+    return false
+  }
+}
+
+/** Why storesSecurely() said no, for whoever asked to store something. */
+export const NOT_SECURE =
+  process.platform === 'linux'
+    ? 'No keyring is running (GNOME Keyring or KWallet), so Wumpy will not store it: it would be readable by anyone with the file.'
+    : 'This PC cannot store it securely, so Wumpy will not store it.'
+
 export class KeyStore {
   private readonly file = join(app.getPath('userData'), 'keys.bin')
   private cache: Partial<Record<ProviderId, string[]>> | null = null

@@ -211,14 +211,17 @@ check('it cannot fire twice for one commit', /searched\.current/.test(searchSrc)
  * to agree with it.
  */
 const mainSrc = read('src/main/index.ts')
+/* The rule itself is decide() in shell.ts, which judge() calls and
+   check-approval.mjs runs. */
+const shellSrc = read('src/main/shell.ts')
 check(
   'severity decides, not merely riskiness',
-  /const level = riskLevel\(command\)/.test(mainSrc),
+  /const level = riskLevel\(command, shell\)/.test(mainSrc) && /decide\(\{ readOnly, level/.test(mainSrc),
   true
 )
 check(
   'accept-all stops for nothing',
-  /mode !== 'all' && level !== 'none'/.test(mainSrc),
+  /v\.mode !== 'all' && v\.level !== 'none'/.test(shellSrc),
   true
 )
 check(
@@ -226,7 +229,7 @@ check(
   /const silent =[\s\S]{0,160}verdict\.auto/.test(mainSrc),
   true
 )
-check('and auto requires not-risky', mainSrc.includes('const auto = allowed && !risky'), true)
+check('and auto requires not-risky', shellSrc.includes('const auto = allowed && !risky'), true)
 // A link to something on this machine is what an injected link would aim at.
 check(
   'a local link still asks, even on accept-all',

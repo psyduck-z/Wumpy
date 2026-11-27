@@ -146,7 +146,7 @@ export function CommandCard({
   useEffect(() => {
     if (!command) return
     let live = true
-    void window.wumpy.shell.check({ command }).then((r) => {
+    void window.wumpy.shell.check({ command, shell }).then((r) => {
       if (!live) return
       setRisk(r.risk)
       setAllowed(r.allowed)
@@ -156,7 +156,7 @@ export function CommandCard({
     return () => {
       live = false
     }
-  }, [command])
+  }, [command, shell])
 
   // The verdict comes from the main process, so the mode cannot be widened
   // here; this only decides whether to press the button on the user's behalf.

