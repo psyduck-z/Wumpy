@@ -97,6 +97,11 @@ export class LowLevelHook {
       this.child.on('exit', (code) => {
         this.child = null
         this.ready = false
+        /* A new helper owes nothing: the old one's late replies died with it,
+           and what was still waiting is answered now, not by a timer that
+           would count against the new one. */
+        this.late.clear()
+        for (const [verb, queue] of this.pending) for (const f of queue.splice(0)) f(`${verb} FAILED helper-exited`)
         if (this.stopping) return
 
         /*
@@ -164,9 +169,21 @@ export class LowLevelHook {
    * are different verbs and a slow CLICK must not be handed a TYPE's answer.
    */
   private pending = new Map<string, Array<(reply: string) => void>>()
+  /**
+   * Replies owed to requests that already timed out, by verb. The helper
+   * answers one command at a time, in order, so the next reply of that verb
+   * is the late one; handed to the request after it, a `fill` reading back
+   * its box would be told what the previous box said.
+   */
+  private late = new Map<string, number>()
 
   private settleCommand(message: string): boolean {
     const verb = message.split(' ')[0]
+    const owed = this.late.get(verb) ?? 0
+    if (owed > 0) {
+      this.late.set(verb, owed - 1)
+      return true
+    }
     const queue = this.pending.get(verb)
     if (!queue || queue.length === 0) return false
     queue.shift()?.(message)
@@ -199,6 +216,7 @@ export class LowLevelHook {
       const timer = setTimeout(() => {
         const q = this.pending.get(verb)
         if (q) this.pending.set(verb, q.filter((f) => f !== settle))
+        this.late.set(verb, (this.late.get(verb) ?? 0) + 1)
         settle(`${verb} FAILED no-reply-in-${timeoutMs}ms`)
       }, timeoutMs)
       queue.push(settle)

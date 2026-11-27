@@ -27,6 +27,13 @@ export class LinuxDesktop {
   /** What it said it can do: "pointer atspi", or which half is missing. */
   private abilities = ''
   private readonly pending = new Map<string, Array<(reply: string) => void>>()
+  /**
+   * Replies still owed to requests that already timed out, by verb. The
+   * helper answers in order, so the next line of that verb is the late one -
+   * and must not be handed to the request after it as if it were its answer:
+   * a `fill` reading back the box would be told about the previous one.
+   */
+  private readonly late = new Map<string, number>()
 
   /** Whether the pieces are there at all. Cheap: used to decide what the prompt says. */
   static available(): boolean {
@@ -75,6 +82,12 @@ export class LinuxDesktop {
             continue
           }
           const verb = line.split(' ')[0]
+          const owed = this.late.get(verb) ?? 0
+          if (owed > 0) {
+            this.late.set(verb, owed - 1)
+            log(`[do] linux helper: a late ${verb} reply, dropped`)
+            continue
+          }
           this.pending.get(verb)?.shift()?.(line)
         }
       })
@@ -86,11 +99,16 @@ export class LinuxDesktop {
       this.child.on('exit', (code) => {
         this.child = null
         this.ready = false
+        this.late.clear()
         for (const [verb, queue] of this.pending) for (const f of queue.splice(0)) f(`${verb} FAILED helper-exited`)
         log(`[do] linux helper exited (${code})`)
         settle(false)
       })
-      setTimeout(() => settle(this.ready), 8000)
+      /* Never said READY: stop it, or the next command starts a second one beside it. */
+      setTimeout(() => {
+        if (!this.ready) this.child?.kill()
+        settle(this.ready)
+      }, 8000)
     })
     return this.starting
   }
@@ -113,6 +131,7 @@ export class LinuxDesktop {
       const timer = setTimeout(() => {
         const q = this.pending.get(verb)
         if (q) this.pending.set(verb, q.filter((f) => f !== settle))
+        this.late.set(verb, (this.late.get(verb) ?? 0) + 1)
         settle(`${verb} FAILED no-reply-in-${timeoutMs}ms`)
       }, timeoutMs)
       queue.push(settle)

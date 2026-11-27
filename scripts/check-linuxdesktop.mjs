@@ -16,7 +16,7 @@
  */
 import { build } from 'esbuild'
 import { execFileSync } from 'node:child_process'
-import { rmSync } from 'node:fs'
+import { readFileSync, rmSync } from 'node:fs'
 import { pathToFileURL } from 'node:url'
 
 let failed = 0
@@ -49,7 +49,7 @@ check('a turn not about the desktop gets the one-line stub', /You can click and 
 /* The helper, by itself: verbs it must answer without a display. */
 const replies = (() => {
   try {
-    return execFileSync('python3', ['src/linux/desktop.py', '--owner=1'], {
+    return execFileSync('python3', ['src/linux/desktop.py', '--owner=1', '--no-a11y'], {
       input: ['CLICK x y', 'SCROLL 1', 'TYPE @@@', 'KEY ', 'KEY ctrl+nosuchkey', 'PRESS !!', 'NOPE', ''].join('\n') + '\n',
       encoding: 'utf8',
       timeout: 20000,
@@ -77,6 +77,58 @@ want.forEach(([prefix, what], i) => {
   check(`one reply for ${what}, starting with its verb`, got.startsWith(prefix), got)
 })
 check('and nothing more', replies.length === want.length + 1, `${replies.length} lines`)
+
+/* The pointer: Wumpy leaves it where it clicked (focus follows the mouse on
+   Hyprland, so putting it back would hand the keyboard to whatever is under
+   it), and GUARD must still report where the USER had it - or the next step
+   would stop with "the mouse moved" - until somebody really moves it. */
+const pointer = (() => {
+  try {
+    return execFileSync(
+      'python3',
+      [
+        '-c',
+        [
+          'import importlib.util, sys',
+          "spec = importlib.util.spec_from_file_location('d', 'src/linux/desktop.py')",
+          'd = importlib.util.module_from_spec(spec); spec.loader.exec_module(d)',
+          'pos = [(100, 100)]',
+          'd.cursor = lambda: pos[0]',
+          "d.hypr = lambda *a: None",
+          'def guard():',
+          '    d.guard()',
+          'lines = []',
+          'd.out = lambda l: lines.append(l)',
+          'd.guard()',
+          'pos[0] = (900, 400); d.placed((100, 100)); d.guard()',
+          'pos[0] = (950, 420); d.placed((900, 400)); d.guard()',
+          'pos[0] = (300, 300); d.guard(); d.guard()',
+          "d.key('backspace', 401); d.key('backspace', 0)",
+          "print('\\n'.join(lines))"
+        ].join('\n')
+      ],
+      { encoding: 'utf8', timeout: 20000 }
+    )
+      .trim()
+      .split('\n')
+  } catch (err) {
+    return [`ERROR ${err.message}`]
+  }
+})()
+const at = (line) => /cursor=(-?\d+,-?\d+)/.exec(line ?? '')?.[1]
+check('GUARD reports the pointer where it is, to begin with', at(pointer[0]) === '100,100', pointer[0])
+check('after Wumpy moves it, GUARD still says where they had it', at(pointer[1]) === '100,100', pointer[1])
+check('and after a second move of Wumpy\'s, still theirs', at(pointer[2]) === '100,100', pointer[2])
+check('once they move it themselves, the real place - so the plan stops', at(pointer[3]) === '300,300', pointer[3])
+check('and it stays the real place after that', at(pointer[4]) === '300,300', pointer[4])
+check('a key repeated more than Windows allows is refused, not cut short', /^KEY FAILED repeat-out-of-range=401/.test(pointer[5] ?? ''), pointer[5])
+check('and so is a repeat of none', /^KEY FAILED repeat-out-of-range=0/.test(pointer[6] ?? ''), pointer[6])
+
+/* The source, for the two things that broke on Hyprland 0.56's Lua dispatch. */
+const src = readFileSync('src/linux/desktop.py', 'utf8')
+check('focusing a window uses the Lua dispatch, with the old form as fallback', /hl\.dsp\.focus\(\{+ window = /.test(src) && /'focuswindow'/.test(src))
+check('and nothing calls the old forms on their own', !/run\(\['hyprctl', 'dispatch', '(focuswindow|movecursor)'/.test(src))
+check('a click no longer puts the pointer back (it would move the focus)', !/pointer=\{'restored'/.test(src))
 
 if (failed) {
   console.log(`\n${failed} failed`)

@@ -87,11 +87,34 @@ def cursor():
     return (int(c['x']), int(c['y'])) if c else None
 
 
+# Where the pointer was left by the helper itself, and where the user had it
+# before that. Focus follows the mouse here (input:follow_mouse = 1), so
+# putting the pointer back after a click hands the keyboard to whatever is
+# under it - often Wumpy's own panel; and focusing a window warps the pointer
+# to it (cursor:no_warps = false). So the pointer stays where Wumpy put it,
+# and GUARD reports the user's position for as long as it is still there: a
+# hand on the mouse moves it off that spot, and that is still noticed.
+PLACED = {'at': None, 'user': None}
+
+
+def placed(before):
+    """Wumpy moved the pointer from `before`: remember both ends."""
+    now = cursor()
+    if not now:
+        return now
+    prior = PLACED['at']
+    if prior is None or not near(before, prior):
+        PLACED['user'] = before  # the first of our moves since the user's own
+    PLACED['at'] = now
+    return now
+
+
+def near(a, b, slack=3):
+    return bool(a) and bool(b) and abs(a[0] - b[0]) <= slack and abs(a[1] - b[1]) <= slack
+
+
 def put(x, y):
-    # Hyprland 0.56 dispatches in Lua; the old "movecursor x y" form is an error there.
-    code, text, _ = run(['hyprctl', 'dispatch', f'hl.dsp.cursor.move({{ x = {int(x)}, y = {int(y)} }})'])
-    if code != 0 or 'error' in text:
-        run(['hyprctl', 'dispatch', 'movecursor', str(x), str(y)])
+    dispatch(f'hl.dsp.cursor.move({{ x = {int(x)}, y = {int(y)} }})', ['movecursor', str(int(x)), str(int(y))])
     return cursor()
 
 
@@ -107,7 +130,15 @@ def target_window():
     if active and not ours(active):
         return active
     clients = hypr('clients') or []
-    behind = [c for c in clients if c.get('mapped', True) and not ours(c) and c.get('focusHistoryID', -1) >= 0]
+    # Only a window on a workspace that is showing: focusing one elsewhere
+    # would switch their workspace out from under them.
+    shown = {m.get('activeWorkspace', {}).get('id') for m in (hypr('monitors') or [])}
+    shown |= {m.get('specialWorkspace', {}).get('id') for m in (hypr('monitors') or []) if m.get('specialWorkspace', {}).get('id')}
+    behind = [
+        c for c in clients
+        if c.get('mapped', True) and not c.get('hidden') and not ours(c) and c.get('focusHistoryID', -1) >= 0
+        and c.get('workspace', {}).get('id') in shown
+    ]
     behind.sort(key=lambda c: c.get('focusHistoryID', 99))
     return behind[0] if behind else None
 
@@ -115,6 +146,10 @@ def target_window():
 def guard():
     active = hypr('activewindow') or {}
     at = cursor() or (-1, -1)
+    if PLACED['at'] and near(at, PLACED['at']) and PLACED['user']:
+        at = PLACED['user']  # still where Wumpy left it: report where they had it
+    elif PLACED['at'] and not near(at, PLACED['at']):
+        PLACED['at'] = PLACED['user'] = None  # they have moved it since
     target = target_window() or {}
     try:
         hwnd = int(str(active.get('address', '0')), 16)
@@ -132,7 +167,9 @@ def guard():
 # ------------------------------------------------------------------- hands
 
 def move(x, y):
+    before = cursor()
     at = put(x, y)
+    placed(before)
     if not at:
         return out('MOVE FAILED hyprctl')
     out(f"MOVE {'ok' if at == (x, y) else 'CLAMPED'} at={at[0]},{at[1]}")
@@ -156,13 +193,13 @@ def click(x, y, button, times):
         if before:
             put(*before)
         return out(f'CLICK REFUSED off-screen asked={x},{y} landed={at[0]},{at[1]}')
+    placed(before)
     time.sleep(0.03)  # let the app see the pointer arrive before the press
     _, fail = press_here('CLICK', ['click', button, str(times)])
-    time.sleep(0.03)
-    restored = bool(before) and put(*before) == before
     if fail:
         return out(fail)
-    out(f"CLICK ok at={x},{y} button={button} times={times} pointer={'restored' if restored else 'left-there'}")
+    # Left where it clicked, not put back: see PLACED.
+    out(f"CLICK ok at={x},{y} button={button} times={times} pointer=left-there")
 
 
 def scroll(x, y, notches):
@@ -174,14 +211,11 @@ def scroll(x, y, notches):
         if before:
             put(*before)
         return out(f'SCROLL REFUSED off-screen asked={x},{y}')
+    placed(before)
     _, fail = press_here('SCROLL', ['scroll', str(notches)])
-    restored = bool(before) and put(*before) == before
     if fail:
         return out(fail)
-    out(
-        f"SCROLL ok at={x},{y} notches={notches} direction={'down' if notches > 0 else 'up'} "
-        f"pointer={'restored' if restored else 'left-there'}"
-    )
+    out(f"SCROLL ok at={x},{y} notches={notches} direction={'down' if notches > 0 else 'up'} pointer=left-there")
 
 
 def keyboard_is_ours(verb):
@@ -240,7 +274,9 @@ def key(chord, times):
     args = ['wtype']
     for m in mod:
         args += ['-M', m]
-    for _ in range(max(1, min(times, 200))):
+    if times < 1 or times > 400:
+        return out(f'KEY FAILED repeat-out-of-range={times}')
+    for _ in range(times):
         args += ['-k', name]
     for m in reversed(mod):
         args += ['-m', m]
@@ -346,7 +382,7 @@ def extents(acc, window):
     return (wx + e.x, wy + e.y, e.width, e.height)
 
 
-def walk(window, limit=4000, budget=5.0, offscreen=False):
+def walk(window, limit=4000, budget=3.0, offscreen=False):
     """Every named, enabled, useful control in the window, as (acc, name, role, x, y, w, h)."""
     app = app_for(window)
     if app is None:
@@ -450,9 +486,24 @@ def elements(limit, filt):
     out(f"ELEMENTS ok count={len(listed)} total={len(found)} window={b64(window.get('title', ''))} {json.dumps(listed)}")
 
 
+def dispatch(lua, old):
+    """Hyprland 0.56 dispatches in Lua and calls the old form an error; older ones only know the old form."""
+    code, text, _ = run(['hyprctl', 'dispatch', lua])
+    if code == 0 and not text.startswith('error'):
+        return True
+    code, text, _ = run(['hyprctl', 'dispatch', *old])
+    return code == 0 and not text.startswith('error')
+
+
 def focus_window(window):
-    if window and window.get('address'):
-        run(['hyprctl', 'dispatch', 'focuswindow', f"address:{window['address']}"])
+    if not window or not window.get('address'):
+        return False
+    before = cursor()
+    addr = window['address']
+    ok = dispatch(f'hl.dsp.focus({{ window = "address:{addr}" }})', ['focuswindow', f'address:{addr}'])
+    if before and not near(cursor(), before):
+        placed(before)  # Hyprland warped the pointer to it: ours, not theirs
+    return ok
 
 
 def take_focus(acc):
@@ -554,7 +605,7 @@ def focused():
     if root is None:
         return no_tree('FOCUSED', window)
     stack, start, el = [root], time.monotonic(), None
-    while stack and time.monotonic() - start < 4.0:
+    while stack and time.monotonic() - start < 3.0:
         acc = stack.pop()
         st = states(acc)
         if has(st, S.FOCUSED):
@@ -652,7 +703,8 @@ def command(line):
 
 
 def main():
-    enable_accessibility()
+    if '--no-a11y' not in sys.argv:
+        enable_accessibility()
     hands = 'pointer' if os.access(POINTER, os.X_OK) else 'no-pointer'
     eyes = 'atspi' if Atspi is not None else 'no-atspi'
     out(f'READY linux {hands} {eyes}')
