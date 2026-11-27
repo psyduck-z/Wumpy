@@ -47,7 +47,9 @@ const facts = () => {
 const cleanup = () =>
   ps(
     `Get-NetFirewallRule -DisplayName '${F.RULE_NAME}' -ErrorAction SilentlyContinue | Remove-NetFirewallRule\n` +
-      "Get-NetFirewallRule -DisplayName 'wumpy-ci-block' -ErrorAction SilentlyContinue | Remove-NetFirewallRule"
+      "Get-NetFirewallRule -DisplayName 'wumpy-ci-block' -ErrorAction SilentlyContinue | Remove-NetFirewallRule\n" +
+      /* Nothing to remove is an error PowerShell still exits 1 for, ignored or not. */
+      'exit 0'
   )
 
 try {

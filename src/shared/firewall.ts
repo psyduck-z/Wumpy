@@ -122,7 +122,10 @@ export function windowsAllowScript(): string {
       (p) =>
         `New-NetFirewallRule -DisplayName '${RULE_NAME}' -Description 'Lets your other devices sync skills with Wumpy over Wi-Fi.' ` +
         `-Direction Inbound -Action Allow -Protocol ${p} -LocalPort ${SYNC_PORT} -RemoteAddress LocalSubnet -Profile Any | Out-Null`
-    )
+    ),
+    /* Got here, so it worked: a "nothing to remove" above still leaves PowerShell
+       exiting 1, which would read as the prompt declined. (Found on the build machine.) */
+    'exit 0'
   ].join('\n')
 }
 
