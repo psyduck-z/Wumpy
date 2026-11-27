@@ -24,14 +24,17 @@ mkdirSync(out, { recursive: true })
 copyFileSync('src/linux/desktop.py', join(out, 'desktop.py'))
 chmodSync(join(out, 'desktop.py'), 0o755)
 
-const xml = 'src/linux/wlr-virtual-pointer-unstable-v1.xml'
+/* The pointer, and the keyboard beside it (see wumpy-pointer.c for why wtype is not enough). */
+const protocols = ['wlr-virtual-pointer-unstable-v1', 'virtual-keyboard-unstable-v1']
 const work = mkdtempSync(join(tmpdir(), 'wumpy-pointer-'))
 try {
-  const header = join(work, 'wlr-virtual-pointer-unstable-v1-client-protocol.h')
-  const glue = join(work, 'wlr-virtual-pointer-unstable-v1-protocol.c')
-  execFileSync('wayland-scanner', ['client-header', xml, header])
-  execFileSync('wayland-scanner', ['private-code', xml, glue])
-  execFileSync('gcc', ['-O2', '-Wall', '-Wextra', '-I', work, 'src/linux/wumpy-pointer.c', glue, '-o', join(out, 'wumpy-pointer'), '-lwayland-client'], {
+  const glue = protocols.map((name) => {
+    const xml = `src/linux/${name}.xml`
+    execFileSync('wayland-scanner', ['client-header', xml, join(work, `${name}-client-protocol.h`)])
+    execFileSync('wayland-scanner', ['private-code', xml, join(work, `${name}-protocol.c`)])
+    return join(work, `${name}-protocol.c`)
+  })
+  execFileSync('gcc', ['-O2', '-Wall', '-Wextra', '-I', work, 'src/linux/wumpy-pointer.c', ...glue, '-o', join(out, 'wumpy-pointer'), '-lwayland-client', '-lxkbcommon'], {
     stdio: 'inherit'
   })
   console.log('built resources/linux/wumpy-pointer and desktop.py')

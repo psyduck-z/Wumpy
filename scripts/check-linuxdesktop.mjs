@@ -129,6 +129,12 @@ const src = readFileSync('src/linux/desktop.py', 'utf8')
 check('focusing a window uses the Lua dispatch, with the old form as fallback', /hl\.dsp\.focus\(\{+ window = /.test(src) && /'focuswindow'/.test(src))
 check('and nothing calls the old forms on their own', !/run\(\['hyprctl', 'dispatch', '(focuswindow|movecursor)'/.test(src))
 check('a click no longer puts the pointer back (it would move the focus)', !/pointer=\{'restored'/.test(src))
+/* Keys go through wumpy-pointer's own keyboard, whole keymap and all: with
+   fcitx5 running, wtype's BackSpace, Delete and ctrl+a never arrive. */
+const keyFn = src.slice(src.indexOf('def key('), src.indexOf('# ----', src.indexOf('def key(')))
+check('keys go to the helper keyboard first, wtype only as a fallback', keyFn.indexOf("[POINTER, 'key'") > 0 && keyFn.indexOf("[POINTER, 'key'") < keyFn.indexOf("['wtype']"))
+const csrc = readFileSync('src/linux/wumpy-pointer.c', 'utf8')
+check('and that keyboard uploads a real keymap, not a made-up one', /xkb_keymap_new_from_names/.test(csrc) && /zwp_virtual_keyboard_v1_keymap/.test(csrc))
 
 if (failed) {
   console.log(`\n${failed} failed`)

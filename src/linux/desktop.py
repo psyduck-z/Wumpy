@@ -271,17 +271,26 @@ def key(chord, times):
         return out(f'KEY FAILED unknown-key chord={chord}')
     if keyboard_is_ours('KEY'):
         return None
+    if times < 1 or times > 400:
+        return out(f'KEY FAILED repeat-out-of-range={times}')
+    what = f'{chord} x{times}' if times > 1 else chord
+    # wumpy-pointer's keyboard first: wtype's BackSpace, Delete and ctrl+
+    # shortcuts vanish when fcitx5 is running (see wumpy-pointer.c). wtype
+    # only where the compositor has no virtual keyboard for it.
+    if os.access(POINTER, os.X_OK):
+        code, text, err = run([POINTER, 'key', ','.join(mod) or '-', name, str(times)], timeout=20)
+        if code == 0 and text.startswith('ok'):
+            return out(f'KEY ok chord={what}')
+        if 'no-virtual-keyboard' not in text:
+            return out(f"KEY FAILED chord={what} {text or err or 'keyboard-helper'}")
     args = ['wtype']
     for m in mod:
         args += ['-M', m]
-    if times < 1 or times > 400:
-        return out(f'KEY FAILED repeat-out-of-range={times}')
     for _ in range(times):
         args += ['-k', name]
     for m in reversed(mod):
         args += ['-m', m]
     code, _, err = run(args, timeout=20)
-    what = f'{chord} x{times}' if times > 1 else chord
     out(f'KEY ok chord={what}' if code == 0 else f'KEY FAILED chord={what} {err or "wtype"}')
 
 
