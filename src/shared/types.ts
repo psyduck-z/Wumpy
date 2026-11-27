@@ -754,6 +754,8 @@ export interface SyncInfo {
   wifi: boolean
   peers: Array<{ name: string; synced?: number; here: boolean }>
   github: { on: boolean; account?: string; token: boolean }
+  /** Whether the firewall lets the other devices in; `reached`, proof that one did. */
+  firewall: import('./firewall').FirewallVerdict & { reached?: { at: number; from: string } }
 }
 
 /* ---------------------------------------------------------------- messaging */
@@ -1178,6 +1180,7 @@ export const IPC = {
   skillsChanged: 'skill:changed',
   syncNote: 'skill:syncnote',
   syncInfo: 'skill:syncinfo',
+  firewall: 'skill:firewall',
   keyStatus: 'key:status',
   keySet: 'key:set',
   keyAdd: 'key:add',

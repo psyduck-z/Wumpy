@@ -477,6 +477,15 @@ input.field {
 .device-dot.is-here {
   background: rgb(74 222 128);
 }
+/* The firewall: green when the devices can get in, orange when they cannot. */
+.device-dot.fw-open,
+.device-dot.fw-off {
+  background: rgb(74 222 128);
+}
+.device-dot.fw-closed,
+.device-dot.fw-blocked {
+  background: rgb(var(--accent));
+}
 .pair-row {
   padding: 6px 0;
 }

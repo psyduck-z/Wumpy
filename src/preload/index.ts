@@ -6,6 +6,7 @@ import type { ProbeResult } from '@shared/probe'
 import type { Footprint } from '@shared/footprint'
 import type { Entry } from '@shared/journal'
 import type { RankView, SyncInfo } from '@shared/types'
+import type { FirewallVerdict } from '@shared/firewall'
 import type { EnrolAnswer, VoiceprintState, WhoseAnswer } from '@shared/types'
 import type { Listening } from '@shared/meeting'
 import type { Skill, SkillSummary } from '@shared/skills'
@@ -268,6 +269,8 @@ const api = {
     }): Promise<{ ok: boolean; on: boolean; message: string; changed?: boolean; account?: string }> => ipcRenderer.invoke(IPC.skillSync, req),
     /** Paired devices and GitHub, for the Settings tab. */
     syncInfo: (): Promise<SyncInfo> => ipcRenderer.invoke(IPC.syncInfo),
+    /** The firewall for Wi-Fi sync: checked again, or opened (with the system's password pop-up). */
+    firewall: (req: { allow?: boolean }): Promise<FirewallVerdict> => ipcRenderer.invoke(IPC.firewall, req),
     /** Something about Wi-Fi sync they did not just ask for: "Paired with desk." */
     onNote: (cb: (text: string) => void) => on<string>(IPC.syncNote, cb),
     /** Another device's skills arrived. */

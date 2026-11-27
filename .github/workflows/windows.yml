@@ -69,6 +69,12 @@ jobs:
           retention-days: 3
       - name: Checks, on Windows
         run: npm run typecheck
+      # Wi-Fi sync's firewall check and fix, for real: a Block rule like the
+      # one Windows makes when its "allow this app?" box is closed, then
+      # Allow, then the check again (scripts/check-firewall-live.mjs). The
+      # runner is an administrator, so there is no pop-up to click.
+      - name: The firewall, live on Windows
+        run: node scripts/check-firewall-live.mjs
       # The recorder in Windows' own Chromium, on a fake mic playing a made-up
       # sentence (see the script). A runner has no sound card, which this may
       # need, so a failure here is reported, not fatal.

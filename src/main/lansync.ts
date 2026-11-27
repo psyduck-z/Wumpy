@@ -24,8 +24,8 @@
  * Windows does on a "public" network). A device that hears a broadcast
  * answers it directly, which a firewall lets back in as a reply; so as long
  * as one of the two accepts connections, both learn where the other is and
- * the one that can reach the other connects. On Linux, pairing opens the port
- * in ufw once, with a password pop-up (pkexec) - never a stored password.
+ * the one that can reach the other connects. Pairing opens the port in the
+ * firewall first (main/firewall.ts), behind the system's password pop-up.
  *
  * Nothing here starts until they pair: no broadcasts, no port, no firewall
  * prompt for anyone who never uses it.
@@ -34,7 +34,6 @@
  * each other for real.
  */
 import { createCipheriv, createDecipheriv, createHash, createHmac, getDiffieHellman, randomBytes, randomInt, timingSafeEqual } from 'node:crypto'
-import { execFile } from 'node:child_process'
 import { createSocket, type RemoteInfo, type Socket as Udp } from 'node:dgram'
 import { readFileSync } from 'node:fs'
 import { connect, createServer, type Server, type Socket } from 'node:net'
@@ -353,6 +352,8 @@ export class LanSync {
   private timers = new Map<string, ReturnType<typeof setTimeout>>()
   private tried = new Map<string, number>()
   private revCache: { at: number; rev: string } | null = null
+  /** The last paired device that reached this one: proof the firewall lets them in. */
+  private lastIn: { at: number; from: string } | null = null
 
   constructor(private readonly o: LanOptions) {
     this.st = this.load()
@@ -382,6 +383,11 @@ export class LanSync {
 
   private secretOf(p: Peer): string | null {
     return this.o.open ? this.o.open(p.secret) : p.secret
+  }
+
+  /** When a paired device last connected in to this one, from another machine. */
+  reached(): { at: number; from: string } | null {
+    return this.lastIn
   }
 
   get id(): string {
@@ -840,8 +846,9 @@ export class LanSync {
     const n2 = randomBytes(16).toString('base64')
     const proof = await wire.ask({ t: 'hello', id: this.st.id, n: n2, proof: mac(secret, 'answer', n1, n2, this.st.id, peer.id) })
     if (!proof || !same(proof.proof, mac(secret, 'open', n1, n2, peer.id, this.st.id))) return wire.close()
-    /* Proved: so this is where it is now. */
+    /* Proved: so this is where it is now - and that it could get here at all. */
     Object.assign(peer, where(wire, first.port, this.heard.get(peer.id)))
+    if (!/^(127\.|::1$|::ffff:127\.)/.test(wire.sock.remoteAddress ?? '')) this.lastIn = { at: Date.now(), from: peer.name }
     wire.seal(Buffer.from(mac(secret, 'key', 'back', n1, n2), 'base64'), Buffer.from(mac(secret, 'key', 'out', n1, n2), 'base64'))
     if (this.busy) {
       wire.send({ t: 'busy' })
@@ -889,31 +896,4 @@ export class LanSync {
       if (changed) this.o.changed()
     }
   }
-}
-
-/**
- * Lets the other device in through ufw, which Omarchy turns on with every
- * port closed: once, behind a password pop-up - "just make it pop-up box and
- * then I will type in the passwords". Elsewhere there is nothing to do here:
- * Windows asks by itself the first time Wumpy listens.
- */
-export async function openFirewall(port = LAN_PORT): Promise<'open' | 'opened' | 'refused'> {
-  if (process.platform !== 'linux') return 'open'
-  let conf = ''
-  try {
-    conf = readFileSync('/etc/ufw/ufw.conf', 'utf8')
-  } catch {
-    return 'open'
-  }
-  if (!/^ENABLED=yes/m.test(conf)) return 'open'
-  try {
-    if (new RegExp(`--dport ${port}\\b`).test(readFileSync('/etc/ufw/user.rules', 'utf8'))) return 'open'
-  } catch {
-    /* Cannot tell: ask. */
-  }
-  return new Promise((resolve) => {
-    execFile('pkexec', ['/usr/bin/ufw', 'allow', String(port), 'comment', 'Wumpy skills sync'], { timeout: 180_000 }, (err) =>
-      resolve(err ? 'refused' : 'opened')
-    )
-  })
 }

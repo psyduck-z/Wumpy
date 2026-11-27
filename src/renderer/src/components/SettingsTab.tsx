@@ -132,6 +132,18 @@ export function SettingsTab({
     }
   }
 
+  /* "Make sure that you allow Wumpy through the firewall": checked now, or opened. */
+  const checkWall = async (allow: boolean): Promise<void> => {
+    setWorking(allow ? 'allow' : 'check')
+    try {
+      const v = await window.wumpy.skills.firewall({ allow })
+      setSync((prev) => (prev ? { ...prev, firewall: { ...v, reached: prev.firewall.reached } } : prev))
+      if (allow) setSaid({ text: v.why, bad: !(v.state === 'open' || v.state === 'off') })
+    } finally {
+      setWorking(null)
+    }
+  }
+
   const showCode = async (): Promise<void> => {
     setSaid(null)
     const m = await run('show', { action: 'pair' })
@@ -153,6 +165,32 @@ export function SettingsTab({
         <Row what="Over Wi-Fi" sub="with devices you have paired, no account" cmd="/sync pair">
           <Toggle on={sync?.wifi ?? settings.lanSync} label="Sync over Wi-Fi" onChange={toggle('lanSync')} />
         </Row>
+        {(sync?.wifi ?? settings.lanSync) && sync?.firewall && (
+          <Row
+            what="Firewall"
+            sub={
+              sync.firewall.reached && (sync.firewall.state === 'open' || sync.firewall.state === 'off')
+                ? `${sync.firewall.why} Confirmed: ${sync.firewall.reached.from} reached this device ${ago(sync.firewall.reached.at).replace('synced ', '')}.`
+                : sync.firewall.why
+            }
+          >
+            <i className={`device-dot fw-${sync.firewall.state}`} aria-hidden="true" />
+            {(sync.firewall.state === 'closed' || sync.firewall.state === 'blocked') && (
+              <button
+                type="button"
+                className="btn btn-accent"
+                disabled={working !== null}
+                title="Asks for your password (the system's own pop-up)"
+                onClick={() => void checkWall(true)}
+              >
+                {working === 'allow' ? 'Waiting…' : 'Allow'}
+              </button>
+            )}
+            <button type="button" className="btn btn-quiet" disabled={working !== null} onClick={() => void checkWall(false)}>
+              {working === 'check' ? 'Checking…' : 'Check'}
+            </button>
+          </Row>
+        )}
         {sync?.peers.length ? (
           <ul className="device-list">
             {sync.peers.map((p) => (

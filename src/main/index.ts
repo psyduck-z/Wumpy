@@ -74,7 +74,9 @@ import { folderFacts, resolveUserFolders } from './folders'
 import { ContextStore } from './context'
 import { SkillStore } from './skills'
 import { SkillSync, type SyncResult } from './skillsync'
-import { LAN_PORT, LanSync, openFirewall, pairCode } from './lansync'
+import { LAN_PORT, LanSync, pairCode } from './lansync'
+import { allowThroughFirewall, checkFirewall, ensureFirewall } from './firewall'
+import { reachable, type FirewallVerdict } from '@shared/firewall'
 import { skillPrompt } from '@shared/skills'
 import { Speech } from './speech'
 import {
@@ -2706,8 +2708,10 @@ ${command}`
           const code = arg ? pairCode(arg) : null
           if (arg && !code) return reply(false, 'A code is six digits: `/sync pair 482913`.')
           settings.patch({ lanSync: true })
-          const wall = await openFirewall()
-          const closed = wall === 'refused' ? ' (Firewall left closed: the other device may not find this one.)' : ''
+          /* Before listening: on Windows, a rule already there may spare them the box Windows shows. */
+          const wall = await ensureFirewall()
+          firewallSeen = { at: Date.now(), verdict: wall }
+          const closed = reachable(wall) || wall.state === 'unknown' ? '' : ` (${wall.why} The other device may not find this one: Settings → Allow.)`
           await lanSync.start()
           if (!code) {
             const shown = lanSync.show()
@@ -2786,9 +2790,18 @@ ${command}`
     async (): Promise<SyncInfo> => ({
       wifi: settings.get('lanSync') !== false,
       peers: lanSync.peers().map(({ name, synced, here }) => ({ name, synced, here })),
-      github: { on: settings.get('skillSync') === true, account: skillSync.status().account, token: Boolean(await skillSync.token()) }
+      github: { on: settings.get('skillSync') === true, account: skillSync.status().account, token: Boolean(await skillSync.token()) },
+      /* A minute old at most: on Windows the check is a PowerShell, and Settings asks every ten seconds. */
+      firewall: { ...(await firewallNow(60_000)), reached: lanSync.reached() ?? undefined }
     })
   )
+  /* Settings' "Check again" and "Allow". */
+  ipcMain.handle(IPC.firewall, async (_e, req: { allow?: boolean }) => {
+    const verdict = req?.allow ? await allowThroughFirewall() : await checkFirewall()
+    firewallSeen = { at: Date.now(), verdict }
+    journal.add('skill', `firewall: ${verdict.why}`)
+    return verdict
+  })
   ipcMain.handle(IPC.skillGet, (_e, name: string) => skills.get(String(name ?? '')))
   ipcMain.handle(IPC.skillFolder, async (_e, open: boolean) => {
     skills.seed()
@@ -3207,6 +3220,7 @@ void app.whenReady().then(async () => {
   setInterval(() => void syncInBackground('every 30 minutes'), 30 * 60_000).unref?.()
   /* Paired over Wi-Fi: listening from the start, so their other devices find this one. */
   if (settings.get('lanSync') !== false && lanSync.peers().length) void lanSync.start()
+  setTimeout(() => void firewallAtStart(), 25_000).unref?.()
   setVoiceprintLog((line) => console.log(line))
   /* Updates on Windows, from the releases each push publishes, shown in the
      panel's header and installed once nobody is using Wumpy; on Linux, from
@@ -3474,6 +3488,29 @@ if (launchChat && !/^[\w-]{1,80}$/.test(launchChat)) launchChat = null
  * A background skills sync, when sharing is on: quiet unless it changed
  * something here, in which case the panel re-reads the commands.
  */
+/** The last firewall check, so Settings does not run one every ten seconds. */
+let firewallSeen: { at: number; verdict: FirewallVerdict } | null = null
+async function firewallNow(maxAge: number): Promise<FirewallVerdict> {
+  if (firewallSeen && Date.now() - firewallSeen.at < maxAge) return firewallSeen.verdict
+  const verdict = await checkFirewall()
+  firewallSeen = { at: Date.now(), verdict }
+  return verdict
+}
+
+/**
+ * Paired, so checked once a little after start: an update is a new
+ * Wumpy.exe, which Windows may ask about - or block - all over again.
+ * Said once, in the chat, with where to fix it.
+ */
+async function firewallAtStart(): Promise<void> {
+  if (settings.get('lanSync') === false || !lanSync.peers().length) return
+  const v = await firewallNow(0)
+  console.log(`[skills] firewall: ${v.state} - ${v.why}`)
+  if (v.state === 'closed' || v.state === 'blocked') {
+    panel?.send(IPC.syncNote, `${v.why} Wi-Fi sync needs it: Settings → Sync skills → **Allow**.`)
+  }
+}
+
 type SyncAction = 'now' | 'on' | 'off' | 'key' | 'status' | 'pair' | 'unpair'
 type SyncReply = { ok: boolean; on: boolean; message: string; changed: boolean; account?: string }
 
