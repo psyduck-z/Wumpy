@@ -90,7 +90,29 @@ export const LINUX_APPS_PROMPT = [
   '  brightness                brightnessctl set 60%',
   '  notify                    notify-send "Title" "Body"',
   '  open a file or folder     xdg-open <path>',
-  'There is no mouse control here: drive apps with their commands and keys.'
+  'Clicking and typing inside an app is a wumpy-do block, when this prompt has',
+  'that section. When it does not, there is no mouse control on this machine:',
+  'drive apps with their commands and keys instead.'
+].join(NL)
+
+/**
+ * What is different about clicking here, after the shared DESKTOP_PROMPT.
+ *
+ * The names come from AT-SPI, and an app only publishes its tree once
+ * accessibility is on - which the helper turns on when it starts, so an app
+ * that was already open may show no names until it is restarted. Wayland also
+ * tells no program about another's keystrokes, so a plan cannot notice the
+ * user typing; it does notice the pointer moving and the window changing.
+ */
+export const LINUX_DESKTOP_NOTE = [
+  'ON THIS MACHINE (Linux, Hyprland): you really can click, scroll and type here.',
+  'Control names come from the accessibility tree. If the list is empty or a',
+  'name is "not found" because the app shows no tree, say so plainly and offer',
+  'that they restart that app (it was opened before Wumpy turned accessibility',
+  'on). Until then click X Y and scroll still work off the screenshot, but',
+  'typing does not: it needs a named box or caret, and both need that tree.',
+  'Wumpy cannot see their keystrokes here, only the mouse and the window, so',
+  'keep plans short and look between them.'
 ].join(NL)
 
 export const LINUX_SHELL_PROMPT = [

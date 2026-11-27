@@ -474,3 +474,4 @@ bench-results.json
 # left behind on a crash, and one was committed that way.
 /.*.mjs
 /.*.cjs
+resources/linux/

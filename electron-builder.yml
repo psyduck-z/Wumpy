@@ -42,6 +42,10 @@ extraResources:
   # NVIDIA's Riva protocol files for hosted speech; see src/main/nvspeech.ts.
   - from: resources/riva
     to: riva
+  # Clicking and typing on Linux (Hyprland); built from src/linux by
+  # scripts/build-linux-helper.mjs. Absent on Windows, which has src/hook.
+  - from: resources/linux
+    to: linux
   # The Win+Shift+W interception helper (Windows only); see src/hook.
   - from: resources/hook
     to: hook

@@ -112,6 +112,7 @@ import { MENTOR_PROMPT, parseReview, type ReflectReview } from '@shared/reflect'
 import { openLink, openSearch } from './browser'
 import { inspectWriteTarget, writeProposedFile } from './writefile'
 import { runPlan, visibleElements } from './input'
+import { LinuxDesktop } from './linuxdesktop'
 import { readPlan } from '@shared/steps'
 import {
   PROVIDERS,
@@ -261,6 +262,15 @@ let panel: Panel
 let tray: (Tray & { refresh(): void }) | null = null
 let hotkeyState: HotkeyState = { active: null, failed: [], intercepted: null }
 let lowLevelHook: LowLevelHook | null = null
+/** The same protocol on Linux, started on first use; see main/linuxdesktop.ts. */
+const linuxDesktop = LinuxDesktop.available() ? new LinuxDesktop() : null
+/** Whichever helper this machine has, for the plan runner and the control list. */
+const desktopSend = (cmd: string, ms?: number): Promise<string> =>
+  lowLevelHook
+    ? lowLevelHook.send(cmd, ms)
+    : linuxDesktop
+      ? linuxDesktop.send(cmd, ms)
+      : Promise.resolve(`${cmd.split(' ')[0]} FAILED helper-not-running`)
 let priority: PriorityManager
 let speech: Speech
 
@@ -939,6 +949,7 @@ function promptShape(
        bench should not have to write the user's settings file to run. */
     lean: settings.get('leanPrompt') || process.env.WUMPY_LEAN === '1',
     platform: process.platform === 'linux' ? 'linux' : process.platform === 'darwin' ? 'darwin' : 'win32',
+    hands: LinuxDesktop.available(),
     /* Which of the two screen sections is true for this model. The bytes are
        dropped for the ones that cannot read them, so promising a photograph
        would describe a turn that cannot happen. */
@@ -2188,11 +2199,7 @@ function registerIpc(): void {
     /** What is on screen, by name. The half of a look that is text. */
     const visibleNames = async (): Promise<Awaited<ReturnType<typeof visibleElements>>> =>
       settings.get('browserEnabled')
-        ? await visibleElements((cmd, ms) =>
-            lowLevelHook
-              ? lowLevelHook.send(cmd, ms)
-              : Promise.resolve('ELEMENTS FAILED helper-not-running')
-          )
+        ? await visibleElements(desktopSend)
         : { elements: [], window: '', total: 0 }
 
     const blind = !seesMedia(activeModel())
@@ -2336,11 +2343,7 @@ function registerIpc(): void {
       }
     }
     const plan = readPlan(req.body)
-    const result = await runPlan(plan, panel.liveWindow(), (cmd, ms) =>
-      lowLevelHook
-        ? lowLevelHook.send(cmd, ms)
-        : Promise.resolve(`${cmd.split(' ')[0]} FAILED helper-not-running`)
-    )
+    const result = await runPlan(plan, panel.liveWindow(), desktopSend)
     /*
      * And then look again, always.
      *
@@ -4904,6 +4907,7 @@ app.on('will-quit', () => {
   void releaseAllMusic()
   unregisterHotkeys()
   lowLevelHook?.stop()
+  linuxDesktop?.stop()
   speech?.stop()
   closeSpeech()
   /*

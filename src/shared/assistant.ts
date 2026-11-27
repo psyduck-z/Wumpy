@@ -1,4 +1,4 @@
-import { LINUX_APPS_PROMPT, LINUX_CLOSE_PROMPT, LINUX_SHELL_PROMPT, linuxVoice } from './linux'
+import { LINUX_APPS_PROMPT, LINUX_CLOSE_PROMPT, LINUX_DESKTOP_NOTE, LINUX_SHELL_PROMPT, linuxVoice } from './linux'
 import type { Assistant } from './types'
 import { WRITE_PROMPT } from './writefile'
 import { LOOK_PROMPT } from './look'
@@ -1632,6 +1632,12 @@ lean?: boolean
    */
   platform?: 'win32' | 'linux' | 'darwin'
   /**
+   * Linux only: whether the desktop helper (src/linux, main/linuxdesktop.ts)
+   * is installed, so clicking and typing exist. Without it the prompt says
+   * there is no mouse control, which is then true. Windows always has hands.
+   */
+  hands?: boolean
+  /**
    * Whether this model can read a picture at all.
    *
    * The catalogue says which - see `seesMedia`. On a model that cannot, the
@@ -1876,6 +1882,13 @@ function linuxSections(shape: PromptShape): string[] {
     screen ? looking : '',
     screen && wants('picture') ? LOOK_PROMPT : '',
     quota ? QUOTA_PROMPT : '',
+    /* The same section as Windows, once there are hands to go with the eyes:
+       the same helper protocol answers it (src/linux/desktop.py). */
+    screen && browser && scope === 'full' && shape.hands
+      ? wants('desktop')
+        ? [DESKTOP_PROMPT, LINUX_DESKTOP_NOTE].join(String.fromCharCode(10, 10))
+        : STUBS.desktop
+      : '',
     agentsFor(shape, wants),
     ASK_PROMPT
   ].filter(Boolean)
