@@ -78,6 +78,8 @@ import { ContextStore } from './context'
 import { SkillStore } from './skills'
 import { SkillSync, type SyncResult } from './skillsync'
 import { LAN_PORT, LanSync, pairCode } from './lansync'
+import { SettingsShare } from './settingshare'
+import { SHARED_SETTINGS, settingWords } from '@shared/settingsync'
 import { allowThroughFirewall, checkFirewall, ensureFirewall } from './firewall'
 import { reachable, type FirewallVerdict } from '@shared/firewall'
 import { skillPrompt } from '@shared/skills'
@@ -228,6 +230,8 @@ let skills: SkillStore
 let skillSync: SkillSync
 /** Skills with their paired devices over Wi-Fi: see main/lansync.ts. */
 let lanSync: LanSync
+/** The settings that follow them to their paired devices (@shared/settingsync). */
+let settingsShare: SettingsShare
 let usage: UsageStore
 let pools: PoolStore
 let ranker: Ranker
@@ -2705,7 +2709,7 @@ ${command}`
    */
   ipcMain.handle(
     IPC.skillSync,
-    async (_e, req: { action: SyncAction; token?: string; arg?: string }) => {
+    async (_e, req: { action: SyncAction; token?: string; arg?: string; to?: string }) => {
       const github = (): boolean => settings.get('skillSync') === true
       const wifi = (): boolean => settings.get('lanSync') !== false
       const paired = (): boolean => lanSync.peers().length > 0
@@ -2736,16 +2740,36 @@ ${command}`
           return reply(r.ok, `${r.message}${closed}`, r.changed)
         }
         case 'unpair': {
+          /* Settings sends the device's id; said by its name. */
+          const who = lanSync.peers().find((p) => p.id === arg)?.name ?? arg
           const gone = lanSync.unpair(arg)
           return reply(
             gone > 0,
-            gone ? (arg ? `Unpaired **${arg}**.` : `Unpaired ${gone === 1 ? 'it' : `all ${gone}`}.`) : arg ? `No paired device called “${arg}”.` : 'Nothing is paired.'
+            gone
+              ? arg
+                ? `Unpaired **${who}**, on all your devices.`
+                : `This device left: unpaired ${gone === 1 ? 'it' : `all ${gone}`}.`
+              : arg
+                ? `No paired device called “${arg}”.`
+                : 'Nothing is paired.'
           )
+        }
+        case 'rename': {
+          const to = String(req?.to ?? '').trim()
+          if (!arg) return reply(false, 'Which device: `/sync rename desk to Work laptop`.')
+          const r = lanSync.rename(arg, to)
+          if (!r.ok) return reply(false, `No paired device called “${arg}”.`)
+          return reply(true, to ? `**${r.was}** is **${r.name}** now, on all your devices.` : `**${r.was}** is back to **${r.name}**.`)
         }
         case 'status': {
           const parts: string[] = []
           if (wifi() && paired()) {
-            parts.push(`Wi-Fi with ${lanSync.peers().map((p) => `**${p.name}**${p.synced ? ` (synced ${ago(p.synced)})` : ''}`).join(', ')}`)
+            parts.push(
+              `Wi-Fi with ${lanSync
+                .peers()
+                .map((p) => `**${p.name}**${p.synced ? ` (synced ${ago(p.synced)})` : ''}${p.via ? ` via ${p.via}` : ''}`)
+                .join(', ')} - this device is **${lanSync.me().name}**`
+            )
           }
           if (github()) {
             const account = skillSync.status().account
@@ -2801,7 +2825,8 @@ ${command}`
     IPC.syncInfo,
     async (): Promise<SyncInfo> => ({
       wifi: settings.get('lanSync') !== false,
-      peers: lanSync.peers().map(({ name, synced, here }) => ({ name, synced, here })),
+      peers: lanSync.peers().map(({ id, name, host, synced, here, via }) => ({ id, name, host, synced, here, via })),
+      me: lanSync.me(),
       github: { on: settings.get('skillSync') === true, account: skillSync.status().account, token: Boolean(await skillSync.token()) },
       /* A minute old at most: on Windows the check is a PowerShell, and Settings asks every ten seconds. */
       firewall: { ...(await firewallNow(60_000)), reached: lanSync.reached() ?? undefined }
@@ -3094,6 +3119,15 @@ void app.whenReady().then(async () => {
   skills = new SkillStore()
   skillSync = new SkillSync(skills, (line) => console.log(line))
   const skillStore = skills
+  settingsShare = new SettingsShare(app.getPath('userData'), settings)
+  const share = settingsShare
+  /* A shared setting changed here, by whoever: the paired devices come for it. */
+  let settingsBefore = settings.all()
+  settings.onChange((next) => {
+    const prev = settingsBefore
+    settingsBefore = next
+    if (settings.get('shareSettings') !== false && share.saw(prev, next)) lanSync?.nudge()
+  })
   lanSync = new LanSync({
     dir: app.getPath('userData'),
     /* The skills, and the voice calibration riding along as "@voice" while
@@ -3104,15 +3138,29 @@ void app.whenReady().then(async () => {
         const view = skillStore.syncView(also)
         const voice = settings.get('shareVoice') ? sharedVoice() : null
         if (voice) view[SHARED_VOICE] = voice
+        const mine = settings.get('shareSettings') !== false ? share.view() : null
+        if (mine) view[SHARED_SETTINGS] = mine
         return view
       },
-      put: (name, text) => {
+      put: (name, text, from) => {
+        if (name === SHARED_SETTINGS) {
+          if (settings.get('shareSettings') === false) return false
+          const took = share.take(text)
+          if (took.changed.length) {
+            if (took.patch.model) void refreshModels()
+            tray?.refresh()
+            const line = `Settings from **${from ?? 'another device'}**: ${settingWords(took.changed)}.`
+            journal.add('skill', line.replace(/\*\*/g, ''))
+            panel?.send(IPC.syncNote, line)
+          }
+          return took.ok
+        }
         if (name !== SHARED_VOICE) return skillStore.put(name, text)
         /* Settings reads the voiceprint's state each time it is opened, so
            there is nothing to push: it shows "calibrated" from then on. */
         return settings.get('shareVoice') && takeSharedVoice(text)
       },
-      drop: (name) => (name === SHARED_VOICE ? false : skillStore.drop(name))
+      drop: (name) => (name.startsWith('@') ? false : skillStore.drop(name))
     },
     name: hostname() || 'another device',
     log: (line) => console.log(line),
@@ -3539,7 +3587,7 @@ async function firewallAtStart(): Promise<void> {
   }
 }
 
-type SyncAction = 'now' | 'on' | 'off' | 'key' | 'status' | 'pair' | 'unpair'
+type SyncAction = 'now' | 'on' | 'off' | 'key' | 'status' | 'pair' | 'unpair' | 'rename'
 type SyncReply = { ok: boolean; on: boolean; message: string; changed: boolean; account?: string }
 
 /** "4 min ago", for /sync status. */

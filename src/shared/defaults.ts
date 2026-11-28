@@ -107,6 +107,8 @@ export const DEFAULT_SETTINGS: WumpySettings = {
   skillSync: false,
   // See WumpySettings.shareVoice. Wi-Fi paired devices only.
   shareVoice: true,
+  // See WumpySettings.shareSettings. Wi-Fi paired devices only.
+  shareSettings: true,
 
   // See WumpySettings.lanSync. On, and nothing runs until a device is paired.
   lanSync: true

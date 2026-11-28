@@ -263,9 +263,11 @@ const api = {
     folder: (open: boolean): Promise<string> => ipcRenderer.invoke(IPC.skillFolder, open),
     /** Skills on every device: over Wi-Fi (main/lansync.ts) and GitHub (main/skillsync.ts). */
     sync: (req: {
-      action: 'now' | 'on' | 'off' | 'key' | 'status' | 'pair' | 'unpair'
+      action: 'now' | 'on' | 'off' | 'key' | 'status' | 'pair' | 'unpair' | 'rename'
       token?: string
       arg?: string
+      /** For `rename`: the new name ("" goes back to the device's own). */
+      to?: string
     }): Promise<{ ok: boolean; on: boolean; message: string; changed?: boolean; account?: string }> => ipcRenderer.invoke(IPC.skillSync, req),
     /** Paired devices and GitHub, for the Settings tab. */
     syncInfo: (): Promise<SyncInfo> => ipcRenderer.invoke(IPC.syncInfo),

@@ -121,7 +121,7 @@ export type CommandAction =
   /** `/skills` — list them; `/skills new <what>`, `/skills folder`. */
   | { kind: 'skills'; ask: string }
   /** `/sync` — skills on every device: now, on, off, or `key <token>`. */
-  | { kind: 'sync'; action: 'now' | 'on' | 'off' | 'key' | 'status' | 'pair' | 'unpair'; token: string; arg?: string }
+  | { kind: 'sync'; action: 'now' | 'on' | 'off' | 'key' | 'status' | 'pair' | 'unpair' | 'rename'; token: string; arg?: string; to?: string }
   /** Send to the model, but wrapped in a prompt that shapes the answer. */
   | { kind: 'prompt'; text: string; label: string }
 
@@ -838,8 +838,8 @@ export const COMMANDS: CommandSpec[] = forThisWindow([
   },
   {
     name: 'sync',
-    hint: 'Share your skills between your devices: over Wi-Fi (pair once), or a gist on your GitHub account',
-    arg: 'pair [code] | unpair | on | off | status | key <token>',
+    hint: 'Share your skills (and settings) between your devices: over Wi-Fi (pair once), or a gist on your GitHub account',
+    arg: 'pair [code] | unpair [device] | rename <device> to <name> | on | off | status | key <token>',
     run: (arg) => {
       const [word, ...rest] = (arg ?? '').trim().split(/\s+/)
       const w = (word ?? '').toLowerCase()
@@ -848,7 +848,16 @@ export const COMMANDS: CommandSpec[] = forThisWindow([
       if (w === 'key' || w === 'token') return { kind: 'sync', action: 'key', token: rest.join('').trim() }
       if (w === 'pair') return { kind: 'sync', action: 'pair', token: '', arg: rest.join(' ').trim() }
       if (w === 'unpair' || w === 'forget') return { kind: 'sync', action: 'unpair', token: '', arg: rest.join(' ').trim() }
-      return { kind: 'error', message: 'Usage: `/sync`, `/sync pair [code]`, `/sync unpair`, `/sync on`, `/sync off`, `/sync status`, `/sync key <token>`.' }
+      if (w === 'rename' || w === 'name' || w === 'call') {
+        /* "/sync rename desk to Work laptop"; "/sync rename this to Personal laptop". */
+        const m = /^(.+?)\s+(?:to|as)\s+(.*)$/i.exec(rest.join(' ').trim())
+        if (!m) return { kind: 'error', message: 'Usage: `/sync rename <device> to <new name>` (`this` for this device).' }
+        return { kind: 'sync', action: 'rename', token: '', arg: m[1].trim(), to: m[2].trim() }
+      }
+      return {
+        kind: 'error',
+        message: 'Usage: `/sync`, `/sync pair [code]`, `/sync unpair [device]`, `/sync rename <device> to <name>`, `/sync on`, `/sync off`, `/sync status`, `/sync key <token>`.'
+      }
     }
   },
   {

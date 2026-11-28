@@ -750,6 +750,13 @@ export interface WumpySettings {
    */
   shareVoice: boolean
   /**
+   * Send the settings that are not about this one machine (the model, the
+   * voice, thinking, search...) to the devices paired over Wi-Fi, and take
+   * theirs: setting by setting, the newest change wins (@shared/settingsync).
+   * Never the window, the hotkeys, or what may run without asking.
+   */
+  shareSettings: boolean
+  /**
    * Share skills with the devices paired over Wi-Fi (`/sync pair`,
    * main/lansync.ts). On, and inert until one is paired; `/sync off` stops it.
    */
@@ -759,7 +766,10 @@ export interface WumpySettings {
 /** What the Settings tab shows about sync: paired devices, and GitHub. */
 export interface SyncInfo {
   wifi: boolean
-  peers: Array<{ name: string; synced?: number; here: boolean }>
+  /** `name` is what they call it (a rename), `host` what it calls itself; `via`, the device that introduced it. */
+  peers: Array<{ id: string; name: string; host: string; synced?: number; here: boolean; via?: string }>
+  /** This device, as the network calls it. */
+  me: { id: string; name: string; host: string }
   github: { on: boolean; account?: string; token: boolean }
   /** Whether the firewall lets the other devices in; `reached`, proof that one did. */
   firewall: import('./firewall').FirewallVerdict & { reached?: { at: number; from: string } }

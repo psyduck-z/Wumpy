@@ -2863,7 +2863,7 @@ function namedControls(shot: Attachment): string[] {
             return
           }
           if (action.action === 'pair' && action.arg) chat.note('Looking for that device…')
-          const result = await window.wumpy.skills.sync({ action: action.action, token: action.token, arg: action.arg })
+          const result = await window.wumpy.skills.sync({ action: action.action, token: action.token, arg: action.arg, to: action.to })
           if (result.changed) void window.wumpy.skills.list().then(setSkillCommands).catch(() => undefined)
           /* Main says it in one line, for Wi-Fi and GitHub both: "shorten that down". */
           chat.note(result.message, !result.ok)

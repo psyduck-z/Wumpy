@@ -98,6 +98,8 @@ export function SettingsTab({
   const [token, setToken] = useState('')
   const [said, setSaid] = useState<{ text: string; bad: boolean } | null>(null)
   const [working, setWorking] = useState<string | null>(null)
+  /** The device being renamed (this one's id for this device), and the name being typed. */
+  const [naming, setNaming] = useState<{ id: string; text: string } | null>(null)
 
   const refresh = useCallback(() => {
     void window.wumpy.skills.syncInfo().then(setSync).catch(() => undefined)
@@ -155,14 +157,45 @@ export function SettingsTab({
     }
   }
 
+  /* "Rename the devices I'm paired with ... my work laptop, my personal laptop." */
+  const saveName = async (): Promise<void> => {
+    if (!naming) return
+    const { id, text } = naming
+    setNaming(null)
+    await run('rename', { action: 'rename', arg: id, to: text })
+  }
+  const nameField = (id: string, label: string): React.JSX.Element => (
+    <>
+      <input
+        className="field"
+        autoFocus
+        aria-label={`New name for ${label}`}
+        placeholder={label}
+        maxLength={40}
+        value={naming?.text ?? ''}
+        onChange={(e) => setNaming({ id, text: e.target.value })}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter') void saveName()
+          if (e.key === 'Escape') setNaming(null)
+        }}
+      />
+      <button type="button" className="btn btn-accent" disabled={working !== null} onClick={() => void saveName()}>
+        Save
+      </button>
+      <button type="button" className="btn btn-quiet" onClick={() => setNaming(null)}>
+        Cancel
+      </button>
+    </>
+  )
+
   const engine = isSearchEngine(settings.searchEngine) ? settings.searchEngine : DEFAULT_ENGINE
   const toggle = (key: keyof WumpySettings) => (next: boolean) => void onPatch({ [key]: next } as Partial<WumpySettings>)
 
   return (
     <div className="tab-page" role="tabpanel">
       <section className="set-section">
-        <h2>Sync skills</h2>
-        <Row what="Over Wi-Fi" sub="with devices you have paired, no account" cmd="/sync pair">
+        <h2>Your devices</h2>
+        <Row what="Over Wi-Fi" sub="skills sync with devices you have paired, no account" cmd="/sync pair">
           <Toggle on={sync?.wifi ?? settings.lanSync} label="Sync over Wi-Fi" onChange={toggle('lanSync')} />
         </Row>
         {(sync?.wifi ?? settings.lanSync) && sync?.firewall && (
@@ -193,20 +226,59 @@ export function SettingsTab({
         )}
         {sync?.peers.length ? (
           <ul className="device-list">
+            {sync.me && (
+              <li key={sync.me.id} title="Every device in your network calls this one by this name">
+                <i className="device-dot is-here" aria-hidden="true" />
+                {naming?.id === sync.me.id ? (
+                  nameField(sync.me.id, sync.me.host)
+                ) : (
+                  <>
+                    <span className="device-name">{sync.me.name}</span>
+                    <span className="set-sub">this device{sync.me.name !== sync.me.host ? ` (${sync.me.host})` : ''}</span>
+                    <button type="button" className="btn btn-quiet" disabled={working !== null} onClick={() => setNaming({ id: sync.me.id, text: sync.me.name })}>
+                      Rename
+                    </button>
+                  </>
+                )}
+              </li>
+            )}
             {sync.peers.map((p) => (
-              <li key={p.name}>
+              <li key={p.id}>
                 <i className={`device-dot ${p.here ? 'is-here' : ''}`} title={p.here ? 'On this Wi-Fi now' : 'Not heard from lately'} />
-                <span className="device-name">{p.name}</span>
-                <span className="set-sub">{ago(p.synced)}</span>
-                <button type="button" className="btn btn-quiet" disabled={working !== null} onClick={() => void run('unpair', { action: 'unpair', arg: p.name })}>
-                  Unpair
-                </button>
+                {naming?.id === p.id ? (
+                  nameField(p.id, p.host)
+                ) : (
+                  <>
+                    <span className="device-name" title={p.name !== p.host ? `It calls itself ${p.host}` : undefined}>
+                      {p.name}
+                    </span>
+                    <span className="set-sub">
+                      {ago(p.synced)}
+                      {p.via ? ` · met through ${p.via}` : ''}
+                    </span>
+                    <button type="button" className="btn btn-quiet" disabled={working !== null} onClick={() => setNaming({ id: p.id, text: p.name })}>
+                      Rename
+                    </button>
+                    <button
+                      type="button"
+                      className="btn btn-quiet"
+                      disabled={working !== null}
+                      title="Takes it out of your network, on all your devices"
+                      onClick={() => void run('unpair', { action: 'unpair', arg: p.id })}
+                    >
+                      Unpair
+                    </button>
+                  </>
+                )}
               </li>
             ))}
           </ul>
         ) : (
-          <p className="set-sub set-note">No devices paired yet.</p>
+          <p className="set-sub set-note">No devices paired yet. Pair one, and it brings the rest of your devices with it.</p>
         )}
+        <Row what="Share my settings" sub="model, voice, thinking, search and the like, newest change wins — not the window, hotkeys or approvals">
+          <Toggle on={settings.shareSettings ?? true} label="Share my settings with my devices" onChange={toggle('shareSettings')} />
+        </Row>
         {shown ? (
           <div className="pair-code" role="status">
             <span className="set-sub">On the other device, type this in Settings → Pair (lasts 5 min):</span>

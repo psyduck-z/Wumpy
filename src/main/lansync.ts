@@ -27,6 +27,15 @@
  * the one that can reach the other connects. Pairing opens the port in the
  * firewall first (main/firewall.ts), behind the system's password pop-up.
  *
+ * ONE NETWORK. "Device 1 pairs to device 2; if device 3 pairs with device 2,
+ * it becomes paired with 1 and 2." Every sync swaps the list of devices each
+ * side is paired with (never their secrets). A device the other has not met
+ * is introduced: this one makes up a fresh secret for the two of them and
+ * hands it to each, over each one's own sealed connection, so they can sync
+ * directly - with the device in the middle switched off. Names given to a
+ * device ("Work laptop") and devices taken out of the network travel the same
+ * way, and the newest word on each wins.
+ *
  * Nothing here starts until they pair: no broadcasts, no port, no firewall
  * prompt for anyone who never uses it.
  *
@@ -283,8 +292,28 @@ function dial(address: string, port: number, ms = 4000): Promise<Socket | null> 
 
 export interface LanStore {
   syncView(also?: ReadonlySet<string>): Record<string, { text: string; hash: string; at: number }>
-  put(name: string, text: string): boolean
+  /** `from`: what this device calls the one it came from. */
+  put(name: string, text: string, from?: string): boolean
   drop(name: string): boolean
+}
+
+/**
+ * Things the store carries that are merged rather than replaced: the
+ * settings, setting by setting (@shared/settingsync). Both sides end with
+ * the merge of the two, in the same sync.
+ */
+const MERGED = new Set(['@settings'])
+
+/** How many devices one network holds: an introduction past it is ignored. */
+const MAX_PEERS = 32
+const ID = /^[0-9a-f]{32}$/
+/** A name they give a device: one line, short. */
+export function deviceName(raw: unknown): string {
+  return String(raw ?? '')
+    .replace(/[\u0000-\u001f\u007f*`<>[\]]/g, '')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .slice(0, 40)
 }
 
 interface Peer {
@@ -300,11 +329,51 @@ interface Peer {
   port?: number
   /** ms: the last sync that went through. */
   synced?: number
+  /** ms: when this pairing was made, by a code or an introduction. Of two, the newer stands. */
+  at?: number
+  /** The device that introduced it, by id (its name then, for one since forgotten); none for a pairing with a code. */
+  via?: string
+  viaId?: string
+}
+
+/**
+ * An introduction this device is making: the two devices and the secret
+ * they will share. Kept until each of them has been handed it.
+ */
+interface Intro {
+  a: string
+  b: string
+  /** Sealed, like a peer's. */
+  secret: string
+  at: number
+  told: string[]
 }
 
 interface State {
   id: string
   peers: Peer[]
+  /** Devices taken out of the network, by id: when. A pairing older than that goes, everywhere. */
+  gone: Record<string, number>
+  /** What they call each device, this one included, by id. The newest rename wins everywhere. */
+  names: Record<string, { text: string; at: number }>
+  intros: Intro[]
+}
+
+/** What one device tells another about its network: never a secret. */
+interface Roster {
+  peers: Array<{ id: string; name: string; at: number }>
+  gone: Record<string, number>
+  names: Record<string, { text: string; at: number }>
+}
+
+/** One introduction as it is handed over, on the sealed connection. */
+interface Meet {
+  id: string
+  name: string
+  at: number
+  secret: string
+  addr?: string
+  port?: number
 }
 
 export interface LanOptions {
@@ -378,11 +447,20 @@ export class LanSync {
   private load(): State {
     try {
       const s = JSON.parse(readFileSync(this.file, 'utf8')) as Partial<State>
-      if (typeof s.id === 'string' && /^[0-9a-f]{32}$/.test(s.id)) return { id: s.id, peers: Array.isArray(s.peers) ? s.peers : [] }
+      const obj = <T>(v: unknown): T => (v && typeof v === 'object' && !Array.isArray(v) ? v : {}) as T
+      if (typeof s.id === 'string' && ID.test(s.id)) {
+        return {
+          id: s.id,
+          peers: Array.isArray(s.peers) ? s.peers : [],
+          gone: obj(s.gone),
+          names: obj(s.names),
+          intros: Array.isArray(s.intros) ? s.intros : []
+        }
+      }
     } catch {
       /* None yet. */
     }
-    return { id: randomBytes(16).toString('hex'), peers: [] }
+    return { id: randomBytes(16).toString('hex'), peers: [], gone: {}, names: {}, intros: [] }
   }
 
   private save(): void {
@@ -406,8 +484,53 @@ export class LanSync {
     return this.st.id
   }
 
-  peers(): Array<{ id: string; name: string; synced?: number; here: boolean }> {
-    return this.st.peers.map((p) => ({ id: p.id, name: p.name, synced: p.synced, here: this.heardRecently(p.id) }))
+  peers(): Array<{ id: string; name: string; host: string; synced?: number; here: boolean; via?: string }> {
+    return this.st.peers.map((p) => ({
+      id: p.id,
+      name: this.nameOf(p.id, p.name),
+      host: p.name,
+      synced: p.synced,
+      here: this.heardRecently(p.id),
+      via: p.viaId ? this.nameOf(p.viaId, this.st.peers.find((v) => v.id === p.viaId)?.name ?? p.via ?? '') || undefined : p.via
+    }))
+  }
+
+  /** This device, as the network calls it. */
+  me(): { id: string; name: string; host: string } {
+    return { id: this.st.id, name: this.nameOf(this.st.id, this.o.name), host: this.o.name }
+  }
+
+  /** The name they gave a device, or the one it calls itself. */
+  private nameOf(id: string, own: string): string {
+    return this.st.names[id]?.text || own
+  }
+
+  /** A paired device by its id, or by what it is called; this device for "this". */
+  private find(raw: string): { id: string; peer?: Peer } | null {
+    const n = raw.trim().toLowerCase()
+    if (!n) return null
+    if (['this', 'me', 'this device', this.st.id].includes(n) || this.nameOf(this.st.id, this.o.name).toLowerCase() === n) return { id: this.st.id }
+    const peer =
+      this.st.peers.find((p) => p.id === n) ??
+      this.st.peers.find((p) => this.nameOf(p.id, p.name).toLowerCase() === n) ??
+      this.st.peers.find((p) => p.name.toLowerCase() === n)
+    return peer ? { id: peer.id, peer } : null
+  }
+
+  /**
+   * Gives a device a name of theirs - "Work laptop" - on every device in the
+   * network, this one included. An empty name goes back to its own.
+   */
+  rename(which: string, to: string): { ok: boolean; name?: string; was?: string } {
+    const hit = this.find(which)
+    if (!hit) return { ok: false }
+    const own = hit.peer?.name ?? this.o.name
+    const was = this.nameOf(hit.id, own)
+    const text = deviceName(to)
+    this.st.names[hit.id] = { text, at: Date.now() }
+    this.save()
+    this.nudge()
+    return { ok: true, name: text || own, was }
   }
 
   private heardRecently(id: string): boolean {
@@ -415,14 +538,176 @@ export class LanSync {
     return Boolean(h && Date.now() - h.at < 3 * 60_000)
   }
 
-  /** Forgets one paired device by name, or all of them; how many went. */
+  /**
+   * Takes one device out of the network, by name - on every device, not just
+   * this one, or the others would only introduce it again - or, with no
+   * name, takes this device out (forgets every pairing here). How many went.
+   */
   unpair(name?: string): number {
     const before = this.st.peers.length
-    const n = (name ?? '').trim().toLowerCase()
-    this.st.peers = n ? this.st.peers.filter((p) => p.name.toLowerCase() !== n) : []
+    if ((name ?? '').trim()) {
+      const hit = this.find(name ?? '')
+      if (!hit?.peer) return 0
+      this.st.gone[hit.id] = Date.now()
+      this.drop(hit.id)
+    } else {
+      this.st.peers = []
+      this.st.intros = []
+    }
     this.save()
     if (!this.st.peers.length) this.stop()
+    else this.nudge()
     return before - this.st.peers.length
+  }
+
+  /** Forgets one device here, and every introduction it is part of. */
+  private drop(id: string): void {
+    this.st.peers = this.st.peers.filter((p) => p.id !== id)
+    this.st.intros = this.st.intros.filter((i) => i.a !== id && i.b !== id)
+    this.heard.delete(id)
+  }
+
+  /* -------------------------------------------------------- one network */
+
+  private roster(): Roster {
+    return {
+      peers: this.st.peers.map((p) => ({ id: p.id, name: p.name, at: p.at ?? 0 })),
+      gone: this.st.gone,
+      names: this.st.names
+    }
+  }
+
+  /**
+   * What another device said about its network, taken in: the newer name for
+   * each device, and the devices taken out - unless the pairing here is newer
+   * than that, which is somebody pairing it again.
+   */
+  private hear(r: Msg): void {
+    const now = Date.now()
+    const fresh = (at: unknown): at is number => typeof at === 'number' && Number.isFinite(at) && at > 0 && at < now + 86_400_000
+    let changed = false
+    const names = (r.names && typeof r.names === 'object' ? r.names : {}) as Record<string, { text?: unknown; at?: unknown }>
+    for (const [id, n] of Object.entries(names).slice(0, 2 * MAX_PEERS)) {
+      if (!ID.test(id) || !n || !fresh(n.at)) continue
+      const mine = this.st.names[id]
+      if (mine && (mine.at > n.at || (mine.at === n.at && mine.text >= deviceName(n.text)))) continue
+      this.st.names[id] = { text: deviceName(n.text), at: n.at }
+      changed = true
+    }
+    const theirPeers = Array.isArray(r.peers) ? (r.peers as Array<{ id?: unknown; at?: unknown }>) : []
+    const gone = (r.gone && typeof r.gone === 'object' ? r.gone : {}) as Record<string, unknown>
+    for (const [id, at] of Object.entries(gone).slice(0, 8 * MAX_PEERS)) {
+      if (!ID.test(id) || id === this.st.id || !fresh(at) || (this.st.gone[id] ?? 0) >= at) continue
+      this.st.gone[id] = at
+      changed = true
+    }
+    /* Paired again since it was taken out: it is back. */
+    for (const p of theirPeers) {
+      if (typeof p?.id === 'string' && fresh(p.at) && (this.st.gone[p.id] ?? Infinity) < p.at) {
+        delete this.st.gone[p.id]
+        changed = true
+      }
+    }
+    for (const p of [...this.st.peers]) {
+      const out = this.st.gone[p.id]
+      if (out !== undefined && (p.at ?? 0) < out) {
+        this.o.log(`[skills] wifi: ${this.nameOf(p.id, p.name)} was taken out of the network on another device`)
+        this.drop(p.id)
+        changed = true
+      }
+    }
+    if (changed) {
+      this.revCache = null
+      this.save()
+    }
+  }
+
+  /** The devices this one is paired with that `other` has not met, each with a secret for the two of them. */
+  private meetsFor(other: Peer, theirs: Msg): { meets: Meet[]; intros: Intro[] } {
+    const known = new Set((Array.isArray(theirs.peers) ? theirs.peers : []).map((p: { id?: unknown }) => String(p?.id)))
+    const meets: Meet[] = []
+    const intros: Intro[] = []
+    let dirty = false
+    /* Introductions it no longer needs - it met that device some other way - or that never finished in a month. */
+    for (const i of this.st.intros) {
+      const partner = i.a === other.id ? i.b : i.b === other.id ? i.a : null
+      if (partner && known.has(partner) && !i.told.includes(other.id)) {
+        i.told.push(other.id)
+        dirty = true
+      }
+    }
+    const month = Date.now() - 30 * 86_400_000
+    const kept = this.st.intros.filter((i) => i.told.length < 2 && i.at > month)
+    if (kept.length !== this.st.intros.length) {
+      this.st.intros = kept
+      dirty = true
+    }
+    for (const x of this.st.peers) {
+      if (x.id === other.id || known.has(x.id) || known.size + meets.length >= MAX_PEERS) continue
+      const [a, b] = [x.id, other.id].sort()
+      let intro = this.st.intros.find((i) => i.a === a && i.b === b)
+      if (!intro) {
+        const raw = randomBytes(32).toString('base64')
+        const sealed = this.o.seal ? this.o.seal(raw) : raw
+        if (!sealed) continue
+        intro = { a, b, secret: sealed, at: Date.now(), told: [] }
+        this.st.intros.push(intro)
+      }
+      const secret = this.o.open ? this.o.open(intro.secret) : intro.secret
+      if (!secret) continue
+      meets.push({ id: x.id, name: x.name, at: intro.at, secret, ...(x.addr && x.port ? { addr: x.addr, port: x.port } : {}) })
+      intros.push(intro)
+      dirty = true
+    }
+    if (dirty) {
+      this.revCache = null
+      this.save()
+    }
+    return { meets, intros }
+  }
+
+  /** `other` has the introductions: once both sides have theirs, it is done with. */
+  private told(other: Peer, intros: Intro[]): void {
+    if (!intros.length) return
+    for (const i of intros) if (!i.told.includes(other.id)) i.told.push(other.id)
+    this.st.intros = this.st.intros.filter((i) => i.told.length < 2)
+    this.revCache = null
+    this.save()
+  }
+
+  /** Introductions from a paired device: now paired with those too. */
+  private meet(list: unknown, via: Peer): void {
+    const met: string[] = []
+    let changed = false
+    for (const raw of (Array.isArray(list) ? list : []).slice(0, MAX_PEERS) as Meet[]) {
+      if (!raw || typeof raw.id !== 'string' || !ID.test(raw.id) || raw.id === this.st.id || raw.id === via.id) continue
+      if (typeof raw.secret !== 'string' || raw.secret.length < 40 || typeof raw.at !== 'number' || !Number.isFinite(raw.at)) continue
+      if ((this.st.gone[raw.id] ?? 0) >= raw.at) continue
+      const have = this.st.peers.find((p) => p.id === raw.id)
+      if (have && (have.at ?? 0) >= raw.at) continue
+      if (!have && this.st.peers.length >= MAX_PEERS) continue
+      const sealed = this.o.seal ? this.o.seal(raw.secret) : raw.secret
+      if (!sealed) continue
+      const name = String(raw.name ?? 'another device').slice(0, 60)
+      const at = typeof raw.addr === 'string' && /^[\d.:a-f]{3,45}$/i.test(raw.addr) && Number(raw.port) > 0 ? { addr: raw.addr, port: Number(raw.port) } : {}
+      const viaName = this.nameOf(via.id, via.name)
+      changed = true
+      if (have) Object.assign(have, { secret: sealed, at: raw.at, via: viaName, viaId: via.id, agreed: undefined }, have.addr ? {} : at)
+      else {
+        this.st.peers.push({ id: raw.id, name, secret: sealed, base: {}, at: raw.at, via: viaName, viaId: via.id, ...at })
+        met.push(this.nameOf(raw.id, name))
+      }
+    }
+    if (!changed) return
+    this.revCache = null
+    this.save()
+    if (met.length) {
+      const who = met.map((n) => `**${n}**`).join(', ')
+      this.o.log(`[skills] wifi: introduced to ${met.join(', ')} by ${this.nameOf(via.id, via.name)}`)
+      this.o.note?.(`Now paired with ${who} too, through **${this.nameOf(via.id, via.name)}**.`)
+      /* Straight away, rather than at the next minute's announcement. */
+      setTimeout(() => this.nudge(), this.o.quick ? 50 : 1500).unref?.()
+    }
   }
 
   /* ------------------------------------------------------------ the network */
@@ -503,10 +788,17 @@ export class LanSync {
     const now = Date.now()
     if (this.revCache && now - this.revCache.at < 1500) return this.revCache.rev
     const view = this.o.store.syncView()
-    const line = Object.keys(view)
+    /* The network too: a device paired, renamed or taken out is a reason for the others to come. */
+    const net = JSON.stringify([
+      this.st.peers.map((p) => `${p.id}:${p.at ?? 0}`).sort(),
+      Object.entries(this.st.gone).sort(),
+      Object.entries(this.st.names).sort(),
+      this.st.intros.map((i) => `${i.a}${i.b}${i.told.join('')}`).sort()
+    ])
+    const line = `${Object.keys(view)
       .sort()
       .map((n) => `${n}:${view[n].hash}`)
-      .join(',')
+      .join(',')}|${net}`
     const rev = createHash('sha256').update(line).digest('hex').slice(0, 16)
     this.revCache = { at: now, rev }
     return rev
@@ -517,7 +809,7 @@ export class LanSync {
       JSON.stringify({
         w: HELLO,
         id: this.st.id,
-        name: this.o.name.slice(0, 60),
+        name: this.me().name.slice(0, 60),
         port: this.tcpPort,
         rev: this.rev(),
         ...(this.showing && Date.now() < this.showing.until ? { pairing: true } : {}),
@@ -543,7 +835,7 @@ export class LanSync {
     } catch {
       return
     }
-    if (m.w !== HELLO || typeof m.id !== 'string' || m.id === this.st.id || !/^[0-9a-f]{32}$/.test(m.id)) return
+    if (m.w !== HELLO || typeof m.id !== 'string' || m.id === this.st.id || !ID.test(m.id)) return
     const h: Heard = {
       id: m.id,
       name: String(m.name ?? 'another device').slice(0, 60),
@@ -660,7 +952,7 @@ export class LanSync {
     this.pairing = true
     try {
       const half = spakeStart(code, shows)
-      const hello: Msg = { t: 'pair', id: this.st.id, name: this.o.name, port: this.tcpPort, shows, msg: hex(half.msg) }
+      const hello: Msg = { t: 'pair', id: this.st.id, name: this.me().name, port: this.tcpPort, shows, msg: hex(half.msg) }
       const theirs = opened ? await wire.ask(hello) : (first ?? null)
       if (!theirs || theirs.t !== 'pair' || typeof theirs.id !== 'string' || !/^[0-9a-f]{32}$/.test(theirs.id)) return
       /* One shows and one types: two showing (or two typing) is not a pair. */
@@ -699,9 +991,13 @@ export class LanSync {
         this.o.log('[skills] wifi: paired, but the secret could not be protected, so it was not kept')
         return
       }
+      const before = this.st.peers.find((p) => p.id === theirs.id)
       this.st.peers = this.st.peers.filter((p) => p.id !== theirs.id)
+      /* Paired with a code: back in the network, if it had been taken out. */
+      delete this.st.gone[theirs.id]
       /* Where it is, from this very connection: no waiting for its next announcement. */
-      this.st.peers.push({ id: theirs.id, name, secret: sealed, base: {}, ...where(wire, theirs.port, this.heard.get(theirs.id)) })
+      this.st.peers.push({ id: theirs.id, name, secret: sealed, base: before?.base ?? {}, at: Date.now(), ...where(wire, theirs.port, this.heard.get(theirs.id)) })
+      this.revCache = null
       this.save()
       if (!opened) wire.send({ t: 'ok' })
       this.o.log(`[skills] wifi: paired with ${name}`)
@@ -759,15 +1055,20 @@ export class LanSync {
     for (const p of this.st.peers) if (p.addr && p.port) this.soon(p)
   }
 
+  /** Whether `p` is still one of the paired devices (a sync may have taken it out). */
+  private still(p: Peer): boolean {
+    return this.st.peers.includes(p)
+  }
+
   /** Every paired device that can be reached, now. */
   async syncAll(): Promise<LanResult[]> {
     const out: LanResult[] = []
-    for (const p of this.st.peers) out.push(await this.syncWith(p))
+    for (const p of [...this.st.peers]) if (this.still(p)) out.push(await this.syncWith(p))
     return out
   }
 
   private async syncWith(peer: Peer): Promise<LanResult> {
-    const fail = (why: string): LanResult => ({ ok: false, changed: false, message: why, peer: peer.name })
+    const fail = (why: string): LanResult => ({ ok: false, changed: false, message: why, peer: this.nameOf(peer.id, peer.name) })
     const h = this.heard.get(peer.id)
     const address = h?.address ?? peer.addr
     const port = h?.port ?? peer.port
@@ -790,6 +1091,16 @@ export class LanSync {
       wire.seal(Buffer.from(mac(secret, 'key', 'out', n1, n2), 'base64'), Buffer.from(mac(secret, 'key', 'back', n1, n2), 'base64'))
       const ready = await wire.next()
       if (ready?.t !== 'ready') return fail(ready?.t === 'busy' ? 'busy, try again' : 'did not answer')
+      /* The network, first (a Wumpy from before there was one does not say `mesh`). */
+      if (ready.mesh === 1) {
+        const back = await wire.ask({ t: 'roster', ...this.roster() })
+        if (back?.t !== 'roster') return fail('stopped answering')
+        this.hear(back)
+        if (!this.still(peer)) return fail('taken out of the network')
+        this.meet(back.meet, peer)
+        const mine = this.meetsFor(peer, back)
+        if ((await wire.ask({ t: 'meet', meet: mine.meets }))?.ok === true) this.told(peer, mine.intros)
+      }
 
       const base = { ...peer.base }
       const first = this.o.store.syncView(new Set(Object.keys(base)))
@@ -801,6 +1112,20 @@ export class LanSync {
       const steps = plan(local, remote, base)
       let changed = false
       for (const [name, step] of Object.entries(steps)) {
+        if (MERGED.has(name) && step !== 'same') {
+          /* Both ways in one go: theirs merged into this one, then the merge back to them. */
+          if (remote[name]) {
+            const got = await wire.ask({ t: 'get', name })
+            const text = typeof got?.text === 'string' ? got.text : ''
+            if (text && fits(name, text) && this.o.store.put(name, text, this.nameOf(peer.id, peer.name))) {
+              changed ||= this.o.store.syncView(new Set([name]))[name]?.hash !== local[name]?.hash
+            }
+          }
+          const merged = this.o.store.syncView(new Set([name]))[name]
+          if (merged && merged.hash !== remote[name]?.hash) await wire.ask({ t: 'put', name, text: merged.text })
+          base[name] = merged?.hash ?? null
+          continue
+        }
         if (step === 'same') base[name] = local[name]?.hash ?? null
         else if (step === 'upload') {
           if ((await wire.ask({ t: 'put', name, text: view[name].text }))?.ok === true) base[name] = local[name].hash
@@ -809,7 +1134,7 @@ export class LanSync {
         } else if (step === 'download') {
           const got = await wire.ask({ t: 'get', name })
           const text = typeof got?.text === 'string' ? got.text : ''
-          if (text && fits(name, text) && this.o.store.put(name, text)) {
+          if (text && fits(name, text) && this.o.store.put(name, text, this.nameOf(peer.id, peer.name))) {
             base[name] = remote[name].hash
             changed = true
           }
@@ -832,8 +1157,8 @@ export class LanSync {
       this.save()
       if (changed) this.o.changed()
       const line = summary(steps).line
-      this.o.log(`[skills] wifi sync with ${peer.name}: ${line}`)
-      return { ok: true, changed, message: line, peer: peer.name }
+      this.o.log(`[skills] wifi sync with ${this.nameOf(peer.id, peer.name)}: ${line}`)
+      return { ok: true, changed, message: line, peer: this.nameOf(peer.id, peer.name) }
     } catch (err) {
       return fail(String((err as Error)?.message ?? err).slice(0, 120))
     } finally {
@@ -860,7 +1185,7 @@ export class LanSync {
     if (!proof || !same(proof.proof, mac(secret, 'open', n1, n2, peer.id, this.st.id))) return wire.close()
     /* Proved: so this is where it is now - and that it could get here at all. */
     Object.assign(peer, where(wire, first.port, this.heard.get(peer.id)))
-    if (!/^(127\.|::1$|::ffff:127\.)/.test(wire.sock.remoteAddress ?? '')) this.lastIn = { at: Date.now(), from: peer.name }
+    if (!/^(127\.|::1$|::ffff:127\.)/.test(wire.sock.remoteAddress ?? '')) this.lastIn = { at: Date.now(), from: this.nameOf(peer.id, peer.name) }
     wire.seal(Buffer.from(mac(secret, 'key', 'back', n1, n2), 'base64'), Buffer.from(mac(secret, 'key', 'out', n1, n2), 'base64'))
     if (this.busy) {
       wire.send({ t: 'busy' })
@@ -868,13 +1193,26 @@ export class LanSync {
     }
     this.busy = true
     let changed = false
+    let sent: Intro[] = []
     try {
-      wire.send({ t: 'ready' })
+      wire.send({ t: 'ready', mesh: 1 })
       for (;;) {
         const m = await wire.next()
         if (!m) return
         const name = typeof m.name === 'string' ? m.name : ''
-        if (m.t === 'view') {
+        if (m.t === 'roster') {
+          const mine = this.roster()
+          this.hear(m)
+          if (!this.still(peer)) return
+          const out = this.meetsFor(peer, m)
+          sent = out.intros
+          wire.send({ t: 'roster', ...mine, meet: out.meets })
+        } else if (m.t === 'meet') {
+          /* Its answer to this one's roster: so it has those introductions. */
+          this.told(peer, sent)
+          this.meet(m.meet, peer)
+          wire.send({ t: 'ok', ok: true })
+        } else if (m.t === 'view') {
           const also = new Set(Array.isArray(m.also) ? m.also.map(String) : [])
           const v = this.o.store.syncView(also)
           wire.send({ t: 'view', view: Object.fromEntries(Object.entries(v).map(([n, x]) => [n, { hash: x.hash, at: x.at }])) })
@@ -882,7 +1220,7 @@ export class LanSync {
           wire.send({ t: 'text', text: this.o.store.syncView(new Set([name]))[name]?.text ?? '' })
         } else if (m.t === 'put') {
           const text = typeof m.text === 'string' ? m.text : ''
-          const ok = Boolean(text && fits(name, text) && this.o.store.put(name, text))
+          const ok = Boolean(text && fits(name, text) && this.o.store.put(name, text, this.nameOf(peer.id, peer.name)))
           changed ||= ok
           wire.send({ t: 'ok', ok })
         } else if (m.t === 'drop') {
@@ -898,7 +1236,7 @@ export class LanSync {
           peer.synced = Date.now()
           this.save()
           wire.send({ t: 'done', rev: mine })
-          this.o.log(`[skills] wifi sync from ${peer.name}${changed ? ': skills changed' : ''}`)
+          this.o.log(`[skills] wifi sync from ${this.nameOf(peer.id, peer.name)}${changed ? ': skills changed' : ''}`)
           return
         } else return
       }
