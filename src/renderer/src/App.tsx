@@ -40,6 +40,7 @@ import {
   wroteLine
 } from '@shared/notify'
 import { CONTEXT_TOKENS, DEFAULT_MODEL, preambleTokens } from '@shared/assistant'
+import { cutPoint, keepBudget } from '@shared/compact'
 import {
   COMPACT_COOLDOWN_MS,
   estimateWithFiles,
@@ -1469,15 +1470,17 @@ function namedControls(shot: Attachment): string[] {
   const compactHistory = useCallback(
     async (opts: { silent?: boolean } = {}): Promise<boolean> => {
       const msgs = chat.messages.filter((m) => !m.error && !m.local)
-      // Keep the last few turns verbatim; summarising those loses the thread.
-      const keep = 4
-      if (msgs.length <= keep + 1) {
+      /* The newest turns stay word for word, as many as fit in their share of
+         the room, from the request that began them (@shared/compact). */
+      const { limit, instructions } = usageRef.current
+      const at = cutPoint(msgs, keepBudget(limit || CONTEXT_TOKENS, instructions ?? 0))
+      if (at === null) {
         if (!opts.silent) chat.note('Not enough history to compact yet.')
         return false
       }
 
-      const older = msgs.slice(0, msgs.length - keep)
-      const recent = msgs.slice(msgs.length - keep)
+      const older = msgs.slice(0, at)
+      const recent = msgs.slice(at)
 
       /*
        * Shown for every compaction, including the silent ones. "Silent"
@@ -1491,8 +1494,12 @@ function namedControls(shot: Attachment): string[] {
       try {
         summary = await window.wumpy.chat.compact({
           messages: older.map((m) => ({
-            role: m.summary ? 'system' : m.role,
-            content: m.content
+            role: m.role,
+            content: m.content,
+            ...(m.summary ? { summary: true } : {}),
+            ...(m.automatic ? { automatic: true } : {}),
+            ...(m.notice ? { notice: true } : {}),
+            ...(m.images?.length ? { images: m.images.map(() => 0) } : {})
           }))
         })
       } finally {
@@ -1511,7 +1518,8 @@ function namedControls(shot: Attachment): string[] {
           content: summary,
           createdAt: Date.now(),
           summary: true,
-          summarised: older.length
+          /* Everything it stands for, including what earlier summaries did. */
+          summarised: older.reduce((n, m) => n + (m.summary ? (m.summarised ?? 1) : 1), 0)
         },
         ...recent
       ])

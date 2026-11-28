@@ -6,6 +6,7 @@
  */
 import { execFile } from 'node:child_process'
 import { readFileSync } from 'node:fs'
+import { rootable } from './elevate'
 import {
   SYNC_PORT,
   encoded,
@@ -62,24 +63,34 @@ export async function checkFirewall(): Promise<FirewallVerdict> {
 }
 
 /** Opens it, behind the system's password pop-up; then checks again. */
-export async function allowThroughFirewall(): Promise<FirewallVerdict> {
+export async function allowThroughFirewall(owner?: bigint): Promise<FirewallVerdict> {
   if (process.platform === 'win32') {
-    const r = await powershell(windowsElevateScript(windowsAllowScript()), 180_000)
+    const r = await powershell(windowsElevateScript(windowsAllowScript(), owner), 180_000)
     const after = await checkFirewall()
     return r.ok || after.state === 'open' ? after : { ...after, why: `Not allowed: the administrator prompt was declined. ${after.why}` }
   }
   if (process.platform === 'linux') {
-    const ok = await new Promise<boolean>((resolve) =>
-      execFile('pkexec', ['/usr/bin/ufw', 'allow', String(SYNC_PORT), 'comment', 'Wumpy skills sync'], { timeout: 180_000 }, (err) => resolve(!err))
+    /* Through the user's systemd when this process cannot gain root itself (main/elevate.ts). */
+    const run = rootable('/usr/bin/pkexec', ['/usr/bin/ufw', 'allow', String(SYNC_PORT), 'comment', 'Wumpy skills sync'])
+    const r = await new Promise<{ ok: boolean; code: number | null; err: string }>((resolve) =>
+      execFile(run.file, run.args, { timeout: 180_000 }, (err, _out, stderr) =>
+        resolve({ ok: !err, code: err ? (typeof err.code === 'number' ? err.code : null) : 0, err: String(stderr ?? '').trim() })
+      )
     )
     const after = await checkFirewall()
-    return ok || after.state === 'open' ? after : { ...after, why: `Not allowed: the password prompt was declined. ${after.why}` }
+    if (r.ok || after.state === 'open') return after
+    /* 126 is pkexec's "they closed the box"; anything else is not them saying no, and is said as it is. */
+    const why =
+      r.code === 126 || /dismissed|not authorized/i.test(r.err)
+        ? 'Not allowed: the password prompt was closed.'
+        : `The password prompt could not open${r.err ? ` (${r.err.split('\n').pop()?.slice(0, 120)})` : ''}.`
+    return { ...after, why: `${why} ${after.why}` }
   }
   return checkFirewall()
 }
 
 /** Checked, and opened if it needs to be: before pairing, which is when it is needed. */
-export async function ensureFirewall(): Promise<FirewallVerdict> {
+export async function ensureFirewall(owner?: bigint): Promise<FirewallVerdict> {
   const now = await checkFirewall()
-  return now.state === 'closed' || now.state === 'blocked' ? allowThroughFirewall() : now
+  return now.state === 'closed' || now.state === 'blocked' ? allowThroughFirewall(owner) : now
 }

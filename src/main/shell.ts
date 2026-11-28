@@ -1,3 +1,4 @@
+import { asksForRoot, rootable, stopUnit } from './elevate'
 import { spawn } from 'node:child_process'
 import { homedir } from 'node:os'
 import { existsSync } from 'node:fs'
@@ -1274,7 +1275,12 @@ export function runCommand(
 ): Promise<ShellResult> {
   const started = Date.now()
   const workingDir = cwd && existsSync(cwd) ? cwd : homedir()
-  const { file, args } = launcher(kind, command)
+  const env = { ...process.env, NO_COLOR: '1', TERM: 'dumb' }
+  /* A pkexec in it: started so the password pop-up can appear (main/elevate.ts). */
+  const plain = launcher(kind, command)
+  const { file, args, unit }: { file: string; args: string[]; unit?: string } = asksForRoot(command)
+    ? rootable(plain.file, plain.args, { cwd: workingDir, env })
+    : plain
   const readOnly = isReadOnly(command)
 
   return new Promise((resolve) => {
@@ -1285,7 +1291,7 @@ export function runCommand(
         windowsHide: true,
         // No shell:true — args are passed as an array, so the command string is
         // only ever interpreted by the shell we explicitly chose.
-        env: { ...process.env, NO_COLOR: '1', TERM: 'dumb' }
+        env
       })
     } catch (err) {
       resolve({
@@ -1332,6 +1338,7 @@ export function runCommand(
     const timer = setTimeout(() => {
       timedOut = true
       child.kill()
+      stopUnit(unit)
     }, TIMEOUT_MS)
 
     child.stdout?.on('data', (c: Buffer) => {

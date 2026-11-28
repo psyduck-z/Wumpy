@@ -2,6 +2,7 @@ import { deadline } from '../deadline'
 import { keepSaves } from '../saves'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { actionFacts } from '../ledger'
+import { asMemory } from '@shared/compact'
 import type { Attachment, ChatMessage, LocalAsk, NoteTopic } from '@shared/types'
 import { BAIL_WINDOW_MS, hasBlock, returnsThePrompt } from '../abort'
 import { handsFree } from '../handsfree'
@@ -316,7 +317,7 @@ export function useChat(): ChatState {
       { ...userMessage, content: trimmed }
     ].map((m) => {
       if (m.summary) {
-        return { role: 'system' as const, content: `Earlier in this conversation: ${m.content}` }
+        return { role: 'system' as const, content: asMemory(m.content) }
       }
       // Notices are app facts the model must act on, not chat turns.
       if (m.notice) return { role: 'system' as const, content: m.content }

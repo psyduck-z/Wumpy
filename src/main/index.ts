@@ -21,7 +21,7 @@ import type {
   UsageReport,
   WumpySettings
 } from '@shared/types'
-import { DEFAULT_MODEL, assistantFor, assemblePrompt, type PromptShape } from '@shared/assistant'
+import { CONTEXT_TOKENS, DEFAULT_MODEL, assistantFor, assemblePrompt, type PromptShape } from '@shared/assistant'
 import type { Footprint } from '@shared/footprint'
 import type { RankView, SyncInfo, Transcript, VoiceStatus, WriteResult } from '@shared/types'
 import { Ranker, type SavedSweep } from './ranker'
@@ -80,6 +80,7 @@ import { SkillSync, type SyncResult } from './skillsync'
 import { LAN_PORT, LanSync, pairCode } from './lansync'
 import { SettingsShare } from './settingshare'
 import { SHARED_SETTINGS, settingWords } from '@shared/settingsync'
+import { asMemory, compactRequest, cutPoint, keepBudget, SUMMARY_TOKENS, type CompactMessage } from '@shared/compact'
 import { allowThroughFirewall, checkFirewall, ensureFirewall } from './firewall'
 import { reachable, type FirewallVerdict } from '@shared/firewall'
 import { skillPrompt } from '@shared/skills'
@@ -1591,29 +1592,16 @@ function registerIpc(): void {
    */
   ipcMain.handle(
     IPC.chatCompact,
-    async (_e, req: { messages: Array<{ role: string; content: string }> }) => {
+    async (_e, req: { messages: CompactMessage[] }) => {
       const model = backgroundModel()
-      if (!model || req.messages.length === 0) return null
-
-      const transcript = req.messages
-        .map((m) => `${m.role === 'user' ? 'User' : 'Assistant'}: ${m.content}`)
-        .join('\n\n')
-
-      return cloud.complete(
-        model,
-        [
-          {
-            role: 'system',
-            content:
-              'You compress conversations so they can be carried forward as context. ' +
-              'Write a dense summary in the third person. Preserve decisions, facts, ' +
-              'names, file paths, code identifiers and anything the user asked for. ' +
-              'Drop pleasantries and repetition. No preamble, no headings.'
-          },
-          { role: 'user', content: `Summarise this conversation:\n\n${transcript}` }
-        ],
-        { numPredict: 500 }
-      )
+      if (!model || !Array.isArray(req?.messages) || req.messages.length === 0) return null
+      /* A memory with sections, with room for them (@shared/compact): 500
+         tokens of "a dense summary" is what made it forget. */
+      const summary = await cloud.complete(model, compactRequest(req.messages), { numPredict: SUMMARY_TOKENS + 500 })
+      const text = summary?.trim() ?? ''
+      /* Something that is not a memory - a refusal, a line - would stand in
+         for everything it replaced. Better not to compact than that. */
+      return text.length >= 200 ? text : null
     }
   )
 
@@ -2725,7 +2713,7 @@ ${command}`
           if (arg && !code) return reply(false, 'A code is six digits: `/sync pair 482913`.')
           settings.patch({ lanSync: true })
           /* Before listening: on Windows, a rule already there may spare them the box Windows shows. */
-          const wall = await ensureFirewall()
+          const wall = await ensureFirewall(panelHandle())
           firewallSeen = { at: Date.now(), verdict: wall }
           const closed = reachable(wall) || wall.state === 'unknown' ? '' : ` (${wall.why} The other device may not find this one: Settings → Allow.)`
           await lanSync.start()
@@ -2834,7 +2822,7 @@ ${command}`
   )
   /* Settings' "Check again" and "Allow". */
   ipcMain.handle(IPC.firewall, async (_e, req: { allow?: boolean }) => {
-    const verdict = req?.allow ? await allowThroughFirewall() : await checkFirewall()
+    const verdict = req?.allow ? await allowThroughFirewall(panelHandle()) : await checkFirewall()
     firewallSeen = { at: Date.now(), verdict }
     journal.add('skill', `firewall: ${verdict.why}`)
     return verdict
@@ -3476,6 +3464,10 @@ app.on('second-instance', (_event, argv) => {
     void verifyCheck()
     return
   }
+  if (argv.includes('--compact-check')) {
+    void compactCheck()
+    return
+  }
   if (argv.includes('--skill-check=writing')) {
     void writingSkillCheck()
     return
@@ -3589,6 +3581,14 @@ async function firewallAtStart(): Promise<void> {
 
 type SyncAction = 'now' | 'on' | 'off' | 'key' | 'status' | 'pair' | 'unpair' | 'rename'
 type SyncReply = { ok: boolean; on: boolean; message: string; changed: boolean; account?: string }
+
+/** The panel's window on Windows: an administrator prompt asked for on its behalf opens in front of it. */
+function panelHandle(): bigint | undefined {
+  if (process.platform !== 'win32') return undefined
+  const b = panel?.liveWindow()?.getNativeWindowHandle()
+  if (!b || b.length < 4) return undefined
+  return b.length >= 8 ? b.readBigUInt64LE(0) : BigInt(b.readUInt32LE(0))
+}
 
 /** "4 min ago", for /sync status. */
 function ago(at: number): string {
@@ -4369,6 +4369,125 @@ async function skillCheck(): Promise<void> {
  * figure about the world. Right is a check proposed (a command or a
  * search), or an answer that says how it knows.
  */
+/**
+ * "When it compacts context, the AI becomes dumber": the same long chat,
+ * compacted the old way (500 tokens of "a dense summary", the last four
+ * messages kept) and the new (@shared/compact), on the real model and the
+ * real prompt - then asked about things only the summarised part said.
+ * Written to compact-check.md in the user data folder.
+ */
+async function compactCheck(): Promise<void> {
+  const model = backgroundModel()
+  if (!model) return void console.log('[wumpy] compact check: no model')
+  type M = ChatRequest['messages'][number] & { automatic?: boolean; summary?: boolean }
+  const u = (content: string, automatic = false): M => ({ role: 'user', content, ...(automatic ? { automatic: true } : {}) })
+  const a = (content: string): M => ({ role: 'assistant', content })
+  const filler = 'It comes down to a few ideas that build on each other, each explained with an example and the reason it matters, and then how they fit together in practice. '
+  const chatter = (topic: string): M[] => [u(`Unrelated, but explain ${topic} to me properly.`), a(`${topic}: ${filler.repeat(26)}`)]
+  const talk = (...topics: string[]): M[] => topics.flatMap(chatter)
+  /* Three stretches of a long chat, compacted after the first and the second, as a real one would be. */
+  const first: M[] = [
+    u('My dog is called Biscuit. And when you give me times, always use the 24-hour clock.'),
+    a('Noted: Biscuit, and 24-hour times from now on.'),
+    ...talk('how HTTP caching works', 'what a closure is'),
+    u('What kernel am I on?'),
+    a('```bash\nuname -r\n```'),
+    u('6.17.3-arch1-1', true),
+    a('You are on kernel 6.17.3-arch1-1.'),
+    u('My work laptop is a ThinkPad X1 Carbon Gen 12, and my GitHub username is quietfern.'),
+    a('Got it.'),
+    ...talk('how React reconciliation works', 'why the sky is blue'),
+    u('Postgres or MySQL for the scraper?'),
+    a('PostgreSQL 17: its JSONB columns fit the scraped records, which MySQL handles worse. Going with PostgreSQL 17.'),
+    u("pip install failed: error: externally-managed-environment", true),
+    a('Arch blocks system pip. I made a venv at ~/venvs/scraper and installed there; that fixed it.'),
+    u('And my router admin page?'),
+    a('It is at http://192.168.50.1 on your network.'),
+    ...talk('how a CPU cache works', 'how TLS handshakes work')
+  ]
+  const second: M[] = [
+    u('Put this down: my meeting with Priya is on Thursday at 14:30. I live in Lisbon, timezone Europe/Lisbon.'),
+    a('Noted: Priya, Thursday 14:30, Europe/Lisbon.'),
+    ...talk('how DNS resolution works', 'what garbage collection does'),
+    u('How much disk is left?'),
+    a('```bash\ndf -h /\n```'),
+    u('Filesystem      Size  Used Avail Use% Mounted on\n/dev/nvme0n1p2  476G  391G   85G  83% /', true),
+    a('85G free of 476G on / (83% used).'),
+    u('The scraper should run every 6 hours.'),
+    a('Done with a systemd timer, scrape.timer, every 6 hours. The site allows 120 requests a minute, so it is throttled to that.'),
+    ...talk('how git rebase works', 'how vaccines train the immune system'),
+    u('It skipped the last page of results.'),
+    a('Found it: an off-by-one in paginate() in src/fetch.py at line 88. Fixed, and it now gets every page.'),
+    u('I edit everything in Helix, by the way. And backups go to the drive mounted at /mnt/vault.'),
+    a('Helix and /mnt/vault, noted.'),
+    ...talk('how SSDs wear out', 'how compilers optimise loops')
+  ]
+  const third: M[] = [
+    u('Now: rename every .jpeg in ~/Pictures/trip-2025 to .jpg, then make a contact sheet of them called sheet.png.'),
+    a('Starting with the renames.\n\n```bash\ncd ~/Pictures/trip-2025 && ls *.jpeg | wc -l\n```'),
+    u('214', true),
+    a('214 files. Renaming.\n\n```bash\ncd ~/Pictures/trip-2025 && for f in *.jpeg; do mv -n "$f" "${f%.jpeg}.jpg"; done; ls *.jpeg 2>/dev/null | wc -l\n```'),
+    u('0', true),
+    a('All 214 are .jpg now. Checking montage is installed for the contact sheet.\n\n```bash\ncommand -v montage\n```'),
+    u('/usr/bin/montage', true),
+    a('montage is there. Next I will build sheet.png from the 214 images.')
+  ]
+  const quiz: Array<{ q: string; right: (t: string) => boolean; what: string }> = [
+    { q: "What's my dog called?", right: (t) => /Biscuit/.test(t), what: 'early: a name' },
+    { q: 'Which kernel am I on?', right: (t) => /6\.17\.3/.test(t), what: 'early: an exact version' },
+    { q: 'What laptop do I use for work?', right: (t) => /X1 Carbon/i.test(t), what: 'early: a fact about them' },
+    { q: "What's my GitHub username?", right: (t) => /quietfern/.test(t), what: 'early: an identifier' },
+    { q: 'Which database did we pick for the scraper, and why?', right: (t) => /postgres/i.test(t) && /jsonb/i.test(t), what: 'early: a decision and why' },
+    { q: 'How did we get around the pip error?', right: (t) => /venvs\/scraper|venv/i.test(t), what: 'early: a fix' },
+    { q: "What's my router's admin address?", right: (t) => /192\.168\.50\.1/.test(t), what: 'early: an address' },
+    { q: 'If my meeting with Priya moved an hour later, when would it be?', right: (t) => /15[:.]30/.test(t) && !/3[:.]30\s*(pm|p\.m)/i.test(t), what: 'their instruction (24-hour clock) + a fact' },
+    { q: 'How much free disk space do I have?', right: (t) => /85\s?G/i.test(t), what: 'middle: a number' },
+    { q: 'What is the systemd timer for the scraper called?', right: (t) => /scrape\.timer/.test(t), what: 'middle: a name' },
+    { q: 'What rate limit does the scraper keep to?', right: (t) => /120/.test(t), what: 'middle: a number' },
+    { q: 'Where exactly was the pagination bug?', right: (t) => /paginate/.test(t) && /fetch\.py/.test(t), what: 'middle: a code location' },
+    { q: 'Which editor do I use?', right: (t) => /Helix/i.test(t), what: 'middle: a preference' },
+    { q: 'Where do backups go?', right: (t) => /\/mnt\/vault/.test(t), what: 'middle: a path' },
+    { q: 'What timezone am I in?', right: (t) => /Lisbon/.test(t), what: 'middle: a fact' },
+    { q: 'What were you in the middle of, and what is the next step?', right: (t) => /trip-2025|contact sheet|sheet\.png/i.test(t) && /montage|sheet\.png|contact sheet/i.test(t), what: 'the task in progress' }
+  ]
+  const OLD_PROMPT =
+    'You compress conversations so they can be carried forward as context. Write a dense summary in the third person. Preserve decisions, facts, ' +
+    'names, file paths, code identifiers and anything the user asked for. Drop pleasantries and repetition. No preamble, no headings.'
+  /* One compaction, either way: the memory message and what is kept after it. */
+  const compactOnce = async (way: 'old' | 'new', msgs: M[]): Promise<M[]> => {
+    if (way === 'old') {
+      const older = msgs.slice(0, -4)
+      const transcript = older.map((m) => `${m.role === 'user' ? 'User' : 'Assistant'}: ${m.content}`).join('\n\n')
+      const text = await cloud.complete(model, [{ role: 'system', content: OLD_PROMPT }, { role: 'user', content: `Summarise this conversation:\n\n${transcript}` }], { numPredict: 500 })
+      return [{ role: 'system', content: `Earlier in this conversation: ${text ?? ''}`, summary: true }, ...msgs.slice(-4)]
+    }
+    const at = cutPoint(msgs, keepBudget(CONTEXT_TOKENS, 8000)) ?? msgs.length - 4
+    const older = msgs.slice(0, at).map((m) => (m.summary ? { ...m, role: 'assistant' as const, content: m.content.replace(/^[\s\S]*?\n\n/, '') } : m))
+    const text = await cloud.complete(model, compactRequest(older), { numPredict: SUMMARY_TOKENS + 500 })
+    return [{ role: 'system', content: asMemory(text ?? ''), summary: true }, ...msgs.slice(at)]
+  }
+  const lines: string[] = [`# Compaction check, ${model}`, '']
+  const score: Record<string, number> = {}
+  for (const way of ['old', 'new'] as const) {
+    let msgs = await compactOnce(way, first)
+    msgs = await compactOnce(way, [...msgs, ...second])
+    msgs = [...msgs, ...third]
+    lines.push(`## ${way}: after two compactions, ${msgs.length - 1} turns kept`, '', '```', msgs[0].content, '```', '')
+    score[way] = 0
+    for (const item of quiz) {
+      const said = await modelSays([...msgs.map(({ role, content }) => ({ role, content })), { role: 'user', content: item.q }], false)
+      const ok = item.right(said)
+      if (ok) score[way]++
+      lines.push(`- ${ok ? 'RIGHT' : 'WRONG'} (${item.what}) ${item.q}  \n  > ${said.replace(/\s+/g, ' ').slice(0, 300)}`)
+      console.log(`[wumpy] compact check ${way}: ${ok ? 'RIGHT' : 'WRONG'} ${item.what}`)
+    }
+    lines.push('')
+  }
+  lines.splice(1, 0, `old ${score.old}/${quiz.length}, new ${score.new}/${quiz.length}`)
+  writeFileSync(join(app.getPath('userData'), 'compact-check.md'), lines.join('\n'))
+  console.log(`[wumpy] compact check: old ${score.old}/${quiz.length}, new ${score.new}/${quiz.length}`)
+}
+
 async function verifyCheck(): Promise<void> {
   console.log(`[wumpy] verify check: on ${resolveModel() ?? 'no model'}`)
   for (const q of [

@@ -146,11 +146,53 @@ export function encoded(script: string): string {
  * administrator (the pop-up) and waits for it. Declined, Start-Process
  * throws and this exits non-zero.
  */
-export function windowsElevateScript(inner: string): string {
+export function windowsElevateScript(inner: string, owner?: bigint): string {
+  const args = `-NoProfile -NonInteractive -WindowStyle Hidden -EncodedCommand ${encoded(inner)}`
+  if (owner === undefined || owner <= 0n) {
+    return [
+      "$ErrorActionPreference = 'Stop'",
+      `$p = Start-Process -FilePath 'powershell.exe' -Verb RunAs -Wait -PassThru -WindowStyle Hidden -ArgumentList @('-NoProfile','-NonInteractive','-EncodedCommand','${encoded(inner)}')`,
+      'exit $p.ExitCode'
+    ].join('\n')
+  }
+  /*
+   * Asked for on behalf of Wumpy's own window. Start-Process names no window,
+   * and a prompt asked for by a hidden PowerShell in the background is one
+   * Windows may only flash in the taskbar - "there's no popup". ShellExecuteEx
+   * with the panel as the owner, which is the window they just clicked in,
+   * brings the prompt up in front of it.
+   */
   return [
     "$ErrorActionPreference = 'Stop'",
-    `$p = Start-Process -FilePath 'powershell.exe' -Verb RunAs -Wait -PassThru -WindowStyle Hidden -ArgumentList @('-NoProfile','-NonInteractive','-EncodedCommand','${encoded(inner)}')`,
-    'exit $p.ExitCode'
+    "Add-Type -TypeDefinition @'",
+    'using System;',
+    'using System.Runtime.InteropServices;',
+    'public static class WumpyElevate {',
+    '  [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]',
+    '  public struct Info {',
+    '    public int cbSize; public uint fMask; public IntPtr hwnd;',
+    '    public string lpVerb; public string lpFile; public string lpParameters; public string lpDirectory;',
+    '    public int nShow; public IntPtr hInstApp; public IntPtr lpIDList; public string lpClass;',
+    '    public IntPtr hkeyClass; public uint dwHotKey; public IntPtr hIcon; public IntPtr hProcess;',
+    '  }',
+    '  [DllImport("shell32.dll", CharSet = CharSet.Unicode, SetLastError = true)] static extern bool ShellExecuteEx(ref Info i);',
+    '  [DllImport("kernel32.dll")] static extern uint WaitForSingleObject(IntPtr h, uint ms);',
+    '  [DllImport("kernel32.dll")] static extern bool GetExitCodeProcess(IntPtr h, out uint code);',
+    '  [DllImport("kernel32.dll")] static extern bool CloseHandle(IntPtr h);',
+    '  public static int Run(long owner, string file, string args) {',
+    '    var i = new Info();',
+    '    i.cbSize = Marshal.SizeOf(typeof(Info));',
+    '    i.fMask = 0x40;',
+    '    i.hwnd = new IntPtr(owner);',
+    '    i.lpVerb = "runas"; i.lpFile = file; i.lpParameters = args; i.nShow = 0;',
+    '    if (!ShellExecuteEx(ref i)) return 1223;',
+    '    WaitForSingleObject(i.hProcess, 0xFFFFFFFF);',
+    '    uint code; GetExitCodeProcess(i.hProcess, out code); CloseHandle(i.hProcess);',
+    '    return (int)code;',
+    '  }',
+    '}',
+    "'@",
+    `exit [WumpyElevate]::Run(${owner.toString()}, 'powershell.exe', '${args}')`
   ].join('\n')
 }
 

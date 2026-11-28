@@ -72,7 +72,7 @@ const api = {
     onError: (cb: (d: ChatError) => void) => on(IPC.chatError, cb),
     /** Summarise older turns; resolves to the summary text, or null on failure. */
     compact: (req: {
-      messages: Array<{ role: string; content: string }>
+      messages: Array<{ role: string; content: string; summary?: boolean; automatic?: boolean; notice?: boolean; images?: unknown[] }>
     }): Promise<string | null> => ipcRenderer.invoke(IPC.chatCompact, req),
     /** Names a conversation from its opening exchange. */
     title: (req: { messages: Array<{ role: string; content: string }> }): Promise<string | null> =>

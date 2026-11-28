@@ -93,11 +93,56 @@ check('a deny rule for the port is not open', F.ufwVerdict('ENABLED=yes\n', '-A 
 
 const main = readFileSync('src/main/index.ts', 'utf8')
 const pair = main.slice(main.indexOf("case 'pair': {"), main.indexOf("case 'unpair': {"))
-check('pairing opens the firewall before it starts listening', pair.indexOf('ensureFirewall()') > 0 && pair.indexOf('ensureFirewall()') < pair.indexOf('lanSync.start()'), true)
+check('pairing opens the firewall before it starts listening', pair.indexOf('ensureFirewall(') > 0 && pair.indexOf('ensureFirewall(') < pair.indexOf('lanSync.start()'), true)
 check('paired, it is checked again after each start (an update is a new Wumpy.exe)', /setTimeout\(\(\) => void firewallAtStart\(\), 25_000\)/.test(main), true)
 check('opening goes through the system pop-up, never sudo', !/\bsudo\b/.test(readFileSync('src/main/firewall.ts', 'utf8')) && /pkexec/.test(readFileSync('src/main/firewall.ts', 'utf8')), true)
 const tab = readFileSync('src/renderer/src/components/SettingsTab.tsx', 'utf8')
 check('Settings shows it, with Allow and Check', /what="Firewall"/.test(tab) && /checkWall\(true\)/.test(tab) && /checkWall\(false\)/.test(tab), true)
+
+/* --------------------------------------------- the pop-up has to appear */
+
+/* Windows: asked for on behalf of the panel, so the prompt comes up in front of it. */
+const owned = F.windowsElevateScript('exit 0', 132456n)
+check('with the panel: ShellExecuteEx runas, owned by its window', /ShellExecuteEx/.test(owned) && /"runas"/.test(owned) && /Run\(132456, 'powershell\.exe'/.test(owned), true)
+check('the struct has every field, in order', /cbSize; public uint fMask; public IntPtr hwnd;/.test(owned) && /hIcon; public IntPtr hProcess;/.test(owned), true)
+check('declined is ERROR_CANCELLED, not success', /return 1223;/.test(owned), true)
+check('without a window: Start-Process, as before', /Start-Process[^\n]*-Verb RunAs/.test(F.windowsElevateScript('exit 0')), true)
+check('Allow passes the panel', /allowThroughFirewall\(panelHandle\(\)\)/.test(main) && /ensureFirewall\(panelHandle\(\)\)/.test(main), true)
+
+/*
+ * Linux: a Wumpy with "no new privileges" (inherited from whatever started
+ * it) cannot run pkexec at all - "pkexec must be setuid root", no pop-up.
+ * Run under that flag for real, the command goes out through the user's
+ * systemd and comes back without it, with its output and its exit code.
+ */
+if (process.platform === 'linux') {
+  const { execFileSync, spawnSync } = await import('node:child_process')
+  const eout = join(process.cwd(), '.elevate-check.mjs')
+  await build({ entryPoints: ['src/main/elevate.ts'], bundle: true, platform: 'node', format: 'esm', outfile: eout, logLevel: 'error' })
+  const probe = `
+    const E = await import(${JSON.stringify(pathToFileURL(eout).href)})
+    const { spawnSync } = await import('node:child_process')
+    const r = E.rootable('/bin/sh', ['-c', 'grep NoNewPrivs /proc/self/status; pwd; echo "$WUMPY_PROBE"; exit 7'], { cwd: '/tmp', env: { ...process.env, WUMPY_PROBE: 'kept' } })
+    const p = spawnSync(r.file, r.args, { encoding: 'utf8' })
+    console.log(JSON.stringify({ flagged: E.noNewPrivs(), via: r.file, out: p.stdout.trim().split('\\n'), code: p.status, root: E.asksForRoot('pkexec pacman -S x'), plain: E.asksForRoot('echo pkexecutable') }))`
+  const usable = spawnSync('setpriv', ['--no-new-privs', 'true']).status === 0 && spawnSync('systemctl', ['--user', 'is-system-running']).stdout?.length > 0
+  if (usable) {
+    const got = JSON.parse(execFileSync('setpriv', ['--no-new-privs', process.execPath, '--input-type=module', '-e', probe], { encoding: 'utf8' }))
+    check('under "no new privileges", it is noticed', got.flagged, true)
+    check('and the command goes through systemd-run', /systemd-run$/.test(got.via), true)
+    check('which runs it without the flag, where it was, with its environment', got.out, ['NoNewPrivs:\t0', '/tmp', 'kept'])
+    check('and hands back its exit code', got.code, 7)
+    check('a pkexec in a command is seen; a word containing it is not', [got.root, got.plain], [true, false])
+    const free = JSON.parse(execFileSync(process.execPath, ['--input-type=module', '-e', probe], { encoding: 'utf8' }))
+    check('without the flag, nothing changes', [free.flagged, free.via], [false, '/bin/sh'])
+  } else console.log('--   no setpriv or user systemd here: the "no new privileges" run is skipped')
+  rmSync(eout, { force: true })
+  const shellSrc = readFileSync('src/main/shell.ts', 'utf8')
+  check('commands Wumpy runs with pkexec in them go the same way', /asksForRoot\(command\)\s*\?\s*rootable\(/.test(shellSrc) && /stopUnit\(unit\)/.test(shellSrc), true)
+  const fw = readFileSync('src/main/firewall.ts', 'utf8')
+  check('and so does Allow', /rootable\('\/usr\/bin\/pkexec'/.test(fw), true)
+  check('a prompt that could not open is not called "declined"', /could not open/.test(fw) && !/password prompt was declined/.test(fw), true)
+}
 
 if (failed) {
   console.log(`\n${failed} failed`)
