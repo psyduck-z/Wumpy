@@ -23,7 +23,7 @@ export class LowLevelHook {
   constructor(
     private readonly key: string,
     private readonly onTrigger: () => void,
-    /** Shift must be held too. Wumpy no longer asks for it: Win+Z, the same shortcut as on Linux. */
+    /** Shift must be held too. Wumpy no longer asks for it: Win+Y, the same shortcut as on Linux. */
     private readonly shift = false
   ) {}
 

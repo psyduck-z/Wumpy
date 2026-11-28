@@ -1039,7 +1039,15 @@ function applyHotkeys(): void {
 }
 
 /**
- * Claims Win+Z through the helper process - the same shortcut Omarchy
+ * The letter that, with Super (Win), shows and hides the panel: "change the
+ * shortcut to super Y". It was Z. On Linux the Hyprland binding in
+ * ~/.config/hypr/bindings.lua is what actually catches it; this is the
+ * label, and on Windows the key the helper swallows.
+ */
+const TOGGLE_KEY = 'Y'
+
+/**
+ * Claims Win+Y through the helper process - the same shortcut Omarchy
  * gets through a Hyprland binding, so it is one combination on every machine.
  * The helper sits below the shell, so the keystroke never reaches anything
  * else (the dedicated Copilot key is still caught too).
@@ -1048,19 +1056,19 @@ async function startLowLevelHook(): Promise<void> {
   /* Linux has no keyboard hook to install: Hyprland owns the keys, and a
      binding there runs `wumpy --toggle` (see the README). */
   if (process.platform === 'linux') {
-    hotkeyState.intercepted = 'Super+Z'
+    hotkeyState.intercepted = `Super+${TOGGLE_KEY}`
     return
   }
-  /* Win+Z, as asked: "can you change the shortcut to just Super Z?". Shift
-     is no longer needed, and Win+Shift+Z still works, since Shift is not
-     refused. The hook swallows the keystroke, so Windows 11's own Win+Z
-     (the snap layouts flyout) gives way to Wumpy. */
-  lowLevelHook = new LowLevelHook('Z', () => panel.toggle(), false)
+  /* Win+Y, as asked ("change the shortcut to super Y"; it was Win+Z, and
+     Win+Shift+Z before that). Shift is not needed, and Win+Shift+Y still
+     works, since Shift is not refused. The hook swallows the keystroke, so
+     whatever Windows does with Win+Y gives way to Wumpy. */
+  lowLevelHook = new LowLevelHook(TOGGLE_KEY, () => panel.toggle(), false)
   const ok = await lowLevelHook.start()
-  hotkeyState.intercepted = ok ? 'Super+Z' : null
+  hotkeyState.intercepted = ok ? `Super+${TOGGLE_KEY}` : null
   if (!ok) {
     lowLevelHook = null
-    console.warn('[wumpy] Win+Z interception unavailable; use the tray icon')
+    console.warn(`[wumpy] Win+${TOGGLE_KEY} interception unavailable; use the tray icon`)
   } else {
     /**
      * The helper takes the foreground, not Wumpy.
@@ -3528,7 +3536,7 @@ app.on('second-instance', (_event, argv) => {
     startVoiceTurn('wumpy --voice')
     return
   }
-  // The shortcut (Super+Z through a Hyprland binding on Linux).
+  // The shortcut (Super+Y through a Hyprland binding on Linux).
   if (argv.includes('--toggle')) {
     panel?.toggle()
     return

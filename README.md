@@ -4,12 +4,12 @@ An AI assistant for Windows and Omarchy that can run commands on your machine,
 talk through your earbuds, and have a second model check its work.
 
 On **Windows** Wumpy lives in the system tray with no window of its own. Press
-`Win+Z` (or the Copilot key) and a panel slides in against the edge of
+`Win+Y` (or the Copilot key) and a panel slides in against the edge of
 your screen, floating above whatever you are working in — including fullscreen
 browsers. Press `Esc` and it is gone.
 
 On **Omarchy** (Arch Linux + Hyprland) it is an ordinary app window that
-Hyprland tiles like any other, with the same tray icon. `Super+Z` opens
+Hyprland tiles like any other, with the same tray icon. `Super+Y` opens
 it, takes you to it if it is open on another workspace, and hides it again —
 see [On Omarchy](#on-omarchy).
 It talks to [Ollama](https://ollama.com) on `127.0.0.1`, so nothing you type
@@ -17,7 +17,7 @@ leaves the machine.
 
 ```
 ┌──────────────────────────────────┐
-│ ● Wumpy   Win+Z       [llama3.2] │
+│ ● Wumpy   Win+Y       [llama3.2] │
 ├──────────────────────────────────┤
 │                                  │
 │          what's a WH_            │
@@ -47,13 +47,13 @@ seeing your screen) are deliberately **not** built yet — see [Roadmap](#roadma
 
 ```powershell
 npm install
-npm run hook:build        # builds the Win+Z interception helper
+npm run hook:build        # builds the Win+Y interception helper
 ollama pull llama3.2:3b   # Flash + Fast; other tiers use models you already have
 npm run dev
 ```
 
 The panel appears on launch. After that it hides in the tray and answers to
-`Win+Z`.
+`Win+Y`.
 
 To build an installer:
 
@@ -65,7 +65,7 @@ Or from any computer: every push to `main` builds it on GitHub's Windows
 machines (`.github/workflows/windows.yml`), runs the checks there too, and
 publishes it as a numbered release, `0.1.<run>`, on the
 [releases page](https://github.com/psyduck-z/Wumpy/releases). That one
-bundles .NET into the Win+Z helper, so it needs nothing else
+bundles .NET into the Win+Y helper, so it needs nothing else
 installed. On Linux without Windows, `npm run package` needs Wine
 (`pacman -S wine`): electron-builder runs the installer under it to make the
 uninstaller.
@@ -105,7 +105,7 @@ installed while Wumpy is in the tray no longer opens the panel afterwards.
 Bind the shortcut in `~/.config/hypr/bindings.lua`:
 
 ```lua
-o.bind("SUPER + Z", "Wumpy", "wumpy --toggle")
+o.bind("SUPER + Y", "Wumpy", "wumpy --toggle")
 ```
 
 `wumpy --toggle` shows or hides the window, `wumpy --voice` starts or ends a spoken
@@ -464,9 +464,8 @@ minute").
 
 ## How the Windows shortcut is taken
 
-The shortcut is `Win+Z` (and the dedicated Copilot key), which takes over
-Windows 11's own Win+Z snap-layouts flyout. It was `Win+Shift+Z` until
-late November 2026, `Win+Shift+D` before that, and `Win+C` before that; the reasoning below — written for that key — is why the hook
+The shortcut is `Win+Y` (and the dedicated Copilot key). It was `Win+Z`
+until 28 November 2026, `Win+Shift+Z` before that, `Win+Shift+D` before that, and `Win+C` before that; the reasoning below — written for that key — is why the hook
 exists at all.
 
 Windows reserves `Win+C` for the shell. This is not a Copilot setting you can
@@ -495,7 +494,7 @@ It runs as a 170 KB helper process (`src/hook`, C#) spawned by the app:
   no other key" pops the Start menu.
 - Exits when its stdin closes, so it can never outlive the app.
 
-`Win+Z` is the only key bound out of the box. If the helper is missing or
+`Win+Y` is the only key bound out of the box. If the helper is missing or
 refuses to start, Wumpy says so in the tray tooltip and the panel header, and
 you can still open the panel by clicking the tray icon — or add an accelerator
 of your own to `hotkeys` in settings. Verify the helper independently with:
@@ -1368,7 +1367,7 @@ and toggle changes apply immediately; hotkey changes apply on restart.
 | `autoSave` | `true` | Persist every chat as it happens |
 | `autoCompact` | `true` | Summarise older turns when context fills |
 | `showReasoning` | `false` | Expand the scratchpad by default |
-| `hotkeys` | `[]` | Extra accelerators; `Win+Z` comes from the hook |
+| `hotkeys` | `[]` | Extra accelerators; `Win+Y` comes from the hook |
 | `keepAlive` | `30m` | How long Ollama holds a model resident |
 | `warmOnStart` | `true` | Preload tier models at startup |
 | `smoothText` | `false` | Reveal character by character (costs CPU while generating) |
@@ -1386,7 +1385,7 @@ and toggle changes apply immediately; hotkey changes apply on restart.
 
 | Key | Action |
 | --- | --- |
-| `Win+Z` / `Super+Z` | Toggle the panel (also: click the tray icon) |
+| `Win+Y` / `Super+Y` | Toggle the panel (also: click the tray icon) |
 | `Ctrl+1`–`Ctrl+4` | Jump to Flash / Fast / Thinker / Deep |
 | `Ctrl+D` | Toggle Quick / Developer mode |
 | `Ctrl+N` | New chat |
@@ -1407,7 +1406,7 @@ src/
 │  ├─ index.ts        lifecycle, IPC, model reconciliation
 │  ├─ panel.ts        the always-on-top overlay window
 │  ├─ hotkey.ts       accelerator registration with fallback
-│  ├─ lowlevelhook.ts drives the Win+Z helper process
+│  ├─ lowlevelhook.ts drives the Win+Y helper process
 │  ├─ ollama.ts       streaming client, abort, capability detection
 │  ├─ tray.ts         tray icon and menu
 │  ├─ chats.ts        saved conversations
