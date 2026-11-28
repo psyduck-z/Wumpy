@@ -32,7 +32,8 @@ export interface RankerDeps {
   /** The instructions a real turn would carry, so the times mean something. */
   preamble(): string
   /** Keys for this provider, and whether the feature is on. */
-  state(): { on: boolean; keys: number }
+  /** everyMs: how often a sweep is due, from the setting; EVERY_MS when left out. */
+  state(): { on: boolean; keys: number; everyMs?: number }
   /** What the user's traffic looks like, now. */
   traffic(): Traffic
   /**
@@ -175,7 +176,7 @@ export class Ranker {
     /* A clock that reads ahead of now (a machine that woke at 1970, then
        corrected) would hold the next sweep off for ever; now is the most it can be. */
     const lastSweepAt = Math.min(saved.lastSweepAt, Date.now())
-    if (!left.length && (lastSweepAt <= 0 || Date.now() - lastSweepAt >= EVERY_MS)) return false
+    if (!left.length && (lastSweepAt <= 0 || Date.now() - lastSweepAt >= this.every())) return false
     this.left = left
     this.asked = CLOUD_MODELS.length
     this.measured = this.asked - left.length
@@ -185,7 +186,7 @@ export class Ranker {
     console.log(
       left.length
         ? `[wumpy] ranking resumes its sweep after a restart: ${left.length} left`
-        : `[wumpy] ranking last swept ${Math.round((Date.now() - lastSweepAt) / 60_000)} min ago; next within the hour`
+        : `[wumpy] ranking last swept ${Math.round((Date.now() - lastSweepAt) / 60_000)} min ago; next in ${Math.max(0, Math.round((this.every() - (Date.now() - lastSweepAt)) / 60_000))} min`
     )
     return true
   }
@@ -263,12 +264,19 @@ export class Ranker {
     void this.tick()
   }
 
+  /** How often a sweep is due: the setting, read each time so a change applies at once. */
+  private every(): number {
+    const ms = this.deps.state().everyMs
+    return typeof ms === 'number' && ms > 0 ? ms : EVERY_MS
+  }
+
   /** What `/rank` and the settings sheet report. */
   view(): RankerState & { lastSweepMs: number } {
     const { on, keys } = this.deps.state()
     return {
       on,
       keys,
+      everyMs: this.every(),
       sinceProbeMs: this.lastProbeAt ? Date.now() - this.lastProbeAt : Infinity,
       sinceSweepMs: this.lastSweepAt ? Date.now() - this.lastSweepAt : Infinity,
       left: this.left.length,
@@ -284,7 +292,7 @@ export class Ranker {
     const view = this.view()
     /* The hour, which is the only rule that adds work rather than refusing
        it: a finished sweep becomes an unfinished one once it is due. */
-    if (!view.left && view.sinceSweepMs >= EVERY_MS) this.begin()
+    if (!view.left && view.sinceSweepMs >= this.every()) this.begin()
 
     const verdict = mayRank(this.view(), this.deps.traffic())
     this.watch(verdict)

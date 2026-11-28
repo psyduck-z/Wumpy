@@ -125,7 +125,7 @@ import { forgetAllLive } from './live'
 import { poolLines } from './quota'
 import { footprintLines } from '@shared/footprint'
 import { settingsLines } from './settingsreport'
-import { rankLines, rankSummary } from '@shared/ranking'
+import { everyWords, rankLines, rankSummary } from '@shared/ranking'
 import { journalLines, journalSpeech, type JournalView } from '@shared/journal'
 import { DEFAULT_RUNS, freshLatencies, probeLines } from '@shared/probe'
 import { copyText } from './copy'
@@ -2281,19 +2281,25 @@ function namedControls(shot: Attachment): string[] {
           return
         }
         case 'rank': {
-          if (action.set !== null) await window.wumpy.rank.set({ on: action.set })
+          if (action.set !== null || action.every !== undefined) {
+            await window.wumpy.rank.set({ ...(action.set !== null ? { on: action.set } : {}), ...(action.every !== undefined ? { everyMin: action.every } : {}) })
+          }
           if (action.now) await window.wumpy.rank.set({ now: true })
           const view = await window.wumpy.rank.state()
           /* The count of models measured is the catalogue less what is
              left, which is the honest figure mid-sweep as well as after. */
           const measured = Math.max(0, CLOUD_MODELS.length - view.left)
           chat.note(
+            /* The blank lines in rankLines are what end its table: only the
+               lines put before it are filtered, or the notes under the
+               table become rows of it. */
             [
-              action.now ? '_Starting a sweep — it still waits for you._' : '',
+              ...[
+                action.now ? '_Starting a sweep — it still waits for you._' : '',
+                action.every !== undefined ? `_Re-ranking every ${everyWords(action.every * 60_000)} from now on._` : ''
+              ].flatMap((line) => (line ? [line, ''] : [])),
               ...rankLines(view, view.traffic, view.lastSweepMs, measured)
-            ]
-              .filter(Boolean)
-              .join(NEWLINE),
+            ].join(NEWLINE),
             false,
             'rank'
           )

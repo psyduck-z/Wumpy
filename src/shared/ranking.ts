@@ -55,6 +55,8 @@ export interface RankerState {
   sinceSweepMs: number
   /** Models still to measure in the sweep that is running. */
   left: number
+  /** How often a sweep is due (the rankEveryMin setting). EVERY_MS when not given. */
+  everyMs?: number
 }
 
 /**
@@ -62,6 +64,58 @@ export interface RankerState {
  * then: "make the auto and model check happen every 30 minutes".
  */
 export const EVERY_MS = 30 * 60 * 1000
+
+/**
+ * How often, as they choose it: "allow me to change how often it reranks".
+ * In minutes, the rankEveryMin setting. Ten at the least - a sweep is nine
+ * models half a minute apart, so anything shorter is one sweep after
+ * another - and a day at the most.
+ */
+export const RANK_EVERY_MIN = { least: 10, most: 24 * 60, usual: 30 } as const
+
+/** The setting as milliseconds, kept within bounds whatever the file says. */
+export function everyMsOf(minutes: unknown): number {
+  const m = typeof minutes === 'number' && Number.isFinite(minutes) ? Math.round(minutes) : RANK_EVERY_MIN.usual
+  return Math.min(RANK_EVERY_MIN.most, Math.max(RANK_EVERY_MIN.least, m)) * 60_000
+}
+
+/** "30 minutes", "an hour", "2 hours", "1 hour 30 minutes", "a day". */
+export function everyWords(ms: number): string {
+  const minutes = Math.round(ms / 60_000)
+  if (minutes === 60) return 'an hour'
+  if (minutes === 24 * 60) return 'a day'
+  if (minutes < 60) return `${minutes} minutes`
+  const h = Math.floor(minutes / 60)
+  const m = minutes % 60
+  return `${h} hour${h === 1 ? '' : 's'}` + (m ? ` ${m} minutes` : '')
+}
+
+/** The choices the settings sheet offers, in minutes. */
+export const RANK_EVERY_CHOICES = [10, 15, 30, 60, 120, 240, 480, 1440] as const
+
+/**
+ * A period as typed: "15", "15m", "45 minutes", "2h", "1.5 hours", "1h30m",
+ * "hourly", "daily", "half an hour". Minutes, or null when it is not one.
+ * Out of bounds is still a number: the caller says what the bounds are.
+ */
+export function readEvery(text: string): number | null {
+  const t = text.trim().toLowerCase().replace(/^every\s+/, '').replace(/^(a|an|one)\s+/, '1 ')
+  if (!t) return null
+  if (/^(hourly|hour|1 hour|1 hr|1 h)$/.test(t)) return 60
+  if (/^(daily|day|1 day)$/.test(t)) return 24 * 60
+  if (/^half(\s+an?)?\s+hour$/.test(t)) return 30
+  if (/^(1 )?quarter(\s+of)?(\s+an?)?\s+hour$/.test(t)) return 15
+  if (/^\d+(\.\d+)?$/.test(t)) return Math.round(Number(t))
+  const unit = /^(\d+(?:\.\d+)?)\s*(m|min|mins|minutes?|h|hr|hrs|hours?|d|days?)$/.exec(t)
+  if (unit) {
+    const n = Number(unit[1])
+    const per = unit[2].startsWith('d') ? 24 * 60 : unit[2].startsWith('h') ? 60 : 1
+    return Math.round(n * per)
+  }
+  const both = /^(\d+)\s*(?:h|hr|hrs|hours?)\s*(?:and\s*)?(\d+)\s*(?:m|min|mins|minutes?)$/.exec(t)
+  if (both) return Number(both[1]) * 60 + Number(both[2])
+  return null
+}
 
 /**
  * Quiet after a turn before the ranker moves again.
@@ -140,11 +194,11 @@ export type Verdict = { go: true; key: number } | { go: false; why: Why }
 export const DURABLE: readonly Why[] = ['off', 'onekey']
 
 /**
- * Is there anything to measure: models left in this sweep, or an hour gone
- * since the last one finished.
+ * Is there anything to measure: models left in this sweep, or the period
+ * they chose gone since the last one finished.
  */
 export function isDue(state: RankerState): boolean {
-  return state.left > 0 || state.sinceSweepMs >= EVERY_MS
+  return state.left > 0 || state.sinceSweepMs >= (state.everyMs ?? EVERY_MS)
 }
 
 /**
@@ -204,7 +258,7 @@ export function whyNot(why: Why): string {
     case 'paced':
       return 'between models'
     case 'waiting':
-      return 'measured; next sweep within the hour'
+      return 'measured; waiting for the next sweep'
   }
 }
 
@@ -265,7 +319,7 @@ export function rankLines(
       (traffic.perMinute > 0 ? ` of about ${traffic.perMinute}` : '') +
       ` (pauses at ${traffic.perMinute > 0 ? crowdedAt(traffic.perMinute) : '—'}) |`,
     '',
-    '_One model at a time, about every 30 minutes, on the key the next question ' +
+    `_One model at a time, a sweep about every ${everyWords(state.everyMs ?? EVERY_MS)} (\`/rank every 2h\` changes it), on the key the next question ` +
       'is least likely to want. It stops mid-request the moment you send ' +
       'something and throws that measurement away._',
     '',
@@ -293,7 +347,8 @@ export function rankSummary(state: RankerState, traffic: Traffic, lastSweepMs: n
   }
   if (verdict.why === 'onekey') return 'on, but it needs a second key'
   const last = `last ${ago(lastSweepMs)}`
-  return state.left > 0
-    ? `on, paused — ${whyNot(verdict.why)} (${state.left} to go)`
-    : `on, ${last}`
+  if (state.left > 0) return `on, paused — ${whyNot(verdict.why)} (${state.left} to go)`
+  const every = state.everyMs ?? EVERY_MS
+  const due = Number.isFinite(lastSweepMs) ? every - lastSweepMs : 0
+  return due >= 60_000 ? `on, ${last}, next in about ${everyWords(due)}` : `on, ${last}`
 }

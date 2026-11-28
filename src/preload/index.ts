@@ -209,7 +209,7 @@ const api = {
    */
   rank: {
     state: (): Promise<RankView> => ipcRenderer.invoke(IPC.rankState),
-    set: (req: { on?: boolean; now?: boolean }): Promise<boolean> =>
+    set: (req: { on?: boolean; now?: boolean; everyMin?: number }): Promise<boolean> =>
       ipcRenderer.invoke(IPC.rankSet, req)
   },
   look: {

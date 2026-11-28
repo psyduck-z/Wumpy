@@ -4,6 +4,7 @@ import { MAX_RUNS } from '@shared/probe'
 import { readOrdering, type Ordering } from '@shared/order'
 import { readKind, type EventKind } from '@shared/journal'
 import { nearest } from '@shared/nearest'
+import { RANK_EVERY_MIN, readEvery } from '@shared/ranking'
 import { shortly } from '@shared/skills'
 import { markLines } from './kinds'
 import { APP_WINDOW, PANEL_ONLY_COMMANDS } from './appwindow'
@@ -69,7 +70,7 @@ export type CommandAction =
    * The background re-ranking. No argument reports; on|off sets; now
    * starts a sweep without waiting for the hour.
    */
-  | { kind: 'rank'; set: boolean | null; now: boolean }
+  | { kind: 'rank'; set: boolean | null; now: boolean; every?: number }
   | {
       kind: 'key'
       provider: ProviderName | null
@@ -433,14 +434,30 @@ export const COMMANDS: CommandSpec[] = forThisWindow([
     name: 'rank',
     aliases: ['ranking', 'autorank'],
     hint: 'Re-measure the models in the background, on the spare key',
-    arg: 'on|off|now',
+    arg: 'on|off|now|every <time>',
     run: (arg) => {
       const word = arg.trim().toLowerCase()
       if (!word) return { kind: 'rank', set: null, now: false }
+      /* "allow me to change how often it reranks": `/rank every 2h`,
+         `/rank 15m`, `/rank hourly`. Choosing a period turns it on too -
+         nobody sets how often for a thing they want off. */
+      const every = readEvery(word)
+      if (every !== null) {
+        if (every < RANK_EVERY_MIN.least || every > RANK_EVERY_MIN.most) {
+          return {
+            kind: 'error',
+            message: `Re-ranking can be every ${RANK_EVERY_MIN.least} minutes at the most often, and once a day at the least.`
+          }
+        }
+        return { kind: 'rank', set: true, now: false, every }
+      }
+      if (/^every\b|^(\d|half|quarter)/.test(word)) {
+        return { kind: 'error', message: 'How often? For example `/rank every 15m`, `/rank every 2h`, `/rank hourly`.' }
+      }
       if (/^(on|yes|start)$/.test(word)) return { kind: 'rank', set: true, now: false }
       if (/^(off|no|stop)$/.test(word)) return { kind: 'rank', set: false, now: false }
       if (/^(now|check|sweep|go)$/.test(word)) return { kind: 'rank', set: null, now: true }
-      return { kind: 'error', message: 'Usage: `/rank` to see it, `/rank on`, `/rank off`, `/rank now`.' }
+      return { kind: 'error', message: 'Usage: `/rank` to see it, `/rank on`, `/rank off`, `/rank now`, `/rank every 1h`.' }
     }
   },
   {

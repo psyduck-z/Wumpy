@@ -21,6 +21,7 @@
  */
 import { DEFAULT_SETTINGS } from './defaults'
 import { isOrdering } from './order'
+import { RANK_EVERY_MIN } from './ranking'
 import type { WumpySettings } from './types'
 
 /** Its name in the sync: not a skill name, which cannot start with @. */
@@ -53,7 +54,8 @@ export const SHARED_KEYS = [
   'screenEnabled',
   'searchEngine',
   'modelOrder',
-  'autoRank'
+  'autoRank',
+  'rankEveryMin'
 ] as const satisfies ReadonlyArray<keyof WumpySettings>
 
 export type SharedKey = (typeof SHARED_KEYS)[number]
@@ -100,6 +102,7 @@ function fitting(k: SharedKey, v: unknown): boolean {
     if (k === 'speakRate') return v >= 0.5 && v <= 3
     if (k === 'reflectRounds') return Number.isInteger(v) && v <= 10
     if (k === 'maxTurnMs') return v >= 10_000 && v <= 60 * 60_000
+    if (k === 'rankEveryMin') return Number.isInteger(v) && v >= RANK_EVERY_MIN.least && v <= RANK_EVERY_MIN.most
   }
   if (typeof v === 'string') {
     if (v.length > 200 || /[\u0000-\u001f]/.test(v)) return false
@@ -175,6 +178,8 @@ export function settingWords(keys: readonly SharedKey[]): string {
     voiceAutoStop: 'stop at a pause',
     pauseMusic: 'pause music',
     reflect: 'reflect',
+    autoRank: 're-ranking',
+    rankEveryMin: 'how often it re-ranks',
     shellEnabled: 'commands',
     browserEnabled: 'opening pages',
     screenEnabled: 'looking at the screen'

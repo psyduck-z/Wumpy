@@ -737,6 +737,11 @@ export interface WumpySettings {
    */
   autoRank: boolean
   /**
+   * How often a sweep is due, in minutes: "allow me to change how often it
+   * reranks". 10 to 1440; see RANK_EVERY_MIN in @shared/ranking.
+   */
+  rankEveryMin: number
+  /**
    * Share skills between their devices, through an unlisted GitHub gist on
    * their own account (main/skillsync.ts). Off until they turn it on: it
    * sends the skills folder to GitHub.
@@ -1255,6 +1260,8 @@ export interface RankView {
   sinceSweepMs: number
   left: number
   lastSweepMs: number
+  /** How often a sweep is due, from rankEveryMin. */
+  everyMs: number
   traffic: {
     busy: boolean
     sinceTurnMs: number

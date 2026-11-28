@@ -25,6 +25,7 @@ import { CONTEXT_TOKENS, DEFAULT_MODEL, assistantFor, assemblePrompt, type Promp
 import type { Footprint } from '@shared/footprint'
 import type { RankView, SyncInfo, Transcript, VoiceStatus, WriteResult } from '@shared/types'
 import { Ranker, type SavedSweep } from './ranker'
+import { everyMsOf } from '@shared/ranking'
 import { checkForUpdate, restartIntoUpdate, startUpdates, updateNow, updateState } from './updater'
 import {
   enrolCancel,
@@ -1449,6 +1450,7 @@ function registerIpc(): void {
       sinceSweepMs: view.sinceSweepMs,
       left: view.left,
       lastSweepMs: view.lastSweepMs,
+      everyMs: view.everyMs ?? everyMsOf(settings.get('rankEveryMin')),
       traffic: {
         busy: turnStartedAt !== null || (agents?.active() ?? 0) > 0 || (limitTester?.busy ?? false),
         sinceTurnMs: lastTurnEndedAt ? Date.now() - lastTurnEndedAt : Infinity,
@@ -1459,8 +1461,12 @@ function registerIpc(): void {
     }
   })
 
-  ipcMain.handle(IPC.rankSet, (_e, req: { on?: boolean; now?: boolean }) => {
+  ipcMain.handle(IPC.rankSet, (_e, req: { on?: boolean; now?: boolean; everyMin?: number }) => {
     if (typeof req?.on === 'boolean') settings.patch({ autoRank: req.on })
+    /* Kept within bounds here too: the panel is not the only thing that could send it. */
+    if (typeof req?.everyMin === 'number' && Number.isFinite(req.everyMin)) {
+      settings.patch({ rankEveryMin: everyMsOf(req.everyMin) / 60_000 })
+    }
     /* `now` still obeys every rule about the user's traffic - it moves the
        hour, not the right of way. */
     if (req?.now) ranker.sweepNow()
@@ -3212,7 +3218,8 @@ void app.whenReady().then(async () => {
       const provider = providerFor(activeModel())
       return {
         on: settings.get('autoRank'),
-        keys: provider ? keys.count(provider) : 0
+        keys: provider ? keys.count(provider) : 0,
+        everyMs: everyMsOf(settings.get('rankEveryMin'))
       }
     },
     traffic: () => {
@@ -3455,9 +3462,12 @@ app.on('second-instance', (_event, argv) => {
   }
   /* A picture of the panel as it is drawn, without putting it on screen:
      for checking a change to how it looks. `--snapshot-type=/skills` types
-     that into the composer first. Saved as panel.png in the user data folder. */
+     that into the composer first; `--snapshot-find=How often` then scrolls
+     the first element reading exactly that into view. Saved as panel.png
+     in the user data folder. */
   if (argv.some((a) => a === '--panel-snapshot')) {
-    void panelSnapshot(argv.find((a) => a.startsWith('--snapshot-type='))?.slice('--snapshot-type='.length))
+    const arg = (name: string): string | undefined => argv.find((a) => a.startsWith(`--${name}=`))?.slice(name.length + 3)
+    void panelSnapshot(arg('snapshot-type'), arg('snapshot-find'))
     return
   }
   if (argv.includes('--verify-check')) {
@@ -4536,7 +4546,7 @@ async function verifyCheck(): Promise<void> {
   console.log(`[wumpy] verify check: after the output -> ${named ? 'names the check' : 'NO RECEIPT'}: ${JSON.stringify(answer.slice(0, 300))}`)
 }
 
-async function panelSnapshot(typed?: string): Promise<void> {
+async function panelSnapshot(typed?: string, find?: string): Promise<void> {
   const win = panel.liveWindow()
   if (!win) return
   if (typed) {
@@ -4547,6 +4557,14 @@ async function panelSnapshot(typed?: string): Promise<void> {
         ta.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true })); return true })()`
     )
     await new Promise((r) => setTimeout(r, 2500))
+  }
+  if (find) {
+    await win.webContents.executeJavaScript(
+      `(() => { const want = ${JSON.stringify(find)};
+        const el = [...document.querySelectorAll('body *')].find((e) => e.children.length === 0 && e.textContent.trim() === want);
+        if (el) el.scrollIntoView({ block: 'center' }); return !!el })()`
+    )
+    await new Promise((r) => setTimeout(r, 400))
   }
   const image = await win.webContents.capturePage()
   const file = join(app.getPath('userData'), 'panel.png')

@@ -167,13 +167,13 @@ check('and hours, once it has been a while', R.ago(3 * 3600_000), '3 h ago')
   check('from another account', lines.includes('another account'), true)
 }
 check(
-  'the settings line is short',
+  'the settings line is short, and says when next',
   R.rankSummary(
     { ...CLEAR.state, left: 0, sinceSweepMs: 20 * 60_000 },
     CLEAR.traffic,
     20 * 60_000
   ),
-  'on, last 20 min ago'
+  'on, last 20 min ago, next in about 10 minutes'
 )
 /* Due, with nothing in the queue yet: the sweep is starting, and saying
    "measuring now (0 to go)" is how a correct verdict reads wrong. */
@@ -208,6 +208,28 @@ check(
 
 /* ------------------------------------------------- across a restart */
 /*
+ * How often, as they choose it: "allow me to change how often it reranks".
+ */
+const MIN = 60_000
+const quietTraffic = { busy: false, sinceTurnMs: Infinity, lastMinute: 0, perMinute: 40, sinceLimitedMs: Infinity }
+check('their period is what makes a sweep due', [
+  R.isDue({ left: 0, sinceSweepMs: 20 * MIN, everyMs: 15 * MIN }),
+  R.isDue({ left: 0, sinceSweepMs: 50 * MIN, everyMs: 2 * 60 * MIN }),
+  R.isDue({ left: 0, sinceSweepMs: 50 * MIN })
+], [true, false, true])
+check('the setting kept within bounds', [R.everyMsOf(1), R.everyMsOf(45), R.everyMsOf(99999), R.everyMsOf('x'), R.everyMsOf(undefined)].map((m) => m / MIN), [10, 45, 1440, 30, 30])
+check('said as a person would', [10, 60, 90, 120, 1440].map((m) => R.everyWords(m * MIN)), ['10 minutes', 'an hour', '1 hour 30 minutes', '2 hours', 'a day'])
+check(
+  'read as typed',
+  ['15', '15m', 'every 45 minutes', '2h', '1.5 hours', '1h30m', 'hourly', 'daily', 'half an hour', 'every hour', 'an hour', '3 hrs', 'now', 'on', 'soon'].map(R.readEvery),
+  [15, 15, 45, 120, 90, 90, 60, 1440, 30, 60, 60, 180, null, null, null]
+)
+check('the choices offered are all within bounds', R.RANK_EVERY_CHOICES.every((m) => m >= R.RANK_EVERY_MIN.least && m <= R.RANK_EVERY_MIN.most), true)
+const twoHourly = { on: true, keys: 2, sinceProbeMs: Infinity, sinceSweepMs: 50 * MIN, left: 0, everyMs: 120 * MIN }
+check('/rank says how often', R.rankLines(twoHourly, quietTraffic, 50 * MIN, 9).some((l) => /about every 2 hours/.test(l)), true)
+check('and the settings sheet says when next', R.rankSummary(twoHourly, quietTraffic, 50 * MIN), 'on, last 50 min ago, next in about 1 hour 10 minutes')
+
+/*
  * The Ranker itself, with its saved place. A restart used to start every
  * sweep from the top and forget when the last one finished.
  */
@@ -225,12 +247,12 @@ const { Ranker } = await import(pathToFileURL(rout).href)
 rmSync(rout, { force: true })
 const quiet = { busy: false, sinceTurnMs: Infinity, lastMinute: 0, perMinute: 40, sinceLimitedMs: Infinity }
 const log = console.log
-const ranker = (saved) => {
+const ranker = (saved, everyMs) => {
   const kept = []
   const r = new Ranker({
     probe: async () => null,
     preamble: () => '',
-    state: () => ({ on: true, keys: 3 }),
+    state: () => ({ on: true, keys: 3, everyMs }),
     traffic: () => quiet,
     record: () => {},
     load: () => saved,
@@ -257,6 +279,11 @@ const gone = ranker({ lastSweepAt: Date.now() - 2 * 3600_000, left: ['no/such-mo
 check('a model no longer listed is dropped', gone.view.left, 1)
 const ahead = ranker({ lastSweepAt: Date.now() + 5 * 3600_000, left: [] })
 check('a clock that read ahead does not hold it off', ahead.view.sinceSweepMs >= 0, true)
+const often = ranker({ lastSweepAt: Date.now() - 20 * 60_000, left: [] }, 15 * 60_000)
+check('swept 20 min ago, set to every 15: a new sweep', often.view.left, all.length)
+const seldom = ranker({ lastSweepAt: Date.now() - 3 * 3600_000, left: [] }, 4 * 3600_000)
+check('swept 3 hours ago, set to every 4 hours: still waits', seldom.view.left, 0)
+check('and reports the period it is on', seldom.view.everyMs, 4 * 3600_000)
 const junk = ranker({ nonsense: true })
 check('a broken file is a fresh start', junk.view.left, all.length)
 

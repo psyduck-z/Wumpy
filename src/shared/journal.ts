@@ -3,6 +3,7 @@ import type { ApprovalMode, WumpySettings } from './types'
 import { CLOUD_MODELS } from './cloud'
 import { DEFAULT_ORDERING, isOrdering, orderingSpec } from './order'
 import { DEFAULT_ENGINE, SEARCH_ENGINES, isSearchEngine } from './links'
+import { everyMsOf, everyWords } from './ranking'
 
 /**
  * What Wumpy has done, with the time it happened.
@@ -850,7 +851,8 @@ const WATCHED: ReadonlyArray<{
     what: 'instructions',
     show: (s) => (s.leanPrompt ? 'short form' : 'full')
   },
-  { key: 'autoRank', what: 're-ranking every 30 minutes', show: (s) => onOff(s.autoRank) },
+  { key: 'autoRank', what: 're-ranking', show: (s) => onOff(s.autoRank) },
+  { key: 'rankEveryMin', what: 're-ranking how often', show: (s) => `every ${everyWords(everyMsOf(s.rankEveryMin))}` },
   { key: 'shellEnabled', what: 'running commands', show: (s) => onOff(s.shellEnabled) },
   {
     key: 'confirmRisky',

@@ -2,6 +2,7 @@ import type { WumpySettings } from '@shared/types'
 import { SEARCH_ENGINES, isSearchEngine, DEFAULT_ENGINE } from '@shared/links'
 import { DEFAULT_ORDERING, isOrdering, orderingSpec } from '@shared/order'
 import { APP_WINDOW } from './appwindow'
+import { everyMsOf, everyWords } from '@shared/ranking'
 
 /**
  * What Wumpy is set to, in one place.
@@ -107,7 +108,7 @@ export function settingsRows(
       change: '`/lean`'
     },
     {
-      what: 're-ranking every 30 minutes',
+      what: `re-ranking every ${everyWords(everyMsOf(settings.rankEveryMin))}`,
       /* The one thing in this sheet that spends a request by itself, so
          it says what it is doing rather than just on or off. */
       now: rank ?? 'off',

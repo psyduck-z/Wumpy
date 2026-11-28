@@ -3,6 +3,7 @@ import type { ApprovalMode, Dock, SyncInfo, VoiceprintState, WumpySettings } fro
 import { DEFAULT_ENGINE, SEARCH_ENGINES, isSearchEngine } from '@shared/links'
 import { APP_WINDOW } from '../appwindow'
 import { DOCK_CYCLE } from './Header'
+import { RANK_EVERY_CHOICES, everyMsOf, everyWords } from '@shared/ranking'
 
 /**
  * Settings, to click: "in settings you can see the devices you're paired
@@ -189,6 +190,7 @@ export function SettingsTab({
   )
 
   const engine = isSearchEngine(settings.searchEngine) ? settings.searchEngine : DEFAULT_ENGINE
+  const rankEvery = everyMsOf(settings.rankEveryMin) / 60_000
   const toggle = (key: keyof WumpySettings) => (next: boolean) => void onPatch({ [key]: next } as Partial<WumpySettings>)
 
   return (
@@ -384,9 +386,30 @@ export function SettingsTab({
         <Row what="Short instructions" sub="about 2,500 fewer tokens a turn" cmd="/lean">
           <Toggle on={settings.leanPrompt} label="Short instructions" onChange={toggle('leanPrompt')} />
         </Row>
-        <Row what="Re-rank models every 30 min" cmd="/rank">
+        <Row what="Re-rank models" sub="measures their speed on your spare key" cmd="/rank">
           <Toggle on={settings.autoRank} label="Re-rank models" onChange={(next) => void window.wumpy.rank.set({ on: next }).then(() => onPatch({}))} />
         </Row>
+        {settings.autoRank && (
+          /* "allow me to change how often it reranks". A period typed with
+             `/rank every 45m` that is not one of these is offered too, so
+             the list never shows something it is not set to. */
+          <Row what="How often" cmd="/rank every 2h">
+            <select
+              className="field"
+              aria-label="How often to re-rank"
+              value={rankEvery}
+              onChange={(e) => void window.wumpy.rank.set({ everyMin: Number(e.target.value) }).then(() => onPatch({}))}
+            >
+              {[...new Set<number>([...RANK_EVERY_CHOICES, rankEvery])]
+                .sort((a, b) => a - b)
+                .map((m) => (
+                  <option key={m} value={m}>
+                    every {everyWords(m * 60_000)}
+                  </option>
+                ))}
+            </select>
+          </Row>
+        )}
       </section>
 
       <section className="set-section">

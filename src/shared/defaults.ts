@@ -102,6 +102,8 @@ export const DEFAULT_SETTINGS: WumpySettings = {
 
   // See WumpySettings.autoRank. On, and inert without a second key.
   autoRank: true,
+  // See WumpySettings.rankEveryMin.
+  rankEveryMin: 30,
 
   // See WumpySettings.skillSync. Off: it sends their skills to GitHub.
   skillSync: false,
