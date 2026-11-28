@@ -369,7 +369,7 @@ check('because guessed options are still guessing', /still guessing/.test(prompt
  * The instructions must not eat the conversation.
  *
  * Everything Wumpy sends before the first word the user types is part of the
- * context, and compaction fires at 65% of the window - so a large preamble
+ * context, and compaction fires at a fixed share of the window (90% now) - so a large preamble
  * does not just cost tokens, it shortens how much conversation fits before
  * older turns start being summarised away. The preamble grew from roughly
  * 3,400 tokens to 9,400 over one session of adding measured rules, which cut

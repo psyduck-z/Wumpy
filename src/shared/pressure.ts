@@ -35,27 +35,35 @@
  * are named after; the practical effect is that a conversation gets the room
  * that is actually free before it is summarised.
  *
+ * MOVED TO 90% ON 28 NOVEMBER 2026: "make the compact limit 90%". Send and
+ * idle both compact at 90% of the room now (they were 65% and 60%), so a
+ * conversation keeps most of its detail for longer. Mid-task went to 95% to
+ * stay the last resort. The cost is the reply: max_tokens is whatever the
+ * window has left, so a send at 89% leaves room for about 2,500 tokens of
+ * answer where 65% left about 9,000 - a long file written that late can be
+ * cut off, and /compact or a click on the meter makes room first.
+ *
  * Pure, so the thresholds can be argued with and checked without a window.
  */
 
 /** While the panel is away and nobody is waiting. The cheapest moment. */
 import { attachmentTokens, sendsBytes, type Attached } from './attach'
 
-export const IDLE_AT = 0.6
+export const IDLE_AT = 0.9
 
 /** The user has pressed Enter and will wait for the summary first. */
-export const SEND_AT = 0.65
+export const SEND_AT = 0.9
 
 /**
  * Mid-task: a result is being handed back to the model by the app itself.
  *
  * Deliberately the highest of the three. This one costs a request in the
  * middle of a sequence the user is watching, and the two cheaper triggers
- * get first refusal at 60% and 65% - so reaching this one means the
+ * get first refusal at 90% - so reaching this one means the
  * conversation grew without the user touching it, which is exactly the
  * runaway case it is here for.
  */
-export const MIDTASK_AT = 0.9
+export const MIDTASK_AT = 0.95
 
 /** What kind of turn is about to be sent. */
 export type Turn = 'send' | 'auto' | 'idle'

@@ -63,24 +63,26 @@ const NL = String.fromCharCode(10)
 
 /* ------------------------------------------------------------ the ordering */
 
-check('idle is the cheapest moment, so it goes first', P.IDLE_AT < P.SEND_AT, true)
+check('idle is the cheapest moment, so it is never later than a send', P.IDLE_AT <= P.SEND_AT, true)
 check('and mid-task is the last resort', P.SEND_AT < P.MIDTASK_AT, true)
-check('which is the number that was asked for', P.MIDTASK_AT, 0.9)
+check('which is the number that was asked for', P.SEND_AT, 0.9)
 check('every turn kind has a threshold', [
   P.thresholdFor('idle'),
   P.thresholdFor('send'),
   P.thresholdFor('auto')
-], [0.6, 0.65, 0.9])
+], [0.9, 0.9, 0.95])
 
 /* ------------------------------------------------------------ the decision */
 
 const LIMIT = 32_768
 check('an empty conversation needs nothing', P.needsRoom('auto', 0, LIMIT), false)
-check('two thirds full is not mid-task business', P.needsRoom('auto', LIMIT * 0.7, LIMIT), false)
-check('but it is a send-time matter', P.needsRoom('send', LIMIT * 0.7, LIMIT), true)
-check('and an idle one', P.needsRoom('idle', LIMIT * 0.7, LIMIT), true)
-check('91% stops a hand-back', P.needsRoom('auto', LIMIT * 0.91, LIMIT), true)
-check('exactly 90% does not, so the test is one-sided', P.needsRoom('auto', LIMIT * 0.9, LIMIT), false)
+check('two thirds full is nobody\'s business any more', P.needsRoom('send', LIMIT * 0.7, LIMIT), false)
+check('92% is not mid-task business', P.needsRoom('auto', LIMIT * 0.92, LIMIT), false)
+check('but it is a send-time matter', P.needsRoom('send', LIMIT * 0.92, LIMIT), true)
+check('and an idle one', P.needsRoom('idle', LIMIT * 0.92, LIMIT), true)
+check('exactly 90% does not compact a send, so the test is one-sided', P.needsRoom('send', LIMIT * 0.9, LIMIT), false)
+check('96% stops a hand-back', P.needsRoom('auto', LIMIT * 0.96, LIMIT), true)
+check('exactly 95% does not', P.needsRoom('auto', LIMIT * 0.95, LIMIT), false)
 check('over the limit certainly does', P.needsRoom('auto', LIMIT * 2, LIMIT), true)
 /* A nonsense limit must not compact on every single turn: the meter falls
    back to an estimate in exactly the moments the counts are missing. */
@@ -405,7 +407,7 @@ check(
 )
 check(
   'but a real conversation over the line is',
-  P.needsRoom('send', 27_000, LIMIT2, 13_300),
+  P.needsRoom('send', 31_500, LIMIT2, 13_300),
   true
 )
 /* A new chat reads zero, however big the preamble is. That is the whole
@@ -419,7 +421,7 @@ check('half the room reads as half', P.fullness(13_300 + 9_734, LIMIT2, 13_300),
 check('a preamble past the window reads full', P.fullness(40_000, LIMIT2, 40_000), 1)
 check('but nothing to summarise means nothing to do', P.needsRoom('send', 40_000, LIMIT2, 40_000), false)
 check('the floor is a handful of exchanges', P.MIN_COMPACTABLE >= 1000 && P.MIN_COMPACTABLE <= 4000, true)
-check('and without a figure for them, it behaves as before', P.needsRoom('send', 22_000, LIMIT2), true)
+check('and without a figure for them, it behaves as before', P.needsRoom('send', 30_000, LIMIT2), true)
 check('under the threshold is still under it', P.needsRoom('send', 1000, LIMIT2, 0), false)
 
 check('the cooldown is a minute', P.COMPACT_COOLDOWN_MS, 60_000)

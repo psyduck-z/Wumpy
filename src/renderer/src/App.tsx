@@ -3134,8 +3134,10 @@ function namedControls(shot: Attachment): string[] {
    * first thing that happens is a wait on a different model. In a gap it
    * costs the same request and nobody is waiting on it.
    *
-   * 60%, under the 65% the send-time path uses, so the idle attempt gets
-   * there first and that one becomes the fallback it was meant to be.
+   * It was 60%, under the 65% the send-time path used. Both are 90% now
+   * ("make the compact limit 90%"), so this one compacts a chat that went
+   * past 90% on its last answer while the panel is away, and the next send
+   * does not have to wait for it.
    */
   useEffect(() => {
     if (!(settings?.autoCompact ?? true)) return

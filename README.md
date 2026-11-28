@@ -754,7 +754,7 @@ thinker`, the tier buttons and `Ctrl+1`–`Ctrl+4` all carry the full history to
 the new model and say how many messages came along.
 
 **The status bar shows where you stand.** A context meter tracks how full the
-window is, amber at 65% where auto-compaction begins and red near the limit.
+window is, amber at 90% where auto-compaction begins and red at 95%.
 Click it to compact early. Alongside it: live elapsed time, token count and
 tokens/sec while a turn streams, then the rate, completion size and model load
 time once it lands. The figures come from Ollama's own `prompt_eval_count` and
@@ -763,7 +763,7 @@ percentage means it is falling back to a character estimate, which happens
 before the first turn and just after loading a saved chat.
 
 **Long conversations compact themselves.** When the context reaches
-65% of the tier's window, Wumpy summarises everything but the last four turns
+90% of the room the conversation has, Wumpy summarises everything but the last four turns
 into a single chip you can expand, and carries it forward as a system message.
 `/compact` forces it early. Compaction always runs on the *fastest* installed
 model rather than the active tier — it is a simple job, and summarising on a 14B
