@@ -242,9 +242,6 @@ const MUST_ALLOW = [
   'command -v git && git --version',
   'command -v docker',
   'rfkill list',
-  `du -h -d 1 ~ 2>/dev/null | sort -rh | head -15`,
-  `find ~ -xdev -type f -printf '%s %p\\n' 2>/dev/null | sort -rn | head -15`,
-  'command -v thunar nautilus dolphin 2>/dev/null || true',
   /* awk that only prints - the uptime answer Wumpy's own Linux prompt gives. */
   `awk '{printf "%.1f\\n", $1/3600}' /proc/uptime`,
   `free -b | awk '/Mem/{printf "%.1f", $3/$2*100}'`,
@@ -259,7 +256,11 @@ const MUST_ALLOW = [
         'cat /sys/class/power_supply/BAT0/status 2>/dev/null',
         'ls -la /home/x 2>/dev/null || echo "File does not exist"',
         'du -sh ~/* 2>/dev/null | sort -rh | head -3',
-        'for d in /sys/class/power_supply/*/; do echo "== $d =="; cat "$d/online" "$d/status" 2>/dev/null; done'
+        'for d in /sys/class/power_supply/*/; do echo "== $d =="; cat "$d/online" "$d/status" 2>/dev/null; done',
+        /* The Linux prompt's own: the biggest folder and files, and which file manager there is. */
+        `du -h -d 1 ~ 2>/dev/null | sort -rh | head -15`,
+        `find ~ -xdev -type f -printf '%s %p\\n' 2>/dev/null | sort -rn | head -15`,
+        'command -v thunar nautilus dolphin 2>/dev/null || true'
       ]),
   'ls 2>&1',
   /* PowerShell's discard. On Linux $null is a bash variable, which could
