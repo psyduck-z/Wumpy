@@ -1,6 +1,6 @@
 import { LINUX_APPS_PROMPT, LINUX_CLOSE_PROMPT, LINUX_DESKTOP_NOTE, LINUX_SHELL_PROMPT, linuxVoice } from './linux'
 import type { Assistant } from './types'
-import { WRITE_PROMPT } from './writefile'
+import { LINUX_WRITE_PROMPT, WRITE_PROMPT } from './writefile'
 import { LOOK_PROMPT } from './look'
 import { STUBS, type Capability } from './needs'
 import { SEARCH_ENGINES, type SearchEngine } from './links'
@@ -1859,15 +1859,22 @@ function linuxSections(shape: PromptShape): string[] {
     shape.needs === undefined || shape.needs.includes(capability)
   const looking =
     shape.sees === false ? (shape.eye ? EYES_PROMPT : NAMES_PROMPT) : SCREEN_PROMPT
+  /*
+   * The same gating as shellFor on Windows, which Linux never had: every
+   * turn here carried the whole of the write rules and the install check,
+   * a question about the weather included. A paragraph about a topic this
+   * turn is not about is left out; the write rules leave their first line
+   * behind (WRITE_STUB), which is the one that must survive.
+   */
   const shell =
     scope === 'none'
       ? NO_SHELL_PROMPT
       : [
-          LINUX_SHELL_PROMPT,
-          WRITE_PROMPT,
-          'On this machine the same refusal covers ~/.config/autostart and',
-          '~/.config/systemd, which start things at login. ~/.config/hypr and the',
-          'shell start-up files (.bashrc, .profile) are asked about first.'
+          ...LINUX_SHELL_PROMPT.split(String.fromCharCode(10, 10)).filter((paragraph) => {
+            const topic = topicOf(paragraph)
+            return topic === null || wants(topic)
+          }),
+          wants('write') ? LINUX_WRITE_PROMPT : WRITE_STUB
         ].join(String.fromCharCode(10, 10))
   return [
     linuxVoice(shape.base ?? VOICE_PROMPT),

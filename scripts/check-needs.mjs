@@ -470,5 +470,34 @@ check('a look with no picture says so', /picture: false/.test(mainSrc), true)
 check('the hand-back does not claim an attachment', /NO PICTURE was sent to you/.test(app), true)
 check('and nothing is attached when there is none', /picture \? \[shot\] : \[\]/.test(app), true)
 
+/*
+ * The facts block went out as a system message right before their turn, and
+ * was read for keywords like anything they said: every turn carried every
+ * section. "Make Wumpy more context efficient."
+ */
+const facts = said(
+  'Facts about right now.' + NL + '- Commands run in bash from /home/omarnut.' + NL +
+    '- Their Documents folder is ~/Documents, Pictures ~/Pictures, Desktop ~/Desktop, Downloads ~/Downloads.' + NL +
+    '- They have 3 background agents; a file written today: ~/x.html. Install, open, screen, click.',
+  'system'
+)
+check('the facts block is not the conversation', N.needsFor([facts, said('what is the capital of australia')]), [])
+check('nor is a summary or a notice', N.needsFor([said('YOUR MEMORY ... opened Spotify, took a screenshot, wrote ~/a.py', 'system'), said('and the weather?')]), [])
+check('their own words still count beside it', needs(facts, 'open youtube'), ['open'])
+const offer = said('That page has the answer. Want me to open the Arch wiki page for it?', 'assistant')
+check('"yes" to an offer carries what was offered', needs('how do i pair my headphones', offer, 'yes'), ['open'])
+check('"do it" too', needs('how do i pair my headphones', offer, 'ok do it'), ['open'])
+check('a request of its own does not borrow the reply', needs('how do i pair my headphones', offer, 'what is the capital of australia then'), [])
+const wroteOld = said('Done.' + NL + '_(Here Wumpy wrote ~/grid.html, 62 lines. Its contents are not in this conversation any more.)_', 'assistant')
+check('a change to a file written earlier brings the write rules', needs('make a page', wroteOld, 'ok', said('4.', 'assistant'), 'q', said('Paris.', 'assistant'), 'change that page background to black').includes('write'), true)
+check('but not a change with no file in the chat', needs('change the volume to 50%').includes('write'), false)
+const linuxShape = { scope: 'full', search: true, screen: true, browser: true, quota: false, platform: 'linux', hands: true }
+const linux = (list) => A.promptSections({ ...linuxShape, needs: list }).join(NL + NL)
+check('Linux leaves the write rules out of a turn not about files', /path: ~\/Downloads\/folder_analysis\.py/.test(linux([])), false)
+check('but keeps the rule that a file is a wumpy-write', /never use a shell command — use a wumpy-write block/.test(linux([])), true)
+check('and sends them whole when it is about files', /path: ~\/Downloads\/folder_analysis\.py/.test(linux(['write'])), true)
+check('Linux is not told about Windows places', /Program Files|Start Menu|Register-ScheduledTask|New-Item/.test(linux(['write', 'install', 'open', 'desktop', 'agents', 'picture'])), false)
+check('a plain turn on Linux is under 7,000 tokens', Math.ceil(linux([]).length / 4) < 7000, true)
+
 console.log(`${NL}${count - failed}/${count} needs checks passed`)
 if (failed) process.exit(1)

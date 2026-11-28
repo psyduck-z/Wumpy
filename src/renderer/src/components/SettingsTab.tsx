@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import type { ApprovalMode, Dock, SyncInfo, VoiceprintState, WumpySettings } from '@shared/types'
 import { DEFAULT_ENGINE, SEARCH_ENGINES, isSearchEngine } from '@shared/links'
-import { APP_WINDOW } from '../appwindow'
+import { APP_WINDOW, ON_LINUX } from '../appwindow'
 import { DOCK_CYCLE } from './Header'
 import { RANK_EVERY_CHOICES, everyMsOf, everyWords } from '@shared/ranking'
 
@@ -383,7 +383,7 @@ export function SettingsTab({
         <Row what="Self-review" sub={`up to ${settings.reflectRounds} reviews per task`} cmd="/reflect">
           <Toggle on={settings.reflect} label="Self-review" onChange={toggle('reflect')} />
         </Row>
-        <Row what="Short instructions" sub="about 2,500 fewer tokens a turn" cmd="/lean">
+        <Row what="Short instructions" sub={ON_LINUX ? 'Windows only — on Linux each turn already gets only the rules it needs' : 'about 2,500 fewer tokens a turn'} cmd="/lean">
           <Toggle on={settings.leanPrompt} label="Short instructions" onChange={toggle('leanPrompt')} />
         </Row>
         <Row what="Re-rank models" sub="measures their speed on your spare key" cmd="/rank">

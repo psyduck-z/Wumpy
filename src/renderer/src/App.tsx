@@ -126,6 +126,7 @@ import { poolLines } from './quota'
 import { footprintLines } from '@shared/footprint'
 import { settingsLines } from './settingsreport'
 import { everyWords, rankLines, rankSummary } from '@shared/ranking'
+import { withoutOldFiles } from '@shared/wire'
 import { journalLines, journalSpeech, type JournalView } from '@shared/journal'
 import { DEFAULT_RUNS, freshLatencies, probeLines } from '@shared/probe'
 import { copyText } from './copy'
@@ -1409,7 +1410,10 @@ function namedControls(shot: Attachment): string[] {
         browser: settings?.browserEnabled ?? false,
         quota: (keyStatus?.counts?.google ?? 0) > 0,
         lean: settings?.leanPrompt ?? false,
-        needs: needsFor(messages.filter((m) => !m.error && !m.local))
+        /* The instructions for the machine it is on: Linux has its own, and
+           they were being measured as the Windows ones. */
+        platform: window.wumpy.platform === 'linux' ? 'linux' : window.wumpy.platform === 'darwin' ? 'darwin' : 'win32',
+        needs: needsFor(withoutOldFiles(messages.filter((m) => !m.error && !m.local)))
       }),
     [settings, keyStatus, messages]
   )
@@ -1425,7 +1429,8 @@ function namedControls(shot: Attachment): string[] {
      * does, so the meter reports the conversation that is being paid for.
      */
     const files = counted.flatMap((m) => m.images ?? [])
-    const chars = counted.reduce((n, m) => n + m.content.length, 0)
+    /* As sent: old file contents are left out on the way (see @shared/wire). */
+    const chars = withoutOldFiles(counted).reduce((n, m) => n + m.content.length, 0)
     return preamble + estimateWithFiles(chars, files, KEEP_PICTURES)
   }, [messages, preamble])
 

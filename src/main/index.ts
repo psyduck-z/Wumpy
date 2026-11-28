@@ -26,6 +26,7 @@ import type { Footprint } from '@shared/footprint'
 import type { RankView, SyncInfo, Transcript, VoiceStatus, WriteResult } from '@shared/types'
 import { Ranker, type SavedSweep } from './ranker'
 import { everyMsOf } from '@shared/ranking'
+import { withoutOldFiles } from '@shared/wire'
 import { checkForUpdate, restartIntoUpdate, startUpdates, updateNow, updateState } from './updater'
 import {
   enrolCancel,
@@ -3486,6 +3487,10 @@ app.on('second-instance', (_event, argv) => {
     void compactCheck()
     return
   }
+  if (argv.includes('--context-check')) {
+    void contextCheck()
+    return
+  }
   if (argv.includes('--skill-check=writing')) {
     void writingSkillCheck()
     return
@@ -4394,6 +4399,62 @@ async function skillCheck(): Promise<void> {
  * real prompt - then asked about things only the summarised part said.
  * Written to compact-check.md in the user data folder.
  */
+/**
+ * "Make Wumpy more context efficient": what the instructions cost on a few
+ * kinds of turn, and whether the real model still does the things whose
+ * instructions are now sent only when a turn is about them - writing a file,
+ * installing, something that starts at login - and whether a file whose
+ * contents were left out of an old reply is read again before it is
+ * changed. Written to context-check.md in the user data folder.
+ */
+async function contextCheck(): Promise<void> {
+  const out: string[] = ['# Context check', '']
+  const say = (line: string): void => {
+    out.push(line)
+    console.log(`[wumpy] context check: ${line}`)
+  }
+  const assistant = currentAssistant()
+  const cost = (text: string): number =>
+    Math.ceil(systemPromptFor(assistant, assistant.tools, withContext({ requestId: 'x', messages: [{ role: 'user', content: text }], context: { chatTitle: null, messageCount: 1, actions: [] } })).length / 4)
+  for (const q of ['what is the capital of australia', 'write a python script that prints hello to ~/hello.py', 'install htop', 'click the blue button on my screen']) {
+    say(`instructions for "${q}": ${cost(q)} tokens`)
+  }
+  const fence = (lang: string, body: string): string => '```' + lang + '\n' + body + '\n```'
+  const snake = Array.from({ length: 60 }, (_, i) => `  <div class="row-${i}"></div>`).join('\n')
+  const earlier: ChatRequest['messages'] = [
+    { role: 'user', content: 'make me a tiny page at ~/Downloads/wumpy-tests/grid.html with a grey background' },
+    { role: 'assistant', content: `Writing it now.\n${fence('wumpy-write', `# Save the grid page\npath: ~/Downloads/wumpy-tests/grid.html\n---\n<!doctype html>\n<style>body { background: #888 }</style>\n${snake}`)}` },
+    { role: 'user', content: 'thanks. what is 2+2?' },
+    { role: 'assistant', content: '4.' },
+    { role: 'user', content: 'and what is the capital of france?' },
+    { role: 'assistant', content: 'Paris.' }
+  ]
+  const cases: Array<{ name: string; messages: ChatRequest['messages']; ok: (t: string) => boolean }> = [
+    { name: 'a plain question gets words, no block', messages: [{ role: 'user', content: 'what is the capital of australia?' }], ok: (t) => /canberra/i.test(t) && !/```wumpy/.test(t) },
+    { name: 'a file is written with a wumpy-write block', messages: [{ role: 'user', content: 'save a note at ~/Downloads/wumpy-tests/todo.txt saying buy milk' }], ok: (t) => /```wumpy-write[\s\S]*path:\s*(?:~|\/home\/[^/\s]+)\/Downloads\/wumpy-tests\/todo\.txt/.test(t) },
+    { name: '"yes" to an offer to open a page opens it', messages: [{ role: 'user', content: 'how do i pair bluetooth headphones on arch' }, { role: 'assistant', content: 'Use bluetoothctl: power on, scan on, pair <MAC>, connect <MAC>. The Arch wiki has the full steps - want me to open that page?' }, { role: 'user', content: 'yes' }], ok: (t) => /```wumpy-open/.test(t) },
+    { name: 'an install goes through pkexec pacman', messages: [{ role: 'user', content: 'install htop' }], ok: (t) => /pkexec\s+pacman|yay\s+-S/.test(t) },
+    { name: 'login start-up is a command, not a write into autostart', messages: [{ role: 'user', content: 'make syncthing start every time i log in' }], ok: (t) => !/```wumpy-write[\s\S]*autostart/.test(t) },
+    { name: 'a trimmed file is remembered by name', messages: [...earlier, { role: 'user', content: 'what was the path of the page you made earlier?' }], ok: (t) => /grid\.html/.test(t) },
+    { name: 'and read again before it is changed', messages: [...earlier, { role: 'user', content: 'change that page background to black' }], ok: (t) => /```wumpy-run[\s\S]*(cat|head|grep|sed -n|less)[^\n]*grid\.html|```wumpy-edit|```wumpy-agent/.test(t) }
+  ]
+  const sent = withContext({ requestId: 'x', messages: [...earlier, { role: 'user', content: 'x' }], context: { chatTitle: null, messageCount: 7, actions: [] } })
+  say(`the 60-line page in the old reply goes out as: ${JSON.stringify(String(sent[1]?.content).slice(0, 220))}`)
+  let passed = 0
+  let total = 0
+  for (const c of cases) {
+    for (let run = 1; run <= 2; run++) {
+      const text = withoutKept(await modelSays(c.messages, false))
+      const ok = c.ok(text)
+      total++
+      if (ok) passed++
+      say(`${ok ? 'PASS' : 'FAIL'} ${c.name} (run ${run}): ${JSON.stringify(text.slice(0, 260))}`)
+    }
+  }
+  say(`${passed} of ${total} passed`)
+  writeFileSync(join(app.getPath('userData'), 'context-check.md'), out.join('\n') + '\n')
+}
+
 async function compactCheck(): Promise<void> {
   const model = backgroundModel()
   if (!model) return void console.log('[wumpy] compact check: no model')
@@ -5173,13 +5234,17 @@ function withContext(req: ChatRequest): Array<Pick<ChatMessage, 'role' | 'conten
    * was sent on their behalf. This is only the wire.
    */
   const messages: Array<Pick<ChatMessage, 'role' | 'content' | 'images'>> = trimPictures(
-    /* Each of their messages with when they sent it (see @shared/sent). */
-    withSentTimes(req.messages).map((m) => ({
-      role: m.role,
-      /* Its own retyping of an agent's file stays out of what it reads back. */
-      content: m.role === 'assistant' && typeof m.content === 'string' ? withoutRetypedCode(m.content) : m.content,
-      images: m.images
-    }))
+    /* Files written several turns ago, or rewritten since, go out as a line
+       saying so rather than their whole contents again (see @shared/wire). */
+    withoutOldFiles(
+      /* Each of their messages with when they sent it (see @shared/sent). */
+      withSentTimes(req.messages).map((m) => ({
+        role: m.role,
+        /* Its own retyping of an agent's file stays out of what it reads back. */
+        content: m.role === 'assistant' && typeof m.content === 'string' ? withoutRetypedCode(m.content) : m.content,
+        images: m.images
+      }))
+    )
   )
   // Directly behind the latest user turn, so everything before it stays cached.
   //

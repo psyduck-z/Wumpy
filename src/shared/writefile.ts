@@ -309,6 +309,44 @@ export const WRITE_PROMPT = [
 ].join(String.fromCharCode(10))
 
 /**
+ * WRITE_PROMPT for Linux. The Windows one went out on Omarchy word for word:
+ * the Startup folder, the Start Menu, Program Files, New-Item and
+ * Register-ScheduledTask, none of which exist there - about 300 tokens a
+ * turn describing another machine, followed by three lines correcting it.
+ * The same rules, with this machine's places and commands.
+ */
+export const LINUX_WRITE_PROMPT = [
+  'To create or replace a FILE, never use a shell command — use a wumpy-write block.',
+  'One exception: a file meant to RUN BY ITSELF later (at login, as a service, on a',
+  'schedule) is not a file write. ~/.config/autostart, ~/.config/systemd, ~/.ssh and',
+  '~/.aws are refused outright, so that is a COMMAND (systemctl --user enable,',
+  'a Hyprland exec-once line) - say which and why, in one line. ~/.config/hypr and',
+  'the shell start-up files (.bashrc, .profile) are asked about first.',
+  'A # line saying why, a path: line, then --- and the exact contents.',
+  '',
+  '```wumpy-write',
+  '# Create the folder analysis script',
+  'path: ~/Downloads/folder_analysis.py',
+  '---',
+  'import os',
+  '',
+  'print(sum(os.path.getsize(f) for f in os.listdir(".") if os.path.isfile(f)))',
+  '```',
+  '',
+  'A GAME, PAGE, APP OR WHOLE PROGRAM is a background agent\'s job when you have them (see',
+  'there): you write its file when the report comes. CODE THAT RUNS IS NOT DONE WHEN IT IS',
+  'WRITTEN: run it in your head first - every name defined where used, every speed per second',
+  'times the frame time, every part they asked for there. Wumpy loads a page and compiles a',
+  'program you write, and hands you the errors. When they say it does not work, READ THE FILE',
+  'before you answer - never guess a cause - and fix all that is wrong, not only what they named.',
+  '',
+  'The contents are written exactly as given, so write plain code: no escaping, no',
+  'quoting, no heredoc. Never put file contents inside echo, printf or cat <<EOF —',
+  'braces and quotes in a shell will mangle them.',
+  'To run a Python file afterwards, the command is: python3 "<full path>"'
+].join(String.fromCharCode(10))
+
+/**
  * The same protected places, recognised inside an arbitrary command string.
  *
  * FORBIDDEN above vets a RESOLVED destination for the write-file card, and

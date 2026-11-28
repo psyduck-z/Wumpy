@@ -234,6 +234,9 @@ const AGENT_WORDS =
  */
 export const LOOKBACK = 4
 
+/** A message of theirs this short is an answer to the last reply, not a request of its own. */
+export const FOLLOW_UP_WORDS = 4
+
 /**
  * Which optional sections this turn should carry in full.
  *
@@ -253,9 +256,28 @@ export function needsFor(messages: readonly Turn[]): Capability[] {
     needs.add('picture')
   }
 
-  for (const message of recent) {
+  /* "yes", "do it", "go on": the request is the reply it answers, so that
+     reply's words count as theirs this once. Without it, "Want me to open
+     the Arch wiki page?" then "yes" arrived with only the stub for opening. */
+  const last = recent[recent.length - 1]
+  const before = [...recent.slice(0, -1)].reverse().find((m) => m.role === 'assistant')
+  const followUp =
+    last?.role === 'user' && before !== undefined && (last.content ?? '').trim().split(/\s+/).length <= FOLLOW_UP_WORDS
+      ? before.content ?? ''
+      : ''
+
+  for (const message of [...recent, ...(followUp ? [{ role: 'user', content: followUp }] : [])]) {
     const text = message.content ?? ''
     if (!text) continue
+    /*
+     * The app's own messages are not the conversation. The facts block goes
+     * out as one, directly before their message, and it names their
+     * Documents, Pictures and Desktop folders and that commands run - so
+     * every turn read as being about opening, installing, pictures and the
+     * desktop, and carried every section, 11,410 tokens on a question about
+     * the weather. Notices and the compaction memory are the app's too.
+     */
+    if (message.role === 'system') continue
 
     /* What the last answer actually did keeps its own instructions. A plan
        that runs over several turns must not lose them in the middle. */
@@ -277,8 +299,27 @@ export function needsFor(messages: readonly Turn[]): Capability[] {
     if (AGENT_WORDS.test(text)) needs.add('agents')
   }
 
+  /*
+   * A file written earlier, and a message that asks for something changed:
+   * the write rules, wherever the write was. They hold "READ THE FILE before
+   * you answer", and a file whose contents were left out of an old reply
+   * (@shared/wire) has to be read before it is changed. Without them, "change
+   * that page background to black" was answered with a whole page made up
+   * on the spot, over the real one.
+   */
+  if (!needs.has('write') && last?.role === 'user' && CHANGE_WORDS.test(last.content ?? '')) {
+    if (messages.some((m) => m.role === 'assistant' && WROTE.test(m.content ?? ''))) needs.add('write')
+  }
+
   return [...needs]
 }
+
+/** A reply that wrote a file, as written or as @shared/wire leaves it. */
+const WROTE = /```wumpy-write|_\(Here Wumpy wrote /
+
+/** Asking for something already made to be different. */
+const CHANGE_WORDS =
+  /\b(change|changes|changed|modify|update|fix|fixed|tweak|adjust|edit|add|remove|delete|replace|rename|make (?:it|that|this|the)|turn (?:it|that|the)|broken|bug|doesn'?t work|does not work|not working|isn'?t working|wrong|instead)\b/i
 
 /**
  * The line that stands in for a section that was not sent.
